@@ -6,7 +6,7 @@
  * Copyright 2025 DeepV Code
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useYoloMode } from '../hooks/useProjectSettings';
 import { useTranslation } from '../hooks/useTranslation';
 import { ExecutionSettingsPanel } from './settings/ExecutionSettingsPanel';
@@ -87,6 +87,34 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [isRefreshingMemory, setIsRefreshingMemory] = useState(false);
 
+  // User Rules 状态
+  const [userRules, setUserRules] = useState<string>('');
+  const [userRulesOriginal, setUserRulesOriginal] = useState<string>(''); // 原始值，用于检测是否有修改
+  const [userRulesSaveStatus, setUserRulesSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const saveStatusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 用户规则限制常量
+  const MAX_RULES_LINES = 100;
+  const MAX_RULES_BYTES = 3000;
+
+  // 计算当前行数（不计算空行）
+  const userRulesLineCount = userRules ? userRules.split('\n').filter(line => line.trim()).length : 0;
+
+  // 计算字节数（不计算空格）
+  const userRulesNoSpaces = userRules.replace(/\s/g, '');
+  const userRulesByteCount = new TextEncoder().encode(userRulesNoSpaces).length;
+
+  // 检查是否超限
+  const isOverLineLimit = userRulesLineCount > MAX_RULES_LINES;
+  const isOverByteLimit = userRulesByteCount > MAX_RULES_BYTES;
+  const isOverLimit = isOverLineLimit || isOverByteLimit;
+
+  // 检查是否有修改
+  const hasChanges = userRules !== userRulesOriginal;
+
+  // 是否可以保存
+  const canSave = hasChanges && !isOverLimit;
+
   // 🎯 对话框打开时初始化数据（仅在isOpen改变时触发）
   React.useEffect(() => {
     if (isOpen) {
@@ -100,8 +128,74 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
       }).catch(err => {
         console.error('Failed to load models:', err);
       });
+
+      // 获取用户规则
+      getGlobalMessageService().getUserRules();
     }
   }, [isOpen, loadYoloMode]);
+
+  // 🎯 监听用户规则响应
+  useEffect(() => {
+    const messageService = getGlobalMessageService();
+
+    const unsubscribeRules = messageService.onUserRulesResponse((data) => {
+      console.log('[UserRules] Received rules:', data.rules?.length || 0, 'chars');
+      setUserRules(data.rules || '');
+      setUserRulesOriginal(data.rules || ''); // 保存原始值
+    });
+
+    const unsubscribeSaved = messageService.onUserRulesSaved((data) => {
+      if (data.success) {
+        console.log('[UserRules] Rules saved successfully');
+        setUserRulesSaveStatus('saved');
+        setUserRulesOriginal(userRules); // 更新原始值
+        // 3秒后恢复为 idle
+        if (saveStatusTimeoutRef.current) {
+          clearTimeout(saveStatusTimeoutRef.current);
+        }
+        saveStatusTimeoutRef.current = setTimeout(() => {
+          setUserRulesSaveStatus('idle');
+        }, 3000);
+      } else {
+        console.error('[UserRules] Failed to save rules:', data.error);
+        setUserRulesSaveStatus('error');
+        // 3秒后恢复为 idle
+        if (saveStatusTimeoutRef.current) {
+          clearTimeout(saveStatusTimeoutRef.current);
+        }
+        saveStatusTimeoutRef.current = setTimeout(() => {
+          setUserRulesSaveStatus('idle');
+        }, 3000);
+      }
+    });
+
+    return () => {
+      unsubscribeRules();
+      unsubscribeSaved();
+      if (saveStatusTimeoutRef.current) {
+        clearTimeout(saveStatusTimeoutRef.current);
+      }
+    };
+  }, [userRules]);
+
+  // 🎯 用户规则变更处理（不自动保存，需要点击保存按钮）
+  const handleUserRulesChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    setUserRules(newValue);
+    // 重置保存状态
+    if (userRulesSaveStatus === 'saved' || userRulesSaveStatus === 'error') {
+      setUserRulesSaveStatus('idle');
+    }
+  }, [userRulesSaveStatus]);
+
+  // 🎯 保存用户规则
+  const handleSaveUserRules = useCallback(() => {
+    if (!canSave) return;
+
+    console.log('[UserRules] Saving rules...');
+    setUserRulesSaveStatus('saving');
+    getGlobalMessageService().saveUserRules(userRules);
+  }, [canSave, userRules]);
 
   // =============================================================================
   // 事件处理
@@ -293,51 +387,117 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
             )}
             {activeTab === 'memory' && (
               <div className="memory-panel">
-                <div className="memory-panel__header">
-                  <h3 className="memory-panel__title">
-                    {t('settings.memory.title')}
-                  </h3>
-                  <p className="memory-panel__description">
-                    {memoryFileCount > 0
-                      ? t('settings.memory.description', { count: memoryFileCount })
-                      : t('settings.memory.none')}
-                  </p>
-                </div>
-                {memoryFilePaths.length > 0 && (
-                  <div className="memory-panel__list-container">
-                    <ul className="memory-panel__list">
-                      {memoryFilePaths.map((filePath, index) => (
-                        <li
-                          key={index}
-                          className="memory-panel__list-item"
-                        >
-                          <button
-                            onClick={() => handleOpenMemoryFile(filePath)}
-                            className="memory-panel__file-button"
-                            title={`Click to open: ${filePath}`}
-                          >
-                            <svg className="memory-panel__file-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                              <path d="M10 1H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5l-4-4zm0 2.5V5h2.5L10 3.5z"/>
-                            </svg>
-                            {getDisplayPath(filePath, 52)}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                {/* 记忆文件部分 */}
+                <div className="memory-panel__section">
+                  <div className="memory-panel__header">
+                    <h3 className="memory-panel__title">
+                      {t('settings.memory.title')}
+                    </h3>
+                    <p className="memory-panel__description">
+                      {memoryFileCount > 0
+                        ? t('settings.memory.description', { count: memoryFileCount })
+                        : t('settings.memory.none')}
+                    </p>
                   </div>
-                )}
-                {memoryFileCount > 0 && (
-                  <button
-                    onClick={handleRefreshMemory}
-                    disabled={isRefreshingMemory}
-                    className="memory-panel__refresh-button"
-                  >
-                    <svg className="memory-panel__refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M13 2L11 3.99545L11.0592 4.05474M11 18.0001L13 19.9108L12.9703 19.9417M11.0592 4.05474L13 6M11.0592 4.05474C11.3677 4.01859 11.6817 4 12 4C16.4183 4 20 7.58172 20 12C20 14.5264 18.8289 16.7793 17 18.2454M7 5.75463C5.17107 7.22075 4 9.47362 4 12C4 16.4183 7.58172 20 12 20C12.3284 20 12.6523 19.9802 12.9703 19.9417M11 22.0001L12.9703 19.9417"/>
-                    </svg>
-                    {isRefreshingMemory ? t('settings.memory.refreshing') : t('settings.memory.refresh')}
-                  </button>
-                )}
+                  {memoryFilePaths.length > 0 && (
+                    <div className="memory-panel__list-container">
+                      <ul className="memory-panel__list">
+                        {memoryFilePaths.map((filePath, index) => (
+                          <li
+                            key={index}
+                            className="memory-panel__list-item"
+                          >
+                            <button
+                              onClick={() => handleOpenMemoryFile(filePath)}
+                              className="memory-panel__file-button"
+                              title={`Click to open: ${filePath}`}
+                            >
+                              <svg className="memory-panel__file-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M10 1H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5l-4-4zm0 2.5V5h2.5L10 3.5z"/>
+                              </svg>
+                              {getDisplayPath(filePath, 52)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {memoryFileCount > 0 && (
+                    <button
+                      onClick={handleRefreshMemory}
+                      disabled={isRefreshingMemory}
+                      className="memory-panel__refresh-button"
+                    >
+                      <svg className="memory-panel__refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M13 2L11 3.99545L11.0592 4.05474M11 18.0001L13 19.9108L12.9703 19.9417M11.0592 4.05474L13 6M11.0592 4.05474C11.3677 4.01859 11.6817 4 12 4C16.4183 4 20 7.58172 20 12C20 14.5264 18.8289 16.7793 17 18.2454M7 5.75463C5.17107 7.22075 4 9.47362 4 12C4 16.4183 7.58172 20 12 20C12.3284 20 12.6523 19.9802 12.9703 19.9417M11 22.0001L12.9703 19.9417"/>
+                      </svg>
+                      {isRefreshingMemory ? t('settings.memory.refreshing') : t('settings.memory.refresh')}
+                    </button>
+                  )}
+                </div>
+
+                {/* 分隔线 */}
+                <div className="memory-panel__divider" />
+
+                {/* 用户规则部分 */}
+                <div className="memory-panel__section">
+                  <div className="memory-panel__header">
+                    <h3 className="memory-panel__title">
+                      {t('settings.userRules.title')}
+                    </h3>
+                    <p className="memory-panel__description">
+                      {t('settings.userRules.description')}
+                    </p>
+                  </div>
+                  <div className="memory-panel__rules-container">
+                    <textarea
+                      className={`memory-panel__rules-textarea ${isOverLineLimit ? 'memory-panel__rules-textarea--error' : ''}`}
+                      value={userRules}
+                      onChange={handleUserRulesChange}
+                      placeholder={t('settings.userRules.placeholder')}
+                      rows={6}
+                    />
+                    <div className="memory-panel__rules-footer">
+                      <div className="memory-panel__rules-stats">
+                        <span className={`memory-panel__line-count ${isOverLineLimit ? 'memory-panel__line-count--error' : ''}`}>
+                          {t('settings.userRules.lineCount', { current: userRulesLineCount, max: MAX_RULES_LINES })}
+                        </span>
+                        <span className={`memory-panel__byte-count ${isOverByteLimit ? 'memory-panel__byte-count--error' : ''}`}>
+                          {t('settings.userRules.byteCount', { current: userRulesByteCount, max: MAX_RULES_BYTES })}
+                        </span>
+                      </div>
+                      <div className="memory-panel__rules-actions">
+                        {isOverLimit && (
+                          <span className="memory-panel__limit-error">
+                            {isOverLineLimit ? t('settings.userRules.lineLimitExceeded') : t('settings.userRules.byteLimitExceeded')}
+                          </span>
+                        )}
+                        <span className={`memory-panel__save-status memory-panel__save-status--${userRulesSaveStatus}`}>
+                          {userRulesSaveStatus === 'saving' && t('settings.userRules.saving')}
+                          {userRulesSaveStatus === 'saved' && (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/>
+                              </svg>
+                              {t('settings.userRules.saved')}
+                            </>
+                          )}
+                          {userRulesSaveStatus === 'error' && (
+                            <span className="memory-panel__save-error">{t('settings.userRules.saveFailed')}</span>
+                          )}
+                        </span>
+                        <button
+                          className={`memory-panel__save-button ${!canSave ? 'memory-panel__save-button--disabled' : ''}`}
+                          onClick={handleSaveUserRules}
+                          disabled={!canSave}
+                          title={!hasChanges ? t('settings.userRules.noChanges') : isOverLimit ? t('settings.userRules.limitExceeded') : t('settings.userRules.save')}
+                        >
+                          {t('settings.userRules.save')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             {activeTab === 'more' && (

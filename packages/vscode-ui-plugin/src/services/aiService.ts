@@ -137,7 +137,7 @@ export class AIService {
     this.loginService = LoginService.getInstance(logger, extensionPath);
   }
 
-  async initialize(workspaceRoot?: string, memoryOptions?: { userMemory?: string; geminiMdFileCount?: number; sessionModel?: string }) {
+  async initialize(workspaceRoot?: string, memoryOptions?: { userMemory?: string; geminiMdFileCount?: number; sessionModel?: string; userRules?: string }) {
     this.logger.info('Initializing AIService');
 
     try {
@@ -148,6 +148,7 @@ export class AIService {
       // 🎯 使用传入的用户内存内容，如果没有则为空
       const userMemory = memoryOptions?.userMemory || '';
       const geminiMdFileCount = memoryOptions?.geminiMdFileCount || 0;
+      const userRules = memoryOptions?.userRules || '';
 
       if (userMemory.length > 0) {
         this.logger.info(`📝 Using shared user memory: ${Math.round(userMemory.length / 1024)}KB from ${geminiMdFileCount} file(s)`);
@@ -225,6 +226,7 @@ export class AIService {
         usageStatisticsEnabled: false,
         userMemory: userMemory,              // 🎯 传入用户内存内容
         geminiMdFileCount: geminiMdFileCount, // 🎯 传入文件计数
+        userRules: userRules,                // 🎯 传入用户规则
         mcpServers: mcpServers,              // 🎯 传入 MCP 服务器配置
         customProxyServerUrl: customProxyServerUrl, // 🎯 传入自定义代理服务器URL
         fileFiltering: {
