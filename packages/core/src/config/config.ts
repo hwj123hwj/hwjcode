@@ -190,6 +190,7 @@ export interface ConfigParameters {
   mcpServers?: Record<string, MCPServerConfig>;
   userMemory?: string;
   geminiMdFileCount?: number;
+  userRules?: string;
   approvalMode?: ApprovalMode;
   showMemoryUsage?: boolean;
   contextFileName?: string | string[];
@@ -251,6 +252,7 @@ export class Config {
   private userMemory: string;
   private memoryTokenCount: number = 0; // 新增
   private geminiMdFileCount: number;
+  private userRules: string;
   private geminiMdFilePaths: string[] = [];
   private approvalMode: ApprovalMode;
   private readonly showMemoryUsage: boolean;
@@ -320,6 +322,7 @@ export class Config {
     this.userMemory = params.userMemory ?? '';
     this.memoryTokenCount = params.memoryTokenCount ?? 0; // 新增
     this.geminiMdFileCount = params.geminiMdFileCount ?? 0;
+    this.userRules = params.userRules ?? '';
     this.cwd = params.cwd ?? process.cwd();
 
     // 初始化项目配置管理器
@@ -671,6 +674,15 @@ export class Config {
 
   setMemoryTokenCount(count: number): void {
     this.memoryTokenCount = count;
+  }
+
+  // 🎯 用户规则相关
+  getUserRules(): string {
+    return this.userRules;
+  }
+
+  setUserRules(rules: string): void {
+    this.userRules = rules;
   }
 
   getGeminiMdFileCount(): number {

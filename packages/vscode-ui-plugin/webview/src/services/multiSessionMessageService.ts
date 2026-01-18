@@ -1029,6 +1029,44 @@ export class MultiSessionMessageService {
   }
 
   // =============================================================================
+  // 🎯 用户规则相关
+  // =============================================================================
+
+  /**
+   * 📝 获取用户规则
+   */
+  getUserRules(): void {
+    this.sendMessage({
+      type: 'get_user_rules' as any,
+      payload: {}
+    });
+  }
+
+  /**
+   * 📝 保存用户规则
+   */
+  saveUserRules(rules: string): void {
+    this.sendMessage({
+      type: 'save_user_rules' as any,
+      payload: { rules }
+    });
+  }
+
+  /**
+   * 📝 监听用户规则响应
+   */
+  onUserRulesResponse(callback: (data: { rules: string }) => void): () => void {
+    return this.addMessageHandler('user_rules_response', callback);
+  }
+
+  /**
+   * 📝 监听用户规则保存结果
+   */
+  onUserRulesSaved(callback: (data: { success: boolean; error?: string }) => void): () => void {
+    return this.addMessageHandler('user_rules_saved', callback);
+  }
+
+  // =============================================================================
   // 🎯 NanoBanana 图像生成
   // =============================================================================
 

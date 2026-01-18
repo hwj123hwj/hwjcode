@@ -256,7 +256,8 @@ export class GeminiClient {
       }
     } else {
       const customModelInfo = this.getCustomModelInfo(modelToUse);
-      systemInstruction = getCoreSystemPrompt(userMemory, false, promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo);
+      const userRules = this.config.getUserRules();
+      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo);
     }
 
     const isThinking = isThinkingSupported(modelToUse);
@@ -413,7 +414,8 @@ export class GeminiClient {
     const agentStyle = this.config.getAgentStyle();
     const currentModel = this.config.getModel();
     const customModelInfo = this.getCustomModelInfo(currentModel);
-    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
+    const userRules = this.config.getUserRules();
+    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
 
     if (this.chat) {
       this.chat.setSystemInstruction(updatedSystemPrompt);
@@ -570,7 +572,18 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       const agentStyle = this.config.getAgentStyle();
       const currentModel = this.config.getModel();
       const customModelInfo = this.getCustomModelInfo(currentModel);
-      const systemInstruction = getCoreSystemPrompt(userMemory, isVSCode, promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
+      const userRules = this.config.getUserRules();
+
+      // 如果有用户规则，优先使用；否则使用 promptRegistry
+      const systemInstruction = getCoreSystemPrompt(
+        userMemory,
+        isVSCode,
+        userRules || promptRegistry,
+        agentStyle,
+        currentModel,
+        this.config.getPreferredLanguage(),
+        customModelInfo
+      );
 
       const generateContentConfigWithThinking = isThinkingSupported(
         currentModel,

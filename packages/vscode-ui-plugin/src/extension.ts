@@ -2108,6 +2108,48 @@ function setupLoginHandlers() {
     }
   });
 
+  // 📝 处理获取用户规则请求
+  communicationService.addMessageHandler('get_user_rules', async () => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      const userRules = config.get<string>('userRules', '');
+      logger.info('📝 Getting user rules', { length: userRules.length });
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: userRules }
+      });
+    } catch (error) {
+      logger.error('Failed to get user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: '' }
+      });
+    }
+  });
+
+  // 📝 处理保存用户规则请求
+  communicationService.addMessageHandler('save_user_rules', async (payload: { rules: string }) => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      await config.update('userRules', payload.rules, vscode.ConfigurationTarget.Global);
+      logger.info('📝 User rules saved successfully', { length: payload.rules.length });
+
+      // 更新 sessionManager 中的 userRules
+      sessionManager.setUserRules(payload.rules);
+
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: true }
+      });
+    } catch (error) {
+      logger.error('Failed to save user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: false, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
   // 🎯 处理获取可用模型列表请求
   communicationService.onGetAvailableModels(async (payload) => {
     try {

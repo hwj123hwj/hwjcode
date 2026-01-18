@@ -472,7 +472,7 @@ export const enUS: Translations = {
     tabs: {
       general: 'General',
       mcp: 'MCP',
-      memory: 'Memory',
+      memory: 'Memory & Rules',
       more: 'More',
     },
     general: {
@@ -491,6 +491,21 @@ export const enUS: Translations = {
       none: 'No memory files found. Create a DEEPV.md or GEMINI.md file in your project.',
       refresh: 'Refresh Memory',
       refreshing: 'Refreshing...',
+    },
+    userRules: {
+      title: 'User Rules',
+      description: 'These rules apply to every conversation',
+      placeholder: 'Enter custom rules, one per line...\nExample:\nReply in English\nUse TypeScript for code\nAdd detailed comments',
+      saved: 'Saved',
+      saving: 'Saving...',
+      saveFailed: 'Save failed',
+      save: 'Save',
+      noChanges: 'No changes',
+      limitExceeded: 'Limit exceeded, cannot save',
+      lineCount: '{{current}}/{{max}} lines',
+      byteCount: '{{current}}/{{max}} bytes',
+      lineLimitExceeded: 'Line limit exceeded',
+      byteLimitExceeded: 'Byte limit exceeded',
     },
     more: {
       title: 'Extension Settings',

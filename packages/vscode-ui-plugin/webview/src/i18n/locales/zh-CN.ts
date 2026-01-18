@@ -472,7 +472,7 @@ export const zhCN: Translations = {
     tabs: {
       general: '常规',
       mcp: 'MCP',
-      memory: '记忆',
+      memory: '记忆与规则',
       more: '更多',
     },
     general: {
@@ -491,6 +491,21 @@ export const zhCN: Translations = {
       none: '未找到记忆文件。请在项目中创建 DEEPV.md 或 GEMINI.md 文件。',
       refresh: '刷新记忆',
       refreshing: '正在刷新...',
+    },
+    userRules: {
+      title: '用户规则',
+      description: '这些规则会应用于每次对话',
+      placeholder: '输入自定义规则，每行一条...\n例如：\n请用中文回复\n代码注释使用英文\n优先使用 TypeScript',
+      saved: '已保存',
+      saving: '保存中...',
+      saveFailed: '保存失败',
+      save: '保存',
+      noChanges: '没有修改',
+      limitExceeded: '超出限制，无法保存',
+      lineCount: '{{current}}/{{max}} 行',
+      byteCount: '{{current}}/{{max}} 字节',
+      lineLimitExceeded: '超出行数限制',
+      byteLimitExceeded: '超出字节限制',
     },
     more: {
       title: '扩展设置',

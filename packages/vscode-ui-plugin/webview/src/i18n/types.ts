@@ -547,6 +547,21 @@ export interface Translations {
       refresh: string;
       refreshing: string;
     };
+    userRules: {
+      title: string;
+      description: string;
+      placeholder: string;
+      saved: string;
+      saving: string;
+      saveFailed: string;
+      save: string;
+      noChanges: string;
+      limitExceeded: string;
+      lineCount: string;
+      byteCount: string;
+      lineLimitExceeded: string;
+      byteLimitExceeded: string;
+    };
     more: {
       title: string;
       description: string;
