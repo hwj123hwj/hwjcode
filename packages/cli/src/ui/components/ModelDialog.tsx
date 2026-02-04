@@ -355,78 +355,75 @@ export function ModelDialog({
               >
                 {/* 自定义模型专用显示 */}
                 {highlightedModel.modelInfo.isCustom ? (
-                  (() => {
-                    const customConfig = config.getCustomModelConfig(highlightedModel.value as string);
-                    return (
-                      <>
-                        <Text>
-                          <Text bold>{t('model.dialog.details.name')}</Text>
-                          <Text color={Colors.AccentCyan}>{highlightedModel.modelInfo.displayName}</Text>
-                        </Text>
-                        <Text>
-                          <Text bold>Type: </Text>
-                          <Text color={Colors.AccentCyan}>Custom Model</Text>
-                        </Text>
-                        {customConfig && (
-                          <>
-                            <Text>
-                              <Text bold>Base URL: </Text>
-                              <Text color={Colors.Gray} wrap="truncate">{customConfig.baseUrl}</Text>
-                            </Text>
-                            <Text>
-                              <Text bold>Model ID: </Text>
-                              <Text wrap="truncate">{customConfig.modelId}</Text>
-                            </Text>
-                          </>
-                        )}
-                        {highlightedModel.modelInfo.maxToken && highlightedModel.modelInfo.maxToken > 0 && (
-                          <Text>
-                            <Text bold>{t('model.dialog.details.context')}</Text>
-                            <Text>{highlightedModel.modelInfo.maxToken.toLocaleString()} tokens</Text>
-                          </Text>
-                        )}
-                        <Text>
-                          <Text bold>{t('model.dialog.details.status')}</Text>
-                          <Text color={highlightedModel.modelInfo.available ? Colors.AccentGreen : Colors.AccentRed}>
-                            {highlightedModel.modelInfo.available ? t('model.dialog.details.available') : t('model.dialog.details.unavailable')}
-                          </Text>
-                        </Text>
-                      </>
-                    );
-                  })()
-                ) : (
-                  /* 云端模型显示 */
-                  <>
+                  <Box flexDirection="column">
                     <Text>
                       <Text bold>{t('model.dialog.details.name')}</Text>
-                      <Text>{highlightedModel.modelInfo.displayName}</Text>
+                      {` ${highlightedModel.modelInfo.displayName}`}
                     </Text>
                     <Text>
-                      <Text bold>{t('model.dialog.details.cost')}</Text>
-                      <Text color={Colors.AccentYellow}>{String(highlightedModel.modelInfo.creditsPerRequest)}x credits</Text>
+                      <Text bold>Type: </Text>
+                      Custom Model
                     </Text>
-                    {highlightedModel.modelInfo.maxToken && highlightedModel.modelInfo.maxToken > 0 && (
+                    {(() => {
+                      const customConfig = config.getCustomModelConfig(highlightedModel.value as string);
+                      if (!customConfig) return null;
+                      return (
+                        <>
+                          <Text>
+                            <Text bold>Base URL: </Text>
+                            <Text color={Colors.Gray} wrap="truncate">{` ${customConfig.baseUrl}`}</Text>
+                          </Text>
+                          <Text>
+                            <Text bold>Model ID: </Text>
+                            {` ${customConfig.modelId}`}
+                          </Text>
+                        </>
+                      );
+                    })()}
+                    {highlightedModel.modelInfo.maxToken && highlightedModel.modelInfo.maxToken > 0 ? (
                       <Text>
                         <Text bold>{t('model.dialog.details.context')}</Text>
-                        <Text>{highlightedModel.modelInfo.maxToken.toLocaleString()} tokens</Text>
+                        {` ${highlightedModel.modelInfo.maxToken.toLocaleString()} tokens`}
                       </Text>
-                    )}
-                    {highlightedModel.modelInfo.highVolumeThreshold && highlightedModel.modelInfo.highVolumeThreshold > 0 && (
-                      <Text>
-                        <Text bold>{t('model.dialog.details.long.context')}</Text>
-                        <Text>
-                          {`>${highlightedModel.modelInfo.highVolumeThreshold.toLocaleString()} tokens: `}
-                          <Text color={Colors.AccentYellow}>{String(highlightedModel.modelInfo.highVolumeCredits)}x credits</Text>
-                        </Text>
-                      </Text>
-                    )}
+                    ) : null}
                     <Text>
                       <Text bold>{t('model.dialog.details.status')}</Text>
                       <Text color={highlightedModel.modelInfo.available ? Colors.AccentGreen : Colors.AccentRed}>
-                        {highlightedModel.modelInfo.available ? t('model.dialog.details.available') : t('model.dialog.details.unavailable')}
+                        {` ${highlightedModel.modelInfo.available ? t('model.dialog.details.available') : t('model.dialog.details.unavailable')}`}
                       </Text>
                     </Text>
-                  </>
+                  </Box>
+                ) : (
+                  /* 云端模型显示 */
+                  <Box flexDirection="column">
+                    <Text>
+                      <Text bold>{t('model.dialog.details.name')}</Text>
+                      {` ${highlightedModel.modelInfo.displayName}`}
+                    </Text>
+                    <Text>
+                      <Text bold>{t('model.dialog.details.cost')}</Text>
+                      {` ${String(highlightedModel.modelInfo.creditsPerRequest)}x credits`}
+                    </Text>
+                    {highlightedModel.modelInfo.maxToken && highlightedModel.modelInfo.maxToken > 0 ? (
+                      <Text>
+                        <Text bold>{t('model.dialog.details.context')}</Text>
+                        {` ${highlightedModel.modelInfo.maxToken.toLocaleString()} tokens`}
+                      </Text>
+                    ) : null}
+                    {highlightedModel.modelInfo.highVolumeThreshold && highlightedModel.modelInfo.highVolumeThreshold > 0 ? (
+                      <Text>
+                        <Text bold>{t('model.dialog.details.long.context')}</Text>
+                        {` >${highlightedModel.modelInfo.highVolumeThreshold.toLocaleString()} tokens: `}
+                        <Text color={Colors.AccentYellow}>{`${String(highlightedModel.modelInfo.highVolumeCredits)}x credits`}</Text>
+                      </Text>
+                    ) : null}
+                    <Text>
+                      <Text bold>{t('model.dialog.details.status')}</Text>
+                      <Text color={highlightedModel.modelInfo.available ? Colors.AccentGreen : Colors.AccentRed}>
+                        {` ${highlightedModel.modelInfo.available ? t('model.dialog.details.available') : t('model.dialog.details.unavailable')}`}
+                      </Text>
+                    </Text>
+                  </Box>
                 )}
               </Box>
             </Box>
