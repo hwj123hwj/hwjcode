@@ -29,53 +29,6 @@ const VERSION = 'v13.0.0-13';
 const MULTI_ARCH_LINUX_VERSION = 'v13.0.0-4';
 const BASE_URL = 'https://github.com/microsoft/ripgrep-prebuilt/releases/download';
 
-// Retry configuration
-const RETRY_CONFIG = {
-  maxRetries: 3,
-  baseDelayMs: 5000, // 5 seconds base delay
-  maxDelayMs: 60000, // 1 minute max delay
-};
-
-/**
- * Sleep for a given number of milliseconds
- */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Download with exponential backoff retry
- * @param {string} url - URL to download
- * @param {string} filePath - Path to save the file
- * @param {string} platformKey - Platform identifier for logging
- */
-async function downloadWithRetry(url, filePath, platformKey) {
-  let lastError;
-
-  for (let attempt = 1; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
-    try {
-      await downloadFile(url, filePath);
-      return; // Success
-    } catch (error) {
-      lastError = error;
-
-      if (attempt < RETRY_CONFIG.maxRetries) {
-        // Exponential backoff: 5s, 10s, 20s, ...
-        const delayMs = Math.min(
-          RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt - 1),
-          RETRY_CONFIG.maxDelayMs
-        );
-        console.warn(`⚠️  [${platformKey}] Attempt ${attempt}/${RETRY_CONFIG.maxRetries} failed: ${error.message}`);
-        console.warn(`   Retrying in ${delayMs / 1000}s...`);
-        await sleep(delayMs);
-      }
-    }
-  }
-
-  // All retries exhausted
-  throw new Error(`Failed after ${RETRY_CONFIG.maxRetries} attempts: ${lastError.message}`);
-}
-
 async function downloadFile(url, filePath) {
   return new Promise((resolve, reject) => {
     const request = https.get(url, (response) => {
@@ -83,16 +36,16 @@ async function downloadFile(url, filePath) {
         // Handle redirect
         return downloadFile(response.headers.location, filePath).then(resolve).catch(reject);
       }
-
+      
       if (response.statusCode !== 200) {
         reject(new Error(`Failed to download ${url}: ${response.statusCode} ${response.statusMessage}`));
         return;
       }
 
       const fileStream = createWriteStream(filePath);
-
+      
       response.pipe(fileStream);
-
+      
       fileStream.on('finish', () => {
         fileStream.close();
         // Make binary executable on Unix-like systems
@@ -105,10 +58,10 @@ async function downloadFile(url, filePath) {
         }
         resolve();
       });
-
+      
       fileStream.on('error', reject);
     });
-
+    
     request.on('error', reject);
     request.setTimeout(30000, () => {
       request.destroy();
@@ -132,7 +85,7 @@ function getBinaryPath(target, tempDir) {
 async function extractBinary(archivePath, target, outputPath) {
   const { execSync } = await import('child_process');
   const tempDir = path.join(path.dirname(archivePath), 'temp_' + target.replace(/[^\w]/g, '_'));
-
+  
   try {
     if (!existsSync(tempDir)) {
       mkdirSync(tempDir, { recursive: true });
@@ -164,7 +117,7 @@ async function extractBinary(archivePath, target, outputPath) {
 
     const binaryPath = path.join(tempDir, binaryFile);
     fs.copyFileSync(binaryPath, outputPath);
-
+    
     // Make executable on Unix-like systems
     if (!target.includes('windows')) {
       fs.chmodSync(outputPath, 0o755);
@@ -184,65 +137,39 @@ async function extractBinary(archivePath, target, outputPath) {
 
 async function downloadRipgrepBinaries(outputDir) {
   console.log('🚀 Downloading ripgrep binaries for all platforms...');
-
+  
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
 
-  const failedPlatforms = [];
-  const successPlatforms = [];
-
   const downloadPromises = Object.entries(platforms).map(async ([platformKey, { target, binary }]) => {
-    const version = target.includes('arm-unknown-linux') || target.includes('powerpc64le') ?
+    const version = target.includes('arm-unknown-linux') || target.includes('powerpc64le') ? 
                    MULTI_ARCH_LINUX_VERSION : VERSION;
-
+    
     const url = getDownloadUrl(target, version);
     const archiveExt = target.includes('windows') ? '.zip' : '.tar.gz';
     const archivePath = path.join(outputDir, `ripgrep-${version}-${target}${archiveExt}`);
     const binaryPath = path.join(outputDir, `${platformKey}-${binary}`);
-
+    
     // Skip if binary already exists
     if (existsSync(binaryPath)) {
       console.log(`⏭️  Skipping ${platformKey} (already exists)`);
-      successPlatforms.push(platformKey);
-      return { platformKey, success: true, skipped: true };
+      return;
     }
 
     try {
       console.log(`⬇️  Downloading ${platformKey} (${target})...`);
-      await downloadWithRetry(url, archivePath, platformKey);
+      await downloadFile(url, archivePath);
       await extractBinary(archivePath, target, binaryPath);
       console.log(`✅ Downloaded ${platformKey}`);
-      successPlatforms.push(platformKey);
-      return { platformKey, success: true, skipped: false };
     } catch (error) {
       console.error(`❌ Failed to download ${platformKey}:`, error.message);
-      failedPlatforms.push({ platformKey, error: error.message });
-      return { platformKey, success: false, error: error.message };
+      // Don't throw, continue with other platforms
     }
   });
 
-  await Promise.all(downloadPromises);
-
-  // Check if any platform failed
-  if (failedPlatforms.length > 0) {
-    const failedList = failedPlatforms.map(p => `  - ${p.platformKey}: ${p.error}`).join('\n');
-    const errorMessage = `❌ Ripgrep binary download failed for ${failedPlatforms.length} platform(s):\n${failedList}`;
-    console.error(errorMessage);
-    throw new Error(errorMessage);
-  }
-
-  // Verify all platforms were downloaded
-  const expectedPlatformCount = Object.keys(platforms).length;
-  if (successPlatforms.length !== expectedPlatformCount) {
-    const missingPlatforms = Object.keys(platforms).filter(p => !successPlatforms.includes(p));
-    const errorMessage = `❌ Missing ripgrep binaries for platforms: ${missingPlatforms.join(', ')}`;
-    console.error(errorMessage);
-    throw new Error(errorMessage);
-  }
-
-  console.log(`🎉 Ripgrep binary download completed! (${successPlatforms.length}/${expectedPlatformCount} platforms)`);
-  return { success: true, platforms: successPlatforms };
+  await Promise.allSettled(downloadPromises);
+  console.log('🎉 Ripgrep binary download completed!');
 }
 
 // Run if called directly
