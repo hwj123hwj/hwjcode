@@ -97,8 +97,9 @@ export class LSPManager {
         }
       });
       this.openedFiles.add(key);
-      // 🎯 给服务器一点时间解析新打开的文件
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 🎯 给 Pyright 足够的时间来解析和索引新打开的 Python 文件
+      // 这个等待时间很关键：Pyright 在接收到 didOpen 后才开始真正的解析
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } else {
       const oldContent = this.fileContents.get(key);
       if (oldContent === content) {
@@ -130,10 +131,13 @@ export class LSPManager {
 
   /**
    * 🎯 Windows 兼容性：获取规范化的 URI
+   * 必须转换盘符为小写并使用 %3A，Pyright 需要这个格式来正确匹配工作区
    */
   private getUri(file: string): string {
     const uri = pathToFileURL(path.resolve(file)).href;
-    return uri.replace(/^file:\/\/\/([A-Z]):\//, (match, drive) => `file:///${drive.toLowerCase()}:/`);
+    return uri.replace(/^file:\/\/\/([A-Z])[:%3A]+\//i, (match, drive) =>
+      `file:///${drive.toLowerCase()}%3A/`,
+    );
   }
 
   async shutdown() {
@@ -168,13 +172,13 @@ export class LSPManager {
     const clients = await this.getClientsForFile(normalizedFile);
     const results = await Promise.all(
       clients.map(async (client) => {
+        // 文档同步已经包含了足够的等待时间（didOpen 后等 3 秒），
+        // 这个时间用于 Pyright 解析和索引 Python 文件
         await this.syncDocument(client, normalizedFile);
 
-        // 🎯 核心策略：给新 Server 基础暖机时间，确保首个请求的成功率
+        // 标记客户端已经过初始化预热
         if (this.freshClients.has(client.serverID)) {
-          console.log(`[LSP][${client.serverID}] First request on fresh server, warming up for 3s...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          this.freshClients.delete(client.serverID); // 暖机完成
+          this.freshClients.delete(client.serverID);
         }
 
         try {
