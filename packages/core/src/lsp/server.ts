@@ -125,7 +125,11 @@ export const Pyright = (projectRoot: string): LSPServer.Info => ({
   id: 'pyright',
   displayName: 'Python Language Server',
   extensions: ['.py'],
-  root: NearestRoot(['pyproject.toml', 'setup.py', 'requirements.txt', '.git'], projectRoot),
+  // 🎯 优化: Pyright 根目录探测策略
+  // 1. 首先查找 Python 项目标志 (pyproject.toml, setup.py, requirements.txt)
+  // 2. 如果找不到，查找 package.json (monorepo 中的子包) 而不是 .git (整个项目根)
+  // 这样在 monorepo 环境下，Pyright 会在子包目录启动，而不是整个项目根
+  root: NearestRoot(['pyproject.toml', 'setup.py', 'requirements.txt', 'package.json'], projectRoot),
   async spawn(root: string) {
     const bin = await BinaryManager.ensureBinary('pyright',
       await BinaryManager.npmInstaller(['pyright'], 'pyright-langserver')
