@@ -211,12 +211,20 @@ export async function executeUpdateCommand(updateCommand: string): Promise<boole
     console.log(t('update.auto.exec.start'));
     console.log(tp('update.command.line', { command: updateCommand }));
 
-    // 解析命令
-    const [command, ...args] = updateCommand.split(' ');
+    // 解析命令（使用更健壮的方式分割）
+    const parts = updateCommand.trim().split(/\s+/);
+    const command = parts[0];
+    const args = parts.slice(1);
 
-    const updateProcess = spawn(command, args, {
+    // 确定使用 cmd.exe 还是直接执行
+    // npm install -g xxx 在 Windows 上需要通过 cmd /c 执行
+    const isWindows = process.platform === 'win32';
+    const actualCommand = isWindows ? 'cmd.exe' : command;
+    const actualArgs = isWindows ? ['/c', command, ...args] : args;
+
+    const updateProcess = spawn(actualCommand, actualArgs, {
       stdio: 'inherit',
-      shell: process.platform === 'win32'
+      shell: false
     });
 
     updateProcess.on('close', (code) => {

@@ -210,12 +210,21 @@ export class HookRunner {
         CLAUDE_PROJECT_DIR: input.cwd, // For compatibility
       };
 
-      const child = spawn(command, {
-        env,
-        cwd: input.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
-      });
+      // Note: User-configured hook commands may use shell features (pipes, redirects, etc.)
+      // We suppress the Node 24+ deprecation warning as this usage is intentional.
+      const originalEmitWarning = process.emitWarning;
+      process.emitWarning = () => {};
+      let child;
+      try {
+        child = spawn(command, {
+          env,
+          cwd: input.cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: true,
+        });
+      } finally {
+        process.emitWarning = originalEmitWarning;
+      }
 
       // Set up timeout
       const timeoutHandle = setTimeout(() => {
