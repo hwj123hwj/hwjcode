@@ -187,7 +187,6 @@ Please answer the user's question directly.`;
           },
         ],
         config: {
-          temperature: 0.7,
           maxOutputTokens: 2048,
         },
       },
