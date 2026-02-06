@@ -1,6 +1,25 @@
 /**
  * Skills Context Builder
  * Reads installed skills and generates context information for AI
+ *
+ * @deprecated This class is legacy and will be removed in a future version.
+ * Use SkillsCompatAdapter instead, which wraps the new SkillLoader architecture.
+ *
+ * Migration path:
+ * ```typescript
+ * // Old (deprecated)
+ * const builder = new SkillsContextBuilder(projectRoot);
+ * const skills = builder.listSkills();
+ *
+ * // New (recommended)
+ * const adapter = new SkillsCompatAdapter(projectRoot);
+ * await adapter.initialize();
+ * const skills = await adapter.listSkills();
+ * ```
+ *
+ * This class remains for backward compatibility but uses an older data discovery
+ * mechanism that may be inconsistent with use_skill tool behavior. New code should
+ * use SkillsCompatAdapter or SkillLoader directly.
  */
 
 import * as fs from 'fs';
@@ -16,6 +35,9 @@ import type {
   SkillsContext,
 } from './skill-types.js';
 
+/**
+ * @deprecated Use SkillsCompatAdapter instead
+ */
 export class SkillsContextBuilder {
   private readonly skillsDir: string;
   private readonly marketplaceDir: string;

@@ -246,12 +246,19 @@ export class PluginInstaller {
         );
       }
 
-      // 更新配置
+      // 更新 settings.json
       await this.settingsManager.enablePlugin(pluginId);
-      await this.settingsManager.updateInstalledPlugin(pluginId, (info) => ({
-        ...info,
-        enabled: true,
-      }));
+      try {
+        // 更新 installed_plugins.json
+        await this.settingsManager.updateInstalledPlugin(pluginId, (info) => ({
+          ...info,
+          enabled: true,
+        }));
+      } catch (rollbackError) {
+        // 第二次写入失败，回滚第一次写入
+        await this.settingsManager.disablePlugin(pluginId);
+        throw rollbackError;
+      }
     } catch (error) {
       if (error instanceof PluginError) {
         throw error;
@@ -278,12 +285,19 @@ export class PluginInstaller {
         );
       }
 
-      // 更新配置
+      // 更新 settings.json
       await this.settingsManager.disablePlugin(pluginId);
-      await this.settingsManager.updateInstalledPlugin(pluginId, (info) => ({
-        ...info,
-        enabled: false,
-      }));
+      try {
+        // 更新 installed_plugins.json
+        await this.settingsManager.updateInstalledPlugin(pluginId, (info) => ({
+          ...info,
+          enabled: false,
+        }));
+      } catch (rollbackError) {
+        // 第二次写入失败，回滚第一次写入
+        await this.settingsManager.enablePlugin(pluginId);
+        throw rollbackError;
+      }
     } catch (error) {
       if (error instanceof PluginError) {
         throw error;

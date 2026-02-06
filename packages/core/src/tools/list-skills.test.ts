@@ -1,32 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ListSkillsTool } from './list-skills.js';
 import { Config } from '../config/config.js';
-import { SkillsContextBuilder } from '../skills/skills-context-builder.js';
+import { SkillsCompatAdapter } from '../skills/skills-compat.js';
 
-vi.mock('../skills/skills-context-builder.js');
+vi.mock('../skills/skills-compat.js');
 vi.mock('../config/config.js');
 
 describe('ListSkillsTool', () => {
   let tool: ListSkillsTool;
   let mockConfig: any;
-  let mockContextBuilder: any;
+  let mockCompatAdapter: any;
 
   beforeEach(() => {
     mockConfig = {
       getProjectRoot: vi.fn().mockReturnValue('/mock/root'),
     };
 
-    mockContextBuilder = {
+    mockCompatAdapter = {
       listSkills: vi.fn(),
     };
 
-    (SkillsContextBuilder as any).mockImplementation(() => mockContextBuilder);
+    (SkillsCompatAdapter as any).mockImplementation(() => mockCompatAdapter);
 
     tool = new ListSkillsTool(mockConfig as any);
   });
 
   it('should return a specific message when no skills are found without filters', async () => {
-    mockContextBuilder.listSkills.mockReturnValue([]);
+    mockCompatAdapter.listSkills.mockResolvedValue([]);
 
     const result = await tool.execute({}, new AbortController().signal);
 
@@ -35,7 +35,7 @@ describe('ListSkillsTool', () => {
   });
 
   it('should return a helpful message when no skills match the filter', async () => {
-    mockContextBuilder.listSkills.mockReturnValue([
+    mockCompatAdapter.listSkills.mockResolvedValue([
       { id: 's1', marketplaceId: 'm1', pluginId: 'p1', name: 'skill1' }
     ]);
 
@@ -48,10 +48,10 @@ describe('ListSkillsTool', () => {
 
   it('should list matching skills when filters are applied', async () => {
     const skills = [
-      { id: 's1', marketplaceId: 'm1', pluginId: 'p1', name: 'skill1', description: 'desc1', path: 'path1', skillMdPath: 'md1' },
-      { id: 's2', marketplaceId: 'm2', pluginId: 'p2', name: 'skill2', description: 'desc2', path: 'path2', skillMdPath: 'md2' }
+      { id: 's1', marketplaceId: 'm1', pluginId: 'p1', name: 'skill1', description: 'desc1', path: 'path1', skillMdPath: 'md1', enabled: true },
+      { id: 's2', marketplaceId: 'm2', pluginId: 'p2', name: 'skill2', description: 'desc2', path: 'path2', skillMdPath: 'md2', enabled: true }
     ];
-    mockContextBuilder.listSkills.mockReturnValue(skills);
+    mockCompatAdapter.listSkills.mockResolvedValue(skills);
 
     const result = await tool.execute({ marketplaceId: 'm1' }, new AbortController().signal);
 
