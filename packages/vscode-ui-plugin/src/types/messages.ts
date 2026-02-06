@@ -280,6 +280,9 @@ export type WebViewToExtensionMessage =
   | { type: 'open_extension_marketplace'; payload: { extensionId: string } }
   // 📝 记忆文件相关
   | { type: 'refresh_memory'; payload: {} }
+  // 📝 用户规则相关
+  | { type: 'get_user_rules'; payload: {} }
+  | { type: 'save_user_rules'; payload: { rules: string } }
   // 🎯 版本控制相关
   | { type: 'revert_to_message'; payload: { sessionId: string; messageId: string } }
   | { type: 'version_timeline_request'; payload: { sessionId: string } }
@@ -359,6 +362,9 @@ export type ExtensionToWebViewMessage =
   | { type: 'lint_suggestions'; payload: { suggestions: any[]; sessionId: string | null; timestamp: number } }
   // 🎯 记忆文件路径信息更新
   | { type: 'memory_files_update'; payload: { filePaths: string[]; fileCount: number } }
+  // 🎯 用户规则响应
+  | { type: 'user_rules_response'; payload: { rules: string } }
+  | { type: 'user_rules_saved'; payload: { success: boolean; error?: string } }
   | { type: 'tool_suggestion'; payload: { sessionId: string; toolName: string; params: any; timestamp: number } }
   // 🎯 模型配置相关
   | { type: 'model_response'; payload: { requestId: string; success: boolean; models?: any[]; currentModel?: string; error?: string } }
