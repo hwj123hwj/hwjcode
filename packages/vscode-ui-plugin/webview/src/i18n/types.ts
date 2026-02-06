@@ -400,6 +400,7 @@ export interface Translations {
     assistant: string;
     basedOnPrevious: string;
     selectAsReference: string;
+    regenerate: string;
     conversationHistory: string;
     uploadNewReference: string;
     error: {

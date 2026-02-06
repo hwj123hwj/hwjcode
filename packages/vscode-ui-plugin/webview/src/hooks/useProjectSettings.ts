@@ -6,7 +6,7 @@
  * Copyright 2025 DeepV Code
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getGlobalMessageService } from '../services/globalMessageService';
 
 // =============================================================================
@@ -63,6 +63,9 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 🎯 用于清理监听器的 ref
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
   // =============================================================================
   // 核心功能实现
   // =============================================================================
@@ -74,8 +77,11 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     console.log('[YOLO] syncFromCore called');
     const messageService = getGlobalMessageService();
     if (messageService) {
+      // 🎯 清理之前的监听器，避免累积
+      unsubscribeRef.current?.();
+
       // 监听响应
-      messageService.onProjectSettingsResponse((data: any) => {
+      unsubscribeRef.current = messageService.onProjectSettingsResponse((data: any) => {
         console.log('[YOLO] Received settings from Core:', data);
         setYoloMode(data.yoloMode);
         if (data.preferredModel) {
@@ -90,6 +96,13 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
       console.log('[YOLO] Requesting project settings from extension');
       messageService.requestProjectSettings();
     }
+  }, []);
+
+  // 🎯 组件卸载时清理监听器
+  useEffect(() => {
+    return () => {
+      unsubscribeRef.current?.();
+    };
   }, []);
 
   /**

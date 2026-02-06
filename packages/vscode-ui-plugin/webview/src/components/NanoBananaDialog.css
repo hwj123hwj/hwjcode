@@ -572,20 +572,77 @@
   border-radius: 8px;
   background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(255, 255, 255, 0.05));
   border: 1px solid var(--vscode-widget-border, #454545);
+  position: relative;
 }
 
+/* 用户消息 - 背景稍深 + 右侧尖角 */
 .nanobanana-dialog__message--user {
-  background-color: var(--vscode-editor-inactiveSelectionBackground, rgba(255, 255, 255, 0.05));
+  background-color: var(--vscode-editor-selectionBackground, rgba(100, 130, 180, 0.15));
   border-left: 3px solid var(--vscode-textLink-foreground, #569cd6);
+  margin-right: 10px;
 }
 
+.nanobanana-dialog__message--user::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  right: -8px;
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 8px solid var(--vscode-editor-selectionBackground, rgba(100, 130, 180, 0.15));
+}
+
+.nanobanana-dialog__message--user::before {
+  content: '';
+  position: absolute;
+  top: 13px;
+  right: -9px;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 9px solid var(--vscode-widget-border, #454545);
+}
+
+/* AI 消息 - 左侧尖角 */
 .nanobanana-dialog__message--assistant {
   background-color: var(--vscode-editor-background, #1e1e1e);
   border-left: 3px solid #ffb803;
+  margin-left: 10px;
+}
+
+.nanobanana-dialog__message--assistant::after {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-right: 8px solid var(--vscode-editor-background, #1e1e1e);
+}
+
+.nanobanana-dialog__message--assistant::before {
+  content: '';
+  position: absolute;
+  top: 13px;
+  left: -7px;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 9px solid #ffb803;
 }
 
 .nanobanana-dialog__message--error {
   border-left: 3px solid var(--vscode-errorForeground, #f48771);
+}
+
+.nanobanana-dialog__message--error::before {
+  border-right-color: var(--vscode-errorForeground, #f48771);
 }
 
 /* 消息头部 */
@@ -644,6 +701,54 @@
   border-radius: 4px;
 }
 
+/* 用户消息中的参考图 - 缩略图行 */
+.nanobanana-dialog__user-reference {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background-color: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.1));
+  border-radius: 6px;
+}
+
+.nanobanana-dialog__user-reference-thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  flex-shrink: 0;
+}
+
+.nanobanana-dialog__user-reference-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #808080);
+}
+
+.nanobanana-dialog__user-reference-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  background-color: #ffb803;
+  border: none;
+  border-radius: 4px;
+  color: #1a1a1a;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.nanobanana-dialog__user-reference-btn:hover:not(:disabled) {
+  background-color: #e5a503;
+}
+
+.nanobanana-dialog__user-reference-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* 消息中的参考图指示器 */
 .nanobanana-dialog__message-reference {
   display: flex;
@@ -663,6 +768,14 @@
   object-fit: cover;
   border-radius: 4px;
   border: 1px solid var(--vscode-widget-border, #454545);
+}
+
+/* 用户消息中参考图的标签（可选） */
+.nanobanana-dialog__message-reference-label {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #808080);
+  margin-top: 4px;
+  padding: 2px 0;
 }
 
 /* AI 响应中的图片网格 */
@@ -695,35 +808,62 @@
   object-fit: cover;
 }
 
-/* 选择图片作为参考的按钮 */
-.nanobanana-dialog__select-reference-btn {
-  position: absolute;
-  bottom: 4px;
-  right: 4px;
-  padding: 4px 8px;
-  background-color: rgba(0, 0, 0, 0.7);
-  border: none;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 10px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
+/* 图片+按钮的外层容器 */
+.nanobanana-dialog__message-image-container {
+  display: flex;
+  flex-direction: column;
 }
 
-.nanobanana-dialog__message-image-wrapper:hover .nanobanana-dialog__select-reference-btn {
-  opacity: 1;
+/* 图片操作按钮行 */
+.nanobanana-dialog__image-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* 选择图片作为参考的按钮 */
+.nanobanana-dialog__select-reference-btn {
+  padding: 4px 10px;
+  background-color: #ffb803;
+  border: none;
+  border-radius: 4px;
+  color: #1a1a1a;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
 }
 
 .nanobanana-dialog__select-reference-btn:hover:not(:disabled) {
-  background-color: #ffb803;
-  color: #1a1a1a;
+  background-color: #e5a503;
 }
 
 .nanobanana-dialog__select-reference-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  display: none;
+}
+
+/* 再次生成按钮 */
+.nanobanana-dialog__regenerate-btn {
+  padding: 4px 10px;
+  background-color: var(--vscode-button-background, #0e639c);
+  border: none;
+  border-radius: 4px;
+  color: var(--vscode-button-foreground, #fff);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.nanobanana-dialog__regenerate-btn:hover:not(:disabled) {
+  background-color: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.nanobanana-dialog__regenerate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 积分消耗显示 */
@@ -731,7 +871,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--vscode-descriptionForeground, #808080);
 }
