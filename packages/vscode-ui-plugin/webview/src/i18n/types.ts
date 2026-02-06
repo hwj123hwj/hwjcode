@@ -540,6 +540,7 @@ export interface Translations {
       mcp: string;
       memory: string;
       more: string;
+      account: string;
     };
     general: {
       yoloLabel: string;
@@ -577,6 +578,18 @@ export interface Translations {
       title: string;
       description: string;
       open: string;
+    };
+    account: {
+      title: string;
+      notLoggedIn: string;
+      name: string;
+      email: string;
+      userId: string;
+      logoutButton: string;
+      logoutConfirm: string;
+      loggingOut: string;
+      logoutSuccess: string;
+      logoutFailed: string;
     };
   };
 

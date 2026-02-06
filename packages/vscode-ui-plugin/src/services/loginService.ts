@@ -152,16 +152,15 @@ export class LoginService {
   }
 
   /**
-   * 登出
+   * 登出 - 清除所有认证数据（jwt-token.json + user-info.json）
    */
   async logout(): Promise<void> {
     try {
-      // 重置ProxyAuthManager
-      this.proxyAuthManager.configure({
-        proxyServerUrl: this.proxyAuthManager.getProxyServerUrl()
-      });
+      // 清除 ProxyAuthManager 中的所有认证信息
+      // 这会删除 ~/.deepv/jwt-token.json 和 ~/.deepv/user-info.json
+      this.proxyAuthManager.clear();
 
-      this.logger.info('✅ 已登出');
+      this.logger.info('✅ 已登出，认证数据已清除');
 
     } catch (error) {
       this.logger.error('登出失败', error instanceof Error ? error : undefined);
