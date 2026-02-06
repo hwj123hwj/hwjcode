@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getCoreSystemPrompt, isGemini3Model } from './prompts.js';
 
 describe('prompts', () => {
@@ -83,6 +83,45 @@ describe('prompts', () => {
       // 检查 Markdown 行内代码格式
       expect(prompt).toContain('**Current Model:** `gpt-4o`');
       expect(prompt).toContain('served by user-configured endpoint `https://api.openai.com/v1`');
+    });
+  });
+
+  describe('getCoreSystemPrompt - Skills Context Injection', () => {
+    afterEach(async () => {
+      // 恢复原始函数
+      const skillsIntegration = await import('../skills/skills-integration.js');
+      vi.mocked(skillsIntegration.getSkillsContext).mockRestore?.();
+    });
+
+    it('should include skills context when available', async () => {
+      // Mock getSkillsContext to return sample skills
+      const mockSkillsContext = `# Available Skills
+
+<available_skills>
+<skill>
+<name>test-skill</name>
+<description>A test skill for validation 📜</description>
+</skill>
+</available_skills>`;
+
+      const skillsIntegration = await import('../skills/skills-integration.js');
+      vi.spyOn(skillsIntegration, 'getSkillsContext').mockReturnValue(mockSkillsContext);
+
+      const prompt = getCoreSystemPrompt(undefined, false);
+
+      expect(prompt).toContain('# Available Skills');
+      expect(prompt).toContain('<available_skills>');
+      expect(prompt).toContain('test-skill');
+    });
+
+    it('should not add extra content when skills context is empty', async () => {
+      const skillsIntegration = await import('../skills/skills-integration.js');
+      vi.spyOn(skillsIntegration, 'getSkillsContext').mockReturnValue('');
+
+      const prompt = getCoreSystemPrompt(undefined, false);
+
+      // 不应该包含空的 Skills section
+      expect(prompt).not.toContain('# Available Skills');
     });
   });
 });
