@@ -29,6 +29,7 @@ import { LSPWorkspaceSymbolsTool } from '../tools/lsp/lsp-workspace-symbols.js';
 import { LSPImplementationTool } from '../tools/lsp/lsp-implementation.js';
 import { TaskPrompts } from './taskPrompts.js';
 import { SkillsContextBuilder } from '../skills/skills-context-builder.js';
+import { getSkillsContext } from '../skills/skills-integration.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
 import type { AgentStyle } from '../config/projectSettings.js';
 
@@ -1146,6 +1147,12 @@ export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, pro
   let finalPrompt = `${basePrompt}\n\n${dynamicPrompt}${modelIdContext}`;
   if (mcpPromptsContext) {
     finalPrompt += mcpPromptsContext;
+  }
+
+  // Inject Skills context (cached from startup)
+  const skillsContext = getSkillsContext();
+  if (skillsContext) {
+    finalPrompt += `\n\n${skillsContext}`;
   }
 
   if (preferredLanguage) {
