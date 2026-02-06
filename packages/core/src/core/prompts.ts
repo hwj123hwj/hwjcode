@@ -1060,7 +1060,16 @@ export interface CustomModelInfo {
   baseUrl: string;
 }
 
-export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, promptRegistry?: PromptRegistry, agentStyle: AgentStyle = 'default', modelId?: string, preferredLanguage?: string, customModelInfo?: CustomModelInfo): string {
+export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, promptRegistryOrUserRules?: PromptRegistry | string, agentStyle: AgentStyle = 'default', modelId?: string, preferredLanguage?: string, customModelInfo?: CustomModelInfo): string {
+  // Handle backward compatibility: promptRegistryOrUserRules can be PromptRegistry or userRules string
+  let promptRegistry: PromptRegistry | undefined;
+  let userRules: string | undefined;
+
+  if (typeof promptRegistryOrUserRules === 'string') {
+    userRules = promptRegistryOrUserRules;
+  } else {
+    promptRegistry = promptRegistryOrUserRules;
+  }
   // if GEMINI_SYSTEM_MD is set (and not 0|false), override system prompt from file
   // default path is .deepv/system.md but can be modified via custom path in GEMINI_SYSTEM_MD
   let systemMdEnabled = false;
@@ -1157,6 +1166,11 @@ export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, pro
 
   if (preferredLanguage) {
     finalPrompt += `\n\n**Language Preference:** Please always use "${preferredLanguage}" to reply to the user.`;
+  }
+
+  // Inject user rules if provided
+  if (userRules && userRules.trim()) {
+    finalPrompt += `\n\n---\n\n## User Rules\n\nThe user has defined the following rules that you MUST follow:\n\n${userRules.trim()}`;
   }
 
   return finalPrompt.trim();
