@@ -401,7 +401,8 @@ export const enUS: Translations = {
     you: 'You',
     assistant: 'NanoBanana',
     basedOnPrevious: 'Based on previous image',
-    selectAsReference: 'Use as reference',
+    selectAsReference: 'Use as Reference',
+    regenerate: 'Regenerate',
     conversationHistory: 'Conversation History',
     uploadNewReference: 'New Reference',
     error: {

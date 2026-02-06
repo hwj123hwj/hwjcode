@@ -135,7 +135,10 @@ export const PPTGeneratorDialog: React.FC<PPTGeneratorDialogProps> = ({
           resolve(data);
         };
 
-        messageService.onPPTGenerateResponse(handleGenerateResponse);
+        const unsubscribe = messageService.onPPTGenerateResponse((data) => {
+          unsubscribe();
+          handleGenerateResponse(data);
+        });
       });
 
       // 检查是否已被取消
@@ -233,7 +236,10 @@ export const PPTGeneratorDialog: React.FC<PPTGeneratorDialogProps> = ({
           resolve(data);
         };
 
-        messageService.onPPTOptimizeOutlineResponse(handleOptimizeResponse);
+        const unsubscribe = messageService.onPPTOptimizeOutlineResponse((data) => {
+          unsubscribe();
+          handleOptimizeResponse(data);
+        });
       });
 
       if (response.success && response.optimizedOutline) {

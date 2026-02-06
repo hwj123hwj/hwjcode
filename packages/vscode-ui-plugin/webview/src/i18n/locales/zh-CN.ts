@@ -401,7 +401,8 @@ export const zhCN: Translations = {
     you: '你',
     assistant: 'NanoBanana',
     basedOnPrevious: '基于之前生成的图片',
-    selectAsReference: '选为参考',
+    selectAsReference: '选为参考图',
+    regenerate: '再次生成',
     conversationHistory: '对话历史',
     uploadNewReference: '上传新参考图',
     error: {
