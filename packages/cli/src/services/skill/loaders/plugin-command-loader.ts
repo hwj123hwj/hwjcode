@@ -4,6 +4,7 @@
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
+import path from 'path';
 import { ICommandLoader } from '../../types.js';
 import { SlashCommand, CommandContext, CommandKind, SubmitPromptActionReturn } from '../../../ui/commands/types.js';
 import { SkillLoader, SkillType, SkillLoadLevel, SettingsManager } from 'deepv-code-core';
@@ -74,9 +75,19 @@ export class PluginCommandLoader implements ICommandLoader {
       kind: CommandKind.PLUGIN,
 
       action: async (context: CommandContext, args?: string): Promise<SubmitPromptActionReturn> => {
-        // 1. 获取插件根路径 (从 ID 或位置信息中提取)
+        // 1. 获取插件根路径 (从 location.rootPath 中提取)
         // 根据官方文档，变量 ${CLAUDE_PLUGIN_ROOT} 指向插件安装目录
-        const pluginRoot = skill.location?.rootPath || skill.path;
+        let pluginRoot = skill.location?.rootPath;
+        if (!pluginRoot && skill.location?.path && skill.location?.relativePath) {
+          // 从组件绝对路径减去相对路径得到插件根目录
+          // 例如: /path/to/plugin/commands/foo.md - commands/foo.md = /path/to/plugin
+          const componentPath = skill.location.path;
+          const relativePath = skill.location.relativePath;
+          pluginRoot = componentPath.substring(0, componentPath.length - relativePath.length).replace(/[\/\\]$/, '');
+        }
+        if (!pluginRoot) {
+          pluginRoot = skill.path; // 最后的 fallback
+        }
 
         // 2. 获取 Markdown 内容
         let prompt = skill.content || '';
