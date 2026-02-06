@@ -30,17 +30,39 @@ import {
 import { PROJECT_DIR_PREFIX } from 'deepv-code-core';
 
 /**
- * 初始化 Skills 系统组件
+ * Skills 系统单例缓存
+ * 避免每次命令调用都重新创建实例，使 SkillLoader 缓存生效
+ */
+let skillsSystemInstance: {
+  settings: SettingsManager;
+  marketplace: MarketplaceManager;
+  installer: PluginInstaller;
+  loader: SkillLoader;
+} | null = null;
+
+/**
+ * 初始化 Skills 系统组件（单例模式）
  */
 export async function initSkillsSystem() {
-  const settings = new SettingsManager();
-  await settings.initialize();
+  if (!skillsSystemInstance) {
+    const settings = new SettingsManager();
+    await settings.initialize();
 
-  const marketplace = new MarketplaceManager(settings);
-  const installer = new PluginInstaller(settings, marketplace);
-  const loader = new SkillLoader(settings, marketplace);
+    const marketplace = new MarketplaceManager(settings);
+    const installer = new PluginInstaller(settings, marketplace);
+    const loader = new SkillLoader(settings, marketplace);
 
-  return { settings, marketplace, installer, loader };
+    skillsSystemInstance = { settings, marketplace, installer, loader };
+  }
+
+  return skillsSystemInstance;
+}
+
+/**
+ * 重置 Skills 系统单例（在 install/uninstall/enable/disable 后调用）
+ */
+export function resetSkillsSystem(): void {
+  skillsSystemInstance = null;
 }
 
 /**
@@ -127,6 +149,7 @@ export const handlePluginInstallAction = (context: CommandContext, args?: string
 
       // Clear Skills context cache
       clearSkillsContextCache();
+              resetSkillsSystem();
 
       context.ui.addItem(
         {
@@ -189,10 +212,27 @@ export const handlePluginInstallCompletion = async (context: CommandContext, par
       // Case 2: Typing Plugin Name
       const marketplaceId = partialArg.substring(0, separatorIndex);
       const pluginInput = partialArg.substring(separatorIndex + 1).trim().toLowerCase();
+      const hasTrailingSpace = partialArg.endsWith(' ');
 
       try {
         const plugins = await marketplace.getPlugins(marketplaceId);
+
+        // If input has trailing space and matches a plugin name exactly,
+        // the argument is complete — stop showing suggestions
+        if (hasTrailingSpace && pluginInput) {
+          const exactMatch = plugins.find(p => p.name.toLowerCase() === pluginInput);
+          if (exactMatch) {
+            return [];
+          }
+        }
+
+        // 排除已安装的插件
+        const { installer } = await initSkillsSystem();
+        const installedPlugins = await installer.getInstalledPlugins();
+        const installedIds = new Set(installedPlugins.map(p => p.id));
+
         return plugins
+          .filter(p => !installedIds.has(`${marketplaceId}:${p.name}`))
           .filter(p => p.name.toLowerCase().includes(pluginInput))
           .map(p => ({
             label: p.name,
@@ -392,6 +432,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache to reload
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -446,6 +487,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -529,6 +571,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -731,13 +774,54 @@ export const skillCommand: SlashCommand = {
                   return;
                 }
 
+                // 动态计算每个插件的实际 skill 数量（避免依赖安装时的静态快照）
+                const dynamicSkillCounts = new Map<string, number>();
+                try {
+                  const { loader } = await initSkillsSystem();
+                  const allSkills = await loader.loadEnabledSkills(SkillLoadLevel.METADATA);
+                  for (const skill of allSkills) {
+                    if (skill.pluginId) {
+                      dynamicSkillCounts.set(skill.pluginId, (dynamicSkillCounts.get(skill.pluginId) || 0) + 1);
+                    }
+                  }
+                } catch {
+                  // 动态计算失败时回退到静态 skillCount
+                }
+
                 const lines = [tp('skill.plugin.list.installed.found', { count: plugins.length })];
+
+                // Detect duplicate plugin names
+                const nameMap = new Map<string, typeof plugins>();
+                for (const p of plugins) {
+                  if (!nameMap.has(p.name)) {
+                    nameMap.set(p.name, []);
+                  }
+                  nameMap.get(p.name)!.push(p);
+                }
+
+                const duplicates = Array.from(nameMap.entries())
+                  .filter(([_, pluginList]) => pluginList.length > 1);
+
+                if (duplicates.length > 0) {
+                  lines.push('');
+                  lines.push('⚠️  ' + t('skill.plugin.list.duplicates.warning'));
+                  for (const [name, pluginList] of duplicates) {
+                    lines.push(`   • "${name}" × ${pluginList.length} (${pluginList.map(p => p.marketplaceId).join(', ')})`);
+                  }
+                  lines.push('');
+                }
+
                 for (const p of plugins) {
                   const status = p.enabled ? t('skill.label.enabled') : t('skill.label.disabled');
+                  // 优先使用动态计算的 skill 数量，回退到静态 skillCount
+                  const skillCount = dynamicSkillCounts.get(p.id) ?? p.skillCount;
                   lines.push(`🔌 ${p.name} (${status})`);
                   lines.push(`   ${t('skill.label.id')}${p.id}`);
                   lines.push(`   ${t('skill.label.marketplace')}${p.marketplaceId}`);
-                  lines.push(`   ${t('skill.label.skills')}${p.skillCount}`);
+                  lines.push(`   ${t('skill.label.skills')}${skillCount}`);
+                  if (p.version) {
+                    lines.push(`   ${t('skill.label.version')}${p.version}`);
+                  }
                   lines.push('');
                 }
 
@@ -817,6 +901,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -849,6 +934,7 @@ export const skillCommand: SlashCommand = {
               const input = partialArg.trim().toLowerCase();
 
               return plugins
+                .filter(p => !p.enabled) // Only show disabled plugins for enable command
                 .filter(p => p.id.toLowerCase().includes(input) || p.name.toLowerCase().includes(input))
                 .map(p => ({
                   label: p.name,
@@ -880,6 +966,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -912,6 +999,7 @@ export const skillCommand: SlashCommand = {
               const input = partialArg.trim().toLowerCase();
 
               return plugins
+                .filter(p => p.enabled) // Only show enabled plugins for disable command
                 .filter(p => p.id.toLowerCase().includes(input) || p.name.toLowerCase().includes(input))
                 .map(p => ({
                   label: p.name,
@@ -943,6 +1031,7 @@ export const skillCommand: SlashCommand = {
 
               // Clear Skills context cache
               clearSkillsContextCache();
+              resetSkillsSystem();
 
               context.ui.addItem(
                 {
@@ -1323,10 +1412,14 @@ export const skillCommand: SlashCommand = {
       description: 'Show skills statistics',
       kind: CommandKind.BUILT_IN,
 
-      action: async (context: CommandContext) => {
+      action: async (context: CommandContext, args: string) => {
         try {
           const { loader } = await initSkillsSystem();
-          const stats = await loader.getSkillStats();
+          const argsArray = args.trim().split(/\s+/).filter(Boolean);
+          const verbose = argsArray.includes('--verbose') || argsArray.includes('-v');
+
+          // Always force reload to ensure stats are accurate
+          const stats = await loader.getSkillStats(true);
 
           const lines = [
             'Skills Statistics:\n',
@@ -1344,6 +1437,29 @@ export const skillCommand: SlashCommand = {
           for (const [pluginId, count] of Object.entries(stats.byPlugin)) {
             const pluginName = pluginId.split(':').slice(1).join(':');
             lines.push(`  ${pluginName}: ${count} skills`);
+          }
+
+          // Verbose mode: show detailed skill list
+          if (verbose) {
+            const skills = await loader.loadEnabledSkills();
+            lines.push('');
+            lines.push('Detailed Skill List:');
+
+            const groupedByMarketplace = new Map<string, typeof skills>();
+            for (const skill of skills) {
+              const marketplace = skill.marketplaceId;
+              if (!groupedByMarketplace.has(marketplace)) {
+                groupedByMarketplace.set(marketplace, []);
+              }
+              groupedByMarketplace.get(marketplace)!.push(skill);
+            }
+
+            for (const [marketplace, marketplaceSkills] of groupedByMarketplace) {
+              lines.push(`\n  ${marketplace}:`);
+              for (const skill of marketplaceSkills) {
+                lines.push(`    - ${skill.id} (${skill.pluginId})`);
+              }
+            }
           }
 
           context.ui.addItem(

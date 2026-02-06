@@ -65,6 +65,7 @@ The CLI and VS Code extension communicate with AI models through the core librar
 
 ### 🎯 Skills System
 - **[Skills Usage Guide](./skills-usage.md)** - How to use and create skills
+- **[Skills Context Injection](./skills-context-injection.md)** - Skills 元数据注入机制（维护文档）
 
 ### 🔌 Model Context Protocol (MCP)
 - **[MCP Async Loading](./mcp-async-loading.md)** - Asynchronous server loading

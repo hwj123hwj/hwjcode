@@ -25,8 +25,10 @@ export function getSkillsContext(): string {
  *
  * This should be called once at startup to load and cache
  * the Skills metadata for injection into the system prompt.
+ *
+ * @param projectRoot - 项目根目录路径（可选，默认为 process.cwd()）
  */
-export async function initializeSkillsContext(): Promise<void> {
+export async function initializeSkillsContext(projectRoot?: string): Promise<void> {
   // Check cache
   const now = Date.now();
   if (cachedSkillsContext && now - lastCacheTime < CACHE_TTL) {
@@ -41,7 +43,8 @@ export async function initializeSkillsContext(): Promise<void> {
     await settings.initialize();
 
     const marketplace = new MarketplaceManager(settings);
-    const loader = new SkillLoader(settings, marketplace);
+    // 传入 projectRoot 参数，确保 SkillLoader 使用正确的项目根目录
+    const loader = new SkillLoader(settings, marketplace, undefined, projectRoot);
     const injector = new SkillContextInjector(loader, settings);
 
     const result = await injector.injectStartupContext();
@@ -60,6 +63,10 @@ export async function initializeSkillsContext(): Promise<void> {
 You have access to specialized Skills that provide domain knowledge, workflows, and executable scripts.
 
 ${result.context}
+
+**Mandatory Skill Usage**:
+If a skill's description says it MUST be used for the current task, you MUST call \`use_skill\` before doing any work.
+When in doubt, prefer loading the skill first.
 
 **Important**: Skills marked with 📜 or <has_scripts>true</has_scripts> have executable scripts.
 You MUST use the \`use_skill\` tool to load their instructions before executing any scripts.

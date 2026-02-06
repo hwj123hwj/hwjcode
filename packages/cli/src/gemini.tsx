@@ -290,19 +290,6 @@ export async function main() {
   loadEnvironment();
   logTiming('loadEnvironment()');
 
-  // Initialize Skills system context (async, non-blocking)
-  // This loads Skills metadata for AI context injection
-  try {
-    const { initializeSkillsContext } = await import('deepv-code-core');
-    logTiming('import initializeSkillsContext');
-    await initializeSkillsContext();
-    logTiming('initializeSkillsContext()');
-  } catch (error) {
-    logTiming('initializeSkillsContext() (failed)');
-    // Skills system is optional, silently continue if not available
-    // console.warn('[Skills] Initialization failed:', error);
-  }
-
   // 初始化 TerminalSizeManager 以集中管理 resize 事件
   // 这样可以避免 MaxListenersExceededWarning，并提升性能
   // 注意：terminalSizeManager 是单例，此调用确保其在应用启动时初始化
@@ -324,6 +311,20 @@ export async function main() {
   }
 
   const workspaceRoot = process.cwd();
+
+  // Initialize Skills system context AFTER workdir is set
+  // This ensures Skills metadata is loaded from the correct project directory
+  try {
+    const { initializeSkillsContext } = await import('deepv-code-core');
+    logTiming('import initializeSkillsContext');
+    // 传入 workspaceRoot 确保使用正确的项目根目录
+    await initializeSkillsContext(workspaceRoot);
+    logTiming('initializeSkillsContext()');
+  } catch (error) {
+    logTiming('initializeSkillsContext() (failed)');
+    // Skills system is optional, silently continue if not available
+    // console.warn('[Skills] Initialization failed:', error);
+  }
   const settings = loadSettings(workspaceRoot);
   logTiming('loadSettings()');
 
