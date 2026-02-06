@@ -79,8 +79,14 @@ export class WebviewModelService {
   }
 
   // 🎯 设置压缩确认处理器
-  onCompressionConfirmationRequest(handler: CompressionConfirmationHandler): void {
+  // @returns 取消订阅的函数
+  onCompressionConfirmationRequest(handler: CompressionConfirmationHandler): () => void {
     this.compressionConfirmationHandler = handler;
+    return () => {
+      if (this.compressionConfirmationHandler === handler) {
+        this.compressionConfirmationHandler = undefined;
+      }
+    };
   }
 
   // 🎯 发送压缩确认响应
@@ -98,8 +104,14 @@ export class WebviewModelService {
   }
 
   // 🎯 设置压缩错误处理器
-  onCompressionError(handler: CompressionErrorHandler): void {
+  // @returns 取消订阅的函数
+  onCompressionError(handler: CompressionErrorHandler): () => void {
     this.compressionErrorHandler = handler;
+    return () => {
+      if (this.compressionErrorHandler === handler) {
+        this.compressionErrorHandler = undefined;
+      }
+    };
   }
 
   static getInstance(): WebviewModelService {

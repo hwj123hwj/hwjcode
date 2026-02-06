@@ -97,6 +97,7 @@ interface NanoBananaMessage {
   // 生成参数
   aspectRatio?: string;
   imageSize?: string;
+  referenceImageUrl?: string;  // 生成时实际传给后端的参考图 URL
 }
 
 // 🎯 当前参考图来源类型
@@ -256,7 +257,8 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
       }
     };
 
-    messageService.onNanoBananaStatusUpdate(handleStatusUpdate);
+    const unsubscribe = messageService.onNanoBananaStatusUpdate(handleStatusUpdate);
+    return () => unsubscribe();
   }, [clearAllIntervals, scrollToBottom]);
 
   // 处理ESC键关闭
@@ -388,7 +390,7 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
       elapsedTime: 0,
     }));
 
-    setPrompt('');
+    // 保留提示词在输入框中，方便用户微调后继续生成
     scrollToBottom();
 
     try {
@@ -424,7 +426,10 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
             }
           };
 
-          messageService.onNanoBananaUploadResponse(handleUploadResponse);
+          const unsubUpload = messageService.onNanoBananaUploadResponse((data) => {
+            unsubUpload();
+            handleUploadResponse(data);
+          });
         });
 
         // 上传成功后更新参考图 URL
@@ -464,6 +469,18 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
         }
       }
 
+      // 将实际使用的参考图 URL 回写到 user 消息中（供再次生成使用）
+      if (finalReferenceUrl) {
+        setConversation(prev => {
+          const msgs = [...prev.messages];
+          const lastUserIdx = msgs.length - 1;
+          if (msgs[lastUserIdx] && msgs[lastUserIdx].role === 'user') {
+            msgs[lastUserIdx] = { ...msgs[lastUserIdx], referenceImageUrl: finalReferenceUrl };
+          }
+          return { ...prev, messages: msgs };
+        });
+      }
+
       // 发送生成请求
       messageService.sendNanoBananaGenerate(generateRequest);
 
@@ -480,7 +497,10 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
           }
         };
 
-        messageService.onNanoBananaGenerateResponse(handleGenerateResponse);
+        const unsubGenerate = messageService.onNanoBananaGenerateResponse((data) => {
+          unsubGenerate();
+          handleGenerateResponse(data);
+        });
       });
 
       currentTaskIdRef.current = taskResponse.taskId;
@@ -573,6 +593,144 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
     setTimeout(() => textareaRef.current?.focus(), 100);
   }, [clearAllIntervals]);
 
+  // 🎯 再次生成：用生成当前图片时的原始参考图和提示词重新生成
+  const handleRegenerate = useCallback(async (messageIndex: number) => {
+    const isGeneratingNow = conversation.currentStatus !== 'idle' && conversation.currentStatus !== 'error';
+    if (isGeneratingNow) return;
+
+    // 找到对应的 user 消息（assistant 消息的前一条）
+    const userMsg = conversation.messages.slice(0, messageIndex).reverse().find(m => m.role === 'user');
+    if (!userMsg || !userMsg.prompt) return;
+
+    clearAllIntervals();
+
+    // 用原始参数重新添加 user 消息
+    const userMessage: NanoBananaMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      timestamp: Date.now(),
+      prompt: userMsg.prompt,
+      aspectRatio: userMsg.aspectRatio || 'auto',
+      imageSize: userMsg.imageSize || '1K',
+      uploadedImageUrl: userMsg.uploadedImageUrl || undefined,
+    };
+
+    setConversation(prev => ({
+      ...prev,
+      messages: [...prev.messages, userMessage],
+      currentStatus: 'generating',
+      progress: 0,
+      estimatedTime: 60,
+      elapsedTime: 0,
+    }));
+
+    scrollToBottom();
+
+    try {
+      const messageService = getGlobalMessageService();
+
+      // 构建请求参数 - 使用原始 prompt 和参数
+      const generateRequest: any = {
+        prompt: userMsg.prompt,
+        aspectRatio: userMsg.aspectRatio || 'auto',
+        imageSize: userMsg.imageSize || '1K',
+      };
+
+      // 使用 user 消息中记录的实际参考图 URL（在 handleGenerate 中回写的）
+      if (userMsg.referenceImageUrl) {
+        generateRequest.referenceImageUrl = userMsg.referenceImageUrl;
+      }
+
+      // 将参考图 URL 回写到新 user 消息中（供链式再次生成使用）
+      if (userMsg.referenceImageUrl) {
+        setConversation(prev => {
+          const msgs = [...prev.messages];
+          const lastIdx = msgs.length - 1;
+          if (msgs[lastIdx]?.role === 'user') {
+            msgs[lastIdx] = { ...msgs[lastIdx], referenceImageUrl: userMsg.referenceImageUrl };
+          }
+          return { ...prev, messages: msgs };
+        });
+      }
+
+      // 发送生成请求
+      messageService.sendNanoBananaGenerate(generateRequest);
+
+      // 等待生成任务创建响应
+      const taskResponse = await new Promise<{ taskId: string; estimatedTime: number }>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Generation request timeout')), 30000);
+
+        const handleGenerateResponse = (data: { success: boolean; taskId?: string; estimatedTime?: number; error?: string }) => {
+          clearTimeout(timeout);
+          if (data.success && data.taskId) {
+            resolve({ taskId: data.taskId, estimatedTime: data.estimatedTime || 60 });
+          } else {
+            reject(new Error(data.error || 'Failed to start generation'));
+          }
+        };
+
+        const unsubRegenerate = messageService.onNanoBananaGenerateResponse((data) => {
+          unsubRegenerate();
+          handleGenerateResponse(data);
+        });
+      });
+
+      // 设置任务 ID 并开始轮询
+      currentTaskIdRef.current = taskResponse.taskId;
+
+      setConversation(prev => ({
+        ...prev,
+        currentStatus: 'polling',
+        currentTaskId: taskResponse.taskId,
+        estimatedTime: taskResponse.estimatedTime,
+        elapsedTime: 0,
+      }));
+
+      // 开始轮询状态
+      pollingIntervalRef.current = setInterval(() => {
+        messageService.sendNanoBananaStatus({ taskId: taskResponse.taskId });
+      }, 1000);
+
+      // 倒计时（与 handleGenerate 保持一致）
+      countdownIntervalRef.current = setInterval(() => {
+        setConversation(prev => {
+          if (prev.currentStatus !== 'polling') return prev;
+          const newElapsed = prev.elapsedTime + 1;
+          const newEstimated = newElapsed >= prev.estimatedTime ? prev.estimatedTime + 10 : prev.estimatedTime;
+          const newProgress = Math.min(99, Math.round((newElapsed / newEstimated) * 100));
+          return {
+            ...prev,
+            elapsedTime: newElapsed,
+            estimatedTime: newEstimated,
+            progress: newProgress,
+          };
+        });
+      }, 1000);
+
+      scrollToBottom();
+
+    } catch (error: any) {
+      console.error('[NanoBanana] Regenerate error:', error);
+      clearAllIntervals();
+      currentTaskIdRef.current = null;
+
+      const errorMessage: NanoBananaMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        timestamp: Date.now(),
+        errorMessage: error.message || 'Regeneration failed',
+      };
+
+      setConversation(prev => ({
+        ...prev,
+        messages: [...prev.messages, errorMessage],
+        currentStatus: 'error',
+      }));
+
+      scrollToBottom();
+    }
+  }, [conversation, clearAllIntervals, scrollToBottom]);
+
   // 🎯 选择图片作为参考（点击历史图片的"选为参考"按钮）
   const handleSelectAsReference = useCallback((originalUrl: string, previewUrl: string) => {
     // 清除待上传文件
@@ -648,7 +806,7 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
 
           {/* 对话历史 */}
           <div className="nanobanana-dialog__conversation">
-            {conversation.messages.map((message) => (
+            {conversation.messages.map((message, messageIndex) => (
               <div
                 key={message.id}
                 className={`nanobanana-dialog__message nanobanana-dialog__message--${message.role}${message.errorMessage ? ' nanobanana-dialog__message--error' : ''}`}
@@ -683,9 +841,25 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
                       </span>
                     </div>
                     {message.uploadedImageUrl && (
-                      <div className="nanobanana-dialog__message-reference">
-                        <img src={message.uploadedImageUrl} alt="Reference" />
-                        <span>{t('nanoBanana.referenceImage', {}, 'Reference Image')}</span>
+                      <div className="nanobanana-dialog__user-reference">
+                        <img
+                          src={message.uploadedImageUrl}
+                          alt="Reference"
+                          className="nanobanana-dialog__user-reference-thumb"
+                        />
+                        <span className="nanobanana-dialog__user-reference-text">
+                          {t('nanoBanana.referenceImage', {}, 'Reference Image')}
+                        </span>
+                        <button
+                          className="nanobanana-dialog__user-reference-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectAsReference(message.uploadedImageUrl!, message.uploadedImageUrl!);
+                          }}
+                          disabled={isGenerating}
+                        >
+                          {t('nanoBanana.selectAsReference', {}, 'Use as reference')}
+                        </button>
                       </div>
                     )}
                   </>
@@ -701,20 +875,20 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
                         const hasFailed = failedImageIndices.has(imageId);
 
                         return (
-                          <div key={imageId} className="nanobanana-dialog__message-image-wrapper">
-                            {hasFailed ? (
-                              <div className="nanobanana-dialog__image-failed" onClick={() => openImage(originalUrl)}>
-                                <div className="nanobanana-dialog__image-failed-content">
-                                  <p className="nanobanana-dialog__image-failed-text">
-                                    {t('nanoBanana.imageTooLarge', {}, 'Image is large, please click to view')}
-                                  </p>
-                                  <button className="nanobanana-dialog__image-failed-link">
-                                    {t('nanoBanana.clickToView', {}, 'Click to View')}
-                                  </button>
+                          <div key={imageId} className="nanobanana-dialog__message-image-container">
+                            <div className="nanobanana-dialog__message-image-wrapper">
+                              {hasFailed ? (
+                                <div className="nanobanana-dialog__image-failed" onClick={() => openImage(originalUrl)}>
+                                  <div className="nanobanana-dialog__image-failed-content">
+                                    <p className="nanobanana-dialog__image-failed-text">
+                                      {t('nanoBanana.imageTooLarge', {}, 'Image is large, please click to view')}
+                                    </p>
+                                    <button className="nanobanana-dialog__image-failed-link">
+                                      {t('nanoBanana.clickToView', {}, 'Click to View')}
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <>
+                              ) : (
                                 <img
                                   src={url}
                                   alt={`Generated ${index + 1}`}
@@ -722,19 +896,30 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
                                   onClick={() => openImage(originalUrl)}
                                   onError={() => handleImageLoadError(imageId)}
                                 />
-                                <button
-                                  className="nanobanana-dialog__select-reference-btn"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleSelectAsReference(originalUrl, url);
-                                  }}
-                                  disabled={isGenerating}
-                                  title={t('nanoBanana.selectAsReference', {}, 'Use as reference')}
-                                >
-                                  {t('nanoBanana.selectAsReference', {}, 'Use as reference')}
-                                </button>
-                              </>
-                            )}
+                              )}
+                            </div>
+                            <div className="nanobanana-dialog__image-actions">
+                              <button
+                                className="nanobanana-dialog__select-reference-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSelectAsReference(originalUrl, url);
+                                }}
+                                disabled={isGenerating}
+                              >
+                                {t('nanoBanana.selectAsReference', {}, 'Use as reference')}
+                              </button>
+                              <button
+                                className="nanobanana-dialog__regenerate-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRegenerate(messageIndex);
+                                }}
+                                disabled={isGenerating}
+                              >
+                                {t('nanoBanana.regenerate', {}, 'Regenerate')}
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
