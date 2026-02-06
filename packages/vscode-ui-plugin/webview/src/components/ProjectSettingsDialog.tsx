@@ -28,6 +28,15 @@ interface MCPServerInfo {
   enabled?: boolean; // 是否启用（控制工具是否注册给 AI）
 }
 
+interface UserInfo {
+  openId: string;
+  userId: string;
+  name: string;
+  enName?: string;
+  email?: string;
+  avatar?: string;
+}
+
 interface YoloModeSettingsDialogProps {
   /** 是否显示对话框 */
   isOpen: boolean;
@@ -52,9 +61,15 @@ interface YoloModeSettingsDialogProps {
 
   /** 记忆文件数量 */
   memoryFileCount?: number;
+
+  /** 当前登录用户信息 */
+  userInfo?: UserInfo | null;
+
+  /** 退出登录回调 */
+  onLogout?: () => void;
 }
 
-type SettingsTab = 'general' | 'mcp' | 'memory' | 'more';
+type SettingsTab = 'general' | 'mcp' | 'memory' | 'more' | 'account';
 
 // =============================================================================
 // 主组件
@@ -68,7 +83,9 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
   mcpStatusLoaded = false,
   onToggleMcpEnabled,
   memoryFilePaths = [],
-  memoryFileCount = 0
+  memoryFileCount = 0,
+  userInfo,
+  onLogout
 }) => {
   const { t } = useTranslation();
   const {
@@ -86,6 +103,10 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [isRefreshingMemory, setIsRefreshingMemory] = useState(false);
+
+  // 账户管理状态
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // User Rules 状态
   const [userRules, setUserRules] = useState<string>('');
@@ -291,6 +312,29 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
     }
   };
 
+  /**
+   * 处理退出登录
+   */
+  const handleLogout = useCallback(() => {
+    setShowLogoutConfirm(true);
+  }, []);
+
+  /**
+   * 确认退出登录
+   */
+  const handleConfirmLogout = useCallback(() => {
+    setShowLogoutConfirm(false);
+    setIsLoggingOut(true);
+    onLogout?.();
+  }, [onLogout]);
+
+  /**
+   * 取消退出登录
+   */
+  const handleCancelLogout = useCallback(() => {
+    setShowLogoutConfirm(false);
+  }, []);
+
   // =============================================================================
   // 渲染
   // =============================================================================
@@ -348,6 +392,12 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
               onClick={() => setActiveTab('more')}
             >
               {t('settings.tabs.more')}
+            </button>
+            <button
+              className={`project-settings-dialog__tab ${activeTab === 'account' ? 'project-settings-dialog__tab--active' : ''}`}
+              onClick={() => setActiveTab('account')}
+            >
+              {t('settings.tabs.account')}
             </button>
           </div>
 
@@ -528,6 +578,85 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
                     </svg>
                     {t('settings.more.open')}
                   </button>
+                </div>
+              </div>
+            )}
+            {activeTab === 'account' && (
+              <div className="account-panel">
+                <div className="account-panel__section">
+                  <h3 className="account-panel__title">{t('settings.account.title')}</h3>
+                  {userInfo ? (
+                    <div className="account-panel__info">
+                      {/* 用户名称 */}
+                      <div className="account-panel__name-group">
+                        <span className="account-panel__display-name">{userInfo.name}</span>
+                        {userInfo.enName && userInfo.enName !== userInfo.name && (
+                          <span className="account-panel__en-name">{userInfo.enName}</span>
+                        )}
+                      </div>
+
+                      {/* 用户详情 */}
+                      <div className="account-panel__details">
+                        {userInfo.email && (
+                          <div className="account-panel__detail-row">
+                            <span className="account-panel__detail-label">{t('settings.account.email')}</span>
+                            <span className="account-panel__detail-value">{userInfo.email}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="account-panel__not-logged-in">{t('settings.account.notLoggedIn')}</p>
+                  )}
+
+                  {/* 退出登录按钮 */}
+                  {userInfo && (
+                    <div className="account-panel__actions">
+                      {!showLogoutConfirm ? (
+                        <button
+                          className="account-panel__logout-btn"
+                          onClick={handleLogout}
+                          disabled={isLoggingOut}
+                        >
+                          {isLoggingOut ? (
+                            <>
+                              <span className="account-panel__spinner"></span>
+                              {t('settings.account.loggingOut')}
+                            </>
+                          ) : (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                <polyline points="16 17 21 12 16 7" />
+                                <line x1="21" y1="12" x2="9" y2="12" />
+                              </svg>
+                              {t('settings.account.logoutButton')}
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="account-panel__logout-confirm">
+                          <p className="account-panel__logout-confirm-text">
+                            {t('settings.account.logoutConfirm')}
+                          </p>
+                          <div className="account-panel__logout-confirm-actions">
+                            <button
+                              className="account-panel__logout-confirm-btn account-panel__logout-confirm-btn--cancel"
+                              onClick={handleCancelLogout}
+                            >
+                              {t('settings.close')}
+                            </button>
+                            <button
+                              className="account-panel__logout-confirm-btn account-panel__logout-confirm-btn--confirm"
+                              onClick={handleConfirmLogout}
+                            >
+                              {t('settings.account.logoutButton')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

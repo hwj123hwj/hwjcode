@@ -66,6 +66,7 @@ export const MultiSessionApp: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = 检查中, false = 未登录, true = 已登录
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>();
+  const [currentUserInfo, setCurrentUserInfo] = useState<any>(null); // 当前登录用户信息
 
   // 🎯 启动流程状态管理
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
@@ -1275,6 +1276,20 @@ export const MultiSessionApp: React.FC = () => {
   // 注意：消息监听器在前面的独立useEffect中已注册，不需要再次注册
 
   // =============================================================================
+  // 🎯 监听登录状态响应，捕获 userInfo
+  // =============================================================================
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'login_status_response' && event.data?.payload?.userInfo) {
+        console.log('📋 [MultiSessionApp] Captured userInfo from login_status_response');
+        setCurrentUserInfo(event.data.payload.userInfo);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // =============================================================================
   // 登录事件处理方法
   // =============================================================================
 
@@ -1300,6 +1315,8 @@ export const MultiSessionApp: React.FC = () => {
         if (data.success) {
           setIsLoggedIn(true);
           setLoginError(undefined);
+          // 登录成功后，请求一次登录状态以获取 userInfo
+          messageService.checkLoginStatus();
           console.log('✅ 登录成功');
         } else {
           setLoginError(data.error || '登录失败');
@@ -1314,6 +1331,29 @@ export const MultiSessionApp: React.FC = () => {
       setIsLoggingIn(false);
       setLoginError('启动登录流程失败');
     }
+  };
+
+  /**
+   * 🎯 处理退出登录
+   */
+  const handleLogout = () => {
+    console.log('🚪 开始退出登录...');
+    const messageService = getGlobalMessageService();
+    messageService.logout();
+
+    // 监听退出结果
+    messageService.onLogoutResponse((data: { success: boolean; error?: string }) => {
+      console.log('📄 收到退出结果:', data);
+      if (data.success) {
+        console.log('✅ 退出登录成功');
+        setCurrentUserInfo(null);
+        setIsLoggedIn(false);
+        setLoginError(undefined);
+        toggleProjectSettings(false);
+      } else {
+        console.error('❌ 退出登录失败:', data.error);
+      }
+    });
   };
 
   /**
@@ -2237,6 +2277,8 @@ User question: ${contentStr}`;
         onToggleMcpEnabled={handleToggleMcpEnabled}
         memoryFilePaths={memoryFilePaths}
         memoryFileCount={memoryFileCount}
+        userInfo={currentUserInfo}
+        onLogout={handleLogout}
       />
 
       {/* 自定义规则管理对话框 */}

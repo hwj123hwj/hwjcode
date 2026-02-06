@@ -485,6 +485,7 @@ export const enUS: Translations = {
       mcp: 'MCP',
       memory: 'Memory & Rules',
       more: 'More',
+      account: 'Account',
     },
     general: {
       yoloLabel: 'YOLO Mode',
@@ -522,6 +523,18 @@ export const enUS: Translations = {
       title: 'Extension Settings',
       description: 'Open the VS Code extension settings to configure additional options.',
       open: 'Open Extension Settings',
+    },
+    account: {
+      title: 'Account Info',
+      notLoggedIn: 'Not logged in',
+      name: 'Name',
+      email: 'Email',
+      userId: 'User ID',
+      logoutButton: 'Logout',
+      logoutConfirm: 'Are you sure you want to logout? Current sessions will be closed, but chat history will be preserved.',
+      loggingOut: 'Logging out...',
+      logoutSuccess: 'Logged out successfully',
+      logoutFailed: 'Logout failed',
     },
   },
 

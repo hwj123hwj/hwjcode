@@ -485,6 +485,7 @@ export const zhCN: Translations = {
       mcp: 'MCP',
       memory: '记忆与规则',
       more: '更多',
+      account: '账户管理',
     },
     general: {
       yoloLabel: 'YOLO 模式',
@@ -522,6 +523,18 @@ export const zhCN: Translations = {
       title: '扩展设置',
       description: '打开 VS Code 扩展设置以配置更多选项。',
       open: '打开扩展设置',
+    },
+    account: {
+      title: '账户信息',
+      notLoggedIn: '未登录',
+      name: '姓名',
+      email: '邮箱',
+      userId: '用户 ID',
+      logoutButton: '退出登录',
+      logoutConfirm: '确定要退出登录吗？当前会话将被关闭，但聊天历史会保留。',
+      loggingOut: '正在退出...',
+      logoutSuccess: '已成功退出登录',
+      logoutFailed: '退出登录失败',
     },
   },
 
