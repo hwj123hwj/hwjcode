@@ -1088,9 +1088,23 @@ export class MultiSessionMessageService {
   }
 
   /**
-   * 🎯 发送NanoBanana生成请求
+   * 🎯 发送NanoBanana生成请求（支持多轮会话）
    */
-  sendNanoBananaGenerate(data: { prompt: string; aspectRatio: string; imageSize: string; referenceImageUrl?: string }) {
+  sendNanoBananaGenerate(data: {
+    prompt: string;
+    aspectRatio: string;
+    imageSize: string;
+    referenceImageUrl?: string;
+    // 🆕 多轮会话上下文
+    conversationContext?: {
+      previousGeneratedImageUrl: string;
+      history: Array<{
+        role: 'user' | 'assistant';
+        prompt?: string;
+        imageUrl?: string;
+      }>;
+    };
+  }) {
     this.sendMessage({
       type: 'nanobanana_generate' as any,
       payload: data
