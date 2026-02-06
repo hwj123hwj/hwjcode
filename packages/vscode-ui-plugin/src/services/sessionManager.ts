@@ -55,6 +55,13 @@ export class SessionManager extends EventEmitter {
   private currentSessionId: string | null = null;
   private isInitialized = false;
 
+  /**
+   * 🎯 获取初始化状态（用于判断退出后重登是否需要完全重新初始化）
+   */
+  getIsInitialized(): boolean {
+    return this.isInitialized;
+  }
+
   // 🎯 Session 顺序管理（用于拖拽排序）
   private sessionsOrder: string[] = [];
 
