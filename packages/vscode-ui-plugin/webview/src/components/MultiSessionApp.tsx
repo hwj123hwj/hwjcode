@@ -450,25 +450,28 @@ export const MultiSessionApp: React.FC = () => {
     console.log('🚀 初始化主应用消息服务...');
     const messageService = getGlobalMessageService();
 
+    // 🎯 收集所有监听器的取消订阅函数，用于清理
+    const cleanups: (() => void)[] = [];
+
     // 🎯 压缩确认请求监听器（模型切换时上下文超限）
-    webviewModelService.onCompressionConfirmationRequest((request) => {
+    cleanups.push(webviewModelService.onCompressionConfirmationRequest((request) => {
       console.log('📊 [MultiSessionApp] Received compression confirmation request:', request);
       setCompressionConfirmation(request);
       setIsModelSwitching(true); // 🎯 进入确认阶段，保持切换状态
-    });
+    }));
 
     // 🎯 压缩错误处理器
-    webviewModelService.onCompressionError((error) => {
+    cleanups.push(webviewModelService.onCompressionError((error) => {
       console.error('📊 [MultiSessionApp] Compression error:', error);
       setIsCompressing(false);
       setCompressionConfirmation(null);
-    });
+    }));
 
     // =============================================================================
     // Session管理事件监听器
     // =============================================================================
 
-    messageService.onSessionListUpdate(({ sessions, currentSessionId }) => {
+    cleanups.push(messageService.onSessionListUpdate(({ sessions, currentSessionId }) => {
       console.log('🔍 [DEBUG-UI-FLOW] [MultiSessionApp] onSessionListUpdate received:', sessions.length, 'sessions');
 
 
@@ -527,9 +530,9 @@ export const MultiSessionApp: React.FC = () => {
 
       // 🎯 会话列表加载完成（loading screen 由 onLoadingComplete 的一次性监听器处理）
       console.log('🎯 [SESSION-LOADED] Sessions loaded');
-    });
+    }));
 
-    messageService.onSessionCreated(({ session }) => {
+    cleanups.push(messageService.onSessionCreated(({ session }) => {
       console.log('🆕 [NEW-SESSION] Creating new session with content loaded:', session.id);
       createSession(session, true); // 🎯 新建session立即加载内容
 
@@ -559,9 +562,9 @@ export const MultiSessionApp: React.FC = () => {
         // 不操作LoadingScreen的显示/隐藏，让升级逻辑自己处理
         console.log('🎯 [NEW-SESSION] Letting upgrade logic handle LoadingScreen visibility');
       }
-    });
+    }));
 
-    messageService.onSessionUpdated(({ sessionId, session }) => {
+    cleanups.push(messageService.onSessionUpdated(({ sessionId, session }) => {
       console.log('🔄 [BACKEND] Session updated:', sessionId, 'session.name:', session.name);
       // 更新 state（这会更新顶部标签页）
       updateSessionInfo(sessionId, session);
@@ -604,9 +607,9 @@ export const MultiSessionApp: React.FC = () => {
         console.log('⚠️ [HISTORY] Not updating - list empty');
         return prev;
       });
-    });
+    }));
 
-    messageService.onSessionDeleted(({ sessionId }) => {
+    cleanups.push(messageService.onSessionDeleted(({ sessionId }) => {
       console.log('🗑️ [BACKEND] Session deleted:', sessionId);
       // 删除 state 中的 session
       deleteSession(sessionId);
@@ -616,9 +619,9 @@ export const MultiSessionApp: React.FC = () => {
       setTimeout(() => {
         getGlobalMessageService().requestSessionList();
       }, 100);
-    });
+    }));
 
-    messageService.onSessionSwitched(({ sessionId, session }) => {
+    cleanups.push(messageService.onSessionSwitched(({ sessionId, session }) => {
       const existingSession = getSession(sessionId);
       if (!existingSession && session) {
         createSession(session, false);
@@ -627,10 +630,10 @@ export const MultiSessionApp: React.FC = () => {
       if (session && existingSession) {
         updateSessionInfo(sessionId, session);
       }
-    });
+    }));
 
     // 🎯 监听历史列表分页响应
-    messageService.onSessionHistoryResponse(({ sessions, total, hasMore, offset }) => {
+    cleanups.push(messageService.onSessionHistoryResponse(({ sessions, total, hasMore, offset }) => {
       setHistorySessionsList((prev) => {
         const newItems = sessions.map(s => {
           // 🔥 关键修复：如果内存中有这个session，优先使用内存中的标题
@@ -673,23 +676,23 @@ export const MultiSessionApp: React.FC = () => {
       setHistoryTotal(total);
       setHistoryHasMore(hasMore);
       setIsLoadingHistory(false);
-    });
+    }));
 
     // 🎯 监听UI历史恢复
-    messageService.onRestoreUIHistory(({ sessionId, messages, rollbackableMessageIds }) => {
+    cleanups.push(messageService.onRestoreUIHistory(({ sessionId, messages, rollbackableMessageIds }) => {
       restoreSessionMessages(sessionId, messages);
       updateRollbackableIds(sessionId, rollbackableMessageIds || []);
-    });
+    }));
 
     // 🎯 监听消息预填充（右键菜单快捷操作 - 自动发送）
-    messageService.onPrefillMessage(({ message }) => {
+    cleanups.push(messageService.onPrefillMessage(({ message }) => {
       console.log('📝 [PREFILL] Received prefill message, auto-sending:', message.substring(0, 50) + '...');
       // 🎯 直接发送消息到当前session
       handleSendMessage([{ type: 'text', value: message }]);
-    });
+    }));
 
     // 🎯 监听插入代码到输入框（只插入，不自动发送）
-    messageService.onInsertCodeToInput(({ fileName, filePath, code, startLine, endLine }) => {
+    cleanups.push(messageService.onInsertCodeToInput(({ fileName, filePath, code, startLine, endLine }) => {
       console.log('📝 [INSERT CODE] Received code to insert:', fileName, startLine, '-', endLine);
 
       // 🎯 调用 MessageInput 的方法插入代码引用
@@ -704,15 +707,15 @@ export const MultiSessionApp: React.FC = () => {
       } else {
         console.warn('MessageInput ref not available, cannot insert code');
       }
-    });
+    }));
 
     // 🎯 监听可回滚消息ID列表更新
-    messageService.onUpdateRollbackableIds(({ sessionId, rollbackableMessageIds }) => {
+    cleanups.push(messageService.onUpdateRollbackableIds(({ sessionId, rollbackableMessageIds }) => {
       updateRollbackableIds(sessionId, rollbackableMessageIds);
-    });
+    }));
 
     // 🎯 监听后端请求UI历史记录
-    messageService.onRequestUIHistory(({ sessionId }) => {
+    cleanups.push(messageService.onRequestUIHistory(({ sessionId }) => {
 
       // 🎯 使用ref获取最新状态，解决闭包问题
       const currentState = stateRef.current;
@@ -740,13 +743,13 @@ export const MultiSessionApp: React.FC = () => {
         // 即使没有找到session也要发送空数组，让后端知道已处理
         messageService.saveSessionUIHistory(sessionId, []);
       }
-    });
+    }));
 
     // =============================================================================
     // 聊天和工具调用事件监听器
     // =============================================================================
 
-    messageService.onChatStart(({ sessionId, messageId }) => {
+    cleanups.push(messageService.onChatStart(({ sessionId, messageId }) => {
 
       // 🎯 开始处理：设置Session为处理状态
       setProcessingState(sessionId, true, messageId, true);
@@ -775,9 +778,9 @@ export const MultiSessionApp: React.FC = () => {
 
       addMessage(sessionId, streamingMessage);
       streamingMessages.current.set(messageId, { messageId, content: '', sessionId });
-    });
+    }));
 
-    messageService.onChatChunk(({ sessionId, content, messageId, isComplete }) => {
+    cleanups.push(messageService.onChatChunk(({ sessionId, content, messageId, isComplete }) => {
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
         // 累积内容
@@ -786,18 +789,18 @@ export const MultiSessionApp: React.FC = () => {
         // 更新消息内容
         updateMessageContent(sessionId, messageId, streamingMsg.content, !isComplete);
       }
-    });
+    }));
 
     // 🎯 处理AI思考过程（reasoning）
-    messageService.onChatReasoning(({ sessionId, content, messageId }) => {
+    cleanups.push(messageService.onChatReasoning(({ sessionId, content, messageId }) => {
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
         // 使用新的 updateMessageReasoning 方法累积思考内容
         updateMessageReasoning(sessionId, messageId, content);
       }
-    });
+    }));
 
-    messageService.onChatComplete(({ sessionId, messageId, tokenUsage }) => {
+    cleanups.push(messageService.onChatComplete(({ sessionId, messageId, tokenUsage }) => {
 
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
@@ -841,20 +844,20 @@ export const MultiSessionApp: React.FC = () => {
         clearTimeout(timeout);
         loadingTimeoutsRef.current.delete(sessionId);
       }
-    });
+    }));
 
     // 🎯 监听 Token 使用情况更新（压缩后更新前端显示）
-    messageService.onExtensionMessage('token_usage_update', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('token_usage_update', (payload: any) => {
       console.log('📊 [MultiSessionApp] Received token_usage_update:', payload);
       if (payload.sessionId && payload.tokenUsage) {
         updateSessionInfo(payload.sessionId, {
           tokenUsage: payload.tokenUsage
         });
       }
-    });
+    }));
 
     // 🎯 监听模型切换完成（压缩成功后更新模型选择器）
-    messageService.onExtensionMessage('model_switch_complete', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('model_switch_complete', (payload: any) => {
       console.log('📊 [MultiSessionApp] Received model_switch_complete:', payload);
       console.log('📊 [MultiSessionApp] payload.sessionId:', payload.sessionId, 'payload.modelName:', payload.modelName);
       if (payload.sessionId && payload.modelName) {
@@ -869,30 +872,30 @@ export const MultiSessionApp: React.FC = () => {
       } else {
         console.warn('📊 [MultiSessionApp] Missing sessionId or modelName in payload!');
       }
-    });
+    }));
 
     // 🚨 REMOVED: onChatResponse 监听器已移除
     // 原因: 与 onChatStart 重复创建消息，我们只使用流式路径 (onChatStart + onChatChunk + onChatComplete)
     // messageService.onChatResponse(...) - DELETED
 
     // 🆕 监听流中断恢复消息
-    messageService.onExtensionMessage('stream_recovery_start', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_start', (payload: any) => {
       console.log('🔄 [MultiSessionApp] Stream recovery started:', payload);
       setStreamRecoveryTotal(payload.total || 10);
       setStreamRecoveryRemaining(payload.total || 10);
       setStreamRecoveryVisible(true);
-    });
+    }));
 
-    messageService.onExtensionMessage('stream_recovery_countdown', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_countdown', (payload: any) => {
       setStreamRecoveryRemaining(payload.remaining || 0);
-    });
+    }));
 
-    messageService.onExtensionMessage('stream_recovery_end', () => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_end', () => {
       console.log('🔄 [MultiSessionApp] Stream recovery ended');
       setStreamRecoveryVisible(false);
-    });
+    }));
 
-    messageService.onChatError(({ sessionId, error }) => {
+    cleanups.push(messageService.onChatError(({ sessionId, error }) => {
       // 🎯 检测认证错误，切换到登录页面
       if (checkAuthenticationError(error)) {
         return; // 不显示错误消息，直接跳转到登录页
@@ -924,9 +927,9 @@ export const MultiSessionApp: React.FC = () => {
           streamingMessages.current.delete(messageId);
         }
       }
-    });
+    }));
 
-    messageService.onToolCallsUpdate(({ sessionId, toolCalls, associatedMessageId }) => {
+    cleanups.push(messageService.onToolCallsUpdate(({ sessionId, toolCalls, associatedMessageId }) => {
       // 🎯 检查是否有subagent_update类型的工具，如果有，创建消息来显示进度
       toolCalls.forEach(t => {
         const resultStr = typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '');
@@ -1015,9 +1018,9 @@ export const MultiSessionApp: React.FC = () => {
       } else {
         console.warn('⚠️ No target message found for tool calls update');
       }
-    });
+    }));
 
-    messageService.onToolConfirmationRequest(({ sessionId, toolCall }) => {
+    cleanups.push(messageService.onToolConfirmationRequest(({ sessionId, toolCall }) => {
       console.log('🔍 [ToolConfirmation] Received confirmation request:', {
         sessionId,
         toolId: toolCall.toolId,
@@ -1068,10 +1071,10 @@ export const MultiSessionApp: React.FC = () => {
       }
 
       showConfirmationFor(sessionId, confirmationTool);
-    });
+    }));
 
     // 🎯 添加工具实时输出监听
-    messageService.onToolMessage((data) => {
+    cleanups.push(messageService.onToolMessage((data) => {
       console.log('🔧 [onToolMessage] Received data:', data);
 
       if (!data) {
@@ -1085,51 +1088,51 @@ export const MultiSessionApp: React.FC = () => {
       if (toolMessageType === 'output' && toolId && content && sessionId) {
         updateToolLiveOutput(sessionId, toolId, content);
       }
-    });
+    }));
 
-    messageService.onContextUpdate(({ sessionId, context }) => {
+    cleanups.push(messageService.onContextUpdate(({ sessionId, context }) => {
 
       if (sessionId) {
         updateSessionContext(sessionId, context);
       } else {
         updateGlobalContext(context);
       }
-    });
+    }));
 
     // =============================================================================
     // 导入导出事件监听器
     // =============================================================================
 
-    messageService.onSessionExportComplete(() => {
+    cleanups.push(messageService.onSessionExportComplete(() => {
       // TODO: 显示成功通知
-    });
+    }));
 
-    messageService.onSessionImportComplete(() => {
+    cleanups.push(messageService.onSessionImportComplete(() => {
       // TODO: 显示成功通知
-    });
+    }));
 
     // =============================================================================
     // 🎯 流程状态事件监听器
     // =============================================================================
 
-    messageService.onFlowStateUpdate(({ sessionId, isProcessing, currentProcessingMessageId, canAbort }) => {
+    cleanups.push(messageService.onFlowStateUpdate(({ sessionId, isProcessing, currentProcessingMessageId, canAbort }) => {
       // 更新Session的流程状态
       setProcessingState(sessionId, isProcessing, currentProcessingMessageId || null, canAbort);
-    });
+    }));
 
-    messageService.onFlowAborted(({ sessionId }) => {
+    cleanups.push(messageService.onFlowAborted(({ sessionId }) => {
       // 重置Session状态
       setProcessingState(sessionId, false, null, false);
-    });
+    }));
 
     // =============================================================================
     // 🎯 自定义规则管理监听器
     // =============================================================================
 
-    messageService.onOpenRulesManagement(() => {
+    cleanups.push(messageService.onOpenRulesManagement(() => {
       console.log('📋 Opening rules management dialog');
       setIsRulesManagementOpen(true);
-    });
+    }));
 
     // =============================================================================
     // 🎯 MCP 状态管理监听器（带防抖稳定化）
@@ -1138,7 +1141,7 @@ export const MultiSessionApp: React.FC = () => {
     let mcpUpdateTimer: NodeJS.Timeout | null = null;
     let pendingMcpPayload: any = null;
 
-    messageService.onMcpStatusUpdate((payload: any) => {
+    cleanups.push(messageService.onMcpStatusUpdate((payload: any) => {
       console.log('🔌 [MCP] Received MCP status update:', JSON.stringify(payload, null, 2));
       console.log('🔌 [MCP] Servers in payload:', payload.servers?.map((s: any) => `${s.name}(tools:${s.toolCount}, enabled:${s.enabled})`).join(', '));
 
@@ -1171,26 +1174,26 @@ export const MultiSessionApp: React.FC = () => {
           }, 500);
         }
       }, 150);
-    });
+    }));
 
     // 🔌 监听 MCP enabled 状态更新
-    messageService.onMcpEnabledStates((payload: { states: Record<string, boolean> }) => {
+    cleanups.push(messageService.onMcpEnabledStates((payload: { states: Record<string, boolean> }) => {
       console.log('🔌 [MCP] Received enabled states update:', payload);
       setMcpServers(prev => prev.map(server => ({
         ...server,
         enabled: payload.states[server.name] ?? server.enabled ?? true
       })));
-    });
+    }));
 
     // 📝 监听记忆文件路径更新
-    messageService.onMemoryFilesUpdate((payload: { filePaths: string[]; fileCount: number }) => {
+    cleanups.push(messageService.onMemoryFilesUpdate((payload: { filePaths: string[]; fileCount: number }) => {
       console.log('📝 [Memory] Received memory files update:', payload);
       setMemoryFilePaths(payload.filePaths);
       setMemoryFileCount(payload.fileCount);
-    });
+    }));
 
     // 🎯 监听后台任务结果（在聊天界面显示任务输出）
-    messageService.onExtensionMessage('background_task_result', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('background_task_result', (payload: any) => {
       console.log('🎯 [Background] Received task result:', payload);
       const { sessionId, taskId, command, status, exitCode, output } = payload;
 
@@ -1221,9 +1224,10 @@ export const MultiSessionApp: React.FC = () => {
       console.log('🎯 [Background] Adding tool message to session:', sessionId, toolMessage);
       addMessage(sessionId, toolMessage);
       console.log('🎯 [Background] Tool message added');
-    });
+    }));
 
     return () => {
+      cleanups.forEach(fn => fn?.());
     };
 
   }, []);
@@ -1324,7 +1328,10 @@ export const MultiSessionApp: React.FC = () => {
         }
       };
 
-      messageService.onLoginResponse(handleLoginResponse);
+      const unsubscribe = messageService.onLoginResponse((data) => {
+        unsubscribe();
+        handleLoginResponse(data);
+      });
 
     } catch (error) {
       console.error('❌ 启动登录流程失败:', error);
@@ -1342,7 +1349,8 @@ export const MultiSessionApp: React.FC = () => {
     messageService.logout();
 
     // 监听退出结果
-    messageService.onLogoutResponse((data: { success: boolean; error?: string }) => {
+    const unsubscribe = messageService.onLogoutResponse((data: { success: boolean; error?: string }) => {
+      unsubscribe();
       console.log('📄 收到退出结果:', data);
       if (data.success) {
         console.log('✅ 退出登录成功');
