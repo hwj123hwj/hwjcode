@@ -1982,8 +1982,20 @@ function setupLoginHandlers() {
       if (loginResult.success) {
         logger.info('Login completed successfully');
 
-        // 登录成功后，重新初始化所有session的AI服务
-        await sessionManager.reinitializeAllSessions();
+        // 登录成功后，判断是否需要重新初始化
+        if (sessionManager.getIsInitialized()) {
+          // 正常登录（非退出后重登），重新初始化现有session的AI服务
+          await sessionManager.reinitializeAllSessions();
+        } else {
+          // 退出后重登，sessionManager已被dispose，需要完全重新初始化
+          logger.info('SessionManager was disposed, re-initializing...');
+          await sessionManager.initialize();
+
+          // 重新初始化后，发送session列表给前端
+          const sessions = sessionManager.getAllSessionsInfo();
+          const currentSessionId = sessionManager.getCurrentSession()?.info.id || null;
+          await communicationService.sendSessionListUpdate(sessions, currentSessionId);
+        }
       } else {
         logger.error(`Login failed: ${loginResult.error}`);
       }
@@ -1993,6 +2005,36 @@ function setupLoginHandlers() {
       await communicationService.sendGenericMessage('login_response', {
         success: false,
         error: error instanceof Error ? error.message : 'Login process failed'
+      });
+    }
+  });
+
+  // 🎯 处理登出请求
+  communicationService.addMessageHandler('logout', async () => {
+    try {
+      logger.info('Received logout request');
+
+      const { LoginService } = await import('./services/loginService');
+      const loginService = LoginService.getInstance(logger, extensionContext.extensionPath);
+
+      // 执行登出 - 清除 jwt-token.json 和 user-info.json
+      await loginService.logout();
+
+      // 销毁所有 session 的 AI 服务（不删除磁盘历史）
+      await sessionManager.dispose();
+
+      // 发送登出结果
+      await communicationService.sendGenericMessage('logout_response', {
+        success: true
+      });
+
+      logger.info('Logout completed successfully, sessions disposed');
+
+    } catch (error) {
+      logger.error('Failed to logout', error instanceof Error ? error : undefined);
+      await communicationService.sendGenericMessage('logout_response', {
+        success: false,
+        error: error instanceof Error ? error.message : 'Logout failed'
       });
     }
   });
@@ -3117,7 +3159,7 @@ function setupMultiSessionHandlers() {
     try {
       // 🆕 判断是否为多轮会话
       const hasConversationContext = payload.conversationContext && payload.conversationContext.previousGeneratedImageUrl;
-      
+
       logger.info('Received nanobanana_generate request', {
         prompt: payload.prompt.substring(0, 50) + '...',
         aspectRatio: payload.aspectRatio,

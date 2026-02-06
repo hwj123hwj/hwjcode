@@ -38,6 +38,15 @@ packages/*/src/**/*.js
 packages/*/src/**/*.d.ts
 packages/*/src/**/*.js.map
 
+# TypeScript编译产物（包根目录下的配置文件编译产物）
+packages/*/vitest.setup.js
+packages/*/vitest.setup.d.ts
+packages/*/vitest.setup.js.map
+packages/*/vitest.config.js
+packages/*/vitest.config.d.ts
+packages/*/vitest.config.js.map
+packages/*/webview/vitest.config.js
+
 # 构建缓存文件
 .build-cache.json
 **/.build-cache.json

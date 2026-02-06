@@ -131,6 +131,7 @@ export interface MultiSessionMessageToExtension {
        // 🎯 登录相关消息类型
        'login_check_status' |
        'login_start' |
+       'logout' |
        // 🎯 项目设置相关
        'project_settings_update' |
        'project_settings_request' |
@@ -277,7 +278,7 @@ export class MultiSessionMessageService {
     }
 
     // 🎯 这些消息必须立即发送，不受ready状态限制
-    const immediateMessages = ['ready', 'login_check_status', 'login_start'];
+    const immediateMessages = ['ready', 'login_check_status', 'login_start', 'logout'];
 
     if (!this.isReady && !immediateMessages.includes(message.type)) {
       console.log('Queueing message (not ready):', message.type);
@@ -826,6 +827,23 @@ export class MultiSessionMessageService {
    */
   onLoginResponse(callback: (data: { success: boolean; error?: string }) => void) {
     this.addMessageHandler('login_response', callback);
+  }
+
+  /**
+   * 发送登出请求
+   */
+  logout(): void {
+    this.sendMessage({
+      type: 'logout',
+      payload: {}
+    });
+  }
+
+  /**
+   * 监听登出结果
+   */
+  onLogoutResponse(callback: (data: { success: boolean; error?: string }) => void) {
+    this.addMessageHandler('logout_response', callback);
   }
 
   /**
