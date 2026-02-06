@@ -52,7 +52,8 @@ describe('SkillLoader', () => {
 
     marketplaceManager = new MarketplaceManager(settingsManager);
     pluginInstaller = new PluginInstaller(settingsManager, marketplaceManager);
-    loader = new SkillLoader(settingsManager, marketplaceManager);
+    // Pass testRoot as projectRoot to isolate tests from actual project directory
+    loader = new SkillLoader(settingsManager, marketplaceManager, undefined, testRoot);
   });
 
   afterEach(async () => {
@@ -351,6 +352,25 @@ Content
       expect(stats.total).toBe(2);
       expect(stats.byMarketplace['test-mp']).toBe(2);
       expect(stats.byPlugin['test-mp:test-plugin']).toBe(2);
+    });
+
+    it('should force reload settings when requested', async () => {
+      await createTestMarketplace();
+
+      // First call without force reload
+      const stats1 = await loader.getSkillStats(false);
+      expect(stats1.total).toBe(2);
+
+      // Simulate external config change by directly modifying settings
+      const settingsManager = (loader as any).settingsManager;
+      const readSettingsSpy = vi.spyOn(settingsManager, 'readSettings');
+
+      // Second call with force reload
+      const stats2 = await loader.getSkillStats(true);
+
+      // Verify readSettings was called with forceReload=true
+      expect(readSettingsSpy).toHaveBeenCalledWith(true);
+      expect(stats2.total).toBe(2);
     });
   });
 

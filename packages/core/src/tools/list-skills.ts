@@ -12,7 +12,7 @@ import {
   type ToolLocation,
 } from './tools.js';
 import { Type } from '@google/genai';
-import { SkillsContextBuilder } from '../skills/skills-context-builder.js';
+import { SkillsCompatAdapter } from '../skills/skills-compat.js';
 import { Config } from '../config/config.js';
 
 interface ListSkillsParams {
@@ -26,7 +26,7 @@ interface ListSkillsParams {
  * ListSkillsTool - List all available skills
  */
 export class ListSkillsTool extends BaseTool<ListSkillsParams, ToolResult> {
-  private contextBuilder: SkillsContextBuilder;
+  private compatAdapter: SkillsCompatAdapter;
 
   constructor(private readonly config: Config) {
     super(
@@ -52,7 +52,7 @@ export class ListSkillsTool extends BaseTool<ListSkillsParams, ToolResult> {
       false, // canUpdateOutput
     );
 
-    this.contextBuilder = new SkillsContextBuilder(this.config.getProjectRoot());
+    this.compatAdapter = new SkillsCompatAdapter(this.config.getProjectRoot());
   }
 
   override validateToolParams(_params: ListSkillsParams): string | null {
@@ -81,7 +81,7 @@ export class ListSkillsTool extends BaseTool<ListSkillsParams, ToolResult> {
     _signal: AbortSignal,
   ): Promise<ToolResult> {
     try {
-      let skills = this.contextBuilder.listSkills();
+      let skills = await this.compatAdapter.listSkills();
 
       // Apply filters if provided
       if (params.marketplaceId) {

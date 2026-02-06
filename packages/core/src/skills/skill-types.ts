@@ -620,7 +620,10 @@ export interface SkillInfo {
   marketplaceId: string;
   description: string;
   path: string;
+  /** @deprecated 使用 skillFilePath 替代，保留此字段以保持向后兼容性 */
   skillMdPath: string;
+  /** SKILL.md 文件的完整路径（推荐使用此字段） */
+  skillFilePath?: string;
   enabled: boolean;
 }
 
@@ -666,6 +669,12 @@ export interface PluginDefinition {
   name: string;
   description: string;
   source: string;
-  strict: boolean;
-  skills: string[];
+  /**
+   * 控制是否自动发现组件
+   * - undefined (默认): 自动发现并合并
+   * - false: 自动发现并合并（显式声明）
+   * - true: 只使用显式定义的组件，禁止自动发现
+   */
+  strict?: boolean;
+  skills?: string[];
 }
