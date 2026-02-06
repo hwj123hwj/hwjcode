@@ -371,6 +371,7 @@ export interface Translations {
     buttonTooltip: string;
     prompt: string;
     promptPlaceholder: string;
+    promptPlaceholderContinue: string;
     aspectRatio: string;
     imageSize: string;
     referenceImage: string;
@@ -378,19 +379,29 @@ export interface Translations {
     uploadImage: string;
     removeReference: string;
     generate: string;
+    continueGenerate: string;
     generateAnother: string;
+    newConversation: string;
     uploading: string;
     generating: string;
     waitingForResult: string;
     estimatedTime: string;
     generationComplete: string;
     resultsHint: string;
+    continueHint: string;
     credits: string;
     openInBrowser: string;
     tryAgain: string;
     remaining: string;
     imageTooLarge: string;
     clickToView: string;
+    // 多轮会话相关
+    you: string;
+    assistant: string;
+    basedOnPrevious: string;
+    selectAsReference: string;
+    conversationHistory: string;
+    uploadNewReference: string;
     error: {
       emptyPrompt: string;
       invalidImageType: string;

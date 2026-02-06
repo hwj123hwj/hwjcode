@@ -3112,24 +3112,40 @@ function setupMultiSessionHandlers() {
     }
   });
 
-  // 🎯 处理NanoBanana生成请求
+  // 🎯 处理NanoBanana生成请求（支持多轮会话）
   communicationService.onNanoBananaGenerate(async (payload) => {
     try {
+      // 🆕 判断是否为多轮会话
+      const hasConversationContext = payload.conversationContext && payload.conversationContext.previousGeneratedImageUrl;
+      
       logger.info('Received nanobanana_generate request', {
         prompt: payload.prompt.substring(0, 50) + '...',
         aspectRatio: payload.aspectRatio,
-        imageSize: payload.imageSize
+        imageSize: payload.imageSize,
+        hasReferenceImage: !!payload.referenceImageUrl,
+        hasConversationContext: !!hasConversationContext,
+        historyLength: payload.conversationContext?.history?.length || 0
       });
 
       // 🎯 获取ImageGeneratorAdapter实例
       const { ImageGeneratorAdapter } = await import('deepv-code-core');
       const imageGenerator = ImageGeneratorAdapter.getInstance();
 
+      // 🆕 确定参考图片 URL
+      // 优先级：1. 多轮会话中的上一轮生成图片 2. 用户手动上传的参考图
+      let referenceImageUrl = payload.referenceImageUrl;
+      if (hasConversationContext) {
+        referenceImageUrl = payload.conversationContext!.previousGeneratedImageUrl;
+        logger.info('Using previous generated image as reference for multi-turn conversation', {
+          previousImageUrl: referenceImageUrl?.substring(0, 100) + '...'
+        });
+      }
+
       // 提交生成任务
       const task = await imageGenerator.submitImageGenerationTask(
         payload.prompt,
         payload.aspectRatio,
-        payload.referenceImageUrl,
+        referenceImageUrl,
         payload.imageSize
       );
 
