@@ -1089,9 +1089,23 @@ export class MultiSessionCommunicationService {
   }
 
   /**
-   * 监听NanoBanana生成请求
+   * 监听NanoBanana生成请求（支持多轮会话）
    */
-  onNanoBananaGenerate(handler: (data: { prompt: string; aspectRatio: string; imageSize: string; referenceImageUrl?: string }) => void) {
+  onNanoBananaGenerate(handler: (data: {
+    prompt: string;
+    aspectRatio: string;
+    imageSize: string;
+    referenceImageUrl?: string;
+    // 🆕 多轮会话上下文
+    conversationContext?: {
+      previousGeneratedImageUrl: string;
+      history: Array<{
+        role: 'user' | 'assistant';
+        prompt?: string;
+        imageUrl?: string;
+      }>;
+    };
+  }) => void) {
     return this.addMessageHandler('nanobanana_generate', handler);
   }
 

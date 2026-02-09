@@ -164,11 +164,7 @@ export class MarketplaceLoader implements IPluginLoader {
       }
     } else if (typeof source === 'string') {
       // 2. 字符串类型：相对路径
-      if (source.startsWith('./') || source.startsWith('../')) {
-        pluginDir = path.join(mpPath, source);
-      } else {
-        pluginDir = path.join(mpPath, source);
-      }
+      pluginDir = path.join(mpPath, source);
     } else {
       // 3. 未知类型，回退到插件名
       pluginDir = path.join(mpPath, pluginDef.name);
@@ -251,13 +247,11 @@ export class MarketplaceLoader implements IPluginLoader {
     }
 
     // 3. 自动发现组件
-    // strict 字段语义：
-    //   - undefined (默认): 总是自动发现并合并，确保发现所有组件
-    //   - false: 总是自动发现并合并（显式声明）
-    //   - true: 只使用显式定义的组件，不自动发现
-    const shouldAutoDiscover = pluginDef.strict !== false;
-
-    if (shouldAutoDiscover) {
+    // 始终执行自动发现，确保不遗漏任何组件
+    // 显式定义的组件优先（去重时保留显式定义的版本）
+    // 注：第三方插件的 strict 字段原意是限制 Claude Code 的行为，
+    //     不应阻止我们发现和加载组件
+    {
       // 自动发现标准目录
       // 按照标准目录和常见第三方工具目录进行自动发现
       const discoveryTasks = [
@@ -300,6 +294,9 @@ export class MarketplaceLoader implements IPluginLoader {
     }
 
     // 4. 构建 UnifiedPlugin
+    // 从 installed_plugins.json 读取实际启用状态
+    const pluginEnabled = installedInfo?.enabled ?? true;
+
     return {
       id,
       name: pluginDef.name,
@@ -326,7 +323,7 @@ export class MarketplaceLoader implements IPluginLoader {
         detectedFormat: 'deepv-code'
       },
       installed: true,
-      enabled: true,
+      enabled: pluginEnabled,
       marketplace: {
         id: marketplaceId,
         name: marketplaceId

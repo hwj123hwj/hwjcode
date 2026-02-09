@@ -1982,8 +1982,20 @@ function setupLoginHandlers() {
       if (loginResult.success) {
         logger.info('Login completed successfully');
 
-        // 登录成功后，重新初始化所有session的AI服务
-        await sessionManager.reinitializeAllSessions();
+        // 登录成功后，判断是否需要重新初始化
+        if (sessionManager.getIsInitialized()) {
+          // 正常登录（非退出后重登），重新初始化现有session的AI服务
+          await sessionManager.reinitializeAllSessions();
+        } else {
+          // 退出后重登，sessionManager已被dispose，需要完全重新初始化
+          logger.info('SessionManager was disposed, re-initializing...');
+          await sessionManager.initialize();
+
+          // 重新初始化后，发送session列表给前端
+          const sessions = sessionManager.getAllSessionsInfo();
+          const currentSessionId = sessionManager.getCurrentSession()?.info.id || null;
+          await communicationService.sendSessionListUpdate(sessions, currentSessionId);
+        }
       } else {
         logger.error(`Login failed: ${loginResult.error}`);
       }
@@ -1993,6 +2005,36 @@ function setupLoginHandlers() {
       await communicationService.sendGenericMessage('login_response', {
         success: false,
         error: error instanceof Error ? error.message : 'Login process failed'
+      });
+    }
+  });
+
+  // 🎯 处理登出请求
+  communicationService.addMessageHandler('logout', async () => {
+    try {
+      logger.info('Received logout request');
+
+      const { LoginService } = await import('./services/loginService');
+      const loginService = LoginService.getInstance(logger, extensionContext.extensionPath);
+
+      // 执行登出 - 清除 jwt-token.json 和 user-info.json
+      await loginService.logout();
+
+      // 销毁所有 session 的 AI 服务（不删除磁盘历史）
+      await sessionManager.dispose();
+
+      // 发送登出结果
+      await communicationService.sendGenericMessage('logout_response', {
+        success: true
+      });
+
+      logger.info('Logout completed successfully, sessions disposed');
+
+    } catch (error) {
+      logger.error('Failed to logout', error instanceof Error ? error : undefined);
+      await communicationService.sendGenericMessage('logout_response', {
+        success: false,
+        error: error instanceof Error ? error.message : 'Logout failed'
       });
     }
   });
@@ -2105,6 +2147,48 @@ function setupLoginHandlers() {
     } catch (error) {
       logger.error('Failed to refresh memory', error instanceof Error ? error : undefined);
       vscode.window.showErrorMessage(`Failed to refresh memory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+
+  // 📝 处理获取用户规则请求
+  communicationService.addMessageHandler('get_user_rules', async () => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      const userRules = config.get<string>('userRules', '');
+      logger.info('📝 Getting user rules', { length: userRules.length });
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: userRules }
+      });
+    } catch (error) {
+      logger.error('Failed to get user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: '' }
+      });
+    }
+  });
+
+  // 📝 处理保存用户规则请求
+  communicationService.addMessageHandler('save_user_rules', async (payload: { rules: string }) => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      await config.update('userRules', payload.rules, vscode.ConfigurationTarget.Global);
+      logger.info('📝 User rules saved successfully', { length: payload.rules.length });
+
+      // 更新 sessionManager 中的 userRules
+      sessionManager.setUserRules(payload.rules);
+
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: true }
+      });
+    } catch (error) {
+      logger.error('Failed to save user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: false, error: error instanceof Error ? error.message : String(error) }
+      });
     }
   });
 
@@ -3070,24 +3154,40 @@ function setupMultiSessionHandlers() {
     }
   });
 
-  // 🎯 处理NanoBanana生成请求
+  // 🎯 处理NanoBanana生成请求（支持多轮会话）
   communicationService.onNanoBananaGenerate(async (payload) => {
     try {
+      // 🆕 判断是否为多轮会话
+      const hasConversationContext = payload.conversationContext && payload.conversationContext.previousGeneratedImageUrl;
+
       logger.info('Received nanobanana_generate request', {
         prompt: payload.prompt.substring(0, 50) + '...',
         aspectRatio: payload.aspectRatio,
-        imageSize: payload.imageSize
+        imageSize: payload.imageSize,
+        hasReferenceImage: !!payload.referenceImageUrl,
+        hasConversationContext: !!hasConversationContext,
+        historyLength: payload.conversationContext?.history?.length || 0
       });
 
       // 🎯 获取ImageGeneratorAdapter实例
       const { ImageGeneratorAdapter } = await import('deepv-code-core');
       const imageGenerator = ImageGeneratorAdapter.getInstance();
 
+      // 🆕 确定参考图片 URL
+      // 优先级：1. 多轮会话中的上一轮生成图片 2. 用户手动上传的参考图
+      let referenceImageUrl = payload.referenceImageUrl;
+      if (hasConversationContext) {
+        referenceImageUrl = payload.conversationContext!.previousGeneratedImageUrl;
+        logger.info('Using previous generated image as reference for multi-turn conversation', {
+          previousImageUrl: referenceImageUrl?.substring(0, 100) + '...'
+        });
+      }
+
       // 提交生成任务
       const task = await imageGenerator.submitImageGenerationTask(
         payload.prompt,
         payload.aspectRatio,
-        payload.referenceImageUrl,
+        referenceImageUrl,
         payload.imageSize
       );
 

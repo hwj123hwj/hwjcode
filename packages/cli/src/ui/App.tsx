@@ -2421,6 +2421,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onOpenTheme={openThemeDialog}
                 onOpenEditor={openEditorDialog}
                 onOpenModel={openModelDialog}
+                onReloadMemory={performMemoryRefresh}
               />
             </Box>
           ) : sessionSelectData ? (

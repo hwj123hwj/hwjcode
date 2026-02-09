@@ -55,6 +55,13 @@ export class SessionManager extends EventEmitter {
   private currentSessionId: string | null = null;
   private isInitialized = false;
 
+  /**
+   * 🎯 获取初始化状态（用于判断退出后重登是否需要完全重新初始化）
+   */
+  getIsInitialized(): boolean {
+    return this.isInitialized;
+  }
+
   // 🎯 Session 顺序管理（用于拖拽排序）
   private sessionsOrder: string[] = [];
 
@@ -63,6 +70,9 @@ export class SessionManager extends EventEmitter {
   private userMemoryFileCount: number = 0;
   private userMemoryFilePaths: string[] = [];
   private memoryInitialized = false;
+
+  // 🎯 用户规则缓存
+  private userRulesContent: string = '';
 
   // 🎯 等待UI历史记录的Promise映射
   private readonly pendingHistoryRequests: Map<string, {
@@ -137,6 +147,9 @@ export class SessionManager extends EventEmitter {
       this.initializeUserMemory().catch(error => {
         this.logger.error('❌ Failed to initialize user memory in background', error instanceof Error ? error : undefined);
       });
+
+      // 🎯 初始化用户规则
+      this.initializeUserRules();
 
       // 🎯 加载持久化的会话数据
       try {
@@ -229,6 +242,85 @@ export class SessionManager extends EventEmitter {
       this.userMemoryFileCount = 0;
       this.userMemoryFilePaths = [];
       this.memoryInitialized = true;
+    }
+  }
+
+  /**
+   * 🎯 初始化用户规则
+   * 从 VSCode 设置中读取用户规则
+   */
+  private initializeUserRules(): void {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      this.userRulesContent = config.get<string>('userRules', '');
+      if (this.userRulesContent) {
+        this.logger.info(`✅ User rules loaded: ${this.userRulesContent.length} characters`);
+      } else {
+        this.logger.debug('ℹ️ No user rules configured');
+      }
+    } catch (error) {
+      this.logger.warn('⚠️ Failed to load user rules', error instanceof Error ? error : undefined);
+      this.userRulesContent = '';
+    }
+  }
+
+  /**
+   * 🎯 设置用户规则
+   * 当用户在设置面板中修改规则时调用
+   */
+  public setUserRules(rules: string): void {
+    this.userRulesContent = rules;
+    this.logger.info(`📝 User rules updated: ${rules.length} characters`);
+
+    // 更新所有活跃 AI 服务的 system prompt
+    for (const [sessionId, aiService] of this.aiServices) {
+      const session = this.sessions.get(sessionId);
+      if (session && session.info.status !== SessionStatus.CLOSED) {
+        this.updateAIServiceSystemPrompt(sessionId, aiService).catch(error => {
+          this.logger.warn(`Failed to update system prompt for session ${sessionId}`, error instanceof Error ? error : undefined);
+        });
+      }
+    }
+  }
+
+  /**
+   * 🎯 获取用户规则
+   */
+  public getUserRules(): string {
+    return this.userRulesContent;
+  }
+
+  /**
+   * 🎯 更新单个 AI 服务的 system prompt（包含 userRules）
+   */
+  private async updateAIServiceSystemPrompt(sessionId: string, aiService: AIService): Promise<void> {
+    try {
+      const config = aiService.getConfig();
+      if (config) {
+        // 设置用户规则到 config
+        config.setUserRules(this.userRulesContent);
+
+        // 刷新 system prompt
+        const geminiClient = await config.getGeminiClient();
+        if (geminiClient) {
+          const chat = geminiClient.getChat();
+          if (chat) {
+            const { getCoreSystemPrompt } = await import('deepv-code-core');
+            const updatedSystemPrompt = getCoreSystemPrompt(
+              this.userMemoryContent,
+              true, // isVSCode
+              this.userRulesContent, // userRules
+              config.getAgentStyle?.() || 'default',
+              undefined, // modelId
+              config.getPreferredLanguage?.()
+            );
+            chat.setSystemInstruction(updatedSystemPrompt);
+            this.logger.debug(`Updated system prompt for session ${sessionId} with user rules`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to update system prompt for session ${sessionId}`, error instanceof Error ? error : undefined);
     }
   }
 
@@ -1224,7 +1316,8 @@ export class SessionManager extends EventEmitter {
       await aiService.initialize(workspaceRoot, {
         userMemory: this.userMemoryContent,
         geminiMdFileCount: this.userMemoryFileCount,
-        sessionModel: sessionModel
+        sessionModel: sessionModel,
+        userRules: this.userRulesContent
       });
 
       // 🎯 恢复 AI 客户端历史记录（针对恢复的 session）
@@ -1270,7 +1363,8 @@ export class SessionManager extends EventEmitter {
       await aiService.initialize(workspaceRoot, {
         userMemory: this.userMemoryContent,
         geminiMdFileCount: this.userMemoryFileCount,
-        sessionModel: sessionModel
+        sessionModel: sessionModel,
+        userRules: this.userRulesContent
       });
 
       return aiService;

@@ -20,14 +20,22 @@ export async function createLSPClient(input: {
   server: { process: any };
   root: string;
 }): Promise<LSPClient.Info> {
-  // 🎯 Windows 兼容性：确保驱动器盘符为小写 (file:///D:/ -> file:///d:/)
-  // 注意：部分 LSP（如 Pyright）会在 initialize 过程中立刻发起 workspace/workspaceFolders 请求。
-  // 若 normalizeUri 尚未初始化，会触发 TDZ ReferenceError，导致 initialize Promise 永远不 resolve（表现为“卡住”）。
+  // 🎯 Windows 兼容性：确保驱动器盘符为小写，并统一使用 %3A
+  // 这是 Pyright 等基于 vscode-uri 的服务器在 Windows 上的标准预期
   const normalizeUri = (uri: string) =>
-    uri.replace(/^file:\/\/\/([A-Z]):\//, (match, drive) =>
-      `file:///${drive.toLowerCase()}:/`,
+    uri.replace(/^file:\/\/\/([A-Z])[:%3A]+\//i, (match, drive) =>
+      `file:///${drive.toLowerCase()}%3A/`,
     );
   const rootUri = normalizeUri(pathToFileURL(input.root).href);
+
+  const debug =
+    process.env.DEEPV_LSP_DEBUG === '1' ||
+    process.env.DEEPV_LSP_DEBUG === 'true';
+
+  if (debug) {
+    console.log(`[LSP][${input.serverID}] Creating client for root: ${input.root}`);
+    console.log(`[LSP][${input.serverID}] rootUri: ${rootUri}`);
+  }
 
   // 1. 建立基于 Stdio 的连接
   const connection = createMessageConnection(
@@ -48,11 +56,15 @@ export async function createLSPClient(input: {
   // 注意：一些 LSP（尤其是 Pyright）会在初始化或处理首个请求时向 client 发起额外 request。
   // 如果 client 不响应，这些 server 可能会阻塞后续响应，表现为“卡住”。
 
+  // 监听服务端推送的诊断信息
+  connection.onNotification('textDocument/publishDiagnostics', (params: any) => {
+    if (debug) {
+      console.log(`[LSP][${input.serverID}] textDocument/publishDiagnostics received for ${params.uri}: ${params.diagnostics?.length || 0} items`);
+    }
+  });
+
   // 打印 server stderr（协议数据通常在 stdout；日志通常在 stderr）
   // 仅在开启 DEEPV_LSP_DEBUG 时输出，避免默认刷屏。
-  const debug =
-    process.env.DEEPV_LSP_DEBUG === '1' ||
-    process.env.DEEPV_LSP_DEBUG === 'true';
   if (debug && input.server.process?.stderr) {
     input.server.process.stderr.on('data', (buf: Buffer) => {
       const msg = buf.toString('utf8').trimEnd();
@@ -126,6 +138,7 @@ export async function createLSPClient(input: {
   // 4. 发送初始化请求 (Capabilities 交涉)
   const initializeParams = {
     processId: process.pid,
+    rootPath: input.root,
     rootUri: rootUri,
     capabilities: {
       window: {
@@ -184,6 +197,11 @@ export async function createLSPClient(input: {
     initializeParams,
   )) as any;
   await connection.sendNotification('initialized', {});
+
+  // 🎯 给 Pyright 发送一个初始配置，强制它开始工作
+  await connection.sendNotification('workspace/didChangeConfiguration', {
+    settings: {}
+  });
 
   return {
     serverID: input.serverID,

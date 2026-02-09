@@ -228,6 +228,13 @@
           "default": true,
           "description": "Enable healthy use reminders",
           "markdownDescription": "Enable or disable healthy use reminders between 22:00 and 06:00."
+        },
+        "deepv.userRules": {
+          "type": "string",
+          "default": "",
+          "description": "Custom user rules that apply to every conversation",
+          "markdownDescription": "Define custom rules that will be applied to every AI conversation. These rules help personalize AI responses according to your preferences.\n\nExample:\n```\nReply in Chinese\nUse English for code comments\nPrefer TypeScript over JavaScript\n```",
+          "editPresentation": "multilineText"
         }
       }
     }

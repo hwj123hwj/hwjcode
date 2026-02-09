@@ -39,6 +39,7 @@ export {
 
 // Context Builder (legacy)
 export { SkillsContextBuilder } from './skills-context-builder.js';
+export { SkillsCompatAdapter } from './skills-compat.js';
 
 /**
  * Initialize Skills System

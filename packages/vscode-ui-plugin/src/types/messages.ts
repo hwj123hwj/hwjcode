@@ -280,6 +280,9 @@ export type WebViewToExtensionMessage =
   | { type: 'open_extension_marketplace'; payload: { extensionId: string } }
   // 📝 记忆文件相关
   | { type: 'refresh_memory'; payload: {} }
+  // 📝 用户规则相关
+  | { type: 'get_user_rules'; payload: {} }
+  | { type: 'save_user_rules'; payload: { rules: string } }
   // 🎯 版本控制相关
   | { type: 'revert_to_message'; payload: { sessionId: string; messageId: string } }
   | { type: 'version_timeline_request'; payload: { sessionId: string } }
@@ -359,6 +362,9 @@ export type ExtensionToWebViewMessage =
   | { type: 'lint_suggestions'; payload: { suggestions: any[]; sessionId: string | null; timestamp: number } }
   // 🎯 记忆文件路径信息更新
   | { type: 'memory_files_update'; payload: { filePaths: string[]; fileCount: number } }
+  // 🎯 用户规则响应
+  | { type: 'user_rules_response'; payload: { rules: string } }
+  | { type: 'user_rules_saved'; payload: { success: boolean; error?: string } }
   | { type: 'tool_suggestion'; payload: { sessionId: string; toolName: string; params: any; timestamp: number } }
   // 🎯 模型配置相关
   | { type: 'model_response'; payload: { requestId: string; success: boolean; models?: any[]; currentModel?: string; error?: string } }
@@ -373,10 +379,10 @@ export type ExtensionToWebViewMessage =
   | { type: 'rules_save_response'; payload: { success: boolean; error?: string } }
   | { type: 'rules_delete_response'; payload: { success: boolean; error?: string } }
   | { type: 'open_rules_management'; payload: {} }
-  // 🎯 NanoBanana 图像生成
+  // 🎯 NanoBanana 图像生成（支持多轮会话）
   | { type: 'nanobanana_upload_response'; payload: { success: boolean; publicUrl?: string; error?: string } }
   | { type: 'nanobanana_generate_response'; payload: { success: boolean; taskId?: string; estimatedTime?: number; error?: string } }
-  | { type: 'nanobanana_status_update'; payload: { taskId: string; status: 'pending' | 'processing' | 'completed' | 'failed'; progress?: number; resultUrls?: string[]; originalUrls?: string[]; errorMessage?: string; creditsDeducted?: number } }
+  | { type: 'nanobanana_status_update'; payload: NanoBananaStatusUpdatePayload }
   // 🎯 PPT 生成 (无状态轮询，任务提交后直接返回编辑页面URL)
   | { type: 'ppt_generate_response'; payload: { success: boolean; taskId?: string; editUrl?: string; error?: string } }
   // 🎯 PPT 大纲 AI 优化
@@ -414,6 +420,55 @@ export interface MCPStatusPayload {
   sessionId: string;
   discoveryState: 'not_started' | 'in_progress' | 'completed';
   servers: MCPServerStatusInfo[];
+}
+
+// =============================================================================
+// 🍌 NanoBanana 多轮会话类型定义
+// =============================================================================
+
+/**
+ * NanoBanana 状态更新消息负载
+ */
+export interface NanoBananaStatusUpdatePayload {
+  taskId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress?: number;
+  resultUrls?: string[];
+  originalUrls?: string[];
+  errorMessage?: string;
+  creditsDeducted?: number;
+}
+
+/**
+ * NanoBanana 对话历史条目（传递给后端的上下文）
+ */
+export interface NanoBananaHistoryEntry {
+  role: 'user' | 'assistant';
+  prompt?: string;           // 用户的提示词
+  imageUrl?: string;         // 生成的图片 URL
+}
+
+/**
+ * NanoBanana 多轮会话上下文
+ */
+export interface NanoBananaConversationContext {
+  /** 上一轮生成的图片 URL（作为本轮的参考图） */
+  previousGeneratedImageUrl: string;
+  /** 完整对话历史 */
+  history: NanoBananaHistoryEntry[];
+}
+
+/**
+ * NanoBanana 生成请求（支持多轮会话）
+ */
+export interface NanoBananaGenerateRequest {
+  prompt: string;
+  aspectRatio: string;
+  imageSize: string;
+  /** 用户手动上传的参考图（首轮可用） */
+  referenceImageUrl?: string;
+  /** 多轮会话上下文 */
+  conversationContext?: NanoBananaConversationContext;
 }
 
 /**
