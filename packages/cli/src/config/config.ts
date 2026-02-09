@@ -344,6 +344,45 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
   return parsedArgs as CliArgs;
 }
 
+/**
+ * Filter memory loading results based on projectMemoryMode setting.
+ * - 'all' (default): keep both DEEPV.md and AGENTS.md
+ * - 'deepv-only': keep only DEEPV.md (filter out AGENTS.md)
+ * - 'none': return empty results
+ */
+export function filterMemoryByMode(
+  result: { memoryContent: string; fileCount: number; filePaths: string[] },
+  mode: Settings['projectMemoryMode'],
+): { memoryContent: string; fileCount: number; filePaths: string[] } {
+  if (mode === 'none') {
+    return { memoryContent: '', fileCount: 0, filePaths: [] };
+  }
+
+  if (mode === 'deepv-only') {
+    const filteredPaths = result.filePaths.filter((fp) => {
+      const filename = fp.split(/[\\/]/).pop() || '';
+      return !filename.toUpperCase().startsWith('AGENTS');
+    });
+    if (filteredPaths.length === result.filePaths.length) {
+      return result; // No AGENTS.md files found, return as-is
+    }
+    // Re-filter memory content by removing AGENTS.md blocks
+    const filteredContent = result.memoryContent
+      .split('\n\n')
+      .filter((block) => !block.includes('AGENTS.md ---'))
+      .join('\n\n')
+      .trim();
+    return {
+      memoryContent: filteredContent,
+      fileCount: filteredPaths.length,
+      filePaths: filteredPaths,
+    };
+  }
+
+  // 'all' or undefined (default) — no filtering
+  return result;
+}
+
 // This function is now a thin wrapper around the server's implementation.
 // It's kept in the CLI for now as App.tsx directly calls it for memory refresh.
 // TODO: Consider if App.tsx should get memory via a server call or if Config should refresh itself.
@@ -363,7 +402,7 @@ export async function loadHierarchicalGeminiMemory(
 
   // Directly call the server function.
   // The server function will use its own homedir() for the global path.
-  return loadServerHierarchicalMemory(
+  const result = await loadServerHierarchicalMemory(
     currentWorkingDirectory,
     debugMode,
     fileService,
@@ -371,6 +410,9 @@ export async function loadHierarchicalGeminiMemory(
     fileFilteringOptions,
     settings.memoryDiscoveryMaxDirs,
   );
+
+  // Apply projectMemoryMode filtering
+  return filterMemoryByMode(result, settings.projectMemoryMode);
 }
 
 export async function loadCliConfig(

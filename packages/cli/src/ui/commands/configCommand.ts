@@ -97,6 +97,10 @@ export const configCommand: SlashCommand = {
       case 'l':
         return await handleLanguageConfig(context, subArgs);
 
+      case 'memory-mode':
+      case 'memory':
+        return handleProjectMemoryModeConfig(context, subArgs);
+
       case 'help':
         return displayConfigMenu(context);
 
@@ -179,12 +183,20 @@ export const configCommand: SlashCommand = {
       action: async (context: CommandContext, args: string) =>
         handleLanguageConfig(context, args),
     },
+    {
+      name: 'memory-mode',
+      altNames: ['memory'],
+      description: t('config.menu.project.memory'),
+      kind: CommandKind.BUILT_IN,
+      action: (context: CommandContext, args: string) =>
+        handleProjectMemoryModeConfig(context, args),
+    },
   ],
 
   completion: async (_context, partialArg) => {
     const subCommands = [
       'theme', 'editor', 'model', 'vim', 'agent-style',
-      'yolo', 'healthy-use', 'language', 'help',
+      'yolo', 'healthy-use', 'language', 'memory-mode', 'help',
       't', 'e', 'm', 'v', 'a', 'y', 'h', 'l'
     ];
     return subCommands.filter(cmd =>
@@ -797,6 +809,82 @@ Usage:
 }
 
 /**
+ * 处理项目级记忆加载模式配置
+ */
+function handleProjectMemoryModeConfig(context: CommandContext, args: string): SlashCommandActionReturn {
+  const { settings } = context.services;
+  const trimmedArgs = args.trim().toLowerCase();
+
+  if (!settings) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: t('error.config.not.loaded'),
+    };
+  }
+
+  const currentMode = settings.merged.projectMemoryMode || 'all';
+
+  // 无参数：显示当前状态
+  if (!trimmedArgs) {
+    const modeLabel = (() => {
+      switch (currentMode) {
+        case 'deepv-only': return t('config.value.project.memory.deepvOnly');
+        case 'none': return t('config.value.project.memory.none');
+        default: return t('config.value.project.memory.all');
+      }
+    })();
+
+    return {
+      type: 'message',
+      messageType: 'info',
+      content: `📂 ${t('config.menu.project.memory')}: ${modeLabel}
+
+Usage:
+  /config memory-mode all        - Load DEEPV.md + AGENTS.md (default)
+  /config memory-mode deepv-only - Load DEEPV.md only
+  /config memory-mode none       - Don't load project memory`,
+    };
+  }
+
+  const modeMap: Record<string, 'all' | 'deepv-only' | 'none'> = {
+    'all': 'all',
+    'both': 'all',
+    'deepv-only': 'deepv-only',
+    'deepv': 'deepv-only',
+    'none': 'none',
+    'off': 'none',
+    'disable': 'none',
+  };
+
+  const newMode = modeMap[trimmedArgs];
+  if (!newMode) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: `Invalid mode: ${args}\n\nValid modes: all, deepv-only, none`,
+    };
+  }
+
+  settings.setValue(SettingScope.Workspace, 'projectMemoryMode', newMode);
+
+  const modeLabel = (() => {
+    switch (newMode) {
+      case 'deepv-only': return t('config.value.project.memory.deepvOnly');
+      case 'none': return t('config.value.project.memory.none');
+      default: return t('config.value.project.memory.all');
+    }
+  })();
+
+  return {
+    type: 'message',
+    messageType: 'info',
+    content: tp('config.status.project.memory.updated', { mode: modeLabel }) +
+      '\n\n' + t('config.status.project.memory.reloading'),
+  };
+}
+
+/**
  * 获取配置帮助信息
  */
 function getConfigHelp(): string {
@@ -808,5 +896,6 @@ function getConfigHelp(): string {
   /config agent-style [style] - Set agent style (default|codex|cursor|augment|...)
   /config yolo [on|off]      - Toggle YOLO mode
   /config healthy-use [on|off] - Toggle healthy use mode
-  /config language [name]    - Set preferred response language`;
+  /config language [name]    - Set preferred response language
+  /config memory-mode [mode] - Set project memory mode (all|deepv-only|none)`;
 }
