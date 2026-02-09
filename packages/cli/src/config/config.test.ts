@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
-import { loadCliConfig, parseArguments } from './config.js';
+import { loadCliConfig, parseArguments, filterMemoryByMode } from './config.js';
 import { Settings } from './settings.js';
 import { Extension } from './extension.js';
 import * as ServerConfig from 'deepv-code-core';
@@ -533,6 +533,55 @@ describe('Hierarchical Memory Loading (config.ts) - Placeholder Suite', () => {
     expect(fsPromises.readFile).toHaveBeenCalledWith(MOCK_GLOBAL_PATH_LOCAL, 'utf-8');
   });
   */
+});
+
+describe('filterMemoryByMode', () => {
+  const sampleResult = {
+    memoryContent:
+      '--- Context from: DEEPV.md ---\nDeepV content\n--- End of Context from: DEEPV.md ---\n\n--- Context from: AGENTS.md ---\nAgents content\n--- End of Context from: AGENTS.md ---',
+    fileCount: 2,
+    filePaths: ['/project/DEEPV.md', '/project/AGENTS.md'],
+  };
+
+  it('should return all content when mode is "all"', () => {
+    const result = filterMemoryByMode(sampleResult, 'all');
+    expect(result.filePaths).toHaveLength(2);
+    expect(result.memoryContent).toContain('DeepV content');
+    expect(result.memoryContent).toContain('Agents content');
+  });
+
+  it('should return all content when mode is undefined (default)', () => {
+    const result = filterMemoryByMode(sampleResult, undefined);
+    expect(result.filePaths).toHaveLength(2);
+    expect(result.memoryContent).toContain('DeepV content');
+    expect(result.memoryContent).toContain('Agents content');
+  });
+
+  it('should filter out AGENTS.md when mode is "deepv-only"', () => {
+    const result = filterMemoryByMode(sampleResult, 'deepv-only');
+    expect(result.filePaths).toHaveLength(1);
+    expect(result.filePaths[0]).toContain('DEEPV.md');
+    expect(result.memoryContent).toContain('DeepV content');
+    expect(result.memoryContent).not.toContain('Agents content');
+    expect(result.fileCount).toBe(1);
+  });
+
+  it('should return empty when mode is "none"', () => {
+    const result = filterMemoryByMode(sampleResult, 'none');
+    expect(result.filePaths).toHaveLength(0);
+    expect(result.memoryContent).toBe('');
+    expect(result.fileCount).toBe(0);
+  });
+
+  it('should handle result with no AGENTS.md in "deepv-only" mode', () => {
+    const deepvOnlyResult = {
+      memoryContent: '--- Context from: DEEPV.md ---\nDeepV content\n--- End of Context from: DEEPV.md ---',
+      fileCount: 1,
+      filePaths: ['/project/DEEPV.md'],
+    };
+    const result = filterMemoryByMode(deepvOnlyResult, 'deepv-only');
+    expect(result).toBe(deepvOnlyResult); // Should return same reference
+  });
 });
 
 describe('mergeMcpServers', () => {

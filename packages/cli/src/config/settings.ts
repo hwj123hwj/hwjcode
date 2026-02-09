@@ -158,6 +158,9 @@ export interface Settings {
 
   // 语言偏好设置
   preferredLanguage?: string;
+
+  // 项目级记忆加载模式: 'all' = DEEPV.md + AGENTS.md, 'deepv-only' = 仅 DEEPV.md, 'none' = 不加载
+  projectMemoryMode?: 'all' | 'deepv-only' | 'none';
 }
 
 export interface SettingsError {

@@ -906,6 +906,18 @@ export const translations = {
     'config.hint.language.help': 'Leave empty for default (AI decided)',
     'config.hint.confirm.cancel': 'Enter to confirm · escape to cancel',
 
+    // Project Memory Mode
+    'config.menu.project.memory': '📂 Project Memory',
+    'config.submenu.project.memory.title': 'Project Memory - Choose which memory files to load',
+    'config.option.project.memory.all': '📂 DEEPV.md + AGENTS.md (Default)',
+    'config.option.project.memory.deepvOnly': '📄 DEEPV.md only',
+    'config.option.project.memory.none': '🚫 Don\'t load',
+    'config.value.project.memory.all': 'DEEPV.md + AGENTS.md',
+    'config.value.project.memory.deepvOnly': 'DEEPV.md only',
+    'config.value.project.memory.none': 'Disabled',
+    'config.status.project.memory.updated': '✅ Project memory mode updated to {mode}',
+    'config.status.project.memory.reloading': '🔄 Reloading memory...',
+
   'command.healthyUse.description': 'Manage healthy use reminders',
   'command.healthyUse.status': 'Healthy use reminder is currently {status}',
   'command.healthyUse.on': 'Healthy use reminder turned ON',
@@ -2255,6 +2267,19 @@ export const translations = {
     'config.hint.language.placeholder': '例如：English, 中文, Español...',
     'config.hint.language.help': '留空则由 AI 决定',
     'config.hint.confirm.cancel': 'Enter 确认 · escape 取消',
+
+    // Project Memory Mode
+    'config.menu.project.memory': '📂 项目记忆',
+    'config.submenu.project.memory.title': '项目记忆 - 选择加载哪些记忆文件',
+    'config.option.project.memory.all': '📂 DEEPV.md + AGENTS.md（默认）',
+    'config.option.project.memory.deepvOnly': '📄 仅 DEEPV.md',
+    'config.option.project.memory.none': '🚫 不加载',
+    'config.value.project.memory.all': 'DEEPV.md + AGENTS.md',
+    'config.value.project.memory.deepvOnly': '仅 DEEPV.md',
+    'config.value.project.memory.none': '不加载',
+    'config.status.project.memory.updated': '✅ 项目记忆模式已更新为 {mode}',
+    'config.status.project.memory.reloading': '🔄 正在重新加载记忆...',
+
   'command.healthyUse.description': '管理健康使用提醒',
   'command.healthyUse.status': '健康使用提醒当前为 {status}',
   'command.healthyUse.on': '已开启健康使用提醒',
