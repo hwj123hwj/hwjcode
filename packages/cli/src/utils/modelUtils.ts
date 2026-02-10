@@ -35,6 +35,7 @@ export const AUTO_MODE_CONFIG = {
  */
 export function formatProviderName(provider: string): string {
   if (provider === 'openai') return 'OpenAI';
+  if (provider === 'openai-responses') return 'OpenAI Responses';
   if (provider === 'anthropic') return 'Anthropic';
   // 默认首字母大写
   return provider.charAt(0).toUpperCase() + provider.slice(1);
