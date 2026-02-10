@@ -709,6 +709,471 @@ export async function callOpenAICompatibleModel(
 }
 
 /**
+ * OpenAI Responses API 格式转换工具
+ * Responses API 使用 input/output 而非 messages/choices
+ * @see https://platform.openai.com/docs/api-reference/responses
+ */
+const OpenAIResponsesConverter = {
+  /**
+   * 将内部内容格式转换为 Responses API 的 input 格式
+   * Responses API 使用扁平化的 items 数组，与 Chat Completions 的 messages 格式不同：
+   * - 文本消息: { role: "user"|"assistant"|"system", content: "..." }
+   * - 函数调用: { type: "function_call", call_id: "...", name: "...", arguments: "..." }
+   * - 函数输出: { type: "function_call_output", call_id: "...", output: "..." }
+   */
+  contentsToInput(contents: any[]): any[] {
+    const items: any[] = [];
+
+    for (const content of contents) {
+      const parts = content.parts || [];
+      const role = content.role === MESSAGE_ROLES.MODEL ? 'assistant'
+                 : content.role === 'system' ? 'system'
+                 : 'user';
+
+      // 收集当前 content 的各类部分
+      const textParts: string[] = [];
+      const functionCalls: any[] = [];
+      const functionResponses: any[] = [];
+      const imageParts: any[] = [];
+
+      for (const part of parts) {
+        if (part.functionCall) {
+          functionCalls.push(part.functionCall);
+        } else if (part.functionResponse) {
+          functionResponses.push(part.functionResponse);
+        } else if (part.text) {
+          textParts.push(part.text);
+        } else if (part.inlineData) {
+          imageParts.push(part.inlineData);
+        }
+      }
+
+      // 如果有文本或图片，先输出文本消息
+      if (textParts.length > 0 || imageParts.length > 0) {
+        if (imageParts.length > 0) {
+          // 混合内容：文本 + 图片
+          const contentParts: any[] = [];
+          for (const text of textParts) {
+            contentParts.push({ type: 'input_text', text });
+          }
+          for (const img of imageParts) {
+            contentParts.push({
+              type: 'input_image',
+              image_url: `data:${img.mimeType};base64,${img.data}`,
+            });
+          }
+          items.push({ role, content: contentParts });
+        } else {
+          items.push({ role, content: textParts.join('\n') });
+        }
+      }
+
+      // 函数调用作为独立的 function_call items（不包裹在 message 中）
+      for (const fc of functionCalls) {
+        items.push({
+          type: 'function_call',
+          call_id: fc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          name: fc.name,
+          arguments: typeof fc.args === 'string' ? fc.args : JSON.stringify(fc.args || {}),
+        });
+      }
+
+      // 函数响应作为独立的 function_call_output items
+      for (const fr of functionResponses) {
+        items.push({
+          type: 'function_call_output',
+          call_id: fr.id || `call_${fr.name}`,
+          output: typeof fr.response === 'string'
+            ? fr.response
+            : JSON.stringify(fr.response || {}),
+        });
+      }
+    }
+
+    return items;
+  },
+
+  /**
+   * JSON Schema 中必须为整数的关键字集合
+   * OpenAI Responses API 严格校验这些字段的类型，不接受字符串形式的数字
+   */
+  INTEGER_SCHEMA_KEYWORDS: new Set([
+    'minLength', 'maxLength', 'minItems', 'maxItems',
+    'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum',
+    'minProperties', 'maxProperties', 'multipleOf',
+  ]),
+
+  /**
+   * 清理 JSON Schema，使其兼容 OpenAI Responses API 的严格校验：
+   * 1. 将 Google GenAI 的大写类型（如 "BOOLEAN", "STRING"）转为小写（"boolean", "string"）
+   * 2. 将数值型 Schema 关键字（如 minLength, minItems）从字符串强制转为数字
+   *    （例如 minLength: '1' → minLength: 1）
+   * 3. 移除 Responses API 不支持的非标准 Schema 字段（如 $schema）
+   */
+  cleanSchema(schema: any): any {
+    if (!schema || typeof schema !== 'object') return schema;
+    if (Array.isArray(schema)) return schema.map((item: any) => OpenAIResponsesConverter.cleanSchema(item));
+
+    const cleaned: any = {};
+    for (const key of Object.keys(schema)) {
+      if (key === 'type' && typeof schema[key] === 'string') {
+        // 大写类型转小写: "STRING" → "string", "BOOLEAN" → "boolean"
+        cleaned[key] = schema[key].toLowerCase();
+      } else if (OpenAIResponsesConverter.INTEGER_SCHEMA_KEYWORDS.has(key)) {
+        // 数值型关键字强制转为数字: '1' → 1
+        const numVal = Number(schema[key]);
+        if (!isNaN(numVal)) {
+          cleaned[key] = numVal;
+        }
+        // 如果无法转为数字则丢弃该字段，避免 API 报错
+      } else if (key === 'properties' && typeof schema[key] === 'object') {
+        cleaned[key] = {};
+        for (const k of Object.keys(schema[key])) {
+          cleaned[key][k] = OpenAIResponsesConverter.cleanSchema(schema[key][k]);
+        }
+      } else if (key === 'items') {
+        cleaned[key] = OpenAIResponsesConverter.cleanSchema(schema[key]);
+      } else if (['anyOf', 'oneOf', 'allOf'].includes(key) && Array.isArray(schema[key])) {
+        cleaned[key] = schema[key].map((item: any) => OpenAIResponsesConverter.cleanSchema(item));
+      } else if (key === 'default') {
+        // default 值根据 type 做基本类型转换
+        cleaned[key] = schema[key];
+      } else {
+        cleaned[key] = schema[key];
+      }
+    }
+    return cleaned;
+  },
+
+  /**
+   * 将工具定义转换为 Responses API 格式
+   * Responses API 使用 type: "function" 包装，内部标记 (internally-tagged)
+   * 注意：Responses API 的 schema 校验比 Chat Completions 更严格，
+   * 必须将 Google GenAI 的大写类型转为小写
+   */
+  toolsToResponsesTools(tools: any[]): any[] | undefined {
+    if (!tools || tools.length === 0) return undefined;
+    return tools.flatMap((tool: any) => {
+      if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
+        return tool.functionDeclarations.map((fd: any) => ({
+          type: 'function',
+          name: fd.name,
+          description: fd.description,
+          parameters: OpenAIResponsesConverter.cleanSchema(fd.parameters),
+          strict: false, // Responses API defaults to strict: true, set false for compatibility
+        }));
+      }
+      return [{
+        type: 'function',
+        name: tool.name,
+        description: tool.description,
+        parameters: OpenAIResponsesConverter.cleanSchema(tool.parameters),
+        strict: false,
+      }];
+    });
+  },
+
+  /**
+   * 从 Responses API 的 output items 中提取 parts
+   */
+  outputToParts(output: any[]): any[] {
+    const parts: any[] = [];
+    if (!output || !Array.isArray(output)) return parts;
+
+    for (const item of output) {
+      if (item.type === 'message') {
+        // message item contains content array
+        if (item.content && Array.isArray(item.content)) {
+          for (const c of item.content) {
+            if (c.type === 'output_text') {
+              parts.push({ text: c.text });
+            }
+          }
+        }
+      } else if (item.type === 'function_call') {
+        parts.push({
+          functionCall: {
+            name: item.name?.trim() || item.name,
+            args: parseJSONSafe(item.arguments || '{}'),
+            id: item.call_id || item.id,
+          },
+        });
+      }
+    }
+    return parts;
+  },
+
+  mapFinishReason(status: string): FinishReason {
+    switch (status) {
+      case 'completed': return FinishReason.STOP;
+      case 'incomplete': return FinishReason.MAX_TOKENS;
+      case 'failed': return FinishReason.OTHER;
+      default: return FinishReason.OTHER;
+    }
+  }
+};
+
+/**
+ * OpenAI Responses API 单次调用
+ * 使用 POST /responses 端点
+ * 使用指数退避重试策略处理 429 和 5xx 错误
+ */
+export async function callOpenAIResponsesModel(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal
+): Promise<GenerateContentResponse> {
+  const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
+  const apiKey = resolveEnvVar(modelConfig.apiKey);
+  const url = `${baseUrl}/responses`;
+
+  const requestBody: any = {
+    model: modelConfig.modelId,
+    input: OpenAIResponsesConverter.contentsToInput(request.contents),
+    tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
+    store: false, // Don't store responses on the server
+  };
+
+  return retryWithBackoff(
+    async () => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw createHttpError(response.status, `OpenAI Responses API error (${response.status}): ${errorText}`, response);
+      }
+
+      const data = await response.json();
+      const parts = OpenAIResponsesConverter.outputToParts(data.output);
+
+      const cachedTokens = data.usage?.input_tokens_details?.cached_tokens || 0;
+      const promptTokens = data.usage?.input_tokens || 0;
+      const outputTokens = data.usage?.output_tokens || 0;
+
+      const result = {
+        candidates: [{
+          content: { role: MESSAGE_ROLES.MODEL, parts: parts.length ? parts : [{ text: '' }] },
+          finishReason: OpenAIResponsesConverter.mapFinishReason(data.status),
+          index: 0,
+        }],
+        usageMetadata: {
+          promptTokenCount: promptTokens,
+          candidatesTokenCount: outputTokens,
+          totalTokenCount: (promptTokens + outputTokens) || data.usage?.total_tokens || 0,
+          ...(cachedTokens > 0 && { cacheReadInputTokens: cachedTokens }),
+          uncachedInputTokens: promptTokens - cachedTokens,
+        } as any,
+      };
+      addFunctionCallsGetter(result);
+      return result as GenerateContentResponse;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    }
+  );
+}
+
+/**
+ * OpenAI Responses API 流式调用
+ * 使用 POST /responses 端点 + stream: true
+ * 使用指数退避重试策略处理初始连接的 429 和 5xx 错误
+ */
+export async function* callOpenAIResponsesModelStream(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal
+): AsyncGenerator<GenerateContentResponse> {
+  const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
+  const apiKey = resolveEnvVar(modelConfig.apiKey);
+
+  const requestBody: any = {
+    model: modelConfig.modelId,
+    input: OpenAIResponsesConverter.contentsToInput(request.contents),
+    tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
+    stream: true,
+    store: false,
+  };
+
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(`${baseUrl}/responses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw createHttpError(res.status, `OpenAI Responses Stream error (${res.status}): ${errorText}`, res);
+      }
+
+      return res;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    }
+  );
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  // Aggregate function call arguments across deltas
+  const aggregatedFunctionCalls: Map<string, { callId: string, name: string, args: string }> = new Map();
+
+  const flushFunctionCalls = function* (): Generator<GenerateContentResponse> {
+    if (aggregatedFunctionCalls.size === 0) return;
+    const toolParts = Array.from(aggregatedFunctionCalls.values()).map(fc => ({
+      functionCall: {
+        name: fc.name || 'unknown_tool',
+        args: parseJSONSafe(fc.args),
+        id: fc.callId || `call_${Date.now()}`
+      }
+    }));
+    const content = { role: MESSAGE_ROLES.MODEL, parts: toolParts };
+    const resp = {
+      candidates: [{
+        content,
+        finishReason: FinishReason.STOP,
+        index: 0
+      }]
+    };
+    addFunctionCallsGetter(resp);
+    addFunctionCallsGetter(content);
+    yield resp as GenerateContentResponse;
+    aggregatedFunctionCalls.clear();
+  };
+
+  try {
+    let isDone = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        isDone = true;
+      }
+
+      if (!done) {
+        buffer += decoder.decode(value, { stream: true });
+      } else {
+        buffer += decoder.decode(undefined, { stream: false });
+      }
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const dataStr = trimmed.slice(6);
+        if (dataStr === '[DONE]') {
+          yield* flushFunctionCalls();
+          isDone = true;
+          break;
+        }
+
+        try {
+          const event = JSON.parse(dataStr);
+
+          // response.output_text.delta - text content streaming
+          if (event.type === 'response.output_text.delta') {
+            const text = event.delta || '';
+            if (text) {
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ text }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as GenerateContentResponse;
+            }
+          }
+
+          // response.function_call_arguments.delta - function call argument streaming
+          if (event.type === 'response.function_call_arguments.delta') {
+            const itemId = event.item_id || 'default';
+            let fc = aggregatedFunctionCalls.get(itemId);
+            if (!fc) {
+              fc = { callId: '', name: '', args: '' };
+              aggregatedFunctionCalls.set(itemId, fc);
+            }
+            if (event.delta) fc.args += event.delta;
+          }
+
+          // response.output_item.added - track new function call items
+          if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') {
+            const itemId = event.item.id || 'default';
+            aggregatedFunctionCalls.set(itemId, {
+              callId: event.item.call_id || event.item.id || `call_${Date.now()}`,
+              name: event.item.name?.trim() || '',
+              args: ''
+            });
+          }
+
+          // response.function_call_arguments.done - function call complete
+          if (event.type === 'response.function_call_arguments.done') {
+            const itemId = event.item_id || 'default';
+            const fc = aggregatedFunctionCalls.get(itemId);
+            if (fc) {
+              // Use the final arguments if provided
+              if (event.arguments) {
+                fc.args = event.arguments;
+              }
+              // Yield completed function call
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: fc.name, args: parseJSONSafe(fc.args), id: fc.callId } }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as GenerateContentResponse;
+              aggregatedFunctionCalls.delete(itemId);
+            }
+          }
+
+          // response.completed - final event with usage
+          if (event.type === 'response.completed' && event.response) {
+            const usage = event.response.usage;
+            if (usage) {
+              const cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
+              const promptTokens = usage.input_tokens || 0;
+
+              yield {
+                candidates: [],
+                usageMetadata: {
+                  promptTokenCount: promptTokens,
+                  candidatesTokenCount: usage.output_tokens || 0,
+                  totalTokenCount: (promptTokens + (usage.output_tokens || 0)) || usage.total_tokens || 0,
+                  ...(cachedTokens > 0 && { cacheReadInputTokens: cachedTokens }),
+                  uncachedInputTokens: promptTokens - cachedTokens,
+                }
+              } as any;
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (isDone) {
+        yield* flushFunctionCalls();
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
  * 检查是否应该启用 Extended Thinking
  * 对于 Anthropic 协议，默认启用 thinking（让服务端决定是否支持）
  * 不支持的模型会忽略此参数，因此统一启用更简单通用
@@ -1247,6 +1712,7 @@ export async function* callCustomModelStream(
 ): AsyncGenerator<GenerateContentResponse> {
   console.log(`[CustomModel] Stream call: ${modelConfig.displayName} (${modelConfig.provider})`);
   if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') yield* callAnthropicModelStream(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider for streaming: ${modelConfig.provider}`);
 }
@@ -1258,6 +1724,7 @@ export async function callCustomModel(
 ): Promise<GenerateContentResponse> {
   console.log(`[CustomModel] Unary call: ${modelConfig.displayName} (${modelConfig.provider})`);
   if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') return callAnthropicModel(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider: ${modelConfig.provider}`);
 }

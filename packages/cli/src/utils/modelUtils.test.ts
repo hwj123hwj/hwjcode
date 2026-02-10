@@ -14,6 +14,10 @@ describe('modelUtils', () => {
       expect(formatProviderName('openai')).toBe('OpenAI');
     });
 
+    it('should format "openai-responses" as "OpenAI Responses"', () => {
+      expect(formatProviderName('openai-responses')).toBe('OpenAI Responses');
+    });
+
     it('should format "anthropic" as "Anthropic"', () => {
       expect(formatProviderName('anthropic')).toBe('Anthropic');
     });
@@ -38,6 +42,17 @@ describe('modelUtils', () => {
         modelId: 'gpt-4o',
       };
       expect(formatCustomModelDisplayName(model)).toBe('[OpenAI] GPT-4o');
+    });
+
+    it('should format OpenAI Responses custom model display name', () => {
+      const model: CustomModelConfig = {
+        displayName: 'GPT-4o Responses',
+        provider: 'openai-responses',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'test-key',
+        modelId: 'gpt-4o',
+      };
+      expect(formatCustomModelDisplayName(model)).toBe('[OpenAI Responses] GPT-4o Responses');
     });
 
     it('should format Anthropic custom model display name', () => {

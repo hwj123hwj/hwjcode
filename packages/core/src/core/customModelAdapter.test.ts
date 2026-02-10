@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, parseJSONSafeExport } from './customModelAdapter.js';
+import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, callOpenAIResponsesModel, callOpenAIResponsesModelStream, parseJSONSafeExport } from './customModelAdapter.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 
 // 为了测试内部函数，需要导出它（见下方的导出添加）
@@ -1327,6 +1327,517 @@ describe('customModelAdapter - Streaming Tool Calls', () => {
         expect(functionCall?.name).toBe('read_file'); // 不是 " read_file"
         expect(functionCall?.args).toEqual({ absolute_path: '/file.txt' });
       }
+    });
+  });
+});
+
+describe('customModelAdapter - OpenAI Responses API', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  describe('Non-streaming', () => {
+    it('should call /responses endpoint and parse output items', async () => {
+      let capturedUrl: string = '';
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          id: 'resp_123',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                { type: 'output_text', text: 'Hello from Responses API!' }
+              ]
+            }
+          ],
+          usage: { input_tokens: 50, output_tokens: 10, total_tokens: 60 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (url, options) => {
+        capturedUrl = url;
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello!' }],
+          },
+        ],
+      };
+
+      const result = await callOpenAIResponsesModel(modelConfig as any, request);
+
+      // Verify URL uses /responses endpoint
+      expect(capturedUrl).toBe('https://api.openai.com/v1/responses');
+
+      // Verify request body uses 'input' instead of 'messages'
+      expect(capturedBody.input).toBeDefined();
+      expect(capturedBody.messages).toBeUndefined();
+      expect(capturedBody.model).toBe('gpt-4o');
+      expect(capturedBody.store).toBe(false);
+
+      // Verify input format: simple text message
+      expect(capturedBody.input).toEqual([
+        { role: 'user', content: 'Hello!' }
+      ]);
+
+      // Verify response parsing
+      const parts = result.candidates?.[0]?.content?.parts;
+      expect(parts).toHaveLength(1);
+      expect(parts?.[0]).toEqual({ text: 'Hello from Responses API!' });
+
+      // Verify usage
+      expect(result.usageMetadata?.promptTokenCount).toBe(50);
+      expect(result.usageMetadata?.candidatesTokenCount).toBe(10);
+    });
+
+    it('should format multi-turn conversation with function calls as flat items', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          id: 'resp_multi',
+          status: 'completed',
+          output: [
+            { type: 'message', content: [{ type: 'output_text', text: 'The result is 42.' }] }
+          ],
+          usage: { input_tokens: 100, output_tokens: 20 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          // Turn 1: user message
+          { role: MESSAGE_ROLES.USER, parts: [{ text: 'Search for test' }] },
+          // Turn 2: model calls a function
+          { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'search', args: { query: 'test' }, id: 'call_abc' } }] },
+          // Turn 3: function response
+          { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'search', response: { results: ['a', 'b'] }, id: 'call_abc' } }] },
+          // Turn 4: model calls another function with preceding text
+          { role: MESSAGE_ROLES.MODEL, parts: [
+            { text: 'Let me read that file.' },
+            { functionCall: { name: 'read_file', args: { path: '/a.txt' }, id: 'call_def' } },
+          ]},
+          // Turn 5: function response
+          { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'read_file', response: 'file content', id: 'call_def' } }] },
+        ],
+      };
+
+      await callOpenAIResponsesModel(modelConfig as any, request);
+
+      // Verify input is a flat array of heterogeneous items:
+      // user msg(1) + function_call(1) + function_call_output(1) + assistant text(1) + function_call(1) + function_call_output(1) = 6
+      const input = capturedBody.input;
+      expect(input).toHaveLength(6);
+
+      // Item 0: user text message
+      expect(input[0]).toEqual({ role: 'user', content: 'Search for test' });
+
+      // Item 1: function_call (standalone, not wrapped in message)
+      expect(input[1].type).toBe('function_call');
+      expect(input[1].name).toBe('search');
+      expect(input[1].call_id).toBe('call_abc');
+      expect(JSON.parse(input[1].arguments)).toEqual({ query: 'test' });
+      // No 'role' field on function_call items
+      expect(input[1].role).toBeUndefined();
+
+      // Item 2: function_call_output (standalone)
+      expect(input[2].type).toBe('function_call_output');
+      expect(input[2].call_id).toBe('call_abc');
+      expect(input[2].role).toBeUndefined();
+
+      // Item 3: assistant text before the next function call
+      expect(input[3]).toEqual({ role: 'assistant', content: 'Let me read that file.' });
+
+      // Item 4: second function_call
+      expect(input[4].type).toBe('function_call');
+      expect(input[4].name).toBe('read_file');
+      expect(input[4].call_id).toBe('call_def');
+
+      // Item 5: second function_call_output
+      expect(input[5].type).toBe('function_call_output');
+      expect(input[5].call_id).toBe('call_def');
+    });
+
+    it('should convert uppercase schema types to lowercase in tool parameters', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          id: 'resp_789',
+          status: 'completed',
+          output: [
+            { type: 'message', content: [{ type: 'output_text', text: 'OK' }] }
+          ],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          { role: MESSAGE_ROLES.USER, parts: [{ text: 'list files' }] },
+        ],
+        config: {
+          tools: [{
+            functionDeclarations: [{
+              name: 'list_directory',
+              description: 'List directory contents',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  path: { type: 'STRING', description: 'Directory path' },
+                  recursive: { type: 'BOOLEAN', description: 'Recurse into subdirs' },
+                  ignore: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Patterns to ignore' },
+                  file_filtering_options: {
+                    type: 'OBJECT',
+                    properties: {
+                      respect_git_ignore: { type: 'BOOLEAN', description: 'Respect .gitignore' },
+                    },
+                  },
+                },
+                required: ['path'],
+              },
+            }],
+          }],
+        },
+      };
+
+      await callOpenAIResponsesModel(modelConfig as any, request);
+
+      // Verify all types were lowercased
+      const tool = capturedBody.tools[0];
+      expect(tool.parameters.type).toBe('object');
+      expect(tool.parameters.properties.path.type).toBe('string');
+      expect(tool.parameters.properties.recursive.type).toBe('boolean');
+      expect(tool.parameters.properties.ignore.type).toBe('array');
+      expect(tool.parameters.properties.ignore.items.type).toBe('string');
+      expect(tool.parameters.properties.file_filtering_options.type).toBe('object');
+      expect(tool.parameters.properties.file_filtering_options.properties.respect_git_ignore.type).toBe('boolean');
+    });
+
+    it('should coerce string-typed numeric schema keywords to numbers', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          id: 'resp_schema',
+          status: 'completed',
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          { role: MESSAGE_ROLES.USER, parts: [{ text: 'read files' }] },
+        ],
+        config: {
+          tools: [{
+            functionDeclarations: [{
+              name: 'read_many_files',
+              description: 'Read multiple files',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  paths: {
+                    type: 'ARRAY',
+                    items: { type: 'STRING', minLength: '1' },
+                    minItems: '1',
+                    description: 'File paths',
+                  },
+                  limit: {
+                    type: 'NUMBER',
+                    minimum: '0',
+                    maximum: '100',
+                    description: 'Max results',
+                  },
+                },
+                required: ['paths'],
+              },
+            }],
+          }],
+        },
+      };
+
+      await callOpenAIResponsesModel(modelConfig as any, request);
+
+      const tool = capturedBody.tools[0];
+      // Verify string numbers were coerced to actual numbers
+      expect(tool.parameters.properties.paths.items.minLength).toBe(1);
+      expect(typeof tool.parameters.properties.paths.items.minLength).toBe('number');
+      expect(tool.parameters.properties.paths.minItems).toBe(1);
+      expect(typeof tool.parameters.properties.paths.minItems).toBe('number');
+      expect(tool.parameters.properties.limit.minimum).toBe(0);
+      expect(typeof tool.parameters.properties.limit.minimum).toBe('number');
+      expect(tool.parameters.properties.limit.maximum).toBe(100);
+      expect(typeof tool.parameters.properties.limit.maximum).toBe('number');
+      // Verify types are still lowercased
+      expect(tool.parameters.properties.paths.type).toBe('array');
+      expect(tool.parameters.properties.paths.items.type).toBe('string');
+      expect(tool.parameters.properties.limit.type).toBe('number');
+    });
+
+    it('should parse function_call output items', async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          id: 'resp_456',
+          status: 'completed',
+          output: [
+            {
+              type: 'function_call',
+              id: 'fc_1',
+              call_id: 'call_abc',
+              name: 'search',
+              arguments: '{"query":"test"}',
+            }
+          ],
+          usage: { input_tokens: 30, output_tokens: 15 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'search for test' }],
+          },
+        ],
+        config: {
+          tools: [{
+            name: 'search',
+            description: 'Search',
+            parameters: { type: 'object', properties: { query: { type: 'string' } } },
+          }],
+        },
+      };
+
+      const result = await callOpenAIResponsesModel(modelConfig as any, request);
+
+      const parts = result.candidates?.[0]?.content?.parts;
+      expect(parts).toHaveLength(1);
+      expect(parts?.[0]?.functionCall).toBeDefined();
+      expect(parts?.[0]?.functionCall?.name).toBe('search');
+      expect(parts?.[0]?.functionCall?.args).toEqual({ query: 'test' });
+      expect(parts?.[0]?.functionCall?.id).toBe('call_abc');
+
+      // Verify functionCalls getter
+      expect(result.functionCalls).toBeDefined();
+      expect(result.functionCalls?.[0]?.name).toBe('search');
+    });
+  });
+
+  describe('Streaming', () => {
+    it('should stream text deltas from Responses API', async () => {
+      const mockResponse = {
+        ok: true,
+        body: {
+          getReader: () => {
+            let index = 0;
+            const chunks = [
+              'data: {"type":"response.output_text.delta","delta":"Hello "}\n',
+              'data: {"type":"response.output_text.delta","delta":"World!"}\n',
+              'data: {"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5}}}\n',
+              'data: [DONE]\n',
+            ];
+
+            return {
+              read: vi.fn(async () => {
+                if (index < chunks.length) {
+                  const value = new TextEncoder().encode(chunks[index]);
+                  index++;
+                  return { done: false, value };
+                }
+                return { done: true, value: undefined };
+              }),
+              releaseLock: vi.fn(),
+            };
+          },
+        },
+      };
+
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello' }],
+          },
+        ],
+      };
+
+      const responses: any[] = [];
+      for await (const response of callOpenAIResponsesModelStream(modelConfig as any, request)) {
+        responses.push(response);
+      }
+
+      // Should receive text chunks
+      const textResponses = responses.filter(r => {
+        const parts = r.candidates?.[0]?.content?.parts;
+        return parts && parts.some((p: any) => p.text);
+      });
+      expect(textResponses).toHaveLength(2);
+      expect(textResponses[0].candidates[0].content.parts[0].text).toBe('Hello ');
+      expect(textResponses[1].candidates[0].content.parts[0].text).toBe('World!');
+
+      // Should receive usage
+      const usageResponse = responses.find(r => r.usageMetadata);
+      expect(usageResponse).toBeDefined();
+      expect(usageResponse.usageMetadata.promptTokenCount).toBe(10);
+      expect(usageResponse.usageMetadata.candidatesTokenCount).toBe(5);
+    });
+
+    it('should stream function calls from Responses API', async () => {
+      const mockResponse = {
+        ok: true,
+        body: {
+          getReader: () => {
+            let index = 0;
+            const chunks = [
+              'data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_123","name":"search"}}\n',
+              'data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\\"qu"}\n',
+              'data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"ery\\":\\"test\\"}"}\n',
+              'data: {"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\\"query\\":\\"test\\"}"}\n',
+              'data: {"type":"response.completed","response":{"usage":{"input_tokens":20,"output_tokens":10}}}\n',
+              'data: [DONE]\n',
+            ];
+
+            return {
+              read: vi.fn(async () => {
+                if (index < chunks.length) {
+                  const value = new TextEncoder().encode(chunks[index]);
+                  index++;
+                  return { done: false, value };
+                }
+                return { done: true, value: undefined };
+              }),
+              releaseLock: vi.fn(),
+            };
+          },
+        },
+      };
+
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-4o',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        displayName: 'GPT-4o Responses',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'search for test' }],
+          },
+        ],
+        config: {
+          tools: [{
+            name: 'search',
+            description: 'Search',
+            parameters: { type: 'object', properties: { query: { type: 'string' } } },
+          }],
+        },
+      };
+
+      const responses: any[] = [];
+      for await (const response of callOpenAIResponsesModelStream(modelConfig as any, request)) {
+        responses.push(response);
+      }
+
+      // Should receive function call
+      const toolCallResponse = responses.find(r => {
+        const parts = r.candidates?.[0]?.content?.parts;
+        return parts && parts.some((p: any) => p.functionCall);
+      });
+
+      expect(toolCallResponse).toBeDefined();
+      if (toolCallResponse) {
+        const functionCall = toolCallResponse.candidates[0].content.parts.find((p: any) => p.functionCall)?.functionCall;
+        expect(functionCall?.name).toBe('search');
+        expect(functionCall?.args).toEqual({ query: 'test' });
+        expect(functionCall?.id).toBe('call_123');
+      }
+
+      // Verify functionCalls getter
+      expect(toolCallResponse?.functionCalls).toBeDefined();
+      expect(toolCallResponse?.functionCalls?.[0]?.name).toBe('search');
     });
   });
 });

@@ -193,7 +193,8 @@ export class GeminiClient {
     if (!customConfig) {
       return modelName;
     }
-    const providerName = customConfig.provider === 'openai' ? 'OpenAI' : 'Anthropic';
+    const providerNameMap: Record<string, string> = { 'openai': 'OpenAI', 'openai-responses': 'OpenAI Responses', 'anthropic': 'Anthropic' };
+    const providerName = providerNameMap[customConfig.provider] || customConfig.provider;
     return `${customConfig.modelId} (via ${customConfig.baseUrl}, ${providerName}-compatible)`;
   }
 
