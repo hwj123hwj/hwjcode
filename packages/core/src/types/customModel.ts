@@ -7,9 +7,10 @@
 /**
  * 自定义模型提供商类型
  * - openai: OpenAI 兼容格式（OpenAI API、Azure OpenAI、Groq、Together AI 等）
+ * - openai-responses: OpenAI Responses API 格式（使用 /responses 端点）
  * - anthropic: Anthropic Claude API 格式
  */
-export type CustomModelProvider = 'openai' | 'anthropic';
+export type CustomModelProvider = 'openai' | 'openai-responses' | 'anthropic';
 
 /**
  * 自定义模型配置接口
@@ -104,6 +105,9 @@ export function extractProvider(modelId: string): CustomModelProvider | null {
     return null;
   }
   const withoutPrefix = modelId.replace('custom:', '');
+  if (withoutPrefix.startsWith('openai-responses:')) {
+    return 'openai-responses';
+  }
   if (withoutPrefix.startsWith('openai:')) {
     return 'openai';
   }
@@ -123,8 +127,8 @@ export function validateCustomModelConfig(config: CustomModelConfig): string[] {
     errors.push('displayName is required and must be a string');
   }
 
-  if (!['openai', 'anthropic'].includes(config.provider)) {
-    errors.push('provider must be one of: openai, anthropic');
+  if (!['openai', 'openai-responses', 'anthropic'].includes(config.provider)) {
+    errors.push('provider must be one of: openai, openai-responses, anthropic');
   }
 
   if (!config.baseUrl || typeof config.baseUrl !== 'string') {

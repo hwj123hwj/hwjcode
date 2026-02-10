@@ -35,6 +35,11 @@ const PROVIDER_OPTIONS: Array<{ value: CustomModelProvider; label: string; descr
     description: 'OpenAI API, Azure OpenAI, LM Studio, Ollama, Groq, Together AI, etc.'
   },
   {
+    value: 'openai-responses',
+    label: 'OpenAI (Responses API)',
+    description: 'OpenAI Responses API (POST /responses), recommended for new projects'
+  },
+  {
     value: 'anthropic',
     label: 'Anthropic Claude',
     description: 'Claude API (claude.ai)'
@@ -217,12 +222,14 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
         return 'Example: My GPT-4 Turbo';
       case WizardStep.BASE_URL:
         if (config.provider === 'openai') return 'Example: https://api.openai.com/v1';
+        if (config.provider === 'openai-responses') return 'Example: https://api.openai.com/v1';
         if (config.provider === 'anthropic') return 'Example: https://api.anthropic.com';
         return 'Example: http://localhost:1234/v1';
       case WizardStep.API_KEY:
         return 'Example: ${OPENAI_API_KEY} or sk-...';
       case WizardStep.MODEL_ID:
         if (config.provider === 'openai') return 'Example: gpt-4-turbo';
+        if (config.provider === 'openai-responses') return 'Example: gpt-4o, o3';
         if (config.provider === 'anthropic') return 'Example: claude-sonnet-4-5';
         return 'Example: llama-3-70b';
       case WizardStep.MAX_TOKENS:
