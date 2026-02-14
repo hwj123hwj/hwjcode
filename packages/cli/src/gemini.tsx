@@ -926,7 +926,7 @@ export async function main() {
     argv,
   );
 
-  await runNonInteractive(nonInteractiveConfig, input, prompt_id, argv.outputFormat);
+  await runNonInteractive(nonInteractiveConfig, input, prompt_id, argv.outputFormat, settings);
 
   // 在非交互模式结束后，运行所有cleanup函数（包括空会话清理）
   await runExitCleanup();

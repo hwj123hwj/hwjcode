@@ -47,6 +47,9 @@ export interface CommandContext {
     git: GitService | undefined;
     logger: Logger;
   };
+  // Runtime mode flags
+  /** 🆕 Indicates whether the command is running in non-interactive mode (e.g., stream-json output) */
+  isNonInteractive?: boolean;
   // UI state and history management
   ui: {
     /** Adds a new item to the history display. */
