@@ -41,6 +41,8 @@ import {
   outputError,
   outputResult,
 } from './utils/streamJsonOutput.js';
+import { handleNonInteractiveSlashCommand } from './nonInteractiveSlashCommandHandler.js';
+import { LoadedSettings } from './config/settings.js';
 
 function getResponseText(response: GenerateContentResponse): string | null {
   if (response.candidates && response.candidates.length > 0) {
@@ -90,6 +92,7 @@ export async function runNonInteractive(
   input: string,
   prompt_id: string,
   outputFormat: 'stream-json' | 'default' = 'default',
+  settings?: LoadedSettings,
 ): Promise<void> {
   await config.initialize();
 
@@ -110,7 +113,59 @@ export async function runNonInteractive(
 
   const chat = await geminiClient.getChat();
   const abortController = new AbortController();
-  let currentMessages: Content[] = [{ role: MESSAGE_ROLES.USER, parts: [{ text: input }] }];
+
+  // 🆕 处理斜杠命令预处理
+  let processedInput = input;
+  let initialFunctionCall: { name: string; args: Record<string, unknown> } | null = null;
+
+  if (settings) {
+    const slashCommandResult = await handleNonInteractiveSlashCommand(input, config, settings);
+
+    if (slashCommandResult.type === 'tool_call') {
+      // 斜杠命令转换为工具调用
+      initialFunctionCall = {
+        name: slashCommandResult.toolName,
+        args: slashCommandResult.toolArgs,
+      };
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+      }
+    } else if (slashCommandResult.type === 'submit_prompt') {
+      // 斜杠命令转换为新的prompt
+      processedInput = slashCommandResult.content;
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+        // Note: Converted prompt will be sent as the actual user message
+      }
+    } else if (slashCommandResult.type === 'complete') {
+      // 🆕 命令已完成，直接输出结果并退出
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+        outputMessage('assistant', slashCommandResult.message);
+        outputResult(slashCommandResult.success ? 'success' : 'error', {
+          total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: 0,
+        });
+      } else {
+        console.log(slashCommandResult.message);
+      }
+      process.exit(slashCommandResult.success ? 0 : 1);
+    } else if (slashCommandResult.type === 'unsupported') {
+      // 不支持的斜杠命令
+      if (outputFormat === 'stream-json') {
+        outputError(slashCommandResult.reason);
+        outputResult('error');
+      } else {
+        console.error(`Error: ${slashCommandResult.reason}`);
+      }
+      process.exit(1);
+    }
+    // type === 'not_slash_command' 时，继续正常处理
+  }
+
+  let currentMessages: Content[] = [{ role: MESSAGE_ROLES.USER, parts: [{ text: processedInput }] }];
   let turnCount = 0;
   const modelName = config.getModel();
   const modelCapabilities = getModelCapabilities(modelName);
@@ -118,10 +173,86 @@ export async function runNonInteractive(
   // Output init event if in stream-json mode
   if (outputFormat === 'stream-json') {
     outputInit(config.getSessionId(), modelName);
-    outputMessage('user', input);
+    if (!initialFunctionCall) {
+      outputMessage('user', processedInput);
+    }
   }
 
   try {
+    // 🆕 如果有初始工具调用（来自斜杠命令），直接执行工具，跳过第一轮LLM调用
+    if (initialFunctionCall) {
+      const callId = `${initialFunctionCall.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const requestInfo: ToolCallRequestInfo = {
+        callId,
+        name: initialFunctionCall.name,
+        args: initialFunctionCall.args,
+        isClientInitiated: true, // 标记为客户端发起
+        prompt_id,
+      };
+
+      if (outputFormat === 'stream-json') {
+        outputToolUse(initialFunctionCall.name, callId, initialFunctionCall.args);
+      }
+
+      try {
+        const toolResponse = await executeToolCall(
+          config,
+          requestInfo,
+          toolRegistry,
+          abortController.signal,
+        );
+
+        if (toolResponse.error) {
+          const resultDisplay = toolResponse.resultDisplay
+            ? typeof toolResponse.resultDisplay === 'string'
+              ? toolResponse.resultDisplay
+              : JSON.stringify(toolResponse.resultDisplay)
+            : toolResponse.error.message;
+
+          if (outputFormat === 'stream-json') {
+            outputToolResult(callId, 'error', resultDisplay);
+            outputError(resultDisplay);
+            outputResult('error');
+          } else {
+            console.error(`Error executing tool ${initialFunctionCall.name}: ${resultDisplay}`);
+          }
+          process.exit(1);
+        }
+
+        // 工具执行成功，输出结果
+        if (toolResponse.resultDisplay) {
+          const resultText = typeof toolResponse.resultDisplay === 'string'
+            ? toolResponse.resultDisplay
+            : JSON.stringify(toolResponse.resultDisplay);
+
+          if (outputFormat === 'stream-json') {
+            outputToolResult(callId, 'success', resultText);
+            outputResult('success', {
+              total_tokens: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              duration_ms: 0,
+            });
+          } else {
+            console.log(resultText);
+          }
+        }
+
+        // 斜杠命令工具调用完成，直接返回
+        return;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (outputFormat === 'stream-json') {
+          outputToolResult(callId, 'error', errorMsg);
+          outputError(errorMsg);
+          outputResult('error');
+        } else {
+          console.error(`Exception executing tool ${initialFunctionCall.name}:`, error);
+        }
+        process.exit(1);
+      }
+    }
+
     while (true) {
       turnCount++;
       if (
