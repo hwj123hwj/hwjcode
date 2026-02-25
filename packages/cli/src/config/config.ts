@@ -80,6 +80,7 @@ export interface CliArgs {
   cloudServer: string | undefined;
   testAudio: boolean | undefined;
   workdir: string | undefined;
+  login: string | undefined;
 }
 
 export async function parseArguments(extensions: Extension[] = []): Promise<CliArgs> {
@@ -260,6 +261,10 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('workdir', {
       type: 'string',
       description: 'Specify the working directory (supports both Windows and Unix paths)',
+    })
+    .option('login', {
+      type: 'string',
+      description: 'Non-interactive login using an API Key (e.g. dvcode --login sk_live_xxx). Exchanges the key for a JWT and exits.',
     })
     .option('output-format', {
       type: 'string',
