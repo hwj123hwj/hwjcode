@@ -345,6 +345,61 @@ export async function main() {
 
   // Enable silent mode early for -p flag to suppress startup logs
 
+  // Handle --login <api-key> flag: non-interactive login for Bots
+  if (argv.login) {
+    const apiKey = argv.login.trim();
+    const serverUrl = process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai';
+    console.log('Logging in with API Key...');
+    try {
+      const response = await fetch(`${serverUrl}/auth/jwt/apikey-login`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'DeepCode-CLI/1.0.0'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Login failed (HTTP ${response.status}): ${errorText}`);
+        process.exit(1);
+      }
+
+      const data = await response.json() as any;
+      if (!data.success || !data.accessToken) {
+        console.error(`Login failed: ${data.message || data.error || 'Unknown error'}`);
+        process.exit(1);
+      }
+
+      const { ProxyAuthManager } = await import('deepv-code-core');
+      const proxyAuthManager = ProxyAuthManager.getInstance();
+
+      proxyAuthManager.setJwtTokenData({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresIn: data.expiresIn || 900
+      });
+
+      if (data.user) {
+        proxyAuthManager.setUserInfo({
+          openId: data.user.openId || data.user.userId,
+          userId: data.user.userId,
+          name: data.user.name,
+          enName: data.user.name,
+          email: data.user.email,
+          avatar: data.user.avatar
+        });
+        console.log(`Login successful: ${data.user.name || data.user.email || data.user.openId}`);
+      } else {
+        console.log('Login successful.');
+      }
+      process.exit(0);
+    } catch (error) {
+      console.error(`Login error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  }
 
   // Handle --update flag
   if (argv.update) {
