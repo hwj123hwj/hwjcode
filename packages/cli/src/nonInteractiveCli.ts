@@ -40,6 +40,8 @@ import {
   outputFunctionCallFixed,
   outputError,
   outputResult,
+  outputFinalJson,
+  MessageBuffer,
 } from './utils/streamJsonOutput.js';
 import { handleNonInteractiveSlashCommand } from './nonInteractiveSlashCommandHandler.js';
 import { LoadedSettings } from './config/settings.js';
@@ -91,7 +93,7 @@ export async function runNonInteractive(
   config: Config,
   input: string,
   prompt_id: string,
-  outputFormat: 'stream-json' | 'default' = 'default',
+  outputFormat: 'stream-json' | 'json' | 'default' = 'default',
   settings?: LoadedSettings,
 ): Promise<void> {
   await config.initialize();
@@ -148,6 +150,12 @@ export async function runNonInteractive(
           output_tokens: 0,
           duration_ms: 0,
         });
+      } else if (outputFormat === 'json') {
+        outputFinalJson({
+          model: config.getModel(),
+          content: slashCommandResult.message,
+          status: slashCommandResult.success ? 'success' : 'error',
+        });
       } else {
         console.log(slashCommandResult.message);
       }
@@ -157,6 +165,13 @@ export async function runNonInteractive(
       if (outputFormat === 'stream-json') {
         outputError(slashCommandResult.reason);
         outputResult('error');
+      } else if (outputFormat === 'json') {
+        outputFinalJson({
+          model: config.getModel(),
+          content: '',
+          status: 'error',
+          error: slashCommandResult.reason,
+        });
       } else {
         console.error(`Error: ${slashCommandResult.reason}`);
       }
@@ -169,6 +184,13 @@ export async function runNonInteractive(
   let turnCount = 0;
   const modelName = config.getModel();
   const modelCapabilities = getModelCapabilities(modelName);
+
+  // Buffer for coalescing assistant message deltas in stream-json mode
+  const messageBuffer = outputFormat === 'stream-json' ? new MessageBuffer() : null;
+
+  // Accumulate full response text for json mode (single final JSON output)
+  const isJsonMode = outputFormat === 'json';
+  let jsonAccumulatedText = '';
 
   // Output init event if in stream-json mode
   if (outputFormat === 'stream-json') {
@@ -213,6 +235,13 @@ export async function runNonInteractive(
             outputToolResult(callId, 'error', resultDisplay);
             outputError(resultDisplay);
             outputResult('error');
+          } else if (isJsonMode) {
+            outputFinalJson({
+              model: modelName,
+              content: '',
+              status: 'error',
+              error: resultDisplay,
+            });
           } else {
             console.error(`Error executing tool ${initialFunctionCall.name}: ${resultDisplay}`);
           }
@@ -233,6 +262,12 @@ export async function runNonInteractive(
               output_tokens: 0,
               duration_ms: 0,
             });
+          } else if (isJsonMode) {
+            outputFinalJson({
+              model: modelName,
+              content: resultText,
+              status: 'success',
+            });
           } else {
             console.log(resultText);
           }
@@ -246,6 +281,13 @@ export async function runNonInteractive(
           outputToolResult(callId, 'error', errorMsg);
           outputError(errorMsg);
           outputResult('error');
+        } else if (isJsonMode) {
+          outputFinalJson({
+            model: modelName,
+            content: '',
+            status: 'error',
+            error: errorMsg,
+          });
         } else {
           console.error(`Exception executing tool ${initialFunctionCall.name}:`, error);
         }
@@ -295,8 +337,10 @@ export async function runNonInteractive(
 
         const textPart = getResponseText(resp);
         if (textPart) {
-          if (outputFormat === 'stream-json') {
-            outputMessage('assistant', textPart, true); // delta=true for streaming
+          if (messageBuffer) {
+            messageBuffer.append(textPart);
+          } else if (isJsonMode) {
+            jsonAccumulatedText += textPart;
           } else {
             process.stdout.write(textPart);
           }
@@ -305,6 +349,9 @@ export async function runNonInteractive(
           functionCalls.push(...resp.functionCalls);
         }
       }
+
+      // Flush buffered text before processing tool calls or finishing the turn
+      messageBuffer?.flush();
 
       // Check for streaming completeness issues in small models
       if (modelCapabilities.proneToIncompleteStream && functionCalls.length > 0) {
@@ -336,6 +383,13 @@ export async function runNonInteractive(
             if (stillInvalid && !modelCapabilities.enableMalformedRetry) {
               if (outputFormat === 'stream-json') {
                 outputError('Function calls remain invalid after fixing. Aborting.');
+              } else if (isJsonMode) {
+                outputFinalJson({
+                  model: modelName,
+                  content: jsonAccumulatedText,
+                  status: 'error',
+                  error: 'Function calls remain invalid after fixing. Aborting.',
+                });
               } else {
                 console.error('\n❌ Function calls remain invalid after fixing. Aborting.');
               }
@@ -472,6 +526,13 @@ export async function runNonInteractive(
         if (toolResponseParts.length === 0 && failedToolCount > 0) {
           if (outputFormat === 'stream-json') {
             outputError('All tool calls failed. Exiting.');
+          } else if (isJsonMode) {
+            outputFinalJson({
+              model: modelName,
+              content: jsonAccumulatedText,
+              status: 'error',
+              error: 'All tool calls failed.',
+            });
           } else {
             console.error('\n❌ All tool calls failed. Exiting.');
           }
@@ -480,9 +541,6 @@ export async function runNonInteractive(
 
         currentMessages = [{ role: MESSAGE_ROLES.USER, parts: toolResponseParts }];
       } else {
-        if (outputFormat !== 'stream-json') {
-          process.stdout.write('\n'); // Ensure a final newline
-        }
         if (outputFormat === 'stream-json') {
           outputResult('success', {
             total_tokens: 0, // TODO: track token usage
@@ -490,11 +548,22 @@ export async function runNonInteractive(
             output_tokens: 0,
             duration_ms: 0,
           });
+        } else if (isJsonMode) {
+          outputFinalJson({
+            model: modelName,
+            content: jsonAccumulatedText,
+            status: 'success',
+          });
+        } else {
+          process.stdout.write('\n'); // Ensure a final newline
         }
         return;
       }
     }
   } catch (error) {
+    // Flush any remaining buffered text before reporting the error
+    messageBuffer?.flush();
+
     const errorMsg = parseAndFormatApiError(
       error,
       config.getContentGeneratorConfig()?.authType,
@@ -502,6 +571,13 @@ export async function runNonInteractive(
     if (outputFormat === 'stream-json') {
       outputError(errorMsg);
       outputResult('error');
+    } else if (isJsonMode) {
+      outputFinalJson({
+        model: modelName,
+        content: jsonAccumulatedText,
+        status: 'error',
+        error: errorMsg,
+      });
     } else {
       console.error(errorMsg);
     }
