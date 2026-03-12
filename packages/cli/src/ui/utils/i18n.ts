@@ -1011,9 +1011,9 @@ export const translations = {
     'command.refine.loading.message': 'AI is refining your text, please wait...',
 
     // NanoBanana Command
-    'command.nanobanana.description': 'Generate images using NanoBanana. Usage: /NanoBanana <ratio> <size> <prompt> [@image]',
-    'nanobanana.usage.error': 'Usage: /NanoBanana <ratio> <size> <prompt> [@image]\nRatio: 1:1, 16:9, 9:16, etc.\nSize: 1K or 2K\n@image can appear anywhere in the command\nExample: /NanoBanana 16:9 2K A futuristic city @ref.jpg',
-    'nanobanana.missing.prompt': 'Missing required parameters. Usage: /NanoBanana <ratio> <size> <prompt> [@image]',
+    'command.nanobanana.description': 'Generate images using NanoBanana. Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]',
+    'nanobanana.usage.error': 'Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]\nRatio: 1:1, 16:9, 9:16, etc.\nSize: 1K or 2K\n@image can appear anywhere, up to 5 reference images\nExample: /NanoBanana 16:9 2K A futuristic city @ref.jpg\nMulti-image: /NanoBanana auto 2K Merge these images @a.jpg @b.png',
+    'nanobanana.missing.prompt': 'Missing required parameters. Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]',
     'nanobanana.invalid.size': 'Invalid image size. Use 1K or 2K. Usage: /NanoBanana <ratio> <size> <prompt>',
     'nanobanana.submitting': 'Submitting image generation task...\nPrompt: "{prompt}"\nRatio: {ratio}',
     'nanobanana.submitted': 'Task submitted (ID: {taskId}).\nEstimated Credits: {credits} (Subject to actual deduction)\nWaiting for image generation...',
@@ -2373,9 +2373,9 @@ export const translations = {
     'command.refine.loading.message': 'AI 正在为您优化文本，请稍候...',
 
     // NanoBanana Command
-    'command.nanobanana.description': '使用 NanoBanana 生成图像。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]',
-    'nanobanana.usage.error': '用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]\n比例：1:1、16:9、9:16 等\n尺寸：1K 或 2K\n@参考图可以放在命令中的任意位置\n示例：/NanoBanana 16:9 2K 赛博朋克风格城市 @ref.jpg',
-    'nanobanana.missing.prompt': '缺少必要参数。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]',
+    'command.nanobanana.description': '使用 NanoBanana 生成图像。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]',
+    'nanobanana.usage.error': '用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]\n比例：1:1、16:9、9:16 等\n尺寸：1K 或 2K\n@参考图可以放在命令中的任意位置，最多 5 张\n示例：/NanoBanana 16:9 2K 赛博朋克风格城市 @ref.jpg\n多图：/NanoBanana auto 2K 将这两张图融合 @a.jpg @b.png',
+    'nanobanana.missing.prompt': '缺少必要参数。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]',
     'nanobanana.invalid.size': '无效的图像尺寸。请使用 1K 或 2K。用法：/NanoBanana <比例> <尺寸> <提示词>',
     'nanobanana.submitting': '正在提交图像生成任务...\n提示词："{prompt}"\n比例：{ratio}',
     'nanobanana.submitted': '任务已提交 (ID: {taskId})。\n积分预估：{credits} (以实际完成扣为准)\n正在等待图像生成...',

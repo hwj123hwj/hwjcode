@@ -379,8 +379,9 @@ export type ExtensionToWebViewMessage =
   | { type: 'rules_save_response'; payload: { success: boolean; error?: string } }
   | { type: 'rules_delete_response'; payload: { success: boolean; error?: string } }
   | { type: 'open_rules_management'; payload: {} }
-  // 🎯 NanoBanana 图像生成（支持多轮会话）
+  // 🎯 NanoBanana 图像生成（支持多轮会话 + 多图参考）
   | { type: 'nanobanana_upload_response'; payload: { success: boolean; publicUrl?: string; error?: string } }
+  | { type: 'nanobanana_batch_upload_response'; payload: { success: boolean; publicUrls?: string[]; error?: string } }
   | { type: 'nanobanana_generate_response'; payload: { success: boolean; taskId?: string; estimatedTime?: number; error?: string } }
   | { type: 'nanobanana_status_update'; payload: NanoBananaStatusUpdatePayload }
   // 🎯 PPT 生成 (无状态轮询，任务提交后直接返回编辑页面URL)
