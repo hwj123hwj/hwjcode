@@ -60,7 +60,7 @@ export interface CliArgs {
   telemetry: boolean | undefined;
   checkpointing: boolean | undefined;
   telemetryTarget: string | undefined;
-  outputFormat: 'stream-json' | 'default' | undefined;
+  outputFormat: 'stream-json' | 'json' | 'default' | undefined;
   _: string[]; // positional arguments
   telemetryOtlpEndpoint: string | undefined;
   telemetryLogPrompts: boolean | undefined;
@@ -268,8 +268,8 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     })
     .option('output-format', {
       type: 'string',
-      choices: ['stream-json', 'default'],
-      description: 'Output format for non-interactive mode (stream-json for streaming line-delimited JSON)',
+      choices: ['stream-json', 'json', 'default'],
+      description: 'Output format for non-interactive mode (stream-json for streaming JSONL, json for single JSON result, default for plain text)',
       default: 'default',
     })
     .command(extensionsCommand)
@@ -302,7 +302,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
   const parsedArgs = yargsInstance.argv as any;
 
   // Type-safe conversion for outputFormat
-  if (parsedArgs.outputFormat && !['stream-json', 'default'].includes(parsedArgs.outputFormat)) {
+  if (parsedArgs.outputFormat && !['stream-json', 'json', 'default'].includes(parsedArgs.outputFormat)) {
     parsedArgs.outputFormat = 'default';
   }
 

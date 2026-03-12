@@ -1,10 +1,8 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
- * https://github.com/OrionStarAI/DeepVCode
+ * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-
 
 /**
  * Stream JSON Output Module - Gemini CLI Compatible
@@ -12,6 +10,9 @@
  * Each event is output as a single line of JSON, immediately flushed to stdout.
  *
  * Compatible with Google Gemini CLI JSON output format.
+ *
+ * Message deltas are buffered and flushed at sentence boundaries or on timeout,
+ * reducing JSON line volume for downstream agent consumers.
  */
 
 export type StreamJsonEventType =
@@ -147,4 +148,84 @@ export function outputResult(
     status,
     ...(stats && { stats }),
   });
+}
+
+/**
+ * Output a single JSON object containing the complete response.
+ * Used by --output-format json mode (non-streaming, final-result-only).
+ */
+export function outputFinalJson(result: {
+  model: string;
+  content: string;
+  status: 'success' | 'error';
+  error?: string;
+}): void {
+  const json = JSON.stringify(result);
+  process.stdout.write(json + '\n');
+}
+
+// Sentence-ending punctuation that triggers a flush
+const SENTENCE_BREAK_RE = /[。！？.!?\n]\s*$/;
+
+// Code fence markers that trigger a flush (start or end of code block)
+const CODE_FENCE_RE = /```[^\n]*\n?$/;
+
+/**
+ * Buffers assistant message deltas and flushes them in coarser chunks,
+ * so downstream JSON consumers see sentence-level granularity instead of
+ * per-token granularity.
+ *
+ * Flush triggers:
+ *  1. Sentence-ending punctuation (。！？. ! ? or newline)
+ *  2. Code fence boundaries (```)
+ *  3. Timer-based timeout (default 300ms of silence)
+ *  4. Manual flush() call (before tool calls, at end of turn, etc.)
+ */
+export class MessageBuffer {
+  private buffer: string = '';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly flushIntervalMs: number;
+
+  constructor(flushIntervalMs: number = 300) {
+    this.flushIntervalMs = flushIntervalMs;
+  }
+
+  /**
+   * Append a text chunk to the buffer.
+   * May trigger an automatic flush if a sentence boundary is detected.
+   */
+  append(text: string): void {
+    this.buffer += text;
+    this.resetTimer();
+
+    if (SENTENCE_BREAK_RE.test(this.buffer) || CODE_FENCE_RE.test(this.buffer)) {
+      this.flush();
+    }
+  }
+
+  /**
+   * Force-flush whatever is in the buffer as a single delta message.
+   * Safe to call even if the buffer is empty.
+   */
+  flush(): void {
+    this.clearTimer();
+    if (this.buffer.length > 0) {
+      outputMessage('assistant', this.buffer, true);
+      this.buffer = '';
+    }
+  }
+
+  private resetTimer(): void {
+    this.clearTimer();
+    this.timer = setTimeout(() => {
+      this.flush();
+    }, this.flushIntervalMs);
+  }
+
+  private clearTimer(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
 }
