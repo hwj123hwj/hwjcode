@@ -1044,11 +1044,21 @@ export class MultiSessionCommunicationService {
   // =============================================================================
 
   /**
-   * 发送NanoBanana上传响应
+   * 发送NanoBanana上传响应（单张）
    */
   async sendNanoBananaUploadResponse(data: { success: boolean; publicUrl?: string; error?: string }) {
     await this.sendMessage({
       type: 'nanobanana_upload_response',
+      payload: data
+    });
+  }
+
+  /**
+   * 发送NanoBanana批量上传响应（多张）
+   */
+  async sendNanoBananaBatchUploadResponse(data: { success: boolean; publicUrls?: string[]; error?: string }) {
+    await this.sendMessage({
+      type: 'nanobanana_batch_upload_response',
       payload: data
     });
   }
@@ -1082,21 +1092,28 @@ export class MultiSessionCommunicationService {
   }
 
   /**
-   * 监听NanoBanana上传请求
+   * 监听NanoBanana上传请求（单张）
    */
   onNanoBananaUpload(handler: (data: { filename: string; contentType: string; fileData: string }) => void) {
     return this.addMessageHandler('nanobanana_upload', handler);
   }
 
   /**
-   * 监听NanoBanana生成请求（支持多轮会话）
+   * 监听NanoBanana批量上传请求（多张）
+   */
+  onNanoBananaBatchUpload(handler: (data: { files: Array<{ filename: string; contentType: string; fileData: string }> }) => void) {
+    return this.addMessageHandler('nanobanana_batch_upload', handler);
+  }
+
+  /**
+   * 监听NanoBanana生成请求（支持多轮会话 + 多图参考）
    */
   onNanoBananaGenerate(handler: (data: {
     prompt: string;
     aspectRatio: string;
     imageSize: string;
     referenceImageUrl?: string;
-    // 🆕 多轮会话上下文
+    referenceImageUrls?: string[];
     conversationContext?: {
       previousGeneratedImageUrl: string;
       history: Array<{

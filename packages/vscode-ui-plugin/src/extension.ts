@@ -3154,7 +3154,46 @@ function setupMultiSessionHandlers() {
     }
   });
 
-  // 🎯 处理NanoBanana生成请求（支持多轮会话）
+  // 🎯 处理NanoBanana批量图片上传请求
+  communicationService.onNanoBananaBatchUpload(async (payload) => {
+    try {
+      logger.info('Received nanobanana_batch_upload request', { fileCount: payload.files.length });
+
+      const { ImageGeneratorAdapter } = await import('deepv-code-core');
+      const imageGenerator = ImageGeneratorAdapter.getInstance();
+
+      // 1. 批量获取上传 URL
+      const uploadResult = await imageGenerator.getUploadUrls(
+        payload.files.map(f => ({ filename: f.filename, content_type: f.contentType }))
+      );
+
+      // 2. 并行上传所有图片到 GCS
+      await Promise.all(
+        uploadResult.files.map((urlInfo, idx) => {
+          const base64Data = payload.files[idx].fileData.split(',')[1];
+          const fileBuffer = Buffer.from(base64Data, 'base64');
+          return imageGenerator.uploadImage(urlInfo.upload_url, fileBuffer, payload.files[idx].contentType);
+        })
+      );
+
+      const publicUrls = uploadResult.files.map(f => f.public_url);
+
+      await communicationService.sendNanoBananaBatchUploadResponse({
+        success: true,
+        publicUrls
+      });
+
+      logger.info('NanoBanana batch upload completed', { count: publicUrls.length });
+    } catch (error) {
+      logger.error('Failed to batch upload NanoBanana images', error instanceof Error ? error : undefined);
+      await communicationService.sendNanoBananaBatchUploadResponse({
+        success: false,
+        error: error instanceof Error ? error.message : 'Batch upload failed'
+      });
+    }
+  });
+
+  // 🎯 处理NanoBanana生成请求（支持多轮会话 + 多图参考）
   communicationService.onNanoBananaGenerate(async (payload) => {
     try {
       // 🆕 判断是否为多轮会话
@@ -3165,6 +3204,7 @@ function setupMultiSessionHandlers() {
         aspectRatio: payload.aspectRatio,
         imageSize: payload.imageSize,
         hasReferenceImage: !!payload.referenceImageUrl,
+        hasReferenceImages: !!payload.referenceImageUrls?.length,
         hasConversationContext: !!hasConversationContext,
         historyLength: payload.conversationContext?.history?.length || 0
       });
@@ -3173,7 +3213,7 @@ function setupMultiSessionHandlers() {
       const { ImageGeneratorAdapter } = await import('deepv-code-core');
       const imageGenerator = ImageGeneratorAdapter.getInstance();
 
-      // 🆕 确定参考图片 URL
+      // 确定参考图片 URL
       // 优先级：1. 多轮会话中的上一轮生成图片 2. 用户手动上传的参考图
       let referenceImageUrl = payload.referenceImageUrl;
       if (hasConversationContext) {
@@ -3183,12 +3223,16 @@ function setupMultiSessionHandlers() {
         });
       }
 
+      // 多图参考 URL（来自批量上传或多选）
+      const referenceImageUrls = payload.referenceImageUrls;
+
       // 提交生成任务
       const task = await imageGenerator.submitImageGenerationTask(
         payload.prompt,
         payload.aspectRatio,
         referenceImageUrl,
-        payload.imageSize
+        payload.imageSize,
+        referenceImageUrls
       );
 
       // 发送成功响应
