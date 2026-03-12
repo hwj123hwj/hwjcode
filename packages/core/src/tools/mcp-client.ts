@@ -44,6 +44,7 @@ import { MCPOAuthProvider } from '../mcp/oauth-provider.js';
 import { OAuthUtils } from '../mcp/oauth-utils.js';
 import { MCPOAuthTokenStorage } from '../mcp/oauth-token-storage.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { isSilentMode } from '../utils/logging.js';
 
 export const MCP_DEFAULT_TIMEOUT_MSEC = 10 * 60 * 1000; // default to 10 minutes
 export const MCP_CONNECT_TIMEOUT_MSEC = 30 * 1000; // 30 seconds for connection attempts (increased from 10s)
@@ -742,9 +743,11 @@ export async function connectAndDiscover(
       throw error;
     }
   } catch (error) {
-    console.error(
-      `Error connecting to MCP server '${mcpServerName}': ${getErrorMessage(error)}`,
-    );
+    if (!isSilentMode()) {
+      console.error(
+        `Error connecting to MCP server '${mcpServerName}': ${getErrorMessage(error)}`,
+      );
+    }
     updateMCPServerStatus(mcpServerName, MCPServerStatus.DISCONNECTED);
   }
 }

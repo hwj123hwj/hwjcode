@@ -867,7 +867,7 @@ export async function main() {
 
   // If --output-format stream-json is specified, it's explicitly non-interactive mode
   // This is a clear user intent to use programmatic output format
-  const isExplicitNonInteractiveMode = argv.outputFormat === 'stream-json';
+  const isExplicitNonInteractiveMode = argv.outputFormat === 'stream-json' || argv.outputFormat === 'json';
 
   const shouldBeInteractive =
     !!argv.promptInteractive ||
@@ -954,9 +954,9 @@ export async function main() {
   if (!input) {
     if (argv.outputFormat && argv.outputFormat !== 'default') {
       console.error('Error: No prompt provided. When using --output-format, you must provide a prompt via:');
-      console.error('  1. Positional argument: dvcode "your prompt" --output-format stream-json');
-      console.error('  2. -p flag: dvcode -p "your prompt" --output-format stream-json');
-      console.error('  3. stdin: echo "your prompt" | dvcode --output-format stream-json');
+      console.error('  1. Positional argument: dvcode "your prompt" --output-format json');
+      console.error('  2. -p flag: dvcode -p "your prompt" --output-format json');
+      console.error('  3. stdin: echo "your prompt" | dvcode --output-format json');
     } else {
       console.error('No input provided via stdin.');
     }

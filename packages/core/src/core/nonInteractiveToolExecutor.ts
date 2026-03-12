@@ -72,15 +72,9 @@ export async function executeToolCall(
       effectiveAbortSignal,
     );
 
-    console.error(`\n[DangerousCommandCheck] Tool: ${toolCallRequest.name}`);
-    console.error(`[DangerousCommandCheck] Confirmation result:`, confirmationDetails ? 'HAS_CONFIRMATION' : 'null');
-
     // If this is a dangerous command (confirmation required), block execution in YOLO mode
     // Check if confirmation is required (not false)
     if (confirmationDetails) {
-      console.error(`[DangerousCommandCheck] Confirmation type: ${confirmationDetails.type}`);
-      console.error(`[DangerousCommandCheck] Root command: ${(confirmationDetails as any).rootCommand}`);
-      console.error(`[DangerousCommandCheck] Has warning: ${!!(confirmationDetails as any).warning}`);
 
       // For 'exec' type with warning = dangerous command
       if (confirmationDetails.type === 'exec' && (confirmationDetails as any).warning) {
