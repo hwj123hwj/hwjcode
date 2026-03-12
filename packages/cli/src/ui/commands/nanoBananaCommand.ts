@@ -20,6 +20,7 @@ import open from 'open';
 
 const ALLOWED_RATIOS = ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.tif'];
+const MAX_REFERENCE_IMAGES = 5;
 
 // ANSI Color Constants
 const COLOR_GREEN = '\u001b[32m';
@@ -32,63 +33,89 @@ const COLOR_GREY = '\u001b[90m';
 const RESET_COLOR = '\u001b[0m';
 const BOLD = '\u001b[1m';
 
-async function runImageGeneration(context: CommandContext, ratio: string, prompt: string, imagePath?: string, imageSize?: string) {
+async function runImageGeneration(context: CommandContext, ratio: string, prompt: string, imagePaths: string[], imageSize?: string) {
   const { addItem } = context.ui;
   const adapter = ImageGeneratorAdapter.getInstance();
 
   try {
     let fromImgUrl: string | undefined;
+    let imageUrls: string[] | undefined;
 
-    if (imagePath) {
+    if (imagePaths.length > 0) {
       if (context.isNonInteractive) {
         console.error(JSON.stringify({
           type: 'nanobanana_upload_start',
           timestamp: new Date().toISOString(),
-          reference_image: imagePath,
+          reference_images: imagePaths,
         }));
       } else {
+        const pathsDisplay = imagePaths.map(p => `${BOLD}${p}${RESET_COLOR}${COLOR_CYAN}`).join(', ');
         addItem({
           type: MessageType.INFO,
-          text: `${COLOR_CYAN}📤 ${tp('nanobanana.uploading_image', { path: `${BOLD}${imagePath}${RESET_COLOR}${COLOR_CYAN}` })}${RESET_COLOR}`,
+          text: `${COLOR_CYAN}📤 ${tp('nanobanana.uploading_image', { path: pathsDisplay })}${RESET_COLOR}`,
         }, Date.now());
       }
 
       try {
-        if (!fs.existsSync(imagePath)) {
-          throw new Error(`Image file not found: ${imagePath}`);
+        // Validate all files exist
+        for (const imagePath of imagePaths) {
+          if (!fs.existsSync(imagePath)) {
+            throw new Error(`Image file not found: ${imagePath}`);
+          }
         }
-
-        const fileBuffer = fs.readFileSync(imagePath);
-        const ext = path.extname(imagePath).toLowerCase();
-
-        let contentType = 'image/jpeg'; // Default
-        if (ext === '.png') contentType = 'image/png';
-        else if (ext === '.webp') contentType = 'image/webp';
-        else if (ext === '.gif') contentType = 'image/gif';
-        else if (ext === '.bmp') contentType = 'image/bmp';
-        else if (ext === '.tiff' || ext === '.tif') contentType = 'image/tiff';
 
         const userInfo = proxyAuthManager.getUserInfo();
         const username = (userInfo?.name || 'unknown').replace(/[^a-zA-Z0-9]/g, '_');
-        const random = Math.random().toString(36).substring(2, 10);
-        const filename = `${username}-${random}${ext}`;
 
-        const { upload_url, public_url } = await adapter.getUploadUrl(filename, contentType);
-        await adapter.uploadImage(upload_url, fileBuffer, contentType);
+        if (imagePaths.length === 1) {
+          // Single image: use existing /upload-url endpoint
+          const imagePath = imagePaths[0];
+          const fileBuffer = fs.readFileSync(imagePath);
+          const ext = path.extname(imagePath).toLowerCase();
+          const contentType = getContentType(ext);
+          const random = Math.random().toString(36).substring(2, 10);
+          const filename = `${username}-${random}${ext}`;
 
-        fromImgUrl = public_url;
+          const { upload_url, public_url } = await adapter.getUploadUrl(filename, contentType);
+          await adapter.uploadImage(upload_url, fileBuffer, contentType);
+          fromImgUrl = public_url;
+        } else {
+          // Multiple images: use batch /upload-urls endpoint
+          const filesInfo = imagePaths.map(imagePath => {
+            const ext = path.extname(imagePath).toLowerCase();
+            const random = Math.random().toString(36).substring(2, 10);
+            return {
+              filename: `${username}-${random}${ext}`,
+              content_type: getContentType(ext),
+              buffer: fs.readFileSync(imagePath),
+            };
+          });
+
+          const uploadResult = await adapter.getUploadUrls(
+            filesInfo.map(f => ({ filename: f.filename, content_type: f.content_type }))
+          );
+
+          // Upload all files in parallel
+          await Promise.all(
+            uploadResult.files.map((urlInfo, idx) =>
+              adapter.uploadImage(urlInfo.upload_url, filesInfo[idx].buffer, filesInfo[idx].content_type)
+            )
+          );
+
+          imageUrls = uploadResult.files.map(f => f.public_url);
+        }
 
         if (context.isNonInteractive) {
           console.error(JSON.stringify({
             type: 'nanobanana_upload_success',
             timestamp: new Date().toISOString(),
-            reference_image: imagePath,
-            uploaded_url: public_url,
+            reference_images: imagePaths,
+            uploaded_urls: fromImgUrl ? [fromImgUrl] : imageUrls,
           }));
         } else {
           addItem({
               type: MessageType.INFO,
-              text: `${COLOR_GREEN}✅ ${tp('nanobanana.image_uploaded', { url: `${COLOR_CYAN}${public_url}${RESET_COLOR}${COLOR_GREEN}` })}${RESET_COLOR}`,
+              text: `${COLOR_GREEN}✅ ${tp('nanobanana.image_uploaded', { url: '' })}${RESET_COLOR}`,
           }, Date.now());
         }
 
@@ -97,7 +124,7 @@ async function runImageGeneration(context: CommandContext, ratio: string, prompt
           console.error(JSON.stringify({
             type: 'nanobanana_upload_failed',
             timestamp: new Date().toISOString(),
-            reference_image: imagePath,
+            reference_images: imagePaths,
             error: error instanceof Error ? error.message : String(error),
           }));
         } else {
@@ -119,7 +146,7 @@ async function runImageGeneration(context: CommandContext, ratio: string, prompt
       }, Date.now());
     }
 
-    const task = await adapter.submitImageGenerationTask(prompt, ratio, fromImgUrl, imageSize);
+    const task = await adapter.submitImageGenerationTask(prompt, ratio, fromImgUrl, imageSize, imageUrls);
 
     const estimatedTime = task.task_info.estimated_time || 60;
     const timeoutSeconds = estimatedTime + 120;
@@ -139,8 +166,8 @@ async function runImageGeneration(context: CommandContext, ratio: string, prompt
         prompt: prompt,
         ratio: ratio,
         size: imageSize || 'auto',
-        reference_image: imagePath || null,
-        reference_image_url: fromImgUrl || null,
+        reference_images: imagePaths.length > 0 ? imagePaths : null,
+        reference_image_urls: fromImgUrl ? [fromImgUrl] : (imageUrls || null),
         estimated_time_seconds: estimatedTime,
         credits_estimated: task.credits_deducted,
       }));
@@ -350,6 +377,20 @@ async function runImageGeneration(context: CommandContext, ratio: string, prompt
 }
 
 /**
+ * Get MIME content type from file extension
+ */
+function getContentType(ext: string): string {
+  switch (ext) {
+    case '.png': return 'image/png';
+    case '.webp': return 'image/webp';
+    case '.gif': return 'image/gif';
+    case '.bmp': return 'image/bmp';
+    case '.tiff': case '.tif': return 'image/tiff';
+    default: return 'image/jpeg';
+  }
+}
+
+/**
  * 检查文件是否为支持的图片格式
  */
 function isImageFile(filePath: string): boolean {
@@ -515,27 +556,22 @@ export const nanoBananaCommand: SlashCommand = {
       };
     }
 
-    // Parse: <ratio> <size> <prompt> [@image]
-    // @image can appear anywhere in the command (before, after, or within the prompt)
+    // Parse: <ratio> <size> <prompt> [@image ...]
+    // @image can appear anywhere in the command, multiple @images are supported (up to 5)
     // Example: /nanobanana 16:9 2K "A futuristic city" @ref.jpg
-    // Example: /nanobanana 16:9 2K @ref.jpg "A futuristic city"
-    // Example: /nanobanana @ref.jpg 16:9 2K "A futuristic city"
+    // Example: /nanobanana 16:9 2K @refA.jpg @refB.png "融合两张图"
 
-    // First, extract all @image references and remove them from the string
-    let imagePath: string | undefined;
+    // Extract all @image references and remove them from the string
+    const imagePaths: string[] = [];
     const atImageRegex = /(?:^|\s)@(?:"([^"]+)"|([^\s]+))/g;
     let argsWithoutImage = trimmedArgs;
     let match;
 
-    // Find all @references and take the first valid image file
+    // Find all @references that are valid image files
     while ((match = atImageRegex.exec(trimmedArgs)) !== null) {
       const potentialPath = match[1] || match[2];
-      // Check if it looks like an image file
-      if (isImageFile(potentialPath)) {
-        if (!imagePath) {
-          imagePath = potentialPath;
-        }
-        // Remove this @reference from the args string
+      if (isImageFile(potentialPath) && imagePaths.length < MAX_REFERENCE_IMAGES) {
+        imagePaths.push(potentialPath);
         argsWithoutImage = argsWithoutImage.replace(match[0], ' ');
       }
     }
@@ -613,7 +649,7 @@ export const nanoBananaCommand: SlashCommand = {
     if (context.isNonInteractive) {
       // 非交互模式：等待任务完成并返回消息
       try {
-        await runImageGeneration(context, ratio, prompt, imagePath, imageSize);
+        await runImageGeneration(context, ratio, prompt, imagePaths, imageSize);
         return {
           type: 'message',
           messageType: 'info',
@@ -628,7 +664,7 @@ export const nanoBananaCommand: SlashCommand = {
       }
     } else {
       // 交互模式：触发即忘
-      runImageGeneration(context, ratio, prompt, imagePath, imageSize);
+      runImageGeneration(context, ratio, prompt, imagePaths, imageSize);
       // Return void to indicate handled without specific action return type
       return;
     }

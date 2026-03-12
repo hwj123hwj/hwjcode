@@ -1089,7 +1089,7 @@ export class MultiSessionMessageService {
   // =============================================================================
 
   /**
-   * 🎯 发送NanoBanana图片上传请求
+   * 🎯 发送NanoBanana图片上传请求（单张）
    */
   sendNanoBananaUpload(data: { filename: string; contentType: string; fileData: string }) {
     this.sendMessage({
@@ -1099,7 +1099,17 @@ export class MultiSessionMessageService {
   }
 
   /**
-   * 🎯 监听NanoBanana上传响应
+   * 🎯 发送NanoBanana批量图片上传请求（多张）
+   */
+  sendNanoBananaBatchUpload(data: { files: Array<{ filename: string; contentType: string; fileData: string }> }) {
+    this.sendMessage({
+      type: 'nanobanana_batch_upload' as any,
+      payload: data
+    });
+  }
+
+  /**
+   * 🎯 监听NanoBanana上传响应（单张）
    * @returns 取消订阅的函数
    */
   onNanoBananaUploadResponse(callback: (data: { success: boolean; publicUrl?: string; error?: string }) => void) {
@@ -1107,14 +1117,23 @@ export class MultiSessionMessageService {
   }
 
   /**
-   * 🎯 发送NanoBanana生成请求（支持多轮会话）
+   * 🎯 监听NanoBanana批量上传响应（多张）
+   * @returns 取消订阅的函数
+   */
+  onNanoBananaBatchUploadResponse(callback: (data: { success: boolean; publicUrls?: string[]; error?: string }) => void) {
+    return this.addMessageHandler('nanobanana_batch_upload_response', callback);
+  }
+
+  /**
+   * 🎯 发送NanoBanana生成请求（支持多轮会话 + 多图参考）
    */
   sendNanoBananaGenerate(data: {
     prompt: string;
     aspectRatio: string;
     imageSize: string;
     referenceImageUrl?: string;
-    // 🆕 多轮会话上下文
+    referenceImageUrls?: string[];
+    // 多轮会话上下文
     conversationContext?: {
       previousGeneratedImageUrl: string;
       history: Array<{
