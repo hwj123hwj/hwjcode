@@ -27,6 +27,17 @@ import './ChatInterface.css'; // 🎯 导入确认对话框样式
 import 'highlight.js/styles/vs2015.css'; // 代码高亮主题
 import 'katex/dist/katex.min.css'; // 数学公式样式
 
+// lazy import mermaid，避免打入首屏 bundle
+let mermaidInitialized = false;
+let mermaidCurrentTheme: string = '';
+const getMermaid = () => import('mermaid').then(m => m.default);
+
+const getVSCodeTheme = () => {
+  const isDark = document.body.classList.contains('theme-dark') ||
+    !document.body.classList.contains('theme-light');
+  return isDark ? 'dark' : 'default';
+};
+
 // VSCode API
 declare const window: Window & {
   vscode: {
@@ -34,8 +45,154 @@ declare const window: Window & {
   };
 };
 
+// Mermaid 图表组件
+// - 流式阶段：debounce 300ms 尝试渲染，成功显示图，失败保持上次成功的图或原始文本
+// - 非流式阶段：立即渲染最终代码
+// - 语法错误：header 显示错误角标，body 显示原始文本
+const MermaidBlockInner = ({ code, isStreaming }: { code: string; isStreaming: boolean }) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = React.useState('');
+  const lastSuccessSvgRef = React.useRef('');
+  const [error, setError] = React.useState('');
+  const [isCopied, setIsCopied] = React.useState(false);
+
+  const doRender = React.useCallback(async (source: string) => {
+    if (!source.trim()) return;
+    try {
+      const mermaid = await getMermaid();
+      const theme = getVSCodeTheme();
+      if (!mermaidInitialized || mermaidCurrentTheme !== theme) {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme,
+          securityLevel: 'strict',
+          suppressErrorRendering: true,
+        });
+        mermaidInitialized = true;
+        mermaidCurrentTheme = theme;
+      }
+      const id = `mermaid-${Math.random().toString(36).slice(2)}`;
+      const { svg: renderedSvg } = await mermaid.render(id, source);
+      lastSuccessSvgRef.current = renderedSvg;
+      setSvg(renderedSvg);
+      setError('');
+
+    } catch (e) {
+      // 流式阶段语法不完整属于正常情况，静默忽略，保持上次成功的图
+      // 已有成功渲染的图时也静默忽略（避免流式结束后重渲染失败导致错误角标误显示）
+      if (!isStreaming && !lastSuccessSvgRef.current) {
+        setError(String(e));
+      }
+    }
+  }, [isStreaming]);
+
+  // 流式阶段：debounce 300ms 渲染
+  React.useEffect(() => {
+    if (!isStreaming) return;
+    const timer = setTimeout(() => {
+      doRender(code);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [code, isStreaming, doRender]);
+
+  // 非流式阶段：立即渲染最终代码
+  React.useEffect(() => {
+    if (isStreaming) return;
+    doRender(code);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming]); // 只在 isStreaming 变为 false 时触发
+
+  // 监听 VSCode 主题切换，主题变化时重新渲染
+  React.useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const newTheme = getVSCodeTheme();
+      if (newTheme !== mermaidCurrentTheme) {
+        // 重置初始化标志，下次 doRender 会重新 initialize
+        mermaidInitialized = false;
+        const source = lastSuccessSvgRef.current ? code : '';
+        if (source) doRender(source);
+      }
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [code, doRender]);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  // 当前展示的 SVG：优先使用最新渲染结果，流式失败时回退到上次成功的
+  const displaySvg = svg || lastSuccessSvgRef.current;
+
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-header">
+        <span className="code-language">mermaid</span>
+        <div className="code-header-actions">
+          {error && (
+            <span
+              className="mermaid-error-badge"
+              title={error}
+              aria-label={`Mermaid syntax error: ${error}`}
+            >
+              <AlertTriangle size={13} />
+              <span>mermaid syntax error</span>
+            </span>
+          )}
+          <button
+            className={`code-copy-btn ${isCopied ? 'copy-success' : ''}`}
+            onClick={copyToClipboard}
+            title={isCopied ? 'Copied' : 'Copy'}
+            aria-label={isCopied ? 'Copied' : 'Copy'}
+          >
+            {isCopied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+        </div>
+      </div>
+      {error && !displaySvg ? (
+        // 语法错误且无历史成功图：显示原始文本
+        <pre className="code-block" style={{ opacity: 0.8 }}>{code}</pre>
+      ) : !displaySvg ? (
+        // 尚未渲染完成：显示占位
+        <div style={{ padding: '12px', opacity: 0.5, fontSize: '12px' }}>
+          {isStreaming ? code : 'rendering diagram...'}
+        </div>
+      ) : (
+        // 渲染成功：显示 SVG
+        // 安全说明：displaySvg 由 mermaid.render() 生成，mermaid 已配置 securityLevel: 'strict'，
+        // strict 模式会清理 SVG 中的危险属性（onclick、href 等），可安全注入。
+        <div
+          ref={containerRef}
+          className="mermaid-block"
+          dangerouslySetInnerHTML={{ __html: displaySvg }}
+          style={{ overflowX: 'auto', padding: '12px' }}
+        />
+      )}
+    </div>
+  );
+};
+
+// code 和 isStreaming 都是基础类型，memo 完全有效
+// 图生成完后 props 不再变化，后续所有渲染都跳过，防止闪烁
+const MermaidBlock = React.memo(MermaidBlockInner,
+  (prev, next) => prev.code === next.code && prev.isStreaming === next.isStreaming
+);
+
 // 代码块组件（提取为独立组件以正确管理状态）
-const CodeBlock: React.FC<any> = ({ node, children, t, ...props }) => {
+const CodeBlock: React.FC<any> = ({ node, children, t, isStreaming = false, completedMermaidCodes = new Set() as Set<string>, ...props }) => {
   const [isCopied, setIsCopied] = React.useState(false);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
@@ -70,9 +227,24 @@ const CodeBlock: React.FC<any> = ({ node, children, t, ...props }) => {
     codeString = extractTextFromNode(node);
   }
 
-  const className = codeElement?.props?.className || '';
+  // 从多个来源尝试获取 className
+  const className = codeElement?.props?.className
+    || node?.children?.[0]?.properties?.className?.join?.(' ')
+    || node?.properties?.className?.join?.(' ')
+    || '';
   const match = /language-(\w+)/.exec(className);
   const language = match ? match[1] : 'text';
+
+  // mermaid 图表单独渲染，从 node AST 取原始文本避免 rehype 转义
+  if (language === 'mermaid') {
+    const rawCode = node?.children?.[0]?.children?.[0]?.value
+      || node?.children?.[0]?.value
+      || codeString;
+    const trimmedCode = rawCode.trim();
+    // 查询该 mermaid 块是否在已完整闭合的集合中
+    const isMermaidComplete = !isStreaming || completedMermaidCodes.has(trimmedCode);
+    return <MermaidBlock code={trimmedCode} isStreaming={!isMermaidComplete} />;
+  }
 
   // 计算代码行数
   const lines = codeString.split('\n');
@@ -317,9 +489,8 @@ const TokenUsagePopup: React.FC<{
 const ThinkingBlock: React.FC<{
   content: string;
   t: (key: string, params?: any, fallback?: string) => string;
-  markdownComponents: any;
   defaultCollapsed?: boolean;
-}> = ({ content, t, markdownComponents, defaultCollapsed = false }) => {
+}> = ({ content, t, defaultCollapsed = false }) => {
   const [isCollapsed, setIsCollapsed] = React.useState(defaultCollapsed);
 
   // 当 defaultCollapsed 变化时（例如从流式输出变成完成状态），同步状态
@@ -341,18 +512,101 @@ const ThinkingBlock: React.FC<{
       </div>
       {!isCollapsed && (
         <div className="thinking-content">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeRaw, rehypeKatex, rehypeHighlight]}
-            components={markdownComponents}
-          >
-            {content}
-          </ReactMarkdown>
+          {/* ThinkingBlock 无流式概念，isStreaming 固定为 false，mermaid 直接渲染 */}
+          <MarkdownRenderer content={content} isStreaming={false} t={t} />
         </div>
       )}
     </div>
   );
 };
+
+// 独立 memo 组件，缓存 markdownComponents，防止父组件重渲染导致 MermaidBlock 被卸载重建
+const MarkdownRenderer = React.memo(({
+  content,
+  isStreaming,
+  t,
+}: {
+  content: string;
+  isStreaming: boolean;
+  t: (key: string, params?: any, fallback?: string) => string;
+}) => {
+  // 提取 content 中所有已完整闭合的 mermaid 块代码，存入 Set
+  // 只在集合内容变化时才重建 markdownComponents，避免每帧重建导致 MermaidBlock 闪烁
+  const completedMermaidCodes = React.useMemo(() => {
+    const set = new Set<string>();
+    if (!isStreaming) return set; // 非流式阶段不需要检测，MermaidBlock 直接渲染
+    const regex = /```mermaid\n([\s\S]*?)```/g;
+    let m;
+    while ((m = regex.exec(content)) !== null) {
+      set.add(m[1].trim());
+    }
+    return set;
+  }, [content, isStreaming]);
+
+  // 序列化集合内容作为 useMemo key，只在新块闭合时重建 markdownComponents
+  const completedMermaidKey = Array.from(completedMermaidCodes).sort().join('|');
+
+  const markdownComponents = React.useMemo(() => ({
+    pre: (props: any) => <CodeBlock {...props} t={t} isStreaming={isStreaming} completedMermaidCodes={completedMermaidCodes} />,
+    code({node, className, children, ...props}: any) {
+      if (className) {
+        return <code className={className} {...props}>{children}</code>;
+      }
+      return (
+        <code className="inline-code" {...props}>
+          {linkifyTextNode(children)}
+        </code>
+      );
+    },
+    h1: ({children}: any) => <h1 className="markdown-h1">{linkifyTextNode(children)}</h1>,
+    h2: ({children}: any) => <h2 className="markdown-h2">{linkifyTextNode(children)}</h2>,
+    h3: ({children}: any) => <h3 className="markdown-h3">{linkifyTextNode(children)}</h3>,
+    p: ({children}: any) => <p className="markdown-p">{linkifyTextNode(children)}</p>,
+    strong: ({children}: any) => <strong className="markdown-strong">{linkifyTextNode(children)}</strong>,
+    em: ({children}: any) => <em className="markdown-em">{linkifyTextNode(children)}</em>,
+    ul: ({children}: any) => <ul className="markdown-ul">{children}</ul>,
+    ol: ({children}: any) => <ol className="markdown-ol">{children}</ol>,
+    li: ({children, ...props}: any) => {
+      const checked = props.checked;
+      if (typeof checked === 'boolean') {
+        return (
+          <li className="markdown-task-list-item">
+            <input type="checkbox" checked={checked} disabled readOnly />
+            <span>{linkifyTextNode(children)}</span>
+          </li>
+        );
+      }
+      return <li className="markdown-li">{linkifyTextNode(children)}</li>;
+    },
+    blockquote: ({children}: any) => (
+      <blockquote className="markdown-blockquote">{children}</blockquote>
+    ),
+    a: ({href, children}: any) => (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="markdown-link">
+        {children}
+      </a>
+    ),
+    table: ({children}: any) => (
+      <div className="markdown-table-container">
+        <table className="markdown-table">{children}</table>
+      </div>
+    ),
+    tr: ({children}: any) => <tr className="markdown-tr">{children}</tr>,
+    th: ({children}: any) => <th className="markdown-th">{linkifyTextNode(children)}</th>,
+    td: ({children}: any) => <td className="markdown-td">{linkifyTextNode(children)}</td>,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [isStreaming, completedMermaidKey, t]);
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeRaw, rehypeKatex, [rehypeHighlight, { detect: false }]]}
+      components={markdownComponents as any}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -597,77 +851,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
               const hasNormalResponse = renderParts.some((p, i) => p.type === 'text' && p.content.trim().length > 0 && i > 0);
               const shouldAutoCollapse = hasNormalResponse || (!message.isStreaming && message.type === 'assistant');
 
-              const markdownComponents = {
-                // 代码块美化 - 使用独立的 CodeBlock 组件
-                pre: (props: any) => <CodeBlock {...props} t={t} />,
-
-                // 行内代码 - 添加文件路径和方法名链接支持
-                code({node, className, children, ...props}: any) {
-                  // 如果有 className，说明是代码块中的 code，直接渲染
-                  if (className) {
-                    return <code className={className} {...props}>{children}</code>;
-                  }
-                  // 否则是行内代码，支持文件路径点击
-                  return (
-                    <code className="inline-code" {...props}>
-                      {linkifyTextNode(children)}
-                    </code>
-                  );
-                },
-
-                // 标题美化 - 添加文件路径和方法名链接支持
-                h1: ({children}: any) => <h1 className="markdown-h1">{linkifyTextNode(children)}</h1>,
-                h2: ({children}: any) => <h2 className="markdown-h2">{linkifyTextNode(children)}</h2>,
-                h3: ({children}: any) => <h3 className="markdown-h3">{linkifyTextNode(children)}</h3>,
-
-                // 段落美化 - 添加文件路径和方法名链接支持
-                p: ({children}: any) => <p className="markdown-p">{linkifyTextNode(children)}</p>,
-
-                // 文本样式美化
-                strong: ({children}: any) => <strong className="markdown-strong">{linkifyTextNode(children)}</strong>,
-                em: ({children}: any) => <em className="markdown-em">{linkifyTextNode(children)}</em>,
-
-                // 列表美化 - 添加文件路径和方法名链接支持
-                ul: ({children}: any) => <ul className="markdown-ul">{children}</ul>,
-                ol: ({children}: any) => <ol className="markdown-ol">{children}</ol>,
-                li: ({children, ...props}: any) => {
-                  const checked = props.checked;
-                  // 处理任务列表
-                  if (typeof checked === 'boolean') {
-                    return (
-                      <li className="markdown-task-list-item">
-                        <input type="checkbox" checked={checked} disabled readOnly />
-                        <span>{linkifyTextNode(children)}</span>
-                      </li>
-                    );
-                  }
-                  return <li className="markdown-li">{linkifyTextNode(children)}</li>;
-                },
-
-                // 引用块美化
-                blockquote: ({children}: any) => (
-                  <blockquote className="markdown-blockquote">
-                    {children}
-                  </blockquote>
-                ),
-
-                // 链接美化
-                a: ({href, children}: any) => (
-                  <a href={href} target="_blank" rel="noopener noreferrer" className="markdown-link">
-                    {children}
-                  </a>
-                ),
-
-                // 表格美化
-                table: ({children}: any) => (
-                  <div className="markdown-table-container">
-                    <table className="markdown-table">{children}</table>
-                  </div>
-                ),
-                tr: ({children}: any) => <tr className="markdown-tr">{children}</tr>,
-                th: ({children}: any) => <th className="markdown-th">{linkifyTextNode(children)}</th>,
-                td: ({children}: any) => <td className="markdown-td">{linkifyTextNode(children)}</td>,
-              };
+              const isStreaming = message.isStreaming;
 
               return (
                 <>
@@ -686,20 +870,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
                           key={`think-${index}`}
                           content={part.content}
                           t={t}
-                          markdownComponents={markdownComponents}
                           defaultCollapsed={shouldAutoCollapse}
                         />
                       );
                     } else {
                       return (
-                        <ReactMarkdown
+                        <MarkdownRenderer
                           key={`text-${index}`}
-                          remarkPlugins={[remarkGfm, remarkMath]}
-                          rehypePlugins={[rehypeRaw, rehypeKatex, rehypeHighlight]}
-                          components={markdownComponents as any}
-                        >
-                          {part.content}
-                        </ReactMarkdown>
+                          content={part.content}
+                          isStreaming={!!isStreaming}
+                          t={t}
+                        />
                       );
                     }
                   })}

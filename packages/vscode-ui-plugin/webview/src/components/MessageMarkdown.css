@@ -5,6 +5,33 @@
   color: var(--vscode-editor-foreground);
 }
 
+/* Mermaid 图表样式 */
+.mermaid-block {
+  width: 100%;
+}
+
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto !important;
+  max-height: none !important;
+  display: block;
+}
+
+/* Mermaid 语法错误角标 */
+.mermaid-error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 15%, transparent);
+  cursor: help;
+  white-space: nowrap;
+}
+
 /* 标题样式 - 字体大小差距不大 */
 .markdown-h1 {
   font-size: 16px; /* 比正文大2px */

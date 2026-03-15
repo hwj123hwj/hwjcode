@@ -121,6 +121,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const lastScrollClickTimeRef = useRef<number>(0);
   // 🎯 新增：记录上一次的 scrollTop，用于判断滚动方向
   const lastScrollTopRef = useRef<number>(0);
+  // 记录上一次的 scrollHeight，用于排除内容缩小导致的 scrollTop 变化误判为用户向上滚动
+  const lastScrollHeightRef = useRef<number>(0);
 
   // 🎯 新增：编辑状态管理
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -190,30 +192,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [isLoading, isProcessing]);
 
-  // 🎯 智能滚动：根据用户位置自动滚动到底部
+  // 智能滚动：根据用户位置自动滚动到底部
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container || messages.length === 0) return;
 
-    // 使用requestAnimationFrame确保DOM完全渲染后再执行滚动判断
     const performScrollCheck = () => {
-      // 如果是第一条消息，或者用户处于"自动滚动模式"（即在底部），则执行滚动
-      // 使用 Ref 可以确保在流式输出的高频更新中，能够即时响应用户的滚动意图
       if (messages.length === 1 || shouldAutoScrollRef.current) {
-        // console.log('🎯 [AutoScroll] Triggering scroll. Reason:', messages.length === 1 ? 'First Message' : 'AutoScroll Enabled');
-
-        // 🎯 使用 'auto' 而不是 'smooth' 来避免流式输出时的抖动
-        // 原因：流式更新时内容高度不断变化，smooth滚动会与内容增长冲突
-        // overflow-anchor CSS属性会处理自动底部粘性，无需smooth动画
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      } else {
-        // console.log('🎯 [AutoScroll] Skipped. User is scrolling (AutoScroll Disabled).');
       }
     };
 
-    // 延迟执行，确保新消息的DOM已经渲染
     requestAnimationFrame(performScrollCheck);
-  }, [messages]); // 移除 userHasScrolled 依赖，只依赖 messages 变化
+  }, [messages]);
+
+  // ResizeObserver 补充方案：监听滚动区域内容高度变化
+  // 用于捕获 mermaid SVG 等异步渲染内容撑高页面的场景
+  // messages 不变但内容高度增加时（如图表渲染完成），触发滚动
+  useEffect(() => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return;
+
+    const observer = new ResizeObserver(() => {
+      if (shouldAutoScrollRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }
+    });
+
+    // 观察 scrollArea 内所有直接子元素，捕获任意子树高度变化
+    Array.from(scrollArea.children).forEach(child => observer.observe(child));
+
+    // 当 messages 新增时，新的子元素需要重新绑定
+    const mutationObserver = new MutationObserver(() => {
+      Array.from(scrollArea.children).forEach(child => observer.observe(child));
+    });
+    mutationObserver.observe(scrollArea, { childList: true });
+
+    return () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, []);
 
   // 🎯 监听滚动事件，检测用户位置和手动滚动
   useEffect(() => {
@@ -236,7 +255,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       // 🎯 关键修复：基于滚动方向的智能判断
       // 只有当用户"向上"滚动，且确实离开了底部时，才关闭自动滚动。
       // 这样可以防止 AI 输出长内容导致页面瞬间变长（此时 scrollTop 不变或增加）时误判为用户停止滚动。
-      if (scrollTop < lastScrollTopRef.current && !isAtBottom && !isForcedAutoScroll) {
+      if (
+        scrollTop < lastScrollTopRef.current &&
+        scrollHeight >= lastScrollHeightRef.current && // 排除内容缩小（如mermaid错误）导致的scrollTop变化
+        !isAtBottom &&
+        !isForcedAutoScroll
+      ) {
         shouldAutoScrollRef.current = false;
       }
       // 如果用户回到了底部，或者处于磁吸状态，重新开启自动滚动
@@ -244,8 +268,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         shouldAutoScrollRef.current = true;
       }
 
-      // 更新 lastScrollTop
+      // 更新 lastScrollTop 和 lastScrollHeight
       lastScrollTopRef.current = scrollTop;
+      lastScrollHeightRef.current = scrollHeight;
 
       // 显示/隐藏滚动到底部按钮 (UI状态更新可以异步)
       setShowScrollToBottom(!isNearBottom && messages.length > 0);
@@ -253,7 +278,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [messages]); // 🎯 改为依赖 messages，确保每次渲染都检查绑定状态
+  }, [messages]);
 
   // 🎯 计算修改的文件
   useEffect(() => {
