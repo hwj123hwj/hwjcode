@@ -31,8 +31,10 @@ export async function executeToolCall(
 
   const startTime = Date.now();
   if (!tool) {
+    const availableTools = toolRegistry.getAllTools().map((t) => t.name).join(', ');
     const error = new Error(
-      `Tool "${toolCallRequest.name}" not found in registry.`,
+      `Tool "${toolCallRequest.name}" not found in registry. Available tools: ${availableTools}. ` +
+      `If this is non-interactive mode, write tools (run_shell_command, replace, write_file) are disabled by default. Use --yolo flag to enable them.`,
     );
     const durationMs = Date.now() - startTime;
     logToolCall(config, {
