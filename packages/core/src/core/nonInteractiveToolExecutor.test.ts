@@ -60,7 +60,7 @@ describe('executeToolCall', () => {
 
     mockToolRegistry = {
       getTool: vi.fn(),
-      // Add other ToolRegistry methods if needed, or use a more complete mock
+      getAllTools: vi.fn(() => [mockTool]),
     } as unknown as ToolRegistry;
 
     abortController = new AbortController();
@@ -124,10 +124,12 @@ describe('executeToolCall', () => {
 
     expect(response.callId).toBe('call2');
     expect(response.error).toBeInstanceOf(Error);
-    expect(response.error?.message).toBe(
+    expect(response.error?.message).toContain(
       'Tool "nonexistentTool" not found in registry.',
     );
-    expect(response.resultDisplay).toBe(
+    expect(response.error?.message).toContain('Available tools:');
+    expect(response.error?.message).toContain('--yolo');
+    expect((response.resultDisplay as string)).toContain(
       'Tool "nonexistentTool" not found in registry.',
     );
     expect(response.responseParts).toEqual([
@@ -135,7 +137,7 @@ describe('executeToolCall', () => {
         functionResponse: {
           name: 'nonexistentTool',
           id: 'call2',
-          response: { error: 'Tool "nonexistentTool" not found in registry.' },
+          response: { error: expect.stringContaining('Tool "nonexistentTool" not found in registry.') },
         },
       },
     ]);

@@ -1127,13 +1127,19 @@ async function loadNonInteractiveConfig(
 ) {
   let finalConfig = config;
   if (config.getApprovalMode() !== ApprovalMode.YOLO) {
-    // Everything is not allowed, ensure that only read-only tools are configured.
+    // Non-YOLO non-interactive mode: exclude write tools that require user confirmation.
+    // Use --yolo flag to enable all tools (dangerous commands are still blocked).
     const existingExcludeTools = settings.merged.excludeTools || [];
     const interactiveTools = [
       ShellTool.Name,
       EditTool.Name,
       WriteFileTool.Name,
     ];
+
+    console.error(
+      `[Non-interactive mode] Write tools disabled: ${interactiveTools.join(', ')}. ` +
+      `Use --yolo to enable all tools.`,
+    );
 
     const newExcludeTools = [
       ...new Set([...existingExcludeTools, ...interactiveTools]),
