@@ -131,6 +131,44 @@ export function getGitBranch(directory: string): string | null {
 }
 
 /**
+ * Scans immediate subdirectories for git repositories and collects their remote & branch info.
+ * Used as a fallback when the current working directory itself is not a git repository,
+ * but contains multiple project subdirectories that are.
+ * @param directory The parent directory to scan
+ * @returns Array of { name, remotes, branch } for each git-enabled subdirectory, or empty array
+ */
+export function getSubdirectoryGitInfos(directory: string): Array<{
+  name: string;
+  remotes: Record<string, string>;
+  branch: string | null;
+}> {
+  try {
+    const resolvedDir = path.resolve(directory);
+    const entries = fs.readdirSync(resolvedDir, { withFileTypes: true });
+    const results: Array<{ name: string; remotes: Record<string, string>; branch: string | null }> = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      const subDir = path.join(resolvedDir, entry.name);
+      const gitDir = path.join(subDir, '.git');
+      if (!fs.existsSync(gitDir)) continue;
+
+      const remotes = getGitRemotes(subDir);
+      if (!remotes) continue;
+
+      results.push({
+        name: entry.name,
+        remotes,
+        branch: getGitBranch(subDir),
+      });
+    }
+    return results;
+  } catch (_error) {
+    return [];
+  }
+}
+
+/**
  * Removes embedded credentials from a git URL.
  * e.g. https://user:token@github.com/org/repo.git → https://github.com/org/repo.git
  * SSH URLs (git@...) are returned as-is since they don't embed passwords.
