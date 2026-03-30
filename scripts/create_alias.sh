@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# This script creates an alias for the Gemini CLI
+# This script creates an alias for the dvcode CLI
 
 # Determine the project directory
 PROJECT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-ALIAS_COMMAND="alias gemini='node $PROJECT_DIR/scripts/start.js'"
+ALIAS_COMMAND="alias dvcode='node $PROJECT_DIR/scripts/start.js'"
 
 # Detect shell and set config file path
 if [[ "$SHELL" == *"/bash" ]]; then
@@ -21,8 +21,8 @@ echo "  $ALIAS_COMMAND"
 echo ""
 
 # Check if the alias already exists
-if grep -q "alias gemini=" "$CONFIG_FILE"; then
-    echo "A 'gemini' alias already exists in $CONFIG_FILE. No changes were made."
+if grep -q "alias dvcode=" "$CONFIG_FILE"; then
+    echo "A 'dvcode' alias already exists in $CONFIG_FILE. No changes were made."
     exit 0
 fi
 
