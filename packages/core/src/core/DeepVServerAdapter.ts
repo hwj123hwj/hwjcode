@@ -33,6 +33,7 @@ import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
 import { isCustomModel } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
+import { getGitRemotes, getGitBranch } from '../utils/gitUtils.js';
 
 /**
  * Check if a model supports Server-Sent Events (SSE) streaming.
@@ -83,6 +84,18 @@ export class DeepVServerAdapter implements ContentGenerator {
   public userTier?: UserTierId;
   private authHandler: (() => Promise<void>) | null = null;
   private config?: Config;
+  private gitHeaders: Record<string, string> | null = null;
+  private gitHeadersResolved = false;
+
+  /**
+   * 内部员工域名白名单
+   * 只有这些域名的用户才会在请求中附带 git 仓库信息
+   */
+  private static readonly INTERNAL_EMAIL_DOMAINS = [
+    '@cmcm.com',
+    '@orionstar.com',
+    '@aicfcf.com',
+  ];
 
   constructor(region: string, projectId: string, proxyServerUrl?: string, config?: Config) {
     // 保存 Config 引用用于模型回退
@@ -103,6 +116,49 @@ export class DeepVServerAdapter implements ContentGenerator {
     if (process.env.DEBUG || process.env.NODE_ENV === 'development') {
       console.log(`[DeepV Server] Initialized with proxy server: ${finalProxyUrl}`);
     }
+  }
+
+  /**
+   * 判断当前用户是否为内部员工（基于邮箱域名）
+   */
+  private isInternalUser(): boolean {
+    const userInfo = proxyAuthManager.getUserInfo();
+    const email = userInfo?.email?.toLowerCase();
+    if (!email) return false;
+    return DeepVServerAdapter.INTERNAL_EMAIL_DOMAINS.some(domain => email.endsWith(domain));
+  }
+
+  /**
+   * 懒加载获取 git 仓库信息 headers。
+   * 仅对内部员工生效，结果在 session 内缓存。
+   */
+  private getGitHeaders(): Record<string, string> {
+    if (this.gitHeadersResolved) {
+      return this.gitHeaders || {};
+    }
+    this.gitHeadersResolved = true;
+
+    if (!this.isInternalUser()) {
+      this.gitHeaders = null;
+      return {};
+    }
+
+    const cwd = this.config?.getWorkingDir?.() || this.config?.getTargetDir?.() || process.cwd();
+    const headers: Record<string, string> = {};
+
+    const remotes = getGitRemotes(cwd);
+    if (remotes) {
+      // JSON格式: {"origin":"https://...","upstream":"https://..."}
+      headers['X-Git-Remotes'] = JSON.stringify(remotes);
+    }
+
+    const branch = getGitBranch(cwd);
+    if (branch) {
+      headers['X-Git-Branch'] = branch;
+    }
+
+    this.gitHeaders = Object.keys(headers).length > 0 ? headers : null;
+    return this.gitHeaders || {};
   }
 
   /**
@@ -366,6 +422,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         headers: {
           'Content-Type': 'application/json',
           ...userHeaders,
+          ...this.getGitHeaders(),
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
@@ -801,6 +858,7 @@ export class DeepVServerAdapter implements ContentGenerator {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
           ...userHeaders,
+          ...this.getGitHeaders(),
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
@@ -1310,6 +1368,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         headers: {
           'Content-Type': 'application/json',
           ...userHeaders,
+          ...this.getGitHeaders(),
         },
         body: JSON.stringify(requestBody),
       });
