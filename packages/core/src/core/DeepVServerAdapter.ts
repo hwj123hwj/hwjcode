@@ -33,7 +33,7 @@ import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
 import { isCustomModel } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
-import { getGitRemotes, getGitBranch } from '../utils/gitUtils.js';
+import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos } from '../utils/gitUtils.js';
 
 /**
  * Check if a model supports Server-Sent Events (SSE) streaming.
@@ -150,11 +150,30 @@ export class DeepVServerAdapter implements ContentGenerator {
     if (remotes) {
       // JSON格式: {"origin":"https://...","upstream":"https://..."}
       headers['X-Git-Remotes'] = JSON.stringify(remotes);
-    }
 
-    const branch = getGitBranch(cwd);
-    if (branch) {
-      headers['X-Git-Branch'] = branch;
+      const branch = getGitBranch(cwd);
+      if (branch) {
+        headers['X-Git-Branch'] = branch;
+      }
+    } else {
+      // 兜底：当前目录不是 git 仓库时，扫描下一级子目录中的 git 仓库
+      const subInfos = getSubdirectoryGitInfos(cwd);
+      if (subInfos.length > 0) {
+        // 收集所有子目录的 remotes，按子目录名分组
+        // 格式: { "project-a": {"origin":"https://..."}, "project-b": {"origin":"https://..."} }
+        const allRemotes: Record<string, Record<string, string>> = {};
+        const branches: Record<string, string> = {};
+        for (const info of subInfos) {
+          allRemotes[info.name] = info.remotes;
+          if (info.branch) {
+            branches[info.name] = info.branch;
+          }
+        }
+        headers['X-Git-Remotes'] = JSON.stringify(allRemotes);
+        if (Object.keys(branches).length > 0) {
+          headers['X-Git-Branch'] = JSON.stringify(branches);
+        }
+      }
     }
 
     this.gitHeaders = Object.keys(headers).length > 0 ? headers : null;
