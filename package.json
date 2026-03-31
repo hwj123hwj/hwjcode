@@ -134,7 +134,6 @@
   },
   "dependencies": {
     "@vscode/ripgrep": "^1.15.14",
-    "axios": "^1.6.0",
     "fs-extra": "^11.3.1",
     "gradient-string": "^2.0.2",
     "open": "^10.0.0",
