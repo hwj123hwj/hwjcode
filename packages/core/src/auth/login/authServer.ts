@@ -98,6 +98,8 @@ export class AuthServer {
           await this.handleStartVipCardAuth(req, res);
         } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
           await this.handleFeishuAllowedCheck(res);
+        } else if (reqUrl.pathname === '/api/backend/feishu-tenants' && req.method === 'GET') {
+          await this.handleFeishuTenants(res);
         } else {
           this.sendErrorResponse(res, 'Not found');
         }
@@ -148,6 +150,8 @@ export class AuthServer {
               await this.handleStartVipCardAuth(req, res);
             } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
               await this.handleFeishuAllowedCheck(res);
+            } else if (reqUrl.pathname === '/api/backend/feishu-tenants' && req.method === 'GET') {
+              await this.handleFeishuTenants(res);
             } else {
               this.sendErrorResponse(res, 'Not found');
             }
@@ -350,6 +354,28 @@ export class AuthServer {
         'Access-Control-Allow-Origin': '*'
       });
       res.end(JSON.stringify(errorResponse));
+    }
+  }
+
+  /**
+   * 处理获取飞书租户列表请求
+   */
+  private async handleFeishuTenants(res: http.ServerResponse): Promise<void> {
+    try {
+      const tenants = await getFeishuTenantsFromServer();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify(tenants));
+    } catch (error) {
+      console.error('❌ [Auth Server] 获取飞书租户列表失败:', error);
+      // 失败时返回空数组，前端会 fallback 到默认按钮
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify([]));
     }
   }
 
