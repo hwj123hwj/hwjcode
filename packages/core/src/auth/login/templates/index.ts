@@ -328,10 +328,8 @@ export class AuthTemplates {
 
           <!-- 登录按钮容器 -->
           <div id="auth-buttons-container" class="hidden">
-            <button id="feishu-btn" class="auth-button feishu-btn hidden" onclick="startFeishuAuth()" data-i18n="auth.feishu.button">
-              <img style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle;" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_c768e6a4/feishu.ico" alt="Feishu" />
-              Feishu Login
-            </button>
+            <!-- 飞书登录按钮区域（动态生成，支持多租户） -->
+            <div id="feishu-buttons-container"></div>
 
             <button class="auth-button" onclick="startDeepvlabAuth()" data-i18n="auth.deepvlab.button">
               <img style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle;" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_52ad718e/deepv.ico" alt="DeepV" />
@@ -438,10 +436,9 @@ export class AuthTemplates {
                   // DeepVlab登录始终可用（没有hidden类）
                   console.log('✅ DeepVlab登录始终可用');
 
-                  // 根据权限显示飞书登录按钮
+                  // 根据权限显示飞书登录按钮（动态获取租户列表）
                   if (data.feishuLoginAllowed) {
-                    document.getElementById('feishu-btn').classList.remove('hidden');
-                    console.log('✅ 飞书登录按钮已显示');
+                    loadFeishuTenants();
                   } else {
                     console.log('🚫 飞书登录被禁用，保持飞书按钮隐藏');
                   }
@@ -473,8 +470,51 @@ export class AuthTemplates {
               });
           }
 
-          function startFeishuAuth() {
-            fetch('/start-feishu-auth', { method: 'POST' })
+          function loadFeishuTenants() {
+            fetch('/api/backend/feishu-allowed')
+              .then(function() {
+                // 租户信息从 /api/config/client 获取（authServer 会代理）
+                // 但 CLI 的 authServer 没有这个路由，所以直接用 start-feishu-auth
+                // 简化方案：用已有的服务端 API 获取租户列表
+                var serverUrl = '';  // 相对路径，走 CLI authServer
+                return fetch(serverUrl + '/api/backend/feishu-tenants');
+              })
+              .then(function(resp) { return resp.json(); })
+              .then(function(tenants) {
+                renderFeishuButtons(tenants);
+              })
+              .catch(function() {
+                // 获取租户列表失败，显示默认单按钮
+                console.log('⚠️ 无法获取租户列表，显示默认飞书按钮');
+                renderFeishuButtons([{ appId: '', label: t('auth.feishu.button'), tenantKey: 'main' }]);
+              });
+          }
+
+          function renderFeishuButtons(tenants) {
+            var container = document.getElementById('feishu-buttons-container');
+            if (!container) return;
+            container.innerHTML = '';
+            if (!tenants || tenants.length === 0) {
+              tenants = [{ appId: '', label: t('auth.feishu.button'), tenantKey: 'main' }];
+            }
+            tenants.forEach(function(tenant) {
+              var btn = document.createElement('button');
+              btn.className = 'auth-button feishu-btn';
+              btn.innerHTML = '<img style="width:20px;height:20px;margin-right:8px;vertical-align:middle;" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_c768e6a4/feishu.ico" alt="Feishu" />' +
+                '<span>' + (tenant.label || t('auth.feishu.button')) + '</span>';
+              btn.onclick = function() { startFeishuAuth(tenant.appId); };
+              container.appendChild(btn);
+            });
+            console.log('✅ 飞书登录按钮已生成，共 ' + tenants.length + ' 个租户');
+          }
+
+          function startFeishuAuth(appId) {
+            var body = appId ? JSON.stringify({ appId: appId }) : '{}';
+            fetch('/start-feishu-auth', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: body
+            })
               .then(response => response.json())
               .then(data => {
                 if (data.authUrl) {
