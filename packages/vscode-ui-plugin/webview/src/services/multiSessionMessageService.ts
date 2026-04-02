@@ -91,7 +91,9 @@ interface MultiSessionMessageFromExtension {
        // 🆕 流中断恢复倒计时
        'stream_recovery_start' |
        'stream_recovery_countdown' |
-       'stream_recovery_end';
+       'stream_recovery_end' |
+       // 🔐 认证过期通知
+       'auth_expired';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -844,6 +846,13 @@ export class MultiSessionMessageService {
    */
   onLogoutResponse(callback: (data: { success: boolean; error?: string }) => void) {
     return this.addMessageHandler('logout_response', callback);
+  }
+
+  /**
+   * 🔐 监听认证过期通知（服务端返回 HTTP 401 时触发）
+   */
+  onAuthExpired(callback: (data: { reason: string }) => void) {
+    return this.addMessageHandler('auth_expired', callback);
   }
 
   /**

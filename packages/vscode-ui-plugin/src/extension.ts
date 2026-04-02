@@ -386,6 +386,17 @@ export async function deactivate(): Promise<void> {
   }
 }
 
+// 🔐 辅助函数：检测 HTTP 401 响应并触发自动登出
+// 当服务端返回 401 时，说明用户登录已过期，需要立即通知 webview 切换到登录页
+async function handleHttpAuthError(response: Response): Promise<boolean> {
+  if (response.status === 401) {
+    logger.warn('🔐 HTTP 401 detected, triggering auth expired notification');
+    await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
+    return true;
+  }
+  return false;
+}
+
 function setupServiceCommunication() {
 
   // 🎯 监听customProxyServerUrl设置变化
@@ -1653,6 +1664,7 @@ function setupBasicMessageHandlers() {
       } as any);
 
       if (!response.ok) {
+        if (await handleHttpAuthError(response)) return;
         throw new Error(`Failed to fetch user stats: ${response.status} ${response.statusText}`);
       }
 
@@ -2215,6 +2227,13 @@ function setupLoginHandlers() {
 
     } catch (error) {
       logger.error('Failed to get available models', error instanceof Error ? error : undefined);
+
+      // 🔐 检测认证过期错误
+      const errMsg = error instanceof Error ? error.message : '';
+      if (errMsg.includes('Authentication required') || errMsg.includes('401')) {
+        await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
+      }
+
       await communicationService.sendModelResponse(payload.requestId, {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -3386,6 +3405,7 @@ function setupMultiSessionHandlers() {
       });
 
       if (!outlineResponse.ok) {
+        if (await handleHttpAuthError(outlineResponse)) return;
         const errorText = await outlineResponse.text();
         throw new Error(`Outline submission failed: ${outlineResponse.status} - ${errorText}`);
       }
@@ -3407,6 +3427,7 @@ function setupMultiSessionHandlers() {
       });
 
       if (!generateResponse.ok) {
+        if (await handleHttpAuthError(generateResponse)) return;
         const errorText = await generateResponse.text();
         throw new Error(`Generation start failed: ${generateResponse.status} - ${errorText}`);
       }
@@ -3434,6 +3455,8 @@ function setupMultiSessionHandlers() {
             const redirectPath = encodeURIComponent(`/ppt/edit/${taskId}`);
             editUrl = `${PPT_WEB_URL}/token-login?code=${tempCodeResult.code}&redirect=${redirectPath}`;
           }
+        } else {
+          await handleHttpAuthError(tempCodeResponse);
         }
       } catch (tempCodeError) {
         logger.warn('Failed to get temp code for PPT edit URL', tempCodeError instanceof Error ? tempCodeError : undefined);
@@ -3515,6 +3538,7 @@ ${payload.outline}
       });
 
       if (!response.ok) {
+        if (await handleHttpAuthError(response)) return;
         const errorText = await response.text();
         throw new Error(`AI optimization failed: ${response.status} - ${errorText}`);
       }
