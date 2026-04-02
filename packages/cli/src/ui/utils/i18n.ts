@@ -192,6 +192,8 @@ export const translations = {
     'update.completed': '✅ Update completed!',
     'update.failed.code': '❌ Update failed, exit code: {code}',
     'update.exec.command.error': '❌ Failed to execute update command: {error}',
+    'update.command.unsafe':
+      'Update command contains unsafe operators. Please run it manually.',
     'update.manual.run.hint': '💡 Please run the update command manually',
     'update.prompt.auto': '🤖 Automatically apply the update? (y/n): ',
     'update.prompt.now': '🤔 Update now? (y/n): ',
@@ -971,7 +973,8 @@ export const translations = {
 
     // Slash command descriptions
     'command.help.description': 'Get deepv-code help',
-    'command.doctor.description': 'Run quick diagnostics for the CLI',
+    'command.report.description': 'Generate a diagnostic report for sharing',
+    'command.history.description': 'Show recent input history',
     'command.clear.description':
       'Clear terminal screen (keeps conversation context)',
     'command.queue.description': 'Manage prompt queue',
@@ -988,6 +991,10 @@ export const translations = {
     'command.issue.section.error_logs': 'Error Logs',
     'command.issue.no_error_logs': 'No error logs captured in this session.',
     'command.issue.opening': 'Opening GitHub issue form in your browser...',
+    'command.report.copied': 'Report copied to clipboard.',
+    'command.report.copy_failed': 'Failed to copy report to clipboard:',
+    'command.history.header': 'Recent history:',
+    'command.history.empty': 'No matching history entries found.',
     'command.issue.open.manual':
       'Please open the following URL in your browser to submit the issue:\n{url}',
     'command.issue.open.failed': 'Failed to open the issue URL: {error}',
@@ -1872,6 +1879,7 @@ export const translations = {
     'update.completed': '✅ 更新完成！',
     'update.failed.code': '❌ 更新失败，退出码：{code}',
     'update.exec.command.error': '❌ 执行更新命令失败：{error}',
+    'update.command.unsafe': '更新命令包含不安全的操作符，请手动执行。',
     'update.manual.run.hint': '💡 请手动执行更新命令',
     'update.prompt.auto': '🤖 是否自动执行更新？ (y/n): ',
     'update.prompt.now': '🤔 是否现在更新？ (y/n): ',
@@ -2571,7 +2579,8 @@ export const translations = {
 
     // Slash command descriptions
     'command.help.description': '获取 deepv-code 帮助',
-    'command.doctor.description': '运行 CLI 快速诊断',
+    'command.report.description': '生成可分享的诊断报告',
+    'command.history.description': '显示最近的输入历史',
     'command.clear.description': '清除终端屏幕（保留对话上下文）',
     'command.queue.description': '管理提示队列',
     'command.queue.clear.description': '清空所有排队的提示',
@@ -2586,6 +2595,10 @@ export const translations = {
     'command.issue.section.error_logs': '错误日志',
     'command.issue.no_error_logs': '本次会话未捕获到错误日志。',
     'command.issue.opening': '正在为你打开 GitHub Issue 提交页面...',
+    'command.report.copied': '报告已复制到剪切板。',
+    'command.report.copy_failed': '复制报告到剪切板失败：',
+    'command.history.header': '最近历史记录：',
+    'command.history.empty': '未找到匹配的历史记录。',
     'command.issue.open.manual': '请在浏览器中打开以下链接提交 Issue：\n{url}',
     'command.issue.open.failed': '打开 Issue 链接失败：{error}',
     'command.about.description': '显示版本信息',
