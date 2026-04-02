@@ -51,7 +51,8 @@ import {
   getAllMCPServerToolNames,
   MCPServerStatus,
   MCPDiscoveryState,
-  unloadMcpServer
+  unloadMcpServer,
+  UnauthorizedError
 } from 'deepv-code-core';
 
 import { ContextBuilder } from './contextBuilder';
@@ -1496,6 +1497,13 @@ export class AIService {
     } catch (error) {
       this.logger.error('❌ Failed to process edit message', error instanceof Error ? error : undefined);
 
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       if (this.communicationService && this.sessionId) {
         const errorMessage = `Edit Error: ${error instanceof Error ? error.message : String(error)}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
@@ -1587,6 +1595,13 @@ export class AIService {
     } catch (error) {
       this.logger.error('❌ Failed to process AI chat', error instanceof Error ? error : undefined);
 
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       if (this.communicationService && this.sessionId) {
         const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
@@ -1625,6 +1640,14 @@ export class AIService {
 
     } catch (error) {
       this.logger.error('❌ Failed to process streaming response with parts', error instanceof Error ? error : undefined);
+
+      // 🔐 检测认证过期错误，避免作为普通错误展示给用户
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
 
       if (this.communicationService && this.sessionId) {
         const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -1703,6 +1726,21 @@ export class AIService {
               const streamInterruptError = new Error(errorMessage);
               (streamInterruptError as any).isStreamInterrupt = true;
               throw streamInterruptError;
+            }
+
+            // 🔐 检测认证过期错误（HTTP 401），触发自动登出
+            const isAuthError =
+              errorMessage.includes('401') ||
+              errorMessage.includes('Unauthorized') ||
+              errorMessage.includes('Authentication required') ||
+              errorMessage.includes('re-authenticate');
+
+            if (isAuthError && this.communicationService) {
+              this.logger.warn('🔐 Authentication error detected in AI stream, triggering auth expired');
+              await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+              this.isCurrentlyResponding = false;
+              this.setProcessingState(false, null, false);
+              return;
             }
 
             if (this.communicationService && this.sessionId) {
@@ -1784,6 +1822,17 @@ export class AIService {
           if (this.communicationService && this.sessionId) {
             await this.communicationService.sendChatError(this.sessionId, `❌ 自动恢复失败，请重新发送消息`);
           }
+        }
+        return;
+      }
+
+      // 🔐 检测认证过期错误（核心层抛出的 UnauthorizedError）
+      if (streamError instanceof UnauthorizedError) {
+        this.logger.warn('🔐 UnauthorizedError caught in stream processing, triggering auth expired');
+        this.isCurrentlyResponding = false;
+        this.setProcessingState(false, null, false);
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
         }
         return;
       }
