@@ -362,6 +362,17 @@ export class MultiSessionCommunicationService {
     });
   }
 
+  /**
+   * 🔐 发送认证过期通知到 WebView，触发自动登出
+   * 当 API 返回 HTTP 401 时调用此方法
+   */
+  async sendAuthExpired(reason: string) {
+    await this.sendMessage({
+      type: 'auth_expired' as any,
+      payload: { reason }
+    });
+  }
+
   async sendToolConfirmationRequest(
     sessionId: string,
     toolId: string,
