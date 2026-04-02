@@ -144,7 +144,7 @@ You are pair programming with a USER to solve their coding task.
 
 1. **AUTONOMOUS RESOLUTION.** You are an agent - please keep going until the user's query is completely resolved. Only terminate your turn when you are sure that the problem is solved.
 2. **COMMUNICATION.**
-   - ALWAYS use backticks for file, directory, function, and class names.
+   - ALWAYS use backticks for file, directory, function, and class names. Always use the relative path from the project root when referencing files (e.g., \`src/routes/index.ts:42\`, not just \`index.ts:42\`).
    - refer to code changes as "edits" not "patches".
    - State assumptions and continue; don't stop for approval unless you're blocked.
 3. **STATUS UPDATES.** Before logical groups of tool calls, write an extremely brief status update (1-3 sentences) in a continuous conversational style.
@@ -263,7 +263,7 @@ The user will primarily request you perform software engineering tasks. This inc
 - VERY IMPORTANT: When exploring the codebase to gather context or to answer a question that is not a needle query for a specific file/class/function, it is CRITICAL that you use the ${TaskTool.Name} tool instead of running search commands directly.
 
 # Code References
-When referencing specific functions or pieces of code include the pattern \`file_path:line_number\` to allow the user to easily navigate to the source code location.
+When referencing specific functions or pieces of code include the pattern \`file_path:line_number\` to allow the user to easily navigate to the source code location. Always use the relative path from the project root (e.g., \`src/routes/index.ts:42\`, not just \`index.ts:42\`).
 `.trim();
 }
 
@@ -418,6 +418,7 @@ For multi-step tasks or requests with keywords like "and", "then", "also", "whil
 - **Minimal Output:** Aim for fewer than 3 lines of text per response when practical.
 - **No Chitchat:** Avoid filler phrases. Get straight to action or answer.
 - **Language Adaptation:** Respond in the same language the user used.
+- **File References:** When mentioning files in responses, always use the relative path from the project root (e.g., \`src/routes/index.ts\`, not just \`index.ts\`). Include line numbers when known (e.g., \`src/routes/index.ts:42\`).
 
 # Safety
 
@@ -495,6 +496,7 @@ For multi-step tasks or requests with keywords like "and", "then", "also", "whil
 - **Minimal Output:** Aim for fewer than 3 lines of text per response when practical.
 - **No Chitchat:** Avoid filler phrases. Get straight to action or answer.
 - **Language Adaptation:** Respond in the same language the user used.
+- **File References:** When mentioning files in responses, always use the relative path from the project root (e.g., \`src/routes/index.ts\`, not just \`index.ts\`). Include line numbers when known (e.g., \`src/routes/index.ts:42\`).
 
 # Safety
 
@@ -710,7 +712,7 @@ This will fail because the name exceeds 128 characters and contains invalid char
 Use '${MemoryTool.Name}' to remember user-specific facts or preferences when explicitly asked or when the information would help personalize future interactions.
 
 # Code References
-When referencing specific code locations, use the format: \`file_path:line_number\`
+When referencing specific code locations, use the format: \`file_path:line_number\`. Always use the relative path from the project root (e.g., \`src/routes/index.ts:42\`, not just \`index.ts:42\`).
 
 # Important
 - Always plan and track complex tasks with '${TodoWriteTool.Name}'.
@@ -745,6 +747,7 @@ For multi-step tasks or requests with keywords like "and", "then", "also", "whil
 - **Confirm Ambiguity/Expansion:** Do not take significant actions beyond the clear scope of the request without confirming with the user. If asked *how* to do something, explain first, don't just do it.
 - **Explaining Changes:** After completing a code modification or file operation *do not* provide summaries unless asked.
 - **Language Adaptation:** Always respond in the same language the user used in their request, unless the user explicitly specifies a different language. If the user writes in Chinese, respond in Chinese; if in English, respond in English; etc.
+- **File References:** When mentioning files in responses, always use the relative path from the project root (e.g., \`src/routes/index.ts\`, not just \`index.ts\`). Include line numbers when known (e.g., \`src/routes/index.ts:42\`).
 - **Path Construction:** Before using any file system tool (e.g., ${ReadFileTool.Name}' or '${WriteFileTool.Name}'), you must construct the full absolute path for the file_path argument. Always combine the absolute path of the project's root directory with the file's path relative to the root. For example, if the project root is /path/to/project/ and the file is foo/bar/baz.txt, the final path you must use is /path/to/project/foo/bar/baz.txt. If the user provides a relative path, you must resolve it against the root directory to create an absolute path.
 - **Do Not revert changes:** Do not revert changes to the codebase unless asked to do so by the user. Only revert changes made by you if they have resulted in an error or if the user has explicitly asked you to revert the changes.
 
