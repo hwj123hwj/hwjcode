@@ -468,11 +468,16 @@ export async function runNonInteractive(
                 }
                 if (!isToolNotFound) {
                   failedToolCount++;
-                  if (failedToolCount > 2 && !modelCapabilities.enableProgressiveDegradation) {
-                    process.exit(1);
-                  }
                 }
-                return null;
+                // Return the error as a functionResponse so the AI can see it and retry
+                return {
+                  responseParts: [{
+                    functionResponse: {
+                      name: fc.name ?? '',
+                      response: { error: resultDisplay },
+                    },
+                  }],
+                } as any;
               }
 
               return toolResponse;
@@ -535,21 +540,8 @@ export async function runNonInteractive(
           }
         }
 
-        if (toolResponseParts.length === 0 && failedToolCount > 0) {
-          if (outputFormat === 'stream-json') {
-            outputError('All tool calls failed. Exiting.');
-          } else if (isJsonMode) {
-            outputFinalJson({
-              model: modelName,
-              content: jsonAccumulatedText,
-              status: 'error',
-              error: 'All tool calls failed.',
-            });
-          } else {
-            console.error('\n❌ All tool calls failed. Exiting.');
-          }
-          process.exit(1);
-        }
+        // Note: tool failures are returned as functionResponse errors so the AI
+        // can see them and retry with corrected parameters, instead of exiting.
 
         currentMessages = [{ role: MESSAGE_ROLES.USER, parts: toolResponseParts }];
       } else {
