@@ -28,6 +28,7 @@ import {
   AuthSubmitMessage,
   ClearSessionMessage,
   FeishuImageMessage,
+  GetModelsRequestMessage,
 } from './remoteProtocol.js';
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { t, tp } from '../ui/utils/i18n.js';
@@ -37,6 +38,7 @@ import { ProxyAuthManager } from 'deepv-code-core';
 import { RemoteSession } from './remoteSession.js';
 import { remoteLogger } from './remoteLogger.js';
 import { CloudClient } from './cloudClient.js';
+import { getAvailableModels } from '../ui/commands/modelCommand.js';
 
 /**
  * 从指定端口开始查找可用端口
@@ -683,6 +685,107 @@ export class RemoteServer {
 
           if (this.cloudClient) {
             this.cloudClient.triggerSessionSync();
+          }
+          break;
+        }
+
+        case 'GET_MODELS_REQUEST':
+        case 'get_models_request': {
+          try {
+            const { modelInfos } = await getAvailableModels(undefined, this.config);
+            const currentModel = this.config.getModel();
+
+            const models = modelInfos.map(m => ({
+              id: m.name,
+              name: m.displayName,
+              current: m.name === currentModel
+            }));
+
+            // 如果没有 current (比如 current 是 auto)，手动加一个 auto
+            if (!models.some(m => m.current)) {
+              models.unshift({
+                id: 'auto',
+                name: 'Auto (Recommended)',
+                current: currentModel === 'auto' || !currentModel
+              });
+            } else {
+              // 也要确保 auto 在列表中
+              if (!models.some(m => m.id === 'auto')) {
+                models.unshift({
+                  id: 'auto',
+                  name: 'Auto (Recommended)',
+                  current: currentModel === 'auto'
+                });
+              }
+            }
+
+            const response = MessageFactory.createGetModelsResponse(models);
+            if (this.cloudClient) {
+              this.cloudClient.sendToCloud(response);
+            }
+          } catch (error) {
+            console.error(`获取模型列表失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          break;
+        }
+
+        case 'GET_STATUS_REQUEST':
+        case 'get_status_request': {
+          try {
+            const { getCliVersion } = await import('../utils/version.js');
+            const { tokenLimit } = await import('deepv-code-core');
+            const version = await getCliVersion();
+            const currentModel = this.config.getModel();
+
+            // 找到与此请求相关的 session（取最近活跃的）
+            let sessionId = (message as any).sessionId || '';
+            let contextTokens = 0;
+
+            if (!sessionId && this.sessions.size > 0) {
+              const sorted = Array.from(this.sessions.entries())
+                .sort(([, a], [, b]) => b.lastActiveAt - a.lastActiveAt);
+              sessionId = sorted[0][0];
+            }
+
+            // 从 session 获取 lastPromptTokenCount
+            if (sessionId) {
+              const sessionInfo = this.sessions.get(sessionId);
+              if (sessionInfo) {
+                contextTokens = sessionInfo.session.getLastPromptTokenCount();
+              }
+            }
+
+            // 获取 context window 上限（复用 tokenLimit 方法，与 Footer 一致）
+            const contextMaxTokens = tokenLimit(currentModel || 'auto', this.config);
+
+            // 获取 git branch
+            let gitBranch = '';
+            try {
+              const { execSync } = await import('child_process');
+              gitBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+                cwd: process.cwd(),
+                encoding: 'utf-8',
+                timeout: 3000,
+              }).trim();
+            } catch {
+              gitBranch = '';
+            }
+
+            const response = MessageFactory.createGetStatusResponse({
+              version,
+              model: currentModel || 'auto',
+              contextTokens,
+              contextMaxTokens,
+              sessionId,
+              workingDir: process.cwd(),
+              gitBranch,
+            });
+
+            if (this.cloudClient) {
+              this.cloudClient.sendToCloud(response);
+            }
+          } catch (error) {
+            console.error(`获取状态信息失败: ${error instanceof Error ? error.message : String(error)}`);
           }
           break;
         }

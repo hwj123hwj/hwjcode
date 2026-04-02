@@ -35,6 +35,10 @@ export enum MessageType {
   CREATE_SESSION = 'create_session',        // 创建新session
   CLEAR_SESSION = 'clear_session',          // 清理session数据
   FEISHU_IMAGE_MESSAGE = 'feishu_image_message', // 飞书图片消息
+  GET_MODELS_REQUEST = 'get_models_request',   // 请求可用模型列表
+  GET_MODELS_RESPONSE = 'get_models_response', // 返回可用模型列表
+  GET_STATUS_REQUEST = 'get_status_request',   // 请求 CLI 状态信息
+  GET_STATUS_RESPONSE = 'get_status_response', // 返回 CLI 状态信息
 
   // 认证类
   AUTH_REQUIRED = 'auth_required',          // 需要密码认证
@@ -234,6 +238,52 @@ export interface FeishuImageMessage extends RemoteMessage {
     fileName: string;
     text?: string;
     mimeType?: string;
+  };
+}
+
+/**
+ * 请求可用模型列表
+ */
+export interface GetModelsRequestMessage extends RemoteMessage {
+  type: MessageType.GET_MODELS_REQUEST;
+  payload: Record<string, never>;
+}
+
+/**
+ * 返回可用模型列表
+ */
+export interface GetModelsResponseMessage extends RemoteMessage {
+  type: MessageType.GET_MODELS_RESPONSE;
+  payload: {
+    models: Array<{
+      id: string;
+      name: string;
+      current: boolean;
+    }>;
+  };
+}
+
+/**
+ * 请求 CLI 状态信息
+ */
+export interface GetStatusRequestMessage extends RemoteMessage {
+  type: MessageType.GET_STATUS_REQUEST;
+  payload: Record<string, never>;
+}
+
+/**
+ * 返回 CLI 状态信息
+ */
+export interface GetStatusResponseMessage extends RemoteMessage {
+  type: MessageType.GET_STATUS_RESPONSE;
+  payload: {
+    version: string;
+    model: string;
+    contextTokens: number;
+    contextMaxTokens: number;
+    sessionId: string;
+    workingDir: string;
+    gitBranch: string;
   };
 }
 
@@ -471,6 +521,42 @@ export class MessageFactory {
     return {
       id: this.generateId(),
       type: MessageType.FEISHU_IMAGE_MESSAGE,
+      payload,
+      timestamp: Date.now(),
+    };
+  }
+
+  static createGetModelsRequest(): GetModelsRequestMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.GET_MODELS_REQUEST,
+      payload: {},
+      timestamp: Date.now(),
+    };
+  }
+
+  static createGetModelsResponse(models: GetModelsResponseMessage['payload']['models']): GetModelsResponseMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.GET_MODELS_RESPONSE,
+      payload: { models },
+      timestamp: Date.now(),
+    };
+  }
+
+  static createGetStatusRequest(): GetStatusRequestMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.GET_STATUS_REQUEST,
+      payload: {},
+      timestamp: Date.now(),
+    };
+  }
+
+  static createGetStatusResponse(payload: GetStatusResponseMessage['payload']): GetStatusResponseMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.GET_STATUS_RESPONSE,
       payload,
       timestamp: Date.now(),
     };
