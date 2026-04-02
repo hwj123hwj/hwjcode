@@ -85,7 +85,7 @@ export interface CliArgs {
 
 export async function parseArguments(extensions: Extension[] = []): Promise<CliArgs> {
   const yargsInstance = yargs(hideBin(process.argv))
-    .scriptName('deepv')
+    .scriptName('dvcode')
     .usage(
       '$0 [options]',
       'DeepV Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode',
