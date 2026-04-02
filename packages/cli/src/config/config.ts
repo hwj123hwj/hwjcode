@@ -244,6 +244,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       description: 'Export a specific session history to a Markdown file and exit',
     })
     .option('cloud-mode', {
+      alias: ['remote', 'cloud'],
       type: 'boolean',
       description: 'Connect to cloud server for remote access',
       default: false,
