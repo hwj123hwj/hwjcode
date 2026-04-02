@@ -360,9 +360,9 @@ export class CloudClient {
    */
   private async forwardToLocalServer(message: CloudMessage): Promise<void> {
     try {
-      // 移除云端路由信息
+      // 保留 _cloudRoute：CLI 回包时需要透传路由信息，
+      // 让服务端能正确路由到消息来源（Web / 飞书等）
       const localMessage = { ...message };
-      delete localMessage._cloudRoute;
 
       // 转发给本地RemoteServer的消息处理逻辑
       console.log(tp('cloud.message.forward.local', { type: message.type }));

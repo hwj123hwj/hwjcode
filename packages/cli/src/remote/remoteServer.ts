@@ -73,6 +73,7 @@ interface SessionInfo {
   session: RemoteSession;
   firstUserInput?: string;  // 第一条用户输入
   lastUserInput?: string;   // 最后一条用户输入
+  cloudRouteRef?: { current: Record<string, any> };  // 云端路由引用，供 virtualWs 回包时使用
 }
 
 /**
@@ -554,6 +555,18 @@ export class RemoteServer {
   public async handleCloudMessage(message: any): Promise<void> {
     console.log(tp('cloud.mode.handle.message', { type: message.type }));
 
+    // 构建回包路由信息：透传原始 _cloudRoute，并补充 targetWeb（如有 webId）
+    // 这保证不论消息来自 Web 还是飞书，回包都携带正确的路由信息
+    const incomingRoute = (message as any)._cloudRoute;
+    const incomingWebId = (message as any).webId;
+    const buildReplyRoute = (): Record<string, any> => {
+      const route: Record<string, any> = { ...(incomingRoute || {}) };
+      if (incomingWebId) {
+        route.targetWeb = incomingWebId;
+      }
+      return route;
+    };
+
     try {
       switch (message.type) {
         case 'CREATE_SESSION':
@@ -564,13 +577,20 @@ export class RemoteServer {
           // 从原始消息中提取webId用于路由
           const originWebId = (message as any).webId;
 
+          // 捕获当前消息的路由信息，供 virtualWs 回包时使用
+          // 使用对象引用，以便后续 COMMAND 消息可以更新路由
+          const sessionRouteRef = { current: buildReplyRoute() };
+
           const virtualWs = {
             readyState: 1, // WebSocket.OPEN
             send: (data: string) => {
-              //console.log(`🌐 [VirtualWS] 发送到云端: ${data}`);
-              // 直接发送原始消息，让服务器端处理路由
               if (this.cloudClient) {
-                this.cloudClient.sendToCloud(JSON.parse(data));
+                const parsed = JSON.parse(data);
+                // 自动注入路由信息：让 session 的所有回包都能正确路由
+                if (!parsed._cloudRoute) {
+                  parsed._cloudRoute = { ...sessionRouteRef.current };
+                }
+                this.cloudClient.sendToCloud(parsed);
               }
             },
             close: () => {
@@ -581,6 +601,12 @@ export class RemoteServer {
           // 使用现有的createSession方法
           const sessionId = this.createSession(virtualWs);
           console.log(tp('cloud.mode.session.created', { sessionId }));
+
+          // 将路由引用绑到 SessionInfo 上，以便后续 COMMAND 更新路由
+          {
+            const si = this.sessions.get(sessionId);
+            if (si) si.cloudRouteRef = sessionRouteRef;
+          }
 
           // 重要: 初始化session，确保geminiChat和toolRegistry正确设置
           let initSuccess = false;
@@ -599,9 +625,6 @@ export class RemoteServer {
 
           // 🎯 发送CREATE_SESSION响应给Web端
           if (this.cloudClient) {
-            // 从原始消息中提取webId用于路由
-            const webId = (message as any).webId;
-
             const createSessionResponse = {
               id: `session_${Date.now()}`,
               type: 'create_session_response',
@@ -611,14 +634,11 @@ export class RemoteServer {
                 error: initSuccess ? undefined : 'Session创建或初始化失败'
               },
               timestamp: Date.now(),
-              // 添加路由信息指定目标Web客户端
-              _cloudRoute: {
-                targetWeb: webId
-              }
+              _cloudRoute: buildReplyRoute()
             };
 
             this.cloudClient.sendToCloud(createSessionResponse);
-            console.log(tp('cloud.mode.create.session.response', { webId, status: initSuccess ? 'SUCCESS' : 'FAILED' }));
+            console.log(tp('cloud.mode.create.session.response', { webId: incomingWebId || 'N/A', status: initSuccess ? 'SUCCESS' : 'FAILED' }));
 
             // 触发session列表同步
             // 立即同步新创建的session到云端
@@ -643,6 +663,11 @@ export class RemoteServer {
           if (!sessionInfo) {
             console.error(tp('cloud.mode.session.not.exist', { sessionId: targetSessionId }));
             break;
+          }
+
+          // 更新 session 的路由信息，确保 COMMAND 回包路由到正确的来源
+          if (sessionInfo.cloudRouteRef) {
+            sessionInfo.cloudRouteRef.current = buildReplyRoute();
           }
 
           console.log(tp('cloud.mode.command.forward', { sessionId: targetSessionId }));
@@ -672,6 +697,11 @@ export class RemoteServer {
           if (!sessionInfo) {
             console.error(tp('cloud.mode.session.not.exist', { sessionId: targetSessionId }));
             break;
+          }
+
+          // 更新路由信息
+          if (sessionInfo.cloudRouteRef) {
+            sessionInfo.cloudRouteRef.current = buildReplyRoute();
           }
 
           try {
@@ -721,6 +751,7 @@ export class RemoteServer {
 
             const response = MessageFactory.createGetModelsResponse(models);
             if (this.cloudClient) {
+              (response as any)._cloudRoute = buildReplyRoute();
               this.cloudClient.sendToCloud(response);
             }
           } catch (error) {
@@ -782,6 +813,7 @@ export class RemoteServer {
             });
 
             if (this.cloudClient) {
+              (response as any)._cloudRoute = buildReplyRoute();
               this.cloudClient.sendToCloud(response);
             }
           } catch (error) {
@@ -812,7 +844,6 @@ export class RemoteServer {
 
           try {
             const uiData = uiSessionInfo.session.getUIDisplayData();
-            const webId = (message as any).webId;
 
             const uiResponse = {
               id: `ui_${Date.now()}`,
@@ -823,16 +854,13 @@ export class RemoteServer {
                 isProcessing: uiData.isProcessing
               },
               timestamp: Date.now(),
-              // 添加路由信息指定目标Web客户端
-              _cloudRoute: {
-                targetWeb: webId
-              }
+              _cloudRoute: buildReplyRoute()
             };
 
             // 发送回云端
             if (this.cloudClient) {
               this.cloudClient.sendToCloud(uiResponse);
-              console.log(tp('cloud.mode.ui.state.sent', { webId }));
+              console.log(tp('cloud.mode.ui.state.sent', { webId: incomingWebId || 'N/A' }));
             }
           } catch (error) {
             console.error(tp('cloud.mode.ui.state.failed', { error: error instanceof Error ? error.message : String(error) }));
@@ -895,7 +923,6 @@ export class RemoteServer {
 
             // 发送清理成功响应
             if (this.cloudClient) {
-              const webId = (message as any).webId;
               const clearResponse = {
                 id: `clear_${Date.now()}`,
                 type: 'clear_session_response',
@@ -904,10 +931,7 @@ export class RemoteServer {
                   sessionId: clearSessionId
                 },
                 timestamp: Date.now(),
-                // 添加路由信息指定目标Web客户端
-                _cloudRoute: {
-                  targetWeb: webId
-                }
+                _cloudRoute: buildReplyRoute()
               };
               this.cloudClient.sendToCloud(clearResponse);
             }
@@ -916,7 +940,6 @@ export class RemoteServer {
 
             // 发送清理失败响应
             if (this.cloudClient) {
-              const webId = (message as any).webId;
               const clearResponse = {
                 id: `clear_${Date.now()}`,
                 type: 'clear_session_response',
@@ -926,10 +949,7 @@ export class RemoteServer {
                   error: error instanceof Error ? error.message : String(error)
                 },
                 timestamp: Date.now(),
-                // 添加路由信息指定目标Web客户端
-                _cloudRoute: {
-                  targetWeb: webId
-                }
+                _cloudRoute: buildReplyRoute()
               };
               this.cloudClient.sendToCloud(clearResponse);
             }
