@@ -895,6 +895,13 @@ export const MultiSessionApp: React.FC = () => {
       setStreamRecoveryVisible(false);
     }));
 
+    // 🔐 监听认证过期通知（服务端返回 HTTP 401 时由 extension 主动推送）
+    cleanups.push(messageService.onAuthExpired(({ reason }) => {
+      console.log('🔐 [MultiSessionApp] Auth expired notification received:', reason);
+      setIsLoggedIn(false);
+      setLoginError('Your login session has expired. Please log in again.');
+    }));
+
     cleanups.push(messageService.onChatError(({ sessionId, error }) => {
       // 🎯 检测认证错误，切换到登录页面
       if (checkAuthenticationError(error)) {
