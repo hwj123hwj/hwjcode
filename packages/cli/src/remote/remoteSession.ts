@@ -7,7 +7,7 @@
 
 
 import WebSocket from 'ws';
-import { Config, ToolRegistry, executeToolCall, GeminiClient, ToolCallRequestInfo, SceneType, AuthType, ApprovalMode, GeminiChat, MESSAGE_ROLES, GeminiEventType, ServerGeminiStreamEvent, CoreToolScheduler, ToolCall as EngineToolCall, CompletedToolCall } from 'deepv-code-core';
+import { Config, ToolRegistry, executeToolCall, GeminiClient, ToolCallRequestInfo, SceneType, AuthType, ApprovalMode, GeminiChat, MESSAGE_ROLES, GeminiEventType, ServerGeminiStreamEvent, CoreToolScheduler, ToolCall as EngineToolCall, CompletedToolCall, ToolConfirmationOutcome } from 'deepv-code-core';
 import { EditorType } from 'deepv-code-core';
 import { GenerateContentResponse, FunctionCall, Part } from '@google/genai';
 import { Content } from 'deepv-code-core';
@@ -58,6 +58,14 @@ export class RemoteSession {
   private sessionId: string;
   private isProcessingInterrupted: boolean = false;
   private currentAbortController: AbortController | null = null;
+
+  // 🆕 远程确认支持：当危险命令需要用户确认时，暂存确认上下文
+  private pendingConfirmation: {
+    callId: string;
+    toolName: string;
+    command: string;
+    scheduler: CoreToolScheduler;
+  } | null = null;
 
   // UI展示记录存储 - 用于断线重连后恢复UI状态
   private uiDisplayRecords: UIDisplayRecord[] = [];
@@ -212,6 +220,41 @@ export class RemoteSession {
     console.log(`[${formatTimestamp()}] ${t('cloud.remote.message.received')}`);
     remoteLogger.info('RemoteSession', `收到指令: ${this.sessionId}`, { command, messageId: message.id });
 
+    // 🆕 如果当前正在等待用户确认危险命令，拦截输入作为确认回复
+    if (this.pendingConfirmation) {
+      const input = command.trim().toLowerCase();
+      const { callId, command: pendingCmd, scheduler } = this.pendingConfirmation;
+
+      if (['y', 'yes', 'ok', '确认', '是'].includes(input)) {
+        this.pendingConfirmation = null;
+        remoteLogger.info('RemoteSession', `用户确认执行危险命令: ${this.sessionId}`, { callId });
+        this.sendMessage(MessageFactory.createOutput(
+          `✅ 已确认，正在执行: \`${pendingCmd}\`\n`,
+          true, 'stdout'
+        ));
+        await scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.ProceedOnce);
+        return;
+      }
+
+      if (['n', 'no', 'cancel', '取消', '否'].includes(input)) {
+        this.pendingConfirmation = null;
+        remoteLogger.info('RemoteSession', `用户取消危险命令: ${this.sessionId}`, { callId });
+        this.sendMessage(MessageFactory.createOutput(
+          `🛑 已取消该操作。\n`,
+          true, 'stdout'
+        ));
+        await scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.Cancel);
+        return;
+      }
+
+      // 用户输入了无关内容，再次提醒
+      this.sendMessage(MessageFactory.createOutput(
+        `⚠️ 请先回复 y(确认) 或 n(取消) 来处理待确认的危险命令：\`${pendingCmd}\`\n`,
+        true, 'stdout'
+      ));
+      return;
+    }
+
     // 如果有正在处理的指令，则等待完成
     if (this.currentProcessingPromise) {
       remoteLogger.warn('RemoteSession', `有指令正在执行，拒绝新指令: ${this.sessionId}`);
@@ -254,6 +297,13 @@ export class RemoteSession {
    */
   handleInterrupt(): void {
     remoteLogger.info('RemoteSession', `收到中断信号: ${this.sessionId}`);
+
+    // 🆕 如果有待确认的危险命令，中断时自动取消
+    if (this.pendingConfirmation) {
+      const { callId, scheduler } = this.pendingConfirmation;
+      this.pendingConfirmation = null;
+      scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.Cancel).catch(() => {});
+    }
 
     // 设置中断标志 - 这会在适当的检查点生效，确保已开始的工具能够完成
     this.isProcessingInterrupted = true;
@@ -480,6 +530,9 @@ export class RemoteSession {
     // 清空UI显示记录
     this.uiDisplayRecords = [];
     this.currentAIResponse = null;
+
+    // 🆕 清理待确认状态
+    this.pendingConfirmation = null;
 
     // 清理对话历史
     this.geminiClient?.resetChat();
@@ -817,14 +870,44 @@ export class RemoteSession {
         allToolsCompleted = true;
       },
       onToolCallsUpdate: (toolCalls: EngineToolCall[]) => {
-        // 工具状态更新回调
-        // remoteLogger.info('RemoteSession', `工具状态更新: ${this.sessionId}`, {
-        //   toolCount: toolCalls.length,
-        //   statuses: toolCalls.map(tc => {
-        //     const toolName = 'tool' in tc ? tc.tool.name : tc.request.name;
-        //     return `${toolName}:${tc.status}`;
-        //   })
-        // });
+        // 🆕 检测是否有工具进入 awaiting_approval 状态（危险命令确认）
+        const confirmingTool = toolCalls.find(tc => tc.status === 'awaiting_approval');
+        if (confirmingTool && !this.pendingConfirmation) {
+          const confirmingAny = confirmingTool as any;
+          const details = confirmingAny.confirmationDetails;
+          const command = details?.command || confirmingAny.request?.args?.command || String(confirmingAny.request?.args);
+          const warning = details?.warning || '这是一个需要确认的敏感操作。';
+          const toolName = confirmingAny.tool?.displayName || confirmingAny.tool?.name || confirmingAny.request?.name || 'Unknown';
+
+          // 保存确认上下文，等待用户回复
+          this.pendingConfirmation = {
+            callId: confirmingTool.request.callId,
+            toolName,
+            command: typeof command === 'string' ? command : JSON.stringify(command),
+            scheduler: toolScheduler,
+          };
+
+          // 向远程端发送人性化的确认提示文本
+          const promptText = [
+            ``,
+            `⚠️ **安全确认**`,
+            `AI 准备执行以下命令：`,
+            `\`${this.pendingConfirmation.command}\``,
+            ``,
+            `${warning}`,
+            ``,
+            `**请回复 y(确认执行) 或 n(取消)**`,
+            ``,
+          ].join('\n');
+
+          this.sendMessage(MessageFactory.createOutput(promptText, true, 'stdout'));
+          this.sendMessage(MessageFactory.createStatus('idle', '等待用户确认危险命令...'));
+
+          remoteLogger.info('RemoteSession', `发送远程确认请求: ${this.sessionId}`, {
+            callId: confirmingTool.request.callId,
+            command: this.pendingConfirmation.command,
+          });
+        }
       },
       onPreToolExecution: async (toolCallInfo) => {
         // 工具执行前的预处理
