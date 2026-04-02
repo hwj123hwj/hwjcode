@@ -11,6 +11,7 @@ import { createServer, Server } from 'http';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
+import * as fs from 'fs/promises';
 
 import { Config, ToolRegistry, executeToolCall } from 'deepv-code-core';
 import { GenerateContentResponse, FunctionCall, Part } from '@google/genai';
@@ -26,6 +27,7 @@ import {
   RequestUIStateMessage,
   AuthSubmitMessage,
   ClearSessionMessage,
+  FeishuImageMessage,
 } from './remoteProtocol.js';
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { t, tp } from '../ui/utils/i18n.js';
@@ -285,7 +287,7 @@ export class RemoteServer {
   /**
    * 检查电源管理设置和系统休眠状态
    */
-  private checkPowerManagement(): boolean {
+  private async checkPowerManagement(): Promise<boolean> {
     const platform = process.platform;
 
     console.log('\n' + t('power.management.check.title'));
@@ -367,7 +369,7 @@ export class RemoteServer {
       }
 
       // 检查电源管理设置，确保系统不会休眠导致云端连接中断
-      const powerManagementOk = this.checkPowerManagement();
+      const powerManagementOk = await this.checkPowerManagement();
       if (!powerManagementOk) {
         throw new Error('电源管理设置不当，系统可能会休眠导致云端连接中断');
       }
@@ -522,6 +524,28 @@ export class RemoteServer {
     }
   }
 
+  private async downloadFeishuImageToClipboard(message: FeishuImageMessage): Promise<string> {
+    const clipboardDir = path.resolve(process.cwd(), '.deepvcode', 'clipboard');
+    await fs.mkdir(clipboardDir, { recursive: true });
+
+    const safeFileName = (message.payload.fileName || 'feishu-image').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.resolve(clipboardDir, safeFileName);
+
+    const response = await fetch(message.payload.imageUrl);
+    if (!response.ok) {
+      throw new Error(`下载飞书图片失败: ${response.status} ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    await fs.writeFile(filePath, Buffer.from(arrayBuffer));
+    return filePath;
+  }
+
+  private buildCommandFromFeishuImageMessage(message: FeishuImageMessage, absolutePath: string): string {
+    const text = message.payload.text?.trim();
+    return text ? `${text}\n@${absolutePath}` : `@${absolutePath}`;
+  }
+
   /**
    * 处理来自CloudClient的消息（云端模式专用）
    */
@@ -632,6 +656,36 @@ export class RemoteServer {
             this.cloudClient.triggerSessionSync();
           }
           break;
+
+        case 'FEISHU_IMAGE_MESSAGE':
+        case 'feishu_image_message': {
+          const feishuImageMessage = message as FeishuImageMessage;
+          const targetSessionId = feishuImageMessage.sessionId;
+          if (!targetSessionId) {
+            console.error('飞书图片消息缺少 sessionId');
+            break;
+          }
+
+          const sessionInfo = this.sessions.get(targetSessionId);
+          if (!sessionInfo) {
+            console.error(tp('cloud.mode.session.not.exist', { sessionId: targetSessionId }));
+            break;
+          }
+
+          try {
+            const absolutePath = await this.downloadFeishuImageToClipboard(feishuImageMessage);
+            const command = this.buildCommandFromFeishuImageMessage(feishuImageMessage, absolutePath);
+            await sessionInfo.session.handleCommand(MessageFactory.createCommand(command));
+            console.log(`飞书图片已转为本地命令输入: ${absolutePath}`);
+          } catch (error) {
+            console.error(`处理飞书图片消息失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+
+          if (this.cloudClient) {
+            this.cloudClient.triggerSessionSync();
+          }
+          break;
+        }
 
         case 'REQUEST_UI_STATE':
         case 'request_ui_state':

@@ -15,32 +15,33 @@ export enum MessageType {
   // 指令类
   COMMAND = 'command',           // 用户输入指令
   INTERRUPT = 'interrupt',       // 中断当前操作 (Ctrl+C)
-  
-  // 响应类  
+
+  // 响应类
   OUTPUT = 'output',             // CLI输出内容
   ERROR = 'error',               // 错误信息
   STATUS = 'status',             // 状态更新
-  
+
   // 工具调用类
   TOOL_CALL = 'tool_call',           // 工具调用（包含执行结果）
   TOOL_STATUS = 'tool_status',       // 工具执行状态更新
-  
+
   // UI状态类
   REQUEST_UI_STATE = 'request_ui_state',    // 请求UI状态数据
   UI_STATE_RESPONSE = 'ui_state_response',  // UI状态响应
-  
+
   // Session管理类
   SESSION_LIST = 'session_list',            // 可用session列表
   SELECT_SESSION = 'select_session',        // 选择session
   CREATE_SESSION = 'create_session',        // 创建新session
   CLEAR_SESSION = 'clear_session',          // 清理session数据
-  
+  FEISHU_IMAGE_MESSAGE = 'feishu_image_message', // 飞书图片消息
+
   // 认证类
   AUTH_REQUIRED = 'auth_required',          // 需要密码认证
   AUTH_SUBMIT = 'auth_submit',              // 提交密码
   AUTH_SUCCESS = 'auth_success',            // 认证成功
   AUTH_FAILED = 'auth_failed',              // 认证失败
-  
+
   // 控制类
   PING = 'ping',                 // 心跳检测
   PONG = 'pong',                 // 心跳响应
@@ -75,7 +76,7 @@ export interface CommandMessage extends RemoteMessage {
 export interface OutputMessage extends RemoteMessage {
   type: MessageType.OUTPUT;
   payload: {
-    content: string;      // CLI输出内容  
+    content: string;      // CLI输出内容
     isComplete: boolean;  // 是否输出完成
     stream: 'stdout' | 'stderr';
   };
@@ -224,6 +225,19 @@ export interface ClearSessionMessage extends RemoteMessage {
 }
 
 /**
+ * 飞书图片消息
+ */
+export interface FeishuImageMessage extends RemoteMessage {
+  type: MessageType.FEISHU_IMAGE_MESSAGE;
+  payload: {
+    imageUrl: string;
+    fileName: string;
+    text?: string;
+    mimeType?: string;
+  };
+}
+
+/**
  * 需要认证消息
  */
 export interface AuthRequiredMessage extends RemoteMessage {
@@ -277,8 +291,8 @@ export class MessageFactory {
   }
 
   static createOutput(
-    content: string, 
-    isComplete: boolean, 
+    content: string,
+    isComplete: boolean,
     stream: 'stdout' | 'stderr' = 'stdout'
   ): OutputMessage {
     return {
@@ -299,7 +313,7 @@ export class MessageFactory {
   }
 
   static createStatus(
-    status: 'idle' | 'running' | 'error', 
+    status: 'idle' | 'running' | 'error',
     message?: string
   ): StatusMessage {
     return {
@@ -412,8 +426,8 @@ export class MessageFactory {
   }
 
   static createSessionList(sessions: Array<{
-    id: string, 
-    createdAt: number, 
+    id: string,
+    createdAt: number,
     lastActiveAt: number,
     firstUserInput?: string,
     lastUserInput?: string
@@ -449,6 +463,15 @@ export class MessageFactory {
       id: this.generateId(),
       type: MessageType.CLEAR_SESSION,
       payload: {},
+      timestamp: Date.now(),
+    };
+  }
+
+  static createFeishuImageMessage(payload: FeishuImageMessage['payload']): FeishuImageMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.FEISHU_IMAGE_MESSAGE,
+      payload,
       timestamp: Date.now(),
     };
   }
