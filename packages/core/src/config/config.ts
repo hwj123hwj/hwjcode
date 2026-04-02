@@ -219,7 +219,7 @@ export interface ConfigParameters {
   summarizeToolOutput?: Record<string, SummarizeToolOutputSettings>;
   model?: string;
   cloudModels?: CloudModelInfo[];
-  customModels?: import('../types/customModel.js').CustomModelConfig[];
+  customModels?: Array<import('../types/customModel.js').CustomModelConfig>;
   ideMode?: boolean;
   ideClient?: IdeClient;
   silentMode?: boolean;
@@ -293,7 +293,7 @@ export class Config {
     | undefined;
   private model: string | undefined;
   private cloudModels: CloudModelInfo[] | undefined;
-  private customModels: import('../types/customModel.js').CustomModelConfig[] | undefined;
+  private customModels: Array<import('../types/customModel.js').CustomModelConfig> | undefined;
   private readonly experimentalAcp: boolean = false;
   private readonly silentMode: boolean;
   private readonly vsCodePluginMode: boolean;
@@ -328,9 +328,12 @@ export class Config {
     this.projectSettingsManager = new ProjectSettingsManager(this.cwd);
     const projectSettings = this.projectSettingsManager.load();
 
-    // 项目级配置优先于参数配置
+    // 项目级配置默认优先于一般参数配置
+    // 但如果命令行明确传入了 YOLO 模式（-y），它应具有最高优先级覆盖项目配置
     const projectApprovalMode = ProjectSettingsManager.toApprovalMode(projectSettings.yolo);
-    this.approvalMode = projectApprovalMode ?? params.approvalMode ?? ApprovalMode.DEFAULT;
+    this.approvalMode = params.approvalMode === ApprovalMode.YOLO
+      ? ApprovalMode.YOLO
+      : (projectApprovalMode ?? params.approvalMode ?? ApprovalMode.DEFAULT);
     this.showMemoryUsage = params.showMemoryUsage ?? false;
     this.accessibility = params.accessibility ?? {};
     // 硬编码禁用所有遥测功能
@@ -525,7 +528,7 @@ export class Config {
     this.cloudModels = models;
   }
 
-  getCustomModels(): import('../types/customModel.js').CustomModelConfig[] | undefined {
+  getCustomModels(): Array<import('../types/customModel.js').CustomModelConfig> | undefined {
     return this.customModels;
   }
 
@@ -549,7 +552,7 @@ export class Config {
     return undefined;
   }
 
-  setCustomModels(models: import('../types/customModel.js').CustomModelConfig[]): void {
+  setCustomModels(models: Array<import('../types/customModel.js').CustomModelConfig>): void {
     this.customModels = models;
   }
 
