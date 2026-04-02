@@ -177,7 +177,7 @@ Expectation for required parameters:
       // If oldString is empty and it's not a new file, do not modify the content.
       result = currentContent;
     } else {
-      result = currentContent.replaceAll(oldString, newString);
+      result = currentContent.replaceAll(oldString, () => newString);
     }
 
     // 应用语言感知的后处理
