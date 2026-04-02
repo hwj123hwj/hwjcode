@@ -70,6 +70,7 @@ export class RemoteSession {
   // UI展示记录存储 - 用于断线重连后恢复UI状态
   private uiDisplayRecords: UIDisplayRecord[] = [];
   private currentAIResponse: UIDisplayRecord | null = null; // 当前正在进行的AI响应
+  private lastPromptTokenCount = 0; // 最近一次 API 调用的 prompt token 数
 
   constructor(
     private ws: WebSocket,
@@ -210,6 +211,13 @@ export class RemoteSession {
    */
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /**
+   * 获取最近一次 API 调用的 prompt token count（用于 context left 计算）
+   */
+  getLastPromptTokenCount(): number {
+    return this.lastPromptTokenCount;
   }
 
   /**
@@ -684,8 +692,10 @@ export class RemoteSession {
         break;
 
       case GeminiEventType.TokenUsage:
-        // Token使用统计
-
+        // Token使用统计 - 记录最近一次的 prompt token count（用于 context left 计算）
+        if (event.value && typeof event.value === 'object' && 'inputTokens' in event.value) {
+          this.lastPromptTokenCount = (event.value as { inputTokens: number }).inputTokens;
+        }
         break;
 
       default:
