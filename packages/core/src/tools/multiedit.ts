@@ -158,7 +158,7 @@ export class MultiEditTool extends BaseTool<MultiEditToolParams, ToolResult> {
 
                 const newContent = edit.old_string === ''
                     ? edit.new_string
-                    : currentContent.replaceAll(edit.old_string, edit.new_string);
+                    : currentContent.replaceAll(edit.old_string, () => edit.new_string);
 
                 const fileName = path.basename(targetFile);
                 const fileDiff = Diff.createPatch(
