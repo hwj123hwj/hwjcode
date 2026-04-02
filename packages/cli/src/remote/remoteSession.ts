@@ -263,6 +263,12 @@ export class RemoteSession {
       return;
     }
 
+    // 🆕 斜杠命令预处理：在发送给 AI 之前拦截本地可处理的命令
+    if (command.trim().startsWith('/')) {
+      const handled = await this.handleSlashCommand(command.trim());
+      if (handled) return;
+    }
+
     // 如果有正在处理的指令，则等待完成
     if (this.currentProcessingPromise) {
       remoteLogger.warn('RemoteSession', `有指令正在执行，拒绝新指令: ${this.sessionId}`);
@@ -297,6 +303,111 @@ export class RemoteSession {
       this.currentProcessingPromise = null;
       this.currentAIResponse = null;
       this.currentAbortController = null;
+    }
+  }
+
+  /**
+   * 处理斜杠命令（本地拦截，不发给 AI）
+   * 返回 true 表示已处理，false 表示不是已知命令，需继续走 AI 流程
+   */
+  private async handleSlashCommand(input: string): Promise<boolean> {
+    const parts = input.substring(1).trim().split(/\s+/);
+    const cmd = parts[0]?.toLowerCase();
+    const args = parts.slice(1).join(' ').trim();
+
+    switch (cmd) {
+      case 'model':
+        await this.handleModelCommand(args);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * 处理 /model 命令：切换模型或显示当前模型
+   */
+  private async handleModelCommand(modelArg: string): Promise<void> {
+    try {
+      const { getAvailableModels } = await import('../ui/commands/modelCommand.js');
+      const { getModelNameFromDisplayName } = await import('../utils/modelUtils.js');
+
+      if (!modelArg) {
+        // /model 无参数：显示当前模型和可用列表
+        const currentModel = this.config.getModel() || 'auto';
+        const { modelInfos } = await getAvailableModels(undefined, this.config);
+        const modelList = ['auto', ...modelInfos.map(m => m.name)]
+          .map(m => `  ${m === currentModel ? '▶' : ' '} ${m}`)
+          .join('\n');
+
+        this.addUIRecord({ type: 'user_input', content: `/model`, status: 'completed' });
+        this.sendMessage(MessageFactory.createOutput(
+          `Current model: **${currentModel}**\n\nAvailable models:\n${modelList}\n\nUsage: \`/model <name>\` to switch.\n`,
+          true, 'stdout'
+        ));
+        this.sendMessage(MessageFactory.createStatus('idle', ''));
+        return;
+      }
+
+      this.addUIRecord({ type: 'user_input', content: `/model ${modelArg}`, status: 'completed' });
+
+      // 获取可用模型列表
+      const { modelInfos } = await getAvailableModels(undefined, this.config);
+      const availableNames = ['auto', ...modelInfos.map(m => m.name)];
+
+      // displayName → modelName 转换
+      const actualModelName = getModelNameFromDisplayName(modelArg, modelInfos);
+
+      if (!availableNames.includes(actualModelName)) {
+        const list = availableNames.join(', ');
+        this.sendMessage(MessageFactory.createOutput(
+          `❌ Unknown model: \`${modelArg}\`\n\nAvailable: ${list}\n`,
+          true, 'stdout'
+        ));
+        this.sendMessage(MessageFactory.createStatus('idle', ''));
+        return;
+      }
+
+      // 切换模型
+      this.sendMessage(MessageFactory.createOutput(
+        `⏳ Switching to model **${actualModelName}**...\n`,
+        true, 'stdout'
+      ));
+
+      this.config.setModel(actualModelName);
+
+      if (this.geminiClient) {
+        await this.geminiClient.waitForChatInitialized();
+        const switchResult = await this.geminiClient.switchModel(
+          actualModelName,
+          new AbortController().signal
+        );
+
+        if (!switchResult.success) {
+          this.sendMessage(MessageFactory.createOutput(
+            `❌ Failed to switch model: ${switchResult.error || 'Unknown error'}\n`,
+            true, 'stdout'
+          ));
+          this.sendMessage(MessageFactory.createStatus('error', 'Model switch failed'));
+          return;
+        }
+      }
+
+      this.sendMessage(MessageFactory.createOutput(
+        `✅ Model switched to **${actualModelName}**\n`,
+        true, 'stdout'
+      ));
+      this.sendMessage(MessageFactory.createStatus('idle', ''));
+
+      remoteLogger.info('RemoteSession', `模型切换成功: ${this.sessionId}`, { model: actualModelName });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendMessage(MessageFactory.createOutput(
+        `❌ Model switch error: ${errMsg}\n`,
+        true, 'stdout'
+      ));
+      this.sendMessage(MessageFactory.createStatus('error', 'Model switch failed'));
+      remoteLogger.error('RemoteSession', `模型切换失败: ${this.sessionId}`, error);
     }
   }
 
