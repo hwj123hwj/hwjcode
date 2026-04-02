@@ -14,6 +14,7 @@ import {
   MESSAGE_ROLES,
   MCPDiscoveryState,
   getMCPDiscoveryState,
+  waitForMCPDiscoveryComplete,
 } from 'deepv-code-core';
 import {
   Content,
@@ -69,24 +70,35 @@ function getResponseText(response: GenerateContentResponse): string | null {
 }
 
 /**
- * Wait for MCP discovery to complete
- * Ensures extension tools are available before using them
+ * Wait for MCP discovery to complete and sync tools into the current toolRegistry.
+ *
+ * Fix: The original implementation only waited for the discovery state to become
+ * COMPLETED, but never synced the globally cached MCP tools into the current
+ * toolRegistry instance. This caused MCP tools to be unavailable in non-interactive mode.
  */
-async function waitForMcpDiscovery(): Promise<void> {
-  const startTime = Date.now();
-  const timeout = 15000; // 15 seconds timeout
-  const checkInterval = 100; // Check every 100ms
+async function waitForMcpDiscovery(config: Config): Promise<void> {
+  const state = getMCPDiscoveryState();
 
-  while (Date.now() - startTime < timeout) {
-    const state = getMCPDiscoveryState();
-    if (state === MCPDiscoveryState.COMPLETED) {
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, checkInterval));
+  // If already complete, sync tools and return immediately
+  if (state === MCPDiscoveryState.COMPLETED) {
+    const toolRegistry = await config.getToolRegistry();
+    await toolRegistry.discoverMcpTools();
+    return;
   }
 
-  // Timeout reached, but we continue anyway (MCP tools may not be available)
-  // This is not a critical failure, so we don't throw an error
+  // If discovery hasn't started yet (setImmediate hasn't fired, or was skipped
+  // due to isMCPDiscoveryTriggered guard), trigger it directly and synchronously.
+  if (state === MCPDiscoveryState.NOT_STARTED) {
+    const toolRegistry = await config.getToolRegistry();
+    await toolRegistry.discoverMcpTools();
+    return;
+  }
+
+  // Discovery is IN_PROGRESS (triggered by a prior initialize call via setImmediate).
+  // Wait for it to finish, then sync the results into the current toolRegistry.
+  await waitForMCPDiscoveryComplete(15000);
+  const toolRegistry = await config.getToolRegistry();
+  await toolRegistry.discoverMcpTools();
 }
 
 export async function runNonInteractive(
@@ -100,7 +112,7 @@ export async function runNonInteractive(
 
   // Wait for MCP tools to be discovered before proceeding
   // This ensures extension tools are available when sending prompts
-  await waitForMcpDiscovery();
+  await waitForMcpDiscovery(config);
 
   // Handle EPIPE errors when the output is piped to a command that closes early.
   process.stdout.on('error', (err: NodeJS.ErrnoException) => {
