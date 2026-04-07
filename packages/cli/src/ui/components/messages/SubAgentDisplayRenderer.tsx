@@ -102,6 +102,15 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
 
     return (
       <Box flexDirection="column">
+        {/* 轮数进度（running 状态） */}
+        {data.currentTurn > 0 && (
+          <Box>
+            <Text color={Colors.Gray}>├─ Turn </Text>
+            <Text color={Colors.AccentBlue}>{data.currentTurn}</Text>
+            <Text color={Colors.Gray}>/{data.maxTurns}</Text>
+          </Box>
+        )}
+
         {/* 如果有隐藏的工具，先显示汇总信息 */}
         {hiddenToolsCount > 0 && (
           <Box>
@@ -157,8 +166,13 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
         </Box>
 
         <Box>
-          <Text color={Colors.Gray}>└─ {t('subagent.token.consumption')} </Text>
+          <Text color={Colors.Gray}>├─ {t('subagent.token.consumption')} </Text>
           <Text>{formatTokenUsage(data.stats.tokenUsage)}</Text>
+        </Box>
+
+        <Box>
+          <Text color={Colors.Gray}>└─ {t('subagent.turns')} </Text>
+          <Text>{data.currentTurn}/{data.maxTurns}</Text>
         </Box>
 
         {/* 错误信息（如果失败） */}
