@@ -194,7 +194,7 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
           <span className="subagent-task-brief">{data.description || '代码分析'}</span>
           {isRunning && data.maxTurns !== undefined && (
             <span className="subagent-task-progress">
-              Est. Turns: {data.maxTurns}
+              Turn {data.currentTurn ?? 0}/{data.maxTurns}
             </span>
           )}
         </div>
@@ -261,9 +261,15 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
         </div>
 
         <div className="subagent-stat-item">
-          <span className="subagent-connector">└─</span>
+          <span className="subagent-connector">├─</span>
           <span className="subagent-stat-label">Token消耗:</span>
           <span className="subagent-stat-value">{formatTokenUsage(data.stats.tokenUsage)}</span>
+        </div>
+
+        <div className="subagent-stat-item">
+          <span className="subagent-connector">└─</span>
+          <span className="subagent-stat-label">轮次:</span>
+          <span className="subagent-stat-value">{data.currentTurn ?? '-'}/{data.maxTurns ?? '-'}</span>
         </div>
 
         {/* 错误信息 */}
