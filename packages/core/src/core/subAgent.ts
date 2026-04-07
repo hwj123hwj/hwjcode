@@ -281,7 +281,7 @@ export class SubAgent {
    */
   private buildSystemPrompt(): string {
     const availableTools = this.getAvailableToolNames();
-    return TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools);
+    return TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
   }
 
   /**
@@ -317,6 +317,9 @@ export class SubAgent {
 
     this.context.currentTurn++;
     this.log(`Conversation turn ${this.context.currentTurn}/${this.context.maxTurns}`);
+
+    // 通知 UI 当前轮次，用于显示 Turn X/Y 进度
+    this.sendTurnProgress();
 
     // 每轮调用AI，可能携带待处理的工具结果
     const aiResponse = await this.callGemini();
@@ -465,8 +468,8 @@ export class SubAgent {
     let messageParts: any[] = [];
 
     if (isFirstTurn) {
-      // 第一轮：发送完整任务描述
-      messageParts = [{ text: TaskPrompts.buildSubAgentTaskPrompt(this.context.taskDescription) }];
+      // 第一轮：发送完整任务描述（带轮数预算提醒）
+      messageParts = [{ text: TaskPrompts.buildSubAgentTaskPrompt(this.context.taskDescription, this.context.maxTurns) }];
     } else {
       // 后续轮次：检查是否有待处理的工具结果
       if (this.pendingToolResults.length > 0) {
@@ -654,6 +657,20 @@ export class SubAgent {
       commandsRun: stats.commandsRun,
       tokenUsage: this.context.tokenUsage,
     };
+  }
+
+  /**
+   * 发送当前轮次进度通知，用于 UI 显示 Turn X/Y
+   */
+  private sendTurnProgress(): void {
+    const event = {
+      type: 'conversation_turn',
+      agentId: this.context.agentId,
+      turnNumber: this.context.currentTurn,
+      maxTurns: this.context.maxTurns,
+      timestamp: Date.now(),
+    };
+    this.updateOutput?.(`SUBAGENT_EVENT:${JSON.stringify(event)}`);
   }
 
   /**
