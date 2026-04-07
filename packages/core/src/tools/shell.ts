@@ -326,7 +326,35 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
       Exit Code: Exit code or \`(none)\` if terminated by signal.
       Signal: Signal number or \`(none)\` if no signal was received.
       Background PIDs: List of background processes started or \`(none)\`.
-      Process Group PGID: Process group started or \`(none)\``,
+      Process Group PGID: Process group started or \`(none)\`
+
+# When to use this tool
+
+IMPORTANT: Prefer dedicated tools over this tool when available:
+- Read files: use the read_file tool, NOT cat/head/tail
+- Edit files: use the replace tool, NOT sed/awk
+- Write files: use the write_file tool, NOT echo or cat with heredoc
+- Search files: use the glob tool, NOT find or ls
+- Search content: use the search_file_content tool, NOT grep or rg
+Reserve this tool for system commands and terminal operations that have no dedicated equivalent.
+
+# Multiple commands
+
+- If commands are independent and can run in parallel, make multiple tool calls in a single message.
+- If commands must run sequentially, use \`&&\` to chain them in a single call.
+- Do NOT use newlines to separate commands (newlines are ok inside quoted strings).
+
+# Avoid unnecessary sleep
+
+- Do not sleep between commands that can run immediately.
+- Do not retry failing commands in a sleep loop — diagnose the root cause instead.
+- If you must poll, keep sleep duration short (1-5 seconds).
+
+# Git safety
+
+- Prefer creating a new commit rather than amending an existing one.
+- Before destructive operations (git reset --hard, git push --force, git checkout --), consider whether a safer alternative achieves the same goal.
+- Never skip hooks (--no-verify) or bypass signing unless the user explicitly asks for it.`,
       Icon.Terminal,
       {
         type: Type.OBJECT,
