@@ -7,13 +7,13 @@
 
 
 import { Type } from '@google/genai';
-import { 
-  BaseTool, 
-  ToolResult, 
-  Icon, 
-  ToolCallConfirmationDetails, 
+import {
+  BaseTool,
+  ToolResult,
+  Icon,
+  ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
-  ToolExecutionServices 
+  ToolExecutionServices
 } from './tools.js';
 import { ToolRegistry } from './tool-registry.js';
 import { Config } from '../config/config.js';
@@ -72,28 +72,26 @@ export interface TaskToolParams {
    * 任务的详细描述 - 告诉子agent要完成什么
    */
   prompt: string;
-  
+
   /**
    * 任务的简短描述 (3-5个字)，用于UI展示
    */
   description: string;
-  
+
   /**
    * 最大对话轮数限制 (防止无限循环)
    */
-  max_turns?: number;
+  max_turns: number;
 }
 
 /**
  * Task工具 - 启动子agent执行复杂任务
- * 
+ *
  * 这个工具创建一个独立的子agent来处理复杂的多步骤任务，
  * 子agent具备与AI多轮对话和调用工具的能力
  */
 export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
   static readonly Name: string = 'task';
-  
-
 
 
 
@@ -122,16 +120,15 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
           },
           max_turns: {
             type: Type.NUMBER,
-            // 最大对话轮数，用于防止无限循环(默认50轮)
-            description: 'Maximum number of conversation turns to prevent infinite loops (default: 50 turns)',
+            description: 'Maximum conversation turns. You MUST set this explicitly based on task complexity: 3-5 for simple lookups (find a function, check a config value, locate a file), 6-12 for moderate tasks (trace a feature across files, understand a module), 12-20 for complex tasks (multi-file dependency analysis, architecture overview). Only use 20-30 for very deep cross-cutting investigations. Always set this as low as feasible to save tokens.',
             minimum: 1,
-            maximum: 50,
+            maximum: 30,
           },
         },
-        required: ['prompt', 'description'],
+        required: ['prompt', 'description', 'max_turns'],
       },
       true,  // isOutputMarkdown
-      false, // forceMarkdown  
+      false, // forceMarkdown
       true,  // canUpdateOutput - 支持实时输出
       false, // allowSubAgentUse - Task工具本身不允许被子agent调用(防止无限嵌套)
     );
@@ -146,7 +143,11 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       return '任务描述不能为空';
     }
 
-    if (params.max_turns !== undefined && (params.max_turns < 1 || params.max_turns > 50)) {
+    if (params.max_turns === undefined || params.max_turns === null) {
+      return TaskPrompts.VALIDATION_ERRORS.MAX_TURNS_REQUIRED;
+    }
+
+    if (params.max_turns < 1 || params.max_turns > 30) {
       return TaskPrompts.VALIDATION_ERRORS.MAX_TURNS_OUT_OF_RANGE;
     }
 
@@ -194,7 +195,7 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       agentId,
       params.prompt,
       params.description,
-      params.max_turns || 50
+      params.max_turns
     );
 
     // 创建状态感知的updateOutput包装器
@@ -287,7 +288,7 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       // 执行任务
       const result = await subAgent.executeTask(
         params.prompt,
-        params.max_turns || 50
+        params.max_turns
       );
 
       // 更新最终状态和统计
@@ -320,7 +321,7 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
+
       // 更新错误状态
       currentDisplayData = {
         ...currentDisplayData,
@@ -340,21 +341,19 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
 
 
 
-
-
   /**
    * 更新SubAgent工具调用状态（纯函数）
    */
   private updateSubAgentToolCall(
-    displayData: SubAgentDisplayData, 
+    displayData: SubAgentDisplayData,
     updates: Partial<SubAgentToolCall> & { callId: string }
   ): SubAgentDisplayData {
     const { callId, ...otherUpdates } = updates;
-    
+
     // 查找现有工具调用
     const existingIndex = displayData.toolCalls.findIndex(tc => tc.callId === callId);
     let newToolCalls = [...displayData.toolCalls];
-    
+
     if (existingIndex >= 0) {
       // 更新现有工具调用
       newToolCalls[existingIndex] = {
@@ -419,7 +418,7 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
         updates.showDetailedProcess = false;
         break;
     }
-    
+
     // 更新轮次信息
     if (statusEvent.currentTurn !== undefined) {
       updates.currentTurn = statusEvent.currentTurn;
