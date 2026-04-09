@@ -1,4 +1,5 @@
 ---
+type: overview
 title: DeepV Code - Project Overview
 tags: [overview, project, ai, cli, vscode, typescript]
 date: 2026-04-09
@@ -37,11 +38,11 @@ An additional companion extension lives at `packages/vscode-ide-companion`.
 
 - **AI-driven code generation & refactoring** — natural language to code, bug fixing, multi-language support
 - **Intelligent debugging** — error log analysis, stack trace diagnosis, auto-fix
-- **MCP (Model Context Protocol)** — full-project context, cross-file analysis, third-party MCP servers
-- **Extensible tool system** — file ops, shell, web fetch/search, grep, memory, task agents
-- **Hooks** — PreToolExecution, PostToolExecution, OnSessionStart, OnSessionEnd
+- **[[mcp-system|MCP (Model Context Protocol)]]** — full-project context, cross-file analysis, third-party MCP servers
+- **[[tools-system|Extensible tool system]]** — file ops, shell, web fetch/search, grep, memory, task agents
+- **[[hooks-system|Hooks]]** — PreToolExecution, PostToolExecution, OnSessionStart, OnSessionEnd
 - **Session management** — persistence, resume, history compression, checkpoint rollback
-- **Skills system** — pluggable skill modules for specialized workflows
+- **[[skills-system|Skills system]]** — pluggable skill modules for specialized workflows
 
 ## Build & Dev
 
@@ -57,3 +58,13 @@ An additional companion extension lives at `packages/vscode-ide-companion`.
 - `docs/` — extensive documentation on features, architecture, tools
 - `bundle/` — output for bundled artifacts
 - `.deepvcode/` — project-level configuration and wiki
+
+## Related Pages
+
+- [[core-module]] — 后端引擎：API、工具、会话、认证
+- [[cli-module]] — 终端前端：Ink/React UI、斜杠命令
+- [[tools-system]] — 可扩展工具框架（27个内置工具）
+- [[hooks-system]] — 5层生命周期钩子管道
+- [[mcp-system]] — MCP 协议集成
+- [[build-system]] — 两管道构建系统
+- [[skills-system]] — 可插拔技能模块/市场
