@@ -1048,11 +1048,35 @@ You are running outside of a sandbox container, directly on the user's system. F
     ? `\n\n---\n\n${userMemory.trim()}`
     : '';
 
+  // LLM Wiki awareness: if the wiki has been initialized, inject a short context
+  // so the model knows how to operate on it during normal conversation.
+  const wikiContext = (function () {
+    const wikiIndex = path.join(process.cwd(), '.llm-wiki', 'index.md');
+    if (fs.existsSync(wikiIndex)) {
+      return `
+# LLM Wiki
+
+This project has an LLM Wiki knowledge base at \`.llm-wiki/\`.
+
+When the user asks you to "save to wiki", "learn into wiki", "update wiki", or similar:
+1. Read \`.llm-wiki/index.md\` to understand the current structure.
+2. Create or update pages in \`.llm-wiki/wiki/\` with YAML frontmatter (\`type\`, \`date\`, \`tags\`).
+3. Use \`[[wikilinks]]\` for cross-references between pages.
+4. Update \`.llm-wiki/index.md\` to reflect new/changed pages.
+5. Append an entry to \`.llm-wiki/log.md\`.
+6. Never modify files in \`.llm-wiki/raw/\` — those are immutable sources.
+
+The user can also use \`/wiki\` slash commands for structured operations.
+`;
+    }
+    return '';
+  })();
+
   // Note: Skills context removed - now provided dynamically in tool descriptions
   // This reduces initial context size by ~2500-3000 tokens
   // Skills are loaded on-demand via the use_skill tool
 
-  return `${sandboxContent}${gitContent}${memorySuffix}`.trim();
+  return `${sandboxContent}${gitContent}${wikiContext}${memorySuffix}`.trim();
 }
 
 /**
