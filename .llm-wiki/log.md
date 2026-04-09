@@ -24,6 +24,29 @@
   - raw/07-mcp-system.md
 - Updated index.md with source listing
 
+## [2026-04-09] lint | Health Check
+
+### Scan Results (32 pages)
+- **Dead links:** 0 — all 31 unique wikilink targets resolve correctly
+- **Orphan pages (filesystem):** 0 — all wiki files listed in index.md
+- **Orphan pages (graph):** 1 — `overview.md` had no incoming `[[overview]]` links
+- **Incomplete frontmatter:** 1 — `overview.md` missing `type` field
+- **Missing cross-references:** 2 — `overview.md` (0 outgoing wikilinks), `build-system.md` (1 outgoing, missing module links)
+- **Thin content:** 4 pages — `SkillLoader.md`, `MarketplaceManager.md`, `ProxyAuthManager.md`, `SessionManager.md`
+- **Contradictions:** 0
+- **Stale content:** Not applicable (all pages dated 2026-04-09, same-day generation)
+
+### Fixes Applied
+1. `wiki/overview.md` — Added missing `type: overview` field to frontmatter
+2. `wiki/overview.md` — Added "Related Pages" section with 7 wikilinks to all major system modules; added inline wikilinks in Core Capabilities list
+3. `wiki/build-system.md` — Added `[[core-module]]` and `[[cli-module]]` wikilinks in Pipelines section
+
+### Remaining Recommendations (manual)
+- Enrich thin entity pages: `SkillLoader.md`, `MarketplaceManager.md`, `ProxyAuthManager.md`, `SessionManager.md`
+- Standardize or document `source` (string) vs `sources` (array) convention across page types
+- Add `[[overview]]` link from at least one other page to eliminate graph orphan status
+- Update individual page dates when content is modified in future edits
+
 ## [2026-04-09] ingest | Full Ingestion of All 7 Raw Sources
 - Processed all 7 raw source documents into wiki pages
 - Created 7 source summary pages:
