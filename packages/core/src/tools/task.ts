@@ -169,10 +169,9 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
   }
 
   toolLocations(params: TaskToolParams): Array<{ path: string; type: 'file' | 'directory' }> {
-    // Task工具可能在任何位置创建或修改文件，返回工作目录
-    return [
-      { path: this.config.getWorkingDir(), type: 'directory' }
-    ];
+    // 返回空数组使多个task调用可以真正并行执行
+    // SubAgent内部有自己独立的ToolExecutionEngine，其子工具调用仍会通过FileOperationQueue保证文件安全
+    return [];
   }
 
   async execute(
