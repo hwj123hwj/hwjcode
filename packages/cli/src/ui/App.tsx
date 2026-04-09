@@ -1325,7 +1325,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   }, [streamingState, pendingBackgroundNotifications, config, submitQuery]);
 
   const sendPromptImmediately = useCallback(
-    (promptText: string, pauseQueueUntilResponse = false) => {
+    (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
       if (logoShows) {
         clearScreenWithScrollBuffer(stdout);
         setLogoShows(false);
@@ -1337,7 +1337,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         setQueuePaused(true);
       }
 
-      submitQuery(promptText);
+      submitQuery(promptText, silent ? { silent: true } : undefined);
     },
     [logoShows, stdout, submitQuery],
   );
@@ -1382,7 +1382,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   }, [addItem, tp]);
 
   const handlePromptOrQueue = useCallback(
-    (promptText: string, pauseQueueUntilResponse = false) => {
+    (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
       const sanitizedPrompt = promptText.trim();
       if (!sanitizedPrompt) {
         return;
@@ -1394,7 +1394,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         return;
       }
 
-      sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse);
+      sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
     },
     [addItem, queuePrompt, queuedPrompts.length, sendPromptImmediately, streamingState],
   );
@@ -1489,7 +1489,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
               return;
             } else if (slashCommandResult.type === 'submit_prompt') {
               // Slash命令返回需要提交的内容
-              handlePromptOrQueue(slashCommandResult.content);
+              handlePromptOrQueue(slashCommandResult.content, false, slashCommandResult.silent);
               return;
             } else if (slashCommandResult.type === 'schedule_tool') {
               // Slash命令要求执行工具，这里可以扩展处理
