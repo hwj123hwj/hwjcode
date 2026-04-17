@@ -149,6 +149,8 @@ export function getSubdirectoryGitInfos(directory: string): Array<{
 
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      // 跳过含非 ASCII 字符的目录名（如中文），避免 HTTP header 中出现非 Latin-1 字符导致 ByteString 错误
+      if (!/^[\x20-\x7E]+$/.test(entry.name)) continue;
       const subDir = path.join(resolvedDir, entry.name);
       const gitDir = path.join(subDir, '.git');
       if (!fs.existsSync(gitDir)) continue;
