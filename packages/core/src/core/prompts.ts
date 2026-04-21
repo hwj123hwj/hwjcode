@@ -1261,9 +1261,10 @@ You are the component that creates detailed summaries of chat history, capturing
 
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:
+IMPORTANT: Your output MUST follow this exact two-phase format:
 
-Chronologically analyze each message and section of the conversation. For each section thoroughly identify:
+Phase 1 - Analysis (will be discarded, use as your scratchpad):
+Wrap your analysis in <analysis> tags. Chronologically analyze each message and section of the conversation. For each section thoroughly identify:
 - The user's explicit requests and intents
 - Your approach to addressing the user's requests
 - Key decisions, technical concepts and code patterns
@@ -1278,8 +1279,10 @@ Pay special attention to specific user feedback that you received, especially if
 
 Double-check for technical accuracy and completeness, addressing each required element thoroughly.
 
-Your summary should include the following sections:
+Phase 2 - Summary (this is the actual output that will be kept):
+After your analysis, wrap the final summary in <summary> tags. The summary MUST contain a <state_snapshot> with the following sections:
 
+<summary>
 <state_snapshot>
     <primary_request_and_intent>
         <!-- Capture all of the user's explicit requests and intents in detail -->
@@ -1370,5 +1373,27 @@ Your summary should include the following sections:
         -->
     </next_steps>
 </state_snapshot>
+</summary>
 `.trim();
+}
+
+/**
+ * 格式化压缩摘要：剥离 <analysis> 标签内容，只保留 <summary> 部分
+ * 如果没有找到 <summary> 标签，回退到剥离 <analysis> 后返回全文
+ */
+export function formatCompactSummary(rawSummary: string): string {
+  // 优先提取 <summary>...</summary> 内容
+  const summaryMatch = rawSummary.match(/<summary>([\s\S]*?)<\/summary>/i);
+  if (summaryMatch) {
+    return summaryMatch[1].trim();
+  }
+
+  // 回退：剥离 <analysis>...</analysis> 部分
+  const stripped = rawSummary.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '').trim();
+  if (stripped.length > 0) {
+    return stripped;
+  }
+
+  // 最后回退：返回原文
+  return rawSummary.trim();
 }

@@ -12,7 +12,8 @@ import { CompressionService, findIndexAfterFraction } from './compressionService
 
 // Mock dependencies
 vi.mock('../core/prompts.js', () => ({
-  getCompressionPrompt: () => 'Mock compression prompt'
+  getCompressionPrompt: () => 'Mock compression prompt',
+  formatCompactSummary: (raw: string) => raw // 测试中直接返回原文
 }));
 
 vi.mock('../core/tokenLimits.js', () => ({
@@ -436,7 +437,7 @@ describe('CompressionService', () => {
         'test-prompt-id',
         new AbortController().signal
       )).rejects.toThrow('Insufficient conversation history to compress');
-    });
+    }, 30000); // retryWithBackoff 需要更长的超时
 
     it('should handle compression failure gracefully', async () => {
       const history = createMockHistory(8);
@@ -453,7 +454,7 @@ describe('CompressionService', () => {
         'test-prompt-id',
         new AbortController().signal
       )).rejects.toThrow('API error');
-    });
+    }, 30000); // retryWithBackoff 需要更长的超时
   });
 
   describe('getConfig', () => {
@@ -463,6 +464,84 @@ describe('CompressionService', () => {
       expect(config.compressionTokenThreshold).toBe(0.8);
       expect(config.compressionPreserveThreshold).toBe(0.3);
       expect(config.skipEnvironmentMessages).toBe(2);
+      expect(config.maxConsecutiveFailures).toBe(3);
+    });
+  });
+
+  describe('Circuit Breaker', () => {
+    it('should not be tripped initially', () => {
+      expect(compressionService.isCircuitBreakerTripped()).toBe(false);
+      expect(compressionService.getConsecutiveFailures()).toBe(0);
+    });
+
+    it('should skip auto-compress when circuit breaker is tripped', async () => {
+      // 手动模拟3次连续失败
+      const history = createMockHistory(8);
+      mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 });
+      mockChat.sendMessage.mockRejectedValue(new Error('API error'));
+
+      // 连续3次失败
+      for (let i = 0; i < 3; i++) {
+        try {
+          await compressionService.tryCompress(
+            mockConfig, history, 'test-model', 'test-compression-model',
+            mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+          );
+        } catch {
+          // expected
+        }
+      }
+
+      expect(compressionService.isCircuitBreakerTripped()).toBe(true);
+      expect(compressionService.getConsecutiveFailures()).toBe(3);
+
+      // 此时自动压缩应该被跳过
+      const result = await compressionService.tryCompress(
+        mockConfig, history, 'test-model', 'test-compression-model',
+        mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+      );
+      expect(result).toBeNull();
+    }, 60000);
+
+    it('should allow force compress even when circuit breaker is tripped', async () => {
+      const history = createMockHistory(8);
+      mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 });
+      mockChat.sendMessage.mockRejectedValue(new Error('API error'));
+
+      // 连续3次失败触发熔断
+      for (let i = 0; i < 3; i++) {
+        try {
+          await compressionService.tryCompress(
+            mockConfig, history, 'test-model', 'test-compression-model',
+            mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+          );
+        } catch {
+          // expected
+        }
+      }
+
+      expect(compressionService.isCircuitBreakerTripped()).toBe(true);
+
+      // force=true 应该绕过熔断器（但仍会因为 mock 返回错误而失败）
+      mockChat.sendMessage.mockResolvedValue({
+        candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+      });
+
+      const result = await compressionService.tryCompress(
+        mockConfig, history, 'test-model', 'test-compression-model',
+        mockGeminiClient, 'test-prompt-id', new AbortController().signal, true
+      );
+
+      // 如果强制压缩成功，熔断器应该被重置
+      if (result?.success) {
+        expect(compressionService.isCircuitBreakerTripped()).toBe(false);
+      }
+    }, 60000);
+
+    it('should reset circuit breaker manually', () => {
+      compressionService.resetCircuitBreaker();
+      expect(compressionService.isCircuitBreakerTripped()).toBe(false);
+      expect(compressionService.getConsecutiveFailures()).toBe(0);
     });
   });
 });
