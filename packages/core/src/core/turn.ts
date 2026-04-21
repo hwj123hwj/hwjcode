@@ -340,6 +340,43 @@ export class Turn {
         const finishReason = resp.candidates?.[0]?.finishReason;
 
         if (finishReason) {
+          // 🔍 STOP-DEBUG: 记录 finishReason 详情
+          console.log(`[STOP-DEBUG] Turn.run(): finishReason=${finishReason}, functionCalls=${(resp.functionCalls ?? []).length}, hasText=${!!getResponseText(resp)}, candidateIndex=${resp.candidates?.[0]?.index}`);
+
+          // 🔍 STOP-DEBUG: 当 finishReason=STOP 且无工具调用时，dump 原始响应以排查模型是否返回了非标准工具调用
+          if (finishReason === 'STOP' && (resp.functionCalls ?? []).length === 0) {
+            try {
+              const candidate = resp.candidates?.[0];
+              const parts = candidate?.content?.parts ?? [];
+              const partsSummary = parts.map((p: any, i: number) => {
+                const keys = Object.keys(p);
+                let desc = `part[${i}] keys=[${keys.join(',')}]`;
+                if (p.text) desc += ` text=${JSON.stringify(p.text.substring(0, 200))}${p.text.length > 200 ? '...(truncated)' : ''}`;
+                if (p.functionCall) desc += ` functionCall=${JSON.stringify(p.functionCall)}`;
+                if (p.functionResponse) desc += ` functionResponse=present`;
+                if (p.thought) desc += ` thought=true`;
+                if ('reasoning' in p) desc += ` reasoning=present`;
+                return desc;
+              });
+              console.log(`[STOP-DEBUG] 🔍 RAW RESPONSE DUMP (finishReason=STOP, no functionCalls):`);
+              console.log(`[STOP-DEBUG]   candidate.finishReason: ${candidate?.finishReason}`);
+              console.log(`[STOP-DEBUG]   candidate.content.role: ${candidate?.content?.role}`);
+              console.log(`[STOP-DEBUG]   candidate.content.parts count: ${parts.length}`);
+              partsSummary.forEach((s: string) => console.log(`[STOP-DEBUG]   ${s}`));
+              console.log(`[STOP-DEBUG]   resp.functionCalls: ${JSON.stringify(resp.functionCalls)}`);
+              console.log(`[STOP-DEBUG]   resp.text: ${JSON.stringify((resp.text || '').substring(0, 300))}`);
+              // 尝试完整dump（限制大小防止日志爆炸）
+              const rawJson = JSON.stringify(resp, null, 2);
+              if (rawJson.length <= 5000) {
+                console.log(`[STOP-DEBUG]   FULL RAW JSON:\n${rawJson}`);
+              } else {
+                console.log(`[STOP-DEBUG]   RAW JSON (truncated to 5000 chars):\n${rawJson.substring(0, 5000)}...`);
+              }
+            } catch (dumpError) {
+              console.log(`[STOP-DEBUG]   Failed to dump raw response: ${dumpError}`);
+            }
+          }
+
           let errorDetails: string | undefined;
 
           // For MALFORMED_FUNCTION_CALL, try to extract detailed error information
@@ -405,12 +442,16 @@ export class Turn {
           };
         }
       }
+      // 🔍 STOP-DEBUG: Turn.run() 流正常结束，记录汇总信息
+      console.log(`[STOP-DEBUG] Turn.run(): stream ended normally. pendingToolCalls=${this.pendingToolCalls.length}, toolNames=[${this.pendingToolCalls.map(tc => tc.name).join(', ')}], debugResponses=${this.debugResponses.length}, model=${this.modelName}`);
     } catch (e) {
       const error = toFriendlyError(e);
       if (error instanceof UnauthorizedError) {
+        console.log(`[STOP-DEBUG] Turn.run(): UnauthorizedError thrown, re-throwing`);
         throw error;
       }
       if (signal.aborted) {
+        console.log(`[STOP-DEBUG] Turn.run(): signal aborted during error handling, yielding UserCancelled`);
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
