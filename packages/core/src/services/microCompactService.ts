@@ -70,6 +70,13 @@ export interface MicroCompactConfig {
    * 默认: true
    */
   enabled?: boolean;
+
+  /**
+   * Token 用量触发阈值：当上下文使用率达到此比例时触发微压缩
+   * 作为全量压缩的缓冲层，在全量压缩之前先尝试轻量清理
+   * 默认: 0.7 (70%)，应低于全量压缩阈值 (默认 0.8)
+   */
+  tokenUsageThreshold?: number;
 }
 
 /**
@@ -90,6 +97,7 @@ export interface MicroCompactResult {
 export class MicroCompactService {
   private readonly idleThresholdMinutes: number;
   private readonly keepRecentToolResults: number;
+  private readonly tokenUsageThreshold: number;
   private enabled: boolean;
 
   /** 上次助手消息的时间戳 */
@@ -98,6 +106,7 @@ export class MicroCompactService {
   constructor(config: MicroCompactConfig = {}) {
     this.idleThresholdMinutes = config.idleThresholdMinutes ?? 60;
     this.keepRecentToolResults = config.keepRecentToolResults ?? 5;
+    this.tokenUsageThreshold = config.tokenUsageThreshold ?? 0.7;
     this.enabled = config.enabled ?? true;
   }
 
@@ -117,11 +126,23 @@ export class MicroCompactService {
 
   /**
    * 检查是否应该执行微压缩
+   * 触发条件（满足任一即触发）：
+   * 1. 空闲 ≥ 60分钟（长时间不活动，缓存早已冷透，清理旧工具结果省钱）
+   * 2. Token 用量 ≥ 70% 且空闲 > 6分钟（上下文快满了 + 缓存已冷，作为全量压缩的缓冲层）
+   * @param tokenUsageRatio 当前 token 使用率（0-1），可选
    */
-  shouldMicroCompact(): boolean {
+  shouldMicroCompact(tokenUsageRatio?: number): boolean {
     if (!this.enabled) return false;
+
     const idleMinutes = this.getIdleMinutes();
-    return idleMinutes >= this.idleThresholdMinutes;
+
+    // 条件1：长时间空闲触发（缓存早已冷透）
+    if (idleMinutes >= this.idleThresholdMinutes) return true;
+
+    // 条件2：token 快满 + 缓存已冷（≥10分钟），作为全量压缩的缓冲层
+    if (tokenUsageRatio !== undefined && tokenUsageRatio >= this.tokenUsageThreshold && idleMinutes > 6) return true;
+
+    return false;
   }
 
   /**
@@ -142,10 +163,6 @@ export class MicroCompactService {
   ): MicroCompactResult {
     if (!this.enabled) {
       return { applied: false, clearedCount: 0, reason: 'disabled' };
-    }
-
-    if (!this.shouldMicroCompact()) {
-      return { applied: false, clearedCount: 0, reason: 'idle threshold not reached' };
     }
 
     const idleMinutes = this.getIdleMinutes();
@@ -246,6 +263,7 @@ export class MicroCompactService {
       idleThresholdMinutes: this.idleThresholdMinutes,
       keepRecentToolResults: this.keepRecentToolResults,
       enabled: this.enabled,
+      tokenUsageThreshold: this.tokenUsageThreshold,
     };
   }
 }
