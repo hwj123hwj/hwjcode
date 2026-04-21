@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getCoreSystemPrompt, isGemini3Model } from './prompts.js';
+import { getCoreSystemPrompt, isGemini3Model, formatCompactSummary } from './prompts.js';
 
 describe('prompts', () => {
   describe('isGemini3Model', () => {
@@ -122,6 +122,40 @@ describe('prompts', () => {
 
       // 不应该包含空的 Skills section
       expect(prompt).not.toContain('# Available Skills');
+    });
+  });
+
+  describe('formatCompactSummary', () => {
+    it('should extract content from <summary> tags', () => {
+      const raw = '<analysis>Some analysis here...</analysis>\n<summary>\n<state_snapshot>Important content</state_snapshot>\n</summary>';
+      const result = formatCompactSummary(raw);
+      expect(result).toContain('<state_snapshot>Important content</state_snapshot>');
+      expect(result).not.toContain('<analysis>');
+    });
+
+    it('should strip <analysis> tags when no <summary> tag exists', () => {
+      const raw = '<analysis>Thinking process...</analysis>\n<state_snapshot>Direct content</state_snapshot>';
+      const result = formatCompactSummary(raw);
+      expect(result).toContain('<state_snapshot>Direct content</state_snapshot>');
+      expect(result).not.toContain('<analysis>');
+      expect(result).not.toContain('Thinking process');
+    });
+
+    it('should return original text when no tags present', () => {
+      const raw = 'Plain text summary without any tags';
+      const result = formatCompactSummary(raw);
+      expect(result).toBe('Plain text summary without any tags');
+    });
+
+    it('should handle empty input', () => {
+      expect(formatCompactSummary('')).toBe('');
+      expect(formatCompactSummary('   ')).toBe('');
+    });
+
+    it('should handle multiple <analysis> blocks', () => {
+      const raw = '<analysis>First analysis</analysis>\nMiddle text\n<analysis>Second analysis</analysis>\n<summary>Final result</summary>';
+      const result = formatCompactSummary(raw);
+      expect(result).toBe('Final result');
     });
   });
 });
