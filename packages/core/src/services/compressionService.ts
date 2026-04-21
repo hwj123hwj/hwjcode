@@ -338,6 +338,55 @@ export class CompressionService {
   }
 
   /**
+   * 确保消息角色严格交替（user ↔ model），修复连续同角色消息问题。
+   * - 连续两条相同角色：中间插入一条对方角色的占位消息
+   * - 第一条必须是 user 角色，否则在最前面补一条 user 占位
+   *
+   * 这在压缩拼接后特别关键，因为 summaryAck(model) + historyToKeep[0](model)
+   * 或 postCompactRestoration(user) + historyToKeep 末尾(user) 等情况会导致连续同角色。
+   */
+  private ensureAlternatingRoles(history: Content[]): Content[] {
+    if (history.length === 0) return history;
+
+    const result: Content[] = [];
+
+    // 确保第一条消息是 user 角色
+    if (history[0].role !== MESSAGE_ROLES.USER) {
+      result.push({
+        role: MESSAGE_ROLES.USER,
+        parts: [{ text: '[Conversation continues]' }],
+      });
+      console.warn(`[ensureAlternatingRoles] Inserted placeholder user message at start (first message was ${history[0].role})`);
+    }
+
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
+      const prev = result[result.length - 1];
+
+      if (prev && prev.role === msg.role) {
+        // 连续同角色 → 插入对方角色的占位
+        const fillerRole = msg.role === MESSAGE_ROLES.USER ? MESSAGE_ROLES.MODEL : MESSAGE_ROLES.USER;
+        const fillerText = fillerRole === MESSAGE_ROLES.MODEL
+          ? 'Understood.'
+          : '[Conversation continues]';
+        result.push({
+          role: fillerRole,
+          parts: [{ text: fillerText }],
+        });
+        console.warn(`[ensureAlternatingRoles] Inserted placeholder ${fillerRole} message before index ${i} to fix consecutive ${msg.role} messages`);
+      }
+
+      result.push(msg);
+    }
+
+    if (result.length !== history.length) {
+      console.log(`[ensureAlternatingRoles] Fixed role alternation: ${history.length} -> ${result.length} messages`);
+    }
+
+    return result;
+  }
+
+  /**
    * 检查是否需要压缩对话历史
    * @param history 对话历史
    * @param model 使用的模型
@@ -593,7 +642,7 @@ export class CompressionService {
             {
               message: compressionPrompt,
               config: {
-                maxOutputTokens: 8192, // 压缩摘要不需要太长
+                maxOutputTokens: 16384, // 压缩摘要需要足够空间来捕获长对话的完整上下文
                 temperature: 0.1, // 低温度确保一致性
                 thinkingConfig: { thinkingBudget: 0 }, // 压缩场景禁用thinking，确保所有token用于文本输出
                 abortSignal,
@@ -695,15 +744,22 @@ export class CompressionService {
       }
 
       // 构建新的对话历史：环境信息 + 压缩摘要 + 保留的最近历史
-      // 确保压缩摘要被作为model消息（不是user消息），以避免连续的user消息
-      const summaryAsModelMessage: Content = {
+      // 摘要以 user 角色注入，加上强化前缀，让模型将其视为权威上下文信息
+      // 随后紧跟 model 确认消息，表示模型已"接受"这些信息
+      const summaryPreamble = `[Context Restoration] The following is a comprehensive summary of our previous conversation. This is authoritative context — treat it as ground truth and continue seamlessly from where we left off. Do NOT re-introduce yourself or treat this as a new conversation.\n\n`;
+      const summaryAsUserMessage: Content = {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ text: summaryPreamble + summary }],
+      };
+      const summaryAckMessage: Content = {
         role: MESSAGE_ROLES.MODEL,
-        parts: [{ text: summary }],
+        parts: [{ text: 'I have reviewed the conversation summary and all context has been restored. I will continue seamlessly from where we left off.' }],
       };
 
       let newHistory: Content[] = [
         ...environmentMessages, // 保留环境信息
-        summaryAsModelMessage,
+        summaryAsUserMessage,
+        summaryAckMessage,
         ...historyToKeep,
       ];
 
@@ -711,11 +767,14 @@ export class CompressionService {
       // This prevents the "unexpected tool_use_id found in tool_result" error
       newHistory = this.validateAndCleanHistory(newHistory);
 
+      // 🔧 确保消息角色严格交替，修复压缩拼接后可能出现的连续同角色消息
+      newHistory = this.ensureAlternatingRoles(newHistory);
+
       // 详细诊断日志
       console.log(`[CompressionService] New history structure after compression:
         - Total messages: ${newHistory.length}
         - Environment: ${environmentMessages.length}
-        - Summary: 1 (model message)
+        - Summary: 1 (user message + model ack)
         - Retained conversation: ${historyToKeep.length}`);
 
       // 打印前几条消息的结构用于诊断
