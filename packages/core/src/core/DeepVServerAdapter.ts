@@ -220,7 +220,7 @@ export class DeepVServerAdapter implements ContentGenerator {
   private cleanContents(contents: any[]): any[] {
     if (!Array.isArray(contents)) return contents;
 
-    return contents.filter(content => {
+    const cleaned = contents.filter(content => {
       // 1. 移除没有 parts 的消息
       if (!content.parts || content.parts.length === 0) return false;
 
@@ -234,6 +234,19 @@ export class DeepVServerAdapter implements ContentGenerator {
 
       return hasValidPart;
     });
+
+    // 🔧 安全保障：确保清理后 contents 不以 model/assistant 结尾
+    // 某些模型（如 AWS Bedrock Claude）不支持 assistant prefill，
+    // 要求对话必须以 user 消息结尾。过滤空消息后末尾可能变成 model。
+    if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === MESSAGE_ROLES.MODEL) {
+      logger.warn('[cleanContents] Contents ends with model message after cleanup — appending user placeholder');
+      cleaned.push({
+        role: MESSAGE_ROLES.USER,
+        parts: [{ text: '[Conversation continues]' }],
+      });
+    }
+
+    return cleaned;
   }
 
   /**
