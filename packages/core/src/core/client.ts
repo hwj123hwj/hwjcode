@@ -105,6 +105,7 @@ export class GeminiClient {
     this.microCompactService = new MicroCompactService({
       idleThresholdMinutes: 60,
       keepRecentToolResults: 5,
+      tokenUsageThreshold: 0.7,
       enabled: true,
     });
 
@@ -725,8 +726,10 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     }
 
     // 微压缩：在发送消息前执行轻量级清理
-    // 当距离上次对话超过空闲阈值时，清除旧的工具结果以节省上下文空间
-    if (this.microCompactService.shouldMicroCompact()) {
+    // 触发条件：1) 空闲超时（缓存冷了省钱）2) token用量接近全量压缩阈值（缓冲层）
+    const currentTokenLimit = tokenLimit(this.config.getModel(), this.config);
+    const tokenUsageRatio = currentTokenLimit > 0 ? this.sessionTokenCount / currentTokenLimit : 0;
+    if (this.microCompactService.shouldMicroCompact(tokenUsageRatio)) {
       const curHistory = this.getChat().getHistory(true);
       const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
       if (mcResult.applied) {
