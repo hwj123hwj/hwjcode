@@ -139,7 +139,7 @@ export class MicroCompactService {
     // 条件1：长时间空闲触发（缓存早已冷透）
     if (idleMinutes >= this.idleThresholdMinutes) return true;
 
-    // 条件2：token 快满 + 缓存已冷（≥10分钟），作为全量压缩的缓冲层
+    // 条件2：token 快满 + 缓存已冷（>6分钟），作为全量压缩的缓冲层
     if (tokenUsageRatio !== undefined && tokenUsageRatio >= this.tokenUsageThreshold && idleMinutes > 6) return true;
 
     return false;
