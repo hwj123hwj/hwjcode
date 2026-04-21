@@ -700,6 +700,22 @@ export class GeminiChat {
       }
     }
 
+    // 🔧 安全保障：确保 contents 不以 model/assistant 结尾
+    // 某些模型（如 AWS Bedrock 上的 Claude）不支持 assistant prefill，
+    // 要求对话必须以 user 消息结尾。如果上面的过滤逻辑移除了末尾的 user 消息
+    // （例如因为孤立的 functionResponse 被全部过滤），末尾会变成 model 消息，
+    // 导致 API 返回 400 错误。
+    if (finalContents.length > 0) {
+      const lastContent = finalContents[finalContents.length - 1];
+      if (lastContent.role === MESSAGE_ROLES.MODEL) {
+        console.warn('[fixRequestContents] ⚠️ Contents ends with model message after cleanup — appending user placeholder to prevent assistant-prefill error');
+        finalContents.push({
+          role: MESSAGE_ROLES.USER,
+          parts: [{ text: '[Conversation continues]' }],
+        });
+      }
+    }
+
     return finalContents;
   }
 
