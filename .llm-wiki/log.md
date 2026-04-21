@@ -2,6 +2,26 @@
 
 > Chronological record of wiki operations.
 
+## [2026-04-10] lint | Health Check
+
+### Scan Results (32 pages)
+- **Dead links:** 0 — all wikilink targets resolve to existing pages
+- **Orphan pages:** 0 — all wiki files listed in index.md
+- **Incomplete frontmatter:** 1 — `overview.md` used `source:` (string) instead of `sources:` (array)
+- **Contradictions:** 0 — tool counts, architecture descriptions consistent across pages
+- **Stale content:** 0 — all pages dated 2026-04-09, no outdated references found
+
+### Fixes Applied
+1. `wiki/overview.md` — Standardized frontmatter: `source: README.md, package.json` → `sources: [README.md, package.json]` to match convention used by all other pages
+
+### Recommendations (not auto-fixed)
+- **Missing entity pages:** Several components mentioned across multiple pages lack dedicated pages:
+  - `CompressionService` — referenced in GeminiClient, source-02
+  - `LoopDetectionService` — referenced in GeminiClient, source-02
+  - `HookPlanner`, `HookRunner`, `HookAggregator`, `HookEventHandler` — 4 of 5 hook layers have no pages
+  - `HookTranslator` — version isolation layer mentioned in source-05
+- **Thin content pages:** `SkillLoader.md`, `MarketplaceManager.md`, `ProxyAuthManager.md`, `SessionManager.md` have minimal detail (~5-8 lines each)
+
 ## [2026-04-09] init | Wiki Initialized
 - Created wiki directory structure
 - Ready for source ingestion

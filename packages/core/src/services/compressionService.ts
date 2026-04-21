@@ -11,7 +11,7 @@ import { Content } from '../types/extendedContent.js';
 import { ChatCompressionInfo } from '../core/turn.js';
 import { ContentGenerator } from '../core/contentGenerator.js';
 import { SceneType } from '../core/sceneManager.js';
-import { getCompressionPrompt } from '../core/prompts.js';
+import { getCompressionPrompt, formatCompactSummary } from '../core/prompts.js';
 import { tokenLimit } from '../core/tokenLimits.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { GeminiClient } from '../core/client.js';
@@ -40,6 +40,12 @@ export interface CompressionServiceConfig {
    * 默认: 2 (用户环境信息 + 模型确认)
    */
   skipEnvironmentMessages?: number;
+
+  /**
+   * 连续压缩失败熔断阈值：连续失败超过此次数后停止自动压缩
+   * 默认: 3
+   */
+  maxConsecutiveFailures?: number;
 }
 
 /**
@@ -107,6 +113,10 @@ export class CompressionService {
   private readonly compressionTokenThreshold: number;
   private readonly compressionPreserveThreshold: number;
   private readonly skipEnvironmentMessages: number;
+  private readonly maxConsecutiveFailures: number;
+
+  /** 连续自动压缩失败计数（熔断器） */
+  private consecutiveAutoCompressFailures: number = 0;
 
   /**
    * 受保护的工具列表
@@ -117,6 +127,28 @@ export class CompressionService {
     this.compressionTokenThreshold = config.compressionTokenThreshold ?? 0.8;
     this.compressionPreserveThreshold = config.compressionPreserveThreshold ?? 0.3;
     this.skipEnvironmentMessages = config.skipEnvironmentMessages ?? 2;
+    this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? 3;
+  }
+
+  /**
+   * 检查熔断器是否已触发（连续失败过多）
+   */
+  isCircuitBreakerTripped(): boolean {
+    return this.consecutiveAutoCompressFailures >= this.maxConsecutiveFailures;
+  }
+
+  /**
+   * 重置熔断器（例如手动压缩成功后）
+   */
+  resetCircuitBreaker(): void {
+    this.consecutiveAutoCompressFailures = 0;
+  }
+
+  /**
+   * 获取连续失败次数
+   */
+  getConsecutiveFailures(): number {
+    return this.consecutiveAutoCompressFailures;
   }
 
   /**
@@ -487,7 +519,7 @@ export class CompressionService {
       }
 
       // 使用临时GeminiChat进行压缩，获得完整的API监控和错误处理
-      const compressionPrompt = 'First, reason in your scratchpad. Then, generate the <state_snapshot>.';
+      const compressionPrompt = 'First, reason in your <analysis> scratchpad. Then, generate the <summary> containing the <state_snapshot>.';
 
       console.log(`[CompressionService] Using temporary chat for compression with full API monitoring`);
 
@@ -539,24 +571,81 @@ export class CompressionService {
         { role: MESSAGE_ROLES.USER, parts: [{ text: compressionPrompt }] }
       ];
 
-      // 设置历史并发送压缩请求
-      temporaryChat.setHistory(compressionContents.slice(0, -1)); // 设置历史，不包括最后的用户消息
+      // PTL 渐进降级：如果压缩请求自身触发 prompt-too-long 错误，
+      // 逐步截断最旧的消息组并重试
+      const MAX_PTL_RETRIES = 3;
+      const PTL_TRUNCATE_RATIO = 0.2; // 每次截断 20% 的消息
+      let ptlRetryCount = 0;
+      let currentPurifiedHistory = [...purifiedHistory];
+      let compressionResponse: any = null;
 
-      const compressionResponse = await temporaryChat.sendMessage(
-        {
-          message: compressionPrompt,
-          config: {
-            maxOutputTokens: 8192, // 压缩摘要不需要太长
-            temperature: 0.1, // 低温度确保一致性
-            abortSignal,
-            systemInstruction: getCompressionPrompt()
+      while (ptlRetryCount <= MAX_PTL_RETRIES) {
+        const contentsForRequest = [
+          ...currentPurifiedHistory,
+          { role: MESSAGE_ROLES.USER, parts: [{ text: compressionPrompt }] }
+        ];
+
+        // 设置历史并发送压缩请求
+        temporaryChat.setHistory(contentsForRequest.slice(0, -1));
+
+        try {
+          compressionResponse = await temporaryChat.sendMessage(
+            {
+              message: compressionPrompt,
+              config: {
+                maxOutputTokens: 8192, // 压缩摘要不需要太长
+                temperature: 0.1, // 低温度确保一致性
+                abortSignal,
+                systemInstruction: getCompressionPrompt()
+              }
+            },
+            `compress-${prompt_id}-${Date.now()}`,
+            SceneType.COMPRESSION
+          );
+          break; // 成功，退出重试循环
+        } catch (ptlError: any) {
+          const errorMsg = ptlError?.message?.toLowerCase() || '';
+          const isPTL = errorMsg.includes('prompt') && errorMsg.includes('too long')
+            || errorMsg.includes('token limit')
+            || errorMsg.includes('context length')
+            || errorMsg.includes('413')
+            || errorMsg.includes('exceeds the maximum');
+
+          if (!isPTL || ptlRetryCount >= MAX_PTL_RETRIES) {
+            throw ptlError; // 非 PTL 错误或已达到最大重试次数
           }
-        },
-        `compress-${prompt_id}-${Date.now()}`,
-        SceneType.COMPRESSION
-      );
 
-      console.log(`[CompressionService] Compression response received:`, {
+          ptlRetryCount++;
+          // 截断最旧的消息（保留环境消息后的部分）
+          const envCount = Math.min(this.skipEnvironmentMessages, currentPurifiedHistory.length);
+          const nonEnvMessages = currentPurifiedHistory.slice(envCount);
+          const truncateCount = Math.max(1, Math.ceil(nonEnvMessages.length * PTL_TRUNCATE_RATIO));
+          const remainingMessages = nonEnvMessages.slice(truncateCount);
+
+          // 如果截断后没有消息可摘要，放弃
+          if (remainingMessages.length === 0) {
+            throw new Error('PTL: No messages left after truncation, cannot compress');
+          }
+
+          // 确保第一条消息是 user（API 要求）
+          let newHistory = [...currentPurifiedHistory.slice(0, envCount), ...remainingMessages];
+          if (newHistory.length > 0 && newHistory[0].role !== MESSAGE_ROLES.USER) {
+            newHistory = [
+              { role: MESSAGE_ROLES.USER, parts: [{ text: '[Earlier conversation context was truncated due to length]' }] },
+              ...newHistory
+            ];
+          }
+
+          currentPurifiedHistory = newHistory;
+          console.warn(`[CompressionService] PTL retry ${ptlRetryCount}/${MAX_PTL_RETRIES}: truncated ${truncateCount} oldest messages, ${currentPurifiedHistory.length} remaining`);
+        }
+      }
+
+      if (!compressionResponse) {
+        throw new Error('Compression failed: no response received after PTL retries');
+      }
+
+      console.log(`[CompressionService] Compression response received${ptlRetryCount > 0 ? ` (after ${ptlRetryCount} PTL retries)` : ''}:`, {
         hasCandidates: !!compressionResponse.candidates,
         candidatesLength: compressionResponse.candidates?.length,
         firstCandidateFinishReason: compressionResponse.candidates?.[0]?.finishReason,
@@ -595,6 +684,13 @@ export class CompressionService {
           })
         })}`;
         throw new Error(detailedError);
+      }
+
+      // 两阶段输出处理：剥离 <analysis> 草稿，只保留 <summary> 内容
+      const rawSummaryLength = summary.length;
+      summary = formatCompactSummary(summary);
+      if (summary.length < rawSummaryLength) {
+        console.log(`[CompressionService] Stripped analysis scratchpad: ${rawSummaryLength} -> ${summary.length} chars`);
       }
 
       // 构建新的对话历史：环境信息 + 压缩摘要 + 保留的最近历史
@@ -701,6 +797,12 @@ export class CompressionService {
     abortSignal: AbortSignal,
     force: boolean = false
   ): Promise<CompressionResult | null> {
+    // 熔断器检查：非强制压缩时，如果连续失败过多则跳过
+    if (!force && this.isCircuitBreakerTripped()) {
+      console.warn(`[CompressionService] Circuit breaker tripped: ${this.consecutiveAutoCompressFailures} consecutive failures. Skipping auto-compress. Use /compress to force.`);
+      return null;
+    }
+
     // 检查是否需要压缩
     const shouldCompressResult = await this.shouldCompress(history, model, geminiClient.getContentGenerator(), force, config);
 
@@ -708,35 +810,49 @@ export class CompressionService {
       return null;
     }
 
-    // 使用 retryWithBackoff 包装压缩执行逻辑
-    return await retryWithBackoff(async () => {
-      // 执行压缩，传递已计算的token数量避免重复计算
-      const result = await this.compressHistory(
-        config,
-        history,
-        model,
-        compressionModel,
-        geminiClient,
-        prompt_id,
-        abortSignal,
-        shouldCompressResult.tokenCount
-      );
+    try {
+      // 使用 retryWithBackoff 包装压缩执行逻辑
+      const result = await retryWithBackoff(async () => {
+        // 执行压缩，传递已计算的token数量避免重复计算
+        const innerResult = await this.compressHistory(
+          config,
+          history,
+          model,
+          compressionModel,
+          geminiClient,
+          prompt_id,
+          abortSignal,
+          shouldCompressResult.tokenCount
+        );
 
-      // 如果压缩失败且没有明确的跳过原因，抛出错误以触发重试
-      if (!result.success && !result.skipReason) {
-        throw new Error(result.error || 'Compression failed without specific error');
+        // 如果压缩失败且没有明确的跳过原因，抛出错误以触发重试
+        if (!innerResult.success && !innerResult.skipReason) {
+          throw new Error(innerResult.error || 'Compression failed without specific error');
+        }
+
+        return innerResult;
+      }, {
+        maxAttempts: 3, // 最多重试3次
+        shouldRetry: (error) => {
+          console.warn(`[CompressionService] Compression attempt failed: ${error.message}. Retrying...`);
+          return true;
+        }
+      });
+
+      // 压缩成功，重置熔断器
+      if (result && result.success) {
+        this.consecutiveAutoCompressFailures = 0;
       }
 
       return result;
-    }, {
-      maxAttempts: 3, // 最多重试3次
-      shouldRetry: (error) => {
-        // 所有的错误都值得重试，除了明确的不可恢复错误（如果有的话）
-        // 这里简单地重试所有错误
-        console.warn(`[CompressionService] Compression attempt failed: ${error.message}. Retrying...`);
-        return true;
+    } catch (error) {
+      // 所有重试都失败了，更新熔断器计数
+      if (!force) {
+        this.consecutiveAutoCompressFailures++;
+        console.warn(`[CompressionService] Auto-compress failed. Consecutive failures: ${this.consecutiveAutoCompressFailures}/${this.maxConsecutiveFailures}`);
       }
-    });
+      throw error;
+    }
   }
 
   /**
@@ -876,6 +992,7 @@ export class CompressionService {
       compressionTokenThreshold: this.compressionTokenThreshold,
       compressionPreserveThreshold: this.compressionPreserveThreshold,
       skipEnvironmentMessages: this.skipEnvironmentMessages,
+      maxConsecutiveFailures: this.maxConsecutiveFailures,
     };
   }
 }
