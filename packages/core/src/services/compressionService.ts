@@ -595,6 +595,7 @@ export class CompressionService {
               config: {
                 maxOutputTokens: 8192, // 压缩摘要不需要太长
                 temperature: 0.1, // 低温度确保一致性
+                thinkingConfig: { thinkingBudget: 0 }, // 压缩场景禁用thinking，确保所有token用于文本输出
                 abortSignal,
                 systemInstruction: getCompressionPrompt()
               }
@@ -652,19 +653,19 @@ export class CompressionService {
         hasContent: !!compressionResponse.candidates?.[0]?.content,
         partsCount: compressionResponse.candidates?.[0]?.content?.parts?.length || 0,
         partTypes: compressionResponse.candidates?.[0]?.content?.parts?.map((p: any) => {
+          if (p.thought) return 'thought';
           if ('text' in p) return 'text';
           if ('functionCall' in p) return 'functionCall';
-          if ('thinking' in p) return 'thinking';
           if ('functionResponse' in p) return 'functionResponse';
           return Object.keys(p)[0] || 'unknown';
         })
       });
 
-      // 尝试从所有部分中查找文本（不仅仅是第一个部分）
+      // 尝试从所有部分中查找文本（跳过 thought part 和空 text）
       let summary = '';
       const parts = compressionResponse.candidates?.[0]?.content?.parts || [];
       for (const part of parts) {
-        if (part && 'text' in part && typeof part.text === 'string') {
+        if (part && 'text' in part && typeof part.text === 'string' && part.text.length > 0 && !part.thought) {
           summary = (part as any).text;
           break;
         }
@@ -676,9 +677,9 @@ export class CompressionService {
           firstCandidateFinishReason: compressionResponse.candidates?.[0]?.finishReason,
           firstCandidateContent: compressionResponse.candidates?.[0]?.content?.parts?.length || 0,
           partTypes: compressionResponse.candidates?.[0]?.content?.parts?.map((p: any) => {
+            if (p.thought) return 'thought';
             if ('text' in p) return 'text';
             if ('functionCall' in p) return 'functionCall';
-            if ('thinking' in p) return 'thinking';
             if ('functionResponse' in p) return 'functionResponse';
             return Object.keys(p)[0] || 'unknown';
           })
