@@ -984,7 +984,7 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
             });
             currentHistory.push({
               role: MESSAGE_ROLES.MODEL,
-              parts: [{ text: 'I have reviewed the restored file context and am ready to continue.' }],
+              parts: [{ text: 'I have reviewed the restored file context and am ready to continue. I will use read_file to verify current file state before attempting any edits, since files may have changed during compression.' }],
             });
             this.getChat().setHistory(currentHistory);
             console.log(`[tryCompressChat] Post-compact restoration: attached ${this.postCompactRestoration.getRecentlyReadFiles().length} recently-read files`);
