@@ -199,9 +199,12 @@ describe('CompressionService', () => {
       expect(result.newHistory?.[0]).toEqual(history[0]);
       expect(result.newHistory?.[1]).toEqual(history[1]);
 
-      // 第3条应该是压缩摘要 (model消息)
-      expect(result.newHistory?.[2].role).toBe('model');
-      expect(result.newHistory?.[2].parts?.[0]?.text).toBe('Summary');
+      // 第3条应该是压缩摘要 (user消息，包含摘要前缀 + 摘要内容)
+      expect(result.newHistory?.[2].role).toBe('user');
+      expect(result.newHistory?.[2].parts?.[0]?.text).toContain('Summary');
+
+      // 第4条应该是模型确认 (model消息)
+      expect(result.newHistory?.[3].role).toBe('model');
     });
 
     it('should handle insufficient conversation history', async () => {

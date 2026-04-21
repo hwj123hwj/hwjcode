@@ -480,13 +480,21 @@ export class CompressionService {
 
     // 根据 keptHistory 末尾的角色决定如何追加摘要消息
     const lastKept = keptHistory[keptHistory.length - 1];
-    if (lastKept && lastKept.role === MESSAGE_ROLES.USER) {
+    if (!lastKept) {
+      // keptHistory 为空（全部都是工具调用被裁剪了）
+      // 以 user(摘要) 形式追加，确保末尾是 user 角色
+      // 这样 compressHistory 拼接时: summaryAck(model) + user(toolSummary) 角色交替正确
+      keptHistory.push({
+        role: MESSAGE_ROLES.USER,
+        parts: [{ text: toolSummaryText }],
+      });
+    } else if (lastKept.role === MESSAGE_ROLES.USER) {
       // 末尾是 user，追加一条 model 消息
       keptHistory.push({
         role: MESSAGE_ROLES.MODEL,
         parts: [{ text: toolSummaryText }],
       });
-    } else if (lastKept && lastKept.role === MESSAGE_ROLES.MODEL) {
+    } else if (lastKept.role === MESSAGE_ROLES.MODEL) {
       // 末尾是 model，追加 user + model 对
       keptHistory.push({
         role: MESSAGE_ROLES.USER,
