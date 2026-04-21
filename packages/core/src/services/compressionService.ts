@@ -387,6 +387,123 @@ export class CompressionService {
   }
 
   /**
+   * 修剪 historyToKeep 末尾连续的工具调用消息对，替换为一条文本摘要。
+   *
+   * 压缩后模型如果看到尾部是 tool call / response，会倾向于"继续"那个操作流程，
+   * 但此时上下文已不完整（工具调用链的早期部分可能被压缩掉了），容易导致死循环。
+   *
+   * 策略：从末尾向前找到最后一条纯文本的 user 消息为止，将之后的所有工具调用对
+   * 摘要为一条简短的文本消息（model），确保尾部是 user(text) → model(text) 格式。
+   */
+  private trimTrailingToolCalls(history: Content[]): Content[] {
+    if (history.length === 0) return history;
+
+    // 判断一条消息是否包含工具调用或工具响应（即非纯文本）
+    const hasToolParts = (msg: Content): boolean => {
+      if (!msg.parts || msg.parts.length === 0) return false;
+      return msg.parts.some((p: any) => p.functionCall || p.functionResponse || p.toolResult);
+    };
+
+    // 从末尾向前，找到最后一条"纯文本 user 消息"的位置
+    // 这是安全的对话边界——此消息以及之前的内容保留，之后的工具调用对摘要化
+    let cutIndex = history.length; // 默认不裁剪
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg.role === MESSAGE_ROLES.USER && !hasToolParts(msg)) {
+        // 找到了一条纯文本 user 消息
+        // 检查它下面是否紧跟一条纯文本 model 消息（理想的对话结尾）
+        if (i + 1 < history.length) {
+          const next = history[i + 1];
+          if (next.role === MESSAGE_ROLES.MODEL && !hasToolParts(next)) {
+            // user(text) + model(text) 对，保留到 model 消息，裁剪之后的
+            cutIndex = i + 2;
+            break;
+          }
+        }
+        // user(text) 后面直接是工具调用，保留到这条 user 消息，裁剪之后的
+        cutIndex = i + 1;
+        break;
+      }
+    }
+
+    // 如果没找到纯文本 user 消息（全是工具调用），从头裁剪
+    if (cutIndex >= history.length) {
+      // 检查末尾是否确实有工具调用需要处理
+      const lastMsg = history[history.length - 1];
+      if (hasToolParts(lastMsg)) {
+        // 整段都是工具调用，全部摘要化
+        cutIndex = 0;
+      } else {
+        // 末尾已是纯文本，无需裁剪
+        return history;
+      }
+    }
+
+    const trimmedMessages = history.slice(cutIndex);
+    const keptHistory = history.slice(0, cutIndex);
+
+    // 从被裁剪的工具消息中生成摘要
+    const toolSummaryParts: string[] = [];
+    for (const msg of trimmedMessages) {
+      if (!msg.parts) continue;
+      for (const part of msg.parts) {
+        const p = part as any;
+        if (p.functionCall) {
+          const args = p.functionCall.args;
+          // 提取关键参数摘要（例如 file_path, pattern 等）
+          let argSummary = '';
+          if (args) {
+            if (args.file_path || args.absolute_path) argSummary = ` on "${args.file_path || args.absolute_path}"`;
+            else if (args.path) argSummary = ` on "${args.path}"`;
+            else if (args.pattern) argSummary = ` for "${args.pattern}"`;
+            else if (args.command) argSummary = `: \`${args.command.substring(0, 80)}\``;
+          }
+          toolSummaryParts.push(`- Called \`${p.functionCall.name}\`${argSummary}`);
+        }
+        if (p.functionResponse) {
+          const output = p.functionResponse.response?.output;
+          if (typeof output === 'string') {
+            // 取首行作为结果摘要
+            const firstLine = output.split('\n')[0].substring(0, 120);
+            toolSummaryParts.push(`  → ${firstLine}`);
+          }
+        }
+      }
+    }
+
+    if (toolSummaryParts.length === 0) {
+      // 没有实际的工具调用（可能只是空消息），直接返回裁剪后的
+      return keptHistory;
+    }
+
+    const toolSummaryText = `[Recent tool activity summary — prior tool calls compressed, verify file state with read_file before editing]\n${toolSummaryParts.join('\n')}`;
+
+    // 根据 keptHistory 末尾的角色决定如何追加摘要消息
+    const lastKept = keptHistory[keptHistory.length - 1];
+    if (lastKept && lastKept.role === MESSAGE_ROLES.USER) {
+      // 末尾是 user，追加一条 model 消息
+      keptHistory.push({
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ text: toolSummaryText }],
+      });
+    } else if (lastKept && lastKept.role === MESSAGE_ROLES.MODEL) {
+      // 末尾是 model，追加 user + model 对
+      keptHistory.push({
+        role: MESSAGE_ROLES.USER,
+        parts: [{ text: '[Conversation continues]' }],
+      });
+      keptHistory.push({
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ text: toolSummaryText }],
+      });
+    }
+
+    console.log(`[trimTrailingToolCalls] Trimmed ${trimmedMessages.length} trailing tool messages (${toolSummaryParts.length} tool operations) and replaced with text summary`);
+
+    return keptHistory;
+  }
+
+  /**
    * 检查是否需要压缩对话历史
    * @param history 对话历史
    * @param model 使用的模型
@@ -746,15 +863,27 @@ export class CompressionService {
       // 构建新的对话历史：环境信息 + 压缩摘要 + 保留的最近历史
       // 摘要以 user 角色注入，加上强化前缀，让模型将其视为权威上下文信息
       // 随后紧跟 model 确认消息，表示模型已"接受"这些信息
-      const summaryPreamble = `[Context Restoration] The following is a comprehensive summary of our previous conversation. This is authoritative context — treat it as ground truth and continue seamlessly from where we left off. Do NOT re-introduce yourself or treat this as a new conversation.\n\n`;
+      const summaryPreamble = `[Context Restoration] The following is a comprehensive summary of our previous conversation. This is authoritative context — treat it as ground truth and continue seamlessly from where we left off. Do NOT re-introduce yourself or treat this as a new conversation.
+
+IMPORTANT POST-COMPRESSION RULES:
+1. Files may have been modified by prior tool calls that are no longer in the conversation history. Always use read_file to verify the current state of a file BEFORE attempting any replace/edit operation.
+2. If a replace tool call fails with "0 occurrences found", do NOT retry with the same old_string. Instead, read_file to see what the file actually contains now, then construct a new edit based on the actual content.
+3. Never retry a failed edit more than once without reading the file first.
+
+`;
       const summaryAsUserMessage: Content = {
         role: MESSAGE_ROLES.USER,
         parts: [{ text: summaryPreamble + summary }],
       };
       const summaryAckMessage: Content = {
         role: MESSAGE_ROLES.MODEL,
-        parts: [{ text: 'I have reviewed the conversation summary and all context has been restored. I will continue seamlessly from where we left off.' }],
+        parts: [{ text: 'I have reviewed the conversation summary and all context has been restored. I will continue seamlessly from where we left off. I understand that files may have been modified by prior tool calls no longer visible in history, so I will always read_file to verify current file state before attempting any edits.' }],
       };
+
+      // 🔧 修剪 historyToKeep 末尾的工具调用对，替换为文本摘要
+      // 压缩后模型看到尾部的 tool call/response 容易陷入"继续未完成的工具操作"死循环，
+      // 因为上下文不再完整。将末尾连续的工具调用对摘要化，确保末尾是纯文本人机对话。
+      historyToKeep = this.trimTrailingToolCalls(historyToKeep);
 
       let newHistory: Content[] = [
         ...environmentMessages, // 保留环境信息

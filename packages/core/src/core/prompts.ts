@@ -1300,14 +1300,15 @@ After your analysis, wrap the final summary in <summary> tags. The summary MUST 
 
     <files_and_code_sections>
         <!-- Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important. -->
+        <!-- CRITICAL: For each file, clearly mark the FINAL STATE after all edits. If a tool call (replace/write_file) succeeded, the file has ALREADY been modified — do NOT list that edit as pending. -->
         <!-- Example:
          - \`src/components/UserProfile.tsx\`:
-           - Modified to use new ProfileAPI instead of deprecated UserAPI
-           - Key code change: Replaced \`getUserData()\` with \`fetchUserProfile()\`
-           - Added error handling for network failures
+           - [COMPLETED] Modified to use new ProfileAPI instead of deprecated UserAPI
+           - [COMPLETED] Key code change: Replaced \`getUserData()\` with \`fetchUserProfile()\`
+           - [COMPLETED] Added error handling for network failures
          - \`package.json\`:
-           - Added dependency: "axios": "^1.6.0"
-           - Removed deprecated: "request": "^2.88.2"
+           - [COMPLETED] Added dependency: "axios": "^1.6.0"
+           - [COMPLETED] Removed deprecated: "request": "^2.88.2"
         -->
     </files_and_code_sections>
 
@@ -1356,20 +1357,22 @@ After your analysis, wrap the final summary in <summary> tags. The summary MUST 
 
     <current_work>
         <!-- Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable. -->
+        <!-- CRITICAL: Clearly distinguish between COMPLETED steps (tool calls that returned success) and PENDING steps (not yet attempted or failed). If a replace/write_file tool call returned "Successfully modified file", that step is DONE — the file has already been changed. Do NOT list completed edits as pending work. -->
         <!-- Example:
          - Working on refactoring \`UserService.ts\` to use async/await pattern
-         - Last completed: Converted \`getUserById()\` method from callbacks to promises
-         - Next step: Convert \`updateUser()\` method and add proper error handling
+         - [COMPLETED] Converted \`getUserById()\` method — replace tool returned success
+         - [PENDING] Convert \`updateUser()\` method — not yet attempted
          - File location: \`src/services/UserService.ts\`, lines 45-78
         -->
     </current_work>
 
     <next_steps>
         <!-- List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's explicit requests, and the task you were working on immediately before this summary request. -->
+        <!-- CRITICAL: Only list steps that have NOT been completed yet. If a tool call already succeeded for a step, do NOT include it here. When resuming, the assistant MUST read_file to verify the current file state before attempting any edits, because prior edits may have already changed the file. -->
         <!-- Example:
-         - Complete the UserService refactoring by converting remaining callback methods
-         - Run the test suite to ensure no regressions were introduced
-         - Update the service documentation to reflect the new async API
+         - [NEXT] Convert remaining callback methods in UserService (getUserById already done)
+         - [NEXT] Run the test suite to ensure no regressions were introduced
+         - [NEXT] Update the service documentation to reflect the new async API
         -->
     </next_steps>
 </state_snapshot>
