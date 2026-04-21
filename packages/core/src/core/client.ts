@@ -41,6 +41,8 @@ import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { LoopDetectionService } from '../services/loopDetectionService.js';
 import { CompressionService } from '../services/compressionService.js';
+import { MicroCompactService } from '../services/microCompactService.js';
+import { PostCompactRestorationService } from '../services/postCompactRestorationService.js';
 import { ideContext } from '../ide/ideContext.js';
 import { logFlashDecidedToContinue } from '../telemetry/loggers.js';
 import { FlashDecidedToContinueEvent, LoopType } from '../telemetry/types.js';
@@ -74,6 +76,8 @@ export class GeminiClient {
 
   private readonly loopDetector: LoopDetectionService;
   private readonly compressionService: CompressionService;
+  private readonly microCompactService: MicroCompactService;
+  private readonly postCompactRestoration: PostCompactRestorationService;
   private lastPromptId?: string;
   private isCompressing: boolean = false; // 压缩互斥锁，防止重入
 
@@ -96,6 +100,18 @@ export class GeminiClient {
       compressionTokenThreshold: this.compressionThreshold,
       compressionPreserveThreshold: 0.3,
       skipEnvironmentMessages: 2, // 跳过环境信息和确认消息
+    });
+
+    this.microCompactService = new MicroCompactService({
+      idleThresholdMinutes: 60,
+      keepRecentToolResults: 5,
+      enabled: true,
+    });
+
+    this.postCompactRestoration = new PostCompactRestorationService({
+      maxFilesToRestore: 5,
+      maxCharsPerFile: 5000,
+      totalCharBudget: 50000,
     });
 
     // 初始化智能压缩阈值（使用与CompressionService相同的逻辑）
@@ -393,6 +409,14 @@ export class GeminiClient {
     return this.chat !== undefined && this.contentGenerator !== undefined;
   }
 
+  /**
+   * 追踪文件读取事件（供工具层调用）
+   * 用于压缩后自动恢复最近读取的文件上下文
+   */
+  trackFileRead(filePath: string): void {
+    this.postCompactRestoration.trackFileRead(filePath);
+  }
+
   getHistory(): Content[] {
     return this.getChat().getHistory();
   }
@@ -684,13 +708,30 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     // 基于响应的智能压缩：检查是否需要在本次对话前进行压缩
     // 只有当 needsCompression 标记为 true 时才尝试压缩，否则不触发压缩流程和 PreCompress 钩子
     if (this.needsCompression) {
-      console.log('[sendMessageStream] Token threshold exceeded, performing compression before new conversation');
-      const compressed = await this.tryCompressChat(prompt_id, signal, true); // 强制压缩
-      if (compressed) {
-        yield { type: GeminiEventType.ChatCompressed, value: compressed };
-        this.resetCompressionFlag(); // 压缩完成后重置标记
+      // 熔断器检查：如果自动压缩连续失败过多，跳过
+      if (this.compressionService.isCircuitBreakerTripped()) {
+        console.warn(`[sendMessageStream] Auto-compress circuit breaker tripped (${this.compressionService.getConsecutiveFailures()} consecutive failures). Skipping. Use /compress to force.`);
+        this.needsCompression = false; // 清除标记避免反复打印
       } else {
-        console.warn('[sendMessageStream] Failed to perform scheduled compression');
+        console.log('[sendMessageStream] Token threshold exceeded, performing compression before new conversation');
+        const compressed = await this.tryCompressChat(prompt_id, signal, true); // 强制压缩
+        if (compressed) {
+          yield { type: GeminiEventType.ChatCompressed, value: compressed };
+          this.resetCompressionFlag(); // 压缩完成后重置标记
+        } else {
+          console.warn('[sendMessageStream] Failed to perform scheduled compression');
+        }
+      }
+    }
+
+    // 微压缩：在发送消息前执行轻量级清理
+    // 当距离上次对话超过空闲阈值时，清除旧的工具结果以节省上下文空间
+    if (this.microCompactService.shouldMicroCompact()) {
+      const curHistory = this.getChat().getHistory(true);
+      const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
+      if (mcResult.applied) {
+        this.getChat().setHistory(curHistory);
+        logger.info(`[sendMessageStream] MicroCompact applied: cleared ${mcResult.clearedCount} old tool results`);
       }
     }
 
@@ -751,13 +792,21 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     }
 
     const resultStream = turn.run(request, signal);
+    let lastFinishReason: string | undefined;
     for await (const event of resultStream) {
       if (this.loopDetector.addAndCheck(event)) {
         const loopType = this.loopDetector.getDetectedLoopType();
+        logger.info(`[STOP-DEBUG] sendMessageStream: LOOP DETECTED, type=${loopType}, turn will be stopped`);
         yield { type: GeminiEventType.LoopDetected, value: loopType ? loopType.toString() : undefined };
         // Add feedback to chat history so AI understands why it was stopped
         this.addLoopDetectionFeedbackToHistory(loopType);
         return turn;
+      }
+
+      // 记录 Finished 事件的 finishReason
+      if (event.type === GeminiEventType.Finished) {
+        lastFinishReason = (event as any).value;
+        logger.info(`[STOP-DEBUG] sendMessageStream: received Finished event, finishReason=${lastFinishReason}, errorDetails=${(event as any).errorDetails || 'none'}`);
       }
 
       // 处理TokenUsage事件，累积token计数并判断是否需要下次压缩
@@ -768,31 +817,49 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           tokenInfo.outputTokens
         );
 
+        // 更新微压缩的时间戳（收到响应=助手刚活动过）
+        this.microCompactService.updateLastAssistantMessageTime();
+
         // 继续传递事件给上层处理
         yield event;
       } else {
         yield event;
       }
     }
+
+    // 🔍 STOP-DEBUG: 记录 turn 结束后的决策信息
+    const pendingToolCallCount = turn.pendingToolCalls.length;
+    const signalAborted = signal?.aborted;
+    logger.info(`[STOP-DEBUG] sendMessageStream: turn stream ended. pendingToolCalls=${pendingToolCallCount}, signal.aborted=${signalAborted}, lastFinishReason=${lastFinishReason}, boundedTurns=${boundedTurns}, model=${this.config.getModel()}, initialModel=${initialModel}`);
+
+    if (pendingToolCallCount > 0) {
+      logger.info(`[STOP-DEBUG] sendMessageStream: has ${pendingToolCallCount} pending tool calls, will be scheduled by CLI layer. Tools: [${turn.pendingToolCalls.map(tc => tc.name).join(', ')}]`);
+    }
+
     if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
       // Check if model was switched during the call (likely due to quota error)
       const currentModel = this.config.getModel();
       if (currentModel !== initialModel) {
         // Model was switched (likely due to quota error fallback)
         // Don't continue with recursive call to prevent unwanted Flash execution
+        logger.info(`[STOP-DEBUG] sendMessageStream: MODEL SWITCHED during call (${initialModel} → ${currentModel}), stopping recursion`);
         return turn;
       }
 
+      logger.info(`[STOP-DEBUG] sendMessageStream: no pending tool calls, checking nextSpeaker...`);
       const nextSpeakerCheck = await checkNextSpeaker(
         this.getChat(),
         this,
         signal,
       );
+      logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker result=${JSON.stringify(nextSpeakerCheck)}`);
+
       if (nextSpeakerCheck?.next_speaker === 'model') {
         logFlashDecidedToContinue(
           this.config,
           new FlashDecidedToContinueEvent(prompt_id),
         );
+        logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker=model, sending "Please continue." (remaining turns=${boundedTurns - 1})`);
         const nextRequest = [{ text: 'Please continue.' }];
         // This recursive call's events will be yielded out, and the final
         // turn object will be from the recursive call.
@@ -803,7 +870,11 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           boundedTurns - 1,
           initialModel,
         );
+      } else {
+        logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker is NOT model, ENDING conversation turn. nextSpeaker=${nextSpeakerCheck?.next_speaker || 'null/undefined'}`);
       }
+    } else if (signal?.aborted) {
+      logger.info(`[STOP-DEBUG] sendMessageStream: signal was aborted, skipping nextSpeaker check`);
     }
 
     // 🪝 触发 AfterAgent 钩子 - 在每个 turn 完成后执行（按照原版逻辑）
@@ -890,6 +961,29 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       if (compressionResult.newHistory) {
         this.getChat().setHistory(compressionResult.newHistory);
         console.log('[tryCompressChat] Compression applied successfully');
+
+        // 压缩后状态恢复：附加最近读取的文件内容
+        try {
+          const restorationContent = await this.postCompactRestoration.generateRestorationContent();
+          if (restorationContent) {
+            const currentHistory = this.getChat().getHistory(true);
+            currentHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: restorationContent }],
+            });
+            currentHistory.push({
+              role: MESSAGE_ROLES.MODEL,
+              parts: [{ text: 'I have reviewed the restored file context and am ready to continue.' }],
+            });
+            this.getChat().setHistory(currentHistory);
+            console.log(`[tryCompressChat] Post-compact restoration: attached ${this.postCompactRestoration.getRecentlyReadFiles().length} recently-read files`);
+          }
+        } catch (restorationError) {
+          console.warn(`[tryCompressChat] Post-compact restoration failed (non-fatal): ${restorationError}`);
+        }
+
+        // 重置微压缩状态（压缩后等于"新对话"开始）
+        this.microCompactService.reset();
       }
 
       return compressionResult.compressionInfo || null;
