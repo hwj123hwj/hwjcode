@@ -1382,8 +1382,8 @@ After your analysis, wrap the final summary in <summary> tags. The summary MUST 
  * 如果没有找到 <summary> 标签，回退到剥离 <analysis> 后返回全文
  */
 export function formatCompactSummary(rawSummary: string): string {
-  // 优先提取 <summary>...</summary> 内容
-  const summaryMatch = rawSummary.match(/<summary>([\s\S]*?)<\/summary>/i);
+  // 优先提取 <summary>...</summary> 内容（贪婪匹配，取最后一个 </summary>）
+  const summaryMatch = rawSummary.match(/<summary>([\s\S]*)<\/summary>/i);
   if (summaryMatch) {
     return summaryMatch[1].trim();
   }
