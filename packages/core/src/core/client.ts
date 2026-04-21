@@ -967,6 +967,17 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           const restorationContent = await this.postCompactRestoration.generateRestorationContent();
           if (restorationContent) {
             const currentHistory = this.getChat().getHistory(true);
+
+            // 确保追加 restoration 消息前角色交替正确
+            const lastMsg = currentHistory[currentHistory.length - 1];
+            if (lastMsg && lastMsg.role === MESSAGE_ROLES.USER) {
+              // 末尾已是 user，先补一条 model 占位以避免连续 user
+              currentHistory.push({
+                role: MESSAGE_ROLES.MODEL,
+                parts: [{ text: 'Understood.' }],
+              });
+            }
+
             currentHistory.push({
               role: MESSAGE_ROLES.USER,
               parts: [{ text: restorationContent }],
