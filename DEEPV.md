@@ -103,3 +103,4 @@ DeepV Code (Monorepo)
 - `DeepV_Code_Whitepaper.md` - 项目白皮书
 - `DEEPV.md` - 本文件（AI记忆文件）
 - `docs/index.md` - 文档总索引
+- ls-dev 是用户的常驻开发分支，提 MR 时绝对不要加 --remove-source-branch。
