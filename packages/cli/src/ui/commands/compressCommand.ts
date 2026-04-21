@@ -10,7 +10,7 @@ import { t } from '../utils/i18n.js';
 
 export const compressCommand: SlashCommand = {
   name: 'compress',
-  altNames: ['summarize'],
+  altNames: ['summarize', 'compact'],
   description: t('command.compress.description'),
   kind: CommandKind.BUILT_IN,
   action: async (context) => {
