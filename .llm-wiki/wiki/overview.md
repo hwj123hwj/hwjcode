@@ -3,7 +3,7 @@ type: overview
 title: DeepV Code - Project Overview
 tags: [overview, project, ai, cli, vscode, typescript]
 date: 2026-04-09
-source: README.md, package.json
+sources: [README.md, package.json]
 ---
 
 # DeepV Code - Project Overview
