@@ -993,6 +993,25 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           console.warn(`[tryCompressChat] Post-compact restoration failed (non-fatal): ${restorationError}`);
         }
 
+        // 🔧 安全保障：确保压缩后 history 不以 model 结尾
+        // AWS Bedrock Claude 等模型不支持 assistant prefill，要求对话以 user 结尾。
+        // postCompactRestoration 追加的最后一条消息是 model(ack)，如果此后没有新 user 消息，
+        // sendMessageStream 在工具调用循环中发送 functionResponse 时，如果该 functionResponse
+        // 对应的 functionCall 已被压缩掉，fixRequestContents 会将其作为孤立响应移除，
+        // 导致 contents 末尾变成 model → API 报 400。
+        {
+          const finalHistory = this.getChat().getHistory(true);
+          const lastMsg = finalHistory[finalHistory.length - 1];
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.MODEL) {
+            finalHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: '[Conversation continues]' }],
+            });
+            this.getChat().setHistory(finalHistory);
+            console.log('[tryCompressChat] Appended user placeholder to ensure history does not end with model message');
+          }
+        }
+
         // 重置微压缩状态（压缩后等于"新对话"开始）
         this.microCompactService.reset();
       }
