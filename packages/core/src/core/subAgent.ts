@@ -23,6 +23,7 @@ import { SessionManager } from '../services/sessionManager.js';
 import { CompressionService } from '../services/compressionService.js';
 import { SceneManager, SceneType } from './sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
+import { AgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
 
 export interface SubAgentExecutionContext {
   agentId: string;
@@ -99,6 +100,7 @@ export class SubAgent {
     private readonly updateOutput?: (output: string) => void,
     private readonly abortSignal?: AbortSignal,
     private readonly externalPreToolExecutionHandler?: PreToolExecutionHandler,
+    private readonly agentDefinition?: AgentDefinition,
   ) {
     this.context = {
       agentId: `subagent-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -280,6 +282,10 @@ export class SubAgent {
    * 构建子agent固定系统提示（不包含任务描述）
    */
   private buildSystemPrompt(): string {
+    if (this.agentDefinition) {
+      return this.agentDefinition.systemPrompt;
+    }
+
     const availableTools = this.getAvailableToolNames();
     return TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
   }
@@ -598,12 +604,13 @@ export class SubAgent {
   private createSubAgentToolRegistry(): ToolRegistry {
     const subAgentRegistry = new ToolRegistry(this.config);
 
-    // 只添加允许子agent使用的工具
     const allTools = this.toolRegistry.getAllTools();
-    allTools.forEach(tool => {
-      if (tool.allowSubAgentUse) {
-        subAgentRegistry.registerTool(tool);
-      }
+    const resolvedTools = this.agentDefinition
+      ? resolveAgentTools(this.agentDefinition, allTools).resolvedTools
+      : allTools.filter(tool => tool.allowSubAgentUse);
+
+    resolvedTools.forEach(tool => {
+      subAgentRegistry.registerTool(tool);
     });
 
     return subAgentRegistry;
