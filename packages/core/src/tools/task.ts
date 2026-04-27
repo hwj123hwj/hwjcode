@@ -185,7 +185,13 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
 
 
   getDescription(params: TaskToolParams): string {
-    return params.description;
+    const agentDefinition = getBuiltInAgentDefinition(
+      params.agent_type,
+      [],
+      params.max_turns,
+    );
+
+    return agentDefinition?.displayName ?? params.description;
   }
 
   toolLocations(params: TaskToolParams): Array<{ path: string; type: 'file' | 'directory' }> {
