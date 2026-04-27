@@ -32,4 +32,17 @@ describe('TaskTool', () => {
       }),
     ).toBe('Code Analysis Expert');
   });
+
+  it('falls back to the provided description for an unknown agent_type', () => {
+    const tool = new TaskTool({} as any, {} as any);
+
+    expect(
+      tool.getDescription({
+        agent_type: 'unknown-agent',
+        prompt: 'Do custom analysis',
+        description: '自定义分析',
+        max_turns: 8,
+      }),
+    ).toBe('自定义分析');
+  });
 });
