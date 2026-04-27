@@ -23,6 +23,13 @@ import { ToolExecutionContext } from '../core/toolSchedulerAdapter.js';
 import { createSubAgentUpdateMessage } from './toolOutputMessage.js';
 import { SubAgentDisplay } from './tools.js';
 import { TaskPrompts } from '../core/taskPrompts.js';
+import {
+  AgentDefinition,
+  BUILT_IN_AGENT_TYPES,
+  DEFAULT_SUBAGENT_AGENT_TYPE,
+  getBuiltInAgentDefinition,
+  resolveAgentTools,
+} from '../agents/agentDefinition.js';
 
 // Type alias for easier usage within this module
 type SubAgentDisplayData = SubAgentDisplay;
@@ -69,6 +76,11 @@ function createInitialSubAgentDisplay(
  */
 export interface TaskToolParams {
   /**
+   * 子Agent类型。当前默认支持 code-analysis，未来可扩展为更多内置/自定义Agent。
+   */
+  agent_type?: string;
+
+  /**
    * 任务的详细描述 - 告诉子agent要完成什么
    */
   prompt: string;
@@ -108,6 +120,10 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       {
         type: Type.OBJECT,
         properties: {
+          agent_type: {
+            type: Type.STRING,
+            description: `Sub-agent type to use. Defaults to ${DEFAULT_SUBAGENT_AGENT_TYPE}. Available built-in agents: ${BUILT_IN_AGENT_TYPES.join(', ')}.`,
+          },
           prompt: {
             type: Type.STRING,
             // 要分析的内容或问题的详细描述。分析专家将系统性地探索相关代码，理解架构和模式，并提供深入的技术洞察和实现建议。
@@ -149,6 +165,10 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
 
     if (params.max_turns < 1 || params.max_turns > 30) {
       return TaskPrompts.VALIDATION_ERRORS.MAX_TURNS_OUT_OF_RANGE;
+    }
+
+    if (params.agent_type && !BUILT_IN_AGENT_TYPES.includes(params.agent_type as typeof BUILT_IN_AGENT_TYPES[number])) {
+      return `Unsupported agent_type '${params.agent_type}'. Available agent types: ${BUILT_IN_AGENT_TYPES.join(', ')}`;
     }
 
     return null;
@@ -262,14 +282,16 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       };
       wrappedUpdateOutput(createSubAgentUpdateMessage(currentDisplayData));
 
-      // 创建子agent实例 - 使用通过allowSubAgentUse过滤的工具
+      // 创建子agent实例 - 使用AgentDefinition过滤后的工具
+      const agentDefinition = this.createAgentDefinition(params);
       const subAgent = new SubAgent(
         this.config,
-        this.createFilteredToolRegistry(),
+        this.createFilteredToolRegistry(agentDefinition),
         geminiClient,
         wrappedUpdateOutput,
         signal,
         services?.onPreToolExecution, // 🎯 传入外部预执行回调（用于git快照等）
+        agentDefinition,
       );
 
       // 🎯 直接使用services中的statusUpdateCallback
@@ -458,19 +480,47 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
     };
   }
 
+  private createAgentDefinition(params: TaskToolParams): AgentDefinition {
+    const allTools = this.toolRegistry.getAllTools();
+    const selectedAgent = getBuiltInAgentDefinition(
+      params.agent_type,
+      [],
+      params.max_turns,
+    );
+
+    if (!selectedAgent) {
+      throw new Error(`Unsupported agent_type '${params.agent_type}'. Available agent types: ${BUILT_IN_AGENT_TYPES.join(', ')}`);
+    }
+
+    const availableToolNames = resolveAgentTools(
+      selectedAgent,
+      allTools,
+    ).resolvedTools.map(tool => tool.name);
+
+    const hydratedAgent = getBuiltInAgentDefinition(
+      selectedAgent.agentType,
+      availableToolNames,
+      params.max_turns,
+    );
+
+    if (!hydratedAgent) {
+      throw new Error(`Failed to load built-in agent '${selectedAgent.agentType}'`);
+    }
+
+    return hydratedAgent;
+  }
+
   /**
    * 创建过滤后的工具注册表
-   * 只包含设置了 allowSubAgentUse: true 的工具
+   * 只包含当前AgentDefinition允许且设置了 allowSubAgentUse: true 的工具
    */
-  private createFilteredToolRegistry(): ToolRegistry {
+  private createFilteredToolRegistry(agentDefinition: AgentDefinition): ToolRegistry {
     const filteredRegistry = new ToolRegistry(this.config);
     const allTools = this.toolRegistry.getAllTools();
+    const resolved = resolveAgentTools(agentDefinition, allTools);
 
-    allTools.forEach(tool => {
-      // 只添加允许子agent使用的工具
-      if (tool.allowSubAgentUse) {
-        filteredRegistry.registerTool(tool);
-      }
+    resolved.resolvedTools.forEach(tool => {
+      filteredRegistry.registerTool(tool);
     });
 
     return filteredRegistry;
