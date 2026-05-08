@@ -724,7 +724,19 @@ function setupBasicMessageHandlers() {
       }
 
       if (data.confirmed) {
-        await aiService.approveToolCall(data.toolId, data.userInput);
+        // 🎯 AskUserQuestion: 如果带 answers/annotations/feedback 结构化字段，透传过去
+        const extra = ((): { answers?: any; annotations?: any; feedback?: string } | undefined => {
+          const d = data as any;
+          if (d.answers || d.annotations || d.feedback) {
+            return {
+              answers: d.answers,
+              annotations: d.annotations,
+              feedback: d.feedback,
+            };
+          }
+          return undefined;
+        })();
+        await aiService.approveToolCall(data.toolId, data.userInput, (data as any).outcome, extra);
       } else {
         await aiService.rejectToolCall(data.toolId, 'User rejected tool execution');
       }

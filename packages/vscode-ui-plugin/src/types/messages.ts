@@ -72,12 +72,63 @@ export enum ToolCallStatus {
   BackgroundRunning = 'background_running'  // 🎯 后台运行中
 }
 
+// 🎯 AskUserQuestion 相关类型（镜像 core 的定义）
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface AskUserQuestion {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
 // 🎯 工具调用确认详情
+// 注意：本接口包含所有 confirmation 变体的字段合集。`type` 字段区分具体变体。
+// 实际从 core 传过来时，structured clone 会丢弃 onConfirm 函数，其余字段保留。
 export interface ToolCallConfirmationDetails {
-  message: string;
-  requiresConfirmation: boolean;
+  // 原有通用字段
+  message?: string;
+  requiresConfirmation?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
   affectedFiles?: string[];
+
+  // 辨别字段 + 共用元数据
+  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete' | 'question';
+  title?: string;
+
+  // edit
+  fileDiff?: string;
+  fileName?: string;
+  originalContent?: string | null;
+  newContent?: string;
+
+  // delete
+  filePath?: string;
+  fileContent?: string;
+  fileSize?: number;
+  reason?: string;
+
+  // exec
+  command?: string;
+  rootCommand?: string;
+  warning?: string;
+
+  // mcp
+  serverName?: string;
+  toolName?: string;
+  toolDisplayName?: string;
+
+  // info
+  prompt?: string;
+  urls?: string[];
+
+  // 🎯 question (AskUserQuestion)
+  questions?: AskUserQuestion[];
+  metadata?: { source?: string };
 }
 
 /**
@@ -206,7 +257,17 @@ export type WebViewToExtensionMessage =
   // 原有消息类型（现在包含sessionId）
   | { type: 'tool_execution_request'; payload: ToolExecutionRequest & { sessionId: string } }
   | { type: 'tool_execution_confirm'; payload: { requestId: string; confirmed: boolean; sessionId?: string } }
-  | { type: 'tool_confirmation_response'; payload: { toolId: string; confirmed: boolean; userInput?: string; sessionId: string } }
+  | { type: 'tool_confirmation_response'; payload: {
+      toolId: string;
+      confirmed: boolean;
+      userInput?: string;
+      sessionId: string;
+      outcome?: string;
+      // 🎯 AskUserQuestion 专用字段 —— 当 tool 是 ask_user_question 时携带
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    } }
   | { type: 'tool_cancel_all'; payload: { sessionId: string } }
   | { type: 'flow_abort'; payload: { sessionId: string } }  // 🎯 新增流程中断消息
   | { type: 'chat_message'; payload: ChatMessage & { sessionId: string } }
