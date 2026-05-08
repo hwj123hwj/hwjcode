@@ -390,7 +390,35 @@ export interface ToolEditConfirmationDetails {
 export interface ToolConfirmationPayload {
   // used to override `modifiedProposedContent` for modifiable tools in the
   // inline modify flow
-  newContent: string;
+  newContent?: string;
+
+  // ========== AskUserQuestion payload fields ==========
+  /**
+   * Answers collected from the AskUserQuestion dialog.
+   * Keyed by `question.question` text, values are the selected option label(s)
+   * (comma-joined for multi-select). For free-text "Other" answers, the value
+   * is the raw user input.
+   */
+  answers?: Record<string, string>;
+
+  /**
+   * Optional per-question annotations: user notes or captured preview content.
+   * Keyed by question text. Surfaced to the LLM in the tool_result.
+   */
+  annotations?: Record<
+    string,
+    {
+      preview?: string;
+      notes?: string;
+    }
+  >;
+
+  /**
+   * Feedback text when the user chooses "Chat about this" or
+   * "Skip interview and plan immediately" — forwarded back to the LLM
+   * via the tool_result content.
+   */
+  feedback?: string;
 }
 
 export interface ToolExecuteConfirmationDetails {
@@ -431,12 +459,59 @@ export interface ToolDeleteConfirmationDetails {
   reason?: string;
 }
 
+/**
+ * Option for a single AskUserQuestion question.
+ */
+export interface AskUserQuestionOption {
+  /** Display text for this option (concise, 1-5 words). Used as the answer key in the LLM-facing result. */
+  label: string;
+  /** Explanation of what this option means or implies. */
+  description: string;
+  /** Optional preview content (markdown or html) rendered side-by-side. Single-select only. */
+  preview?: string;
+}
+
+/**
+ * A single question inside an AskUserQuestion call.
+ */
+export interface AskUserQuestion {
+  /** The complete question to ask the user. */
+  question: string;
+  /** Short chip label (≤12 chars) displayed in the question navigation bar. */
+  header: string;
+  /** 2-4 mutually exclusive options (unless multiSelect). An "Other" option is auto-appended by the UI. */
+  options: AskUserQuestionOption[];
+  /** Whether the user can pick multiple options. Defaults to false. */
+  multiSelect?: boolean;
+}
+
+/**
+ * Confirmation details for the AskUserQuestion tool.
+ * Rendered by a dedicated permission dialog (AskUserQuestionMessage)
+ * that reuses the standard awaiting_approval pause/resume pipeline.
+ */
+export interface ToolQuestionConfirmationDetails {
+  type: 'question';
+  title: string;
+  /** 1-4 questions to ask in this call. */
+  questions: AskUserQuestion[];
+  /** Optional metadata for tracking/analytics (not shown to user). */
+  metadata?: {
+    source?: string;
+  };
+  onConfirm: (
+    outcome: ToolConfirmationOutcome,
+    payload?: ToolConfirmationPayload,
+  ) => Promise<void>;
+}
+
 export type ToolCallConfirmationDetails =
   | ToolEditConfirmationDetails
   | ToolExecuteConfirmationDetails
   | ToolMcpConfirmationDetails
   | ToolInfoConfirmationDetails
-  | ToolDeleteConfirmationDetails;
+  | ToolDeleteConfirmationDetails
+  | ToolQuestionConfirmationDetails;
 
 export enum ToolConfirmationOutcome {
   ProceedOnce = 'proceed_once',
@@ -507,6 +582,7 @@ export enum Icon {
   Trash = 'trash',           // 🗑️ 用于DeleteFile
   List = 'list',             // 📜 用于ListSkills
   Info = 'info',             // ℹ️ 用于GetSkillDetails
+  Question = 'question',     // ❓ 用于AskUserQuestion
 }
 
 export interface ToolLocation {

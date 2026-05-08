@@ -513,8 +513,26 @@ export class MultiSessionMessageService {
 
   /**
    * 发送工具确认响应
+   *
+   * @param sessionId
+   * @param toolId
+   * @param confirmed 用户是否允许
+   * @param userInput 旧版的 edit 模式行内改写内容（可选）
+   * @param outcome 'proceed_once' | 'proceed_always' | 'proceed_always_project' | 'cancel' 等
+   * @param extra 🎯 AskUserQuestion 专用字段（answers / annotations / feedback）
    */
-  sendToolConfirmationResponse(sessionId: string, toolId: string, confirmed: boolean, userInput?: string, outcome?: string) {
+  sendToolConfirmationResponse(
+    sessionId: string,
+    toolId: string,
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) {
     this.sendMessage({
       type: 'tool_confirmation_response',
       payload: {
@@ -522,7 +540,10 @@ export class MultiSessionMessageService {
         toolId,
         confirmed,
         userInput,
-        outcome
+        outcome,
+        ...(extra?.answers && { answers: extra.answers }),
+        ...(extra?.annotations && { annotations: extra.annotations }),
+        ...(extra?.feedback && { feedback: extra.feedback }),
       }
     });
   }

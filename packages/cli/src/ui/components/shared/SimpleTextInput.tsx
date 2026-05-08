@@ -21,7 +21,7 @@
  * - Unicode-aware cursor positioning
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text } from 'ink';
 import { useKeypress, Key } from '../../hooks/useKeypress.js';
 import { Colors } from '../../colors.js';
@@ -71,8 +71,34 @@ export function SimpleTextInput({
     }
   }, [value, cursorPosition]);
 
+  // 🎯 IME / 批量按键修复：
+  // KeypressContext 的 rapidPaste 检测会把短时间内多次中文 IME 上屏字
+  // 逐个 broadcast（当字数 < 5 时）。若 handleKeypress 闭包读 state 的 `value`
+  // 会是同一 tick 内的旧值 —— 后续字符用旧 value 拼接后覆盖前面的 onChange，
+  // 导致「只上屏最后一个字」。
+  // 方案：用 ref 保持 value/cursor 的即时最新值，同一 tick 多次 keypress
+  // 依然能正确累加。
+  const valueRef = useRef(value);
+  const cursorRef = useRef(cursorPosition);
+  valueRef.current = value;
+  cursorRef.current = cursorPosition;
+
+  const commitChange = useCallback(
+    (nextValue: string, nextCursor: number) => {
+      valueRef.current = nextValue;
+      cursorRef.current = nextCursor;
+      onChange(nextValue);
+      setCursorPosition(nextCursor);
+    },
+    [onChange],
+  );
+
   const handleKeypress = useCallback((key: Key) => {
-    const valueLen = cpLen(value);
+    // Always read the freshest value/cursor from refs so that IME multi-char
+    // bursts dispatched within the same tick accumulate correctly.
+    const curValue = valueRef.current;
+    const curCursor = cursorRef.current;
+    const valueLen = cpLen(curValue);
 
     // ============================================
     // Paste handling (from InputPrompt)
@@ -81,181 +107,147 @@ export function SimpleTextInput({
     // Handle paste event with content
     if (key.paste && key.sequence) {
       // Windows special case: Ctrl+Enter/Shift+Enter may be misidentified as paste
-      // (from InputPrompt lines 848-862)
       if (key.sequence === '\n' || key.sequence === '\r') {
-        // This is likely Ctrl+Enter or Shift+Enter, not a real paste
-        // For single-line input, just ignore it (don't insert newline)
         return;
       }
 
       const sanitized = sanitizePasteContent(key.sequence);
-      // For single-line input, replace newlines with spaces
       const singleLine = sanitized.replace(/[\r\n]+/g, ' ').trim();
       if (singleLine) {
-        const newValue = cpSlice(value, 0, cursorPosition) + singleLine + cpSlice(value, cursorPosition);
-        onChange(newValue);
-        setCursorPosition(cursorPosition + cpLen(singleLine));
+        const newValue = cpSlice(curValue, 0, curCursor) + singleLine + cpSlice(curValue, curCursor);
+        commitChange(newValue, curCursor + cpLen(singleLine));
       }
       return;
     }
 
     // Handle empty paste event (might be image paste, just ignore for simple text input)
-    // (from InputPrompt lines 840-846)
     if (key.paste && !key.sequence) {
       return;
     }
 
     // Compatibility: some terminals don't set paste flag but send multi-line content
-    // (from InputPrompt lines 879-890)
     if (key.sequence && key.sequence.includes('\n') && key.sequence.length > 50) {
       const sanitized = sanitizePasteContent(key.sequence);
       const singleLine = sanitized.replace(/[\r\n]+/g, ' ').trim();
       if (singleLine) {
-        const newValue = cpSlice(value, 0, cursorPosition) + singleLine + cpSlice(value, cursorPosition);
-        onChange(newValue);
-        setCursorPosition(cursorPosition + cpLen(singleLine));
+        const newValue = cpSlice(curValue, 0, curCursor) + singleLine + cpSlice(curValue, curCursor);
+        commitChange(newValue, curCursor + cpLen(singleLine));
       }
       return;
     }
 
-    // ============================================
-    // Enter key handling (from InputPrompt)
-    // ============================================
-
-    // Handle Enter for submit (only when not using modifiers)
-    // (from InputPrompt lines 766-785)
+    // Enter for submit (only when not using modifiers)
     if (key.name === 'return' && !key.shift && !key.ctrl && !key.meta && !key.paste) {
-      onSubmit(value);
+      onSubmit(curValue);
       return;
     }
 
-    // Ignore Shift+Enter, Ctrl+Enter, Alt+Enter for single-line input
-    // (In InputPrompt these create newlines, but we're single-line)
+    // Ignore modified Enter for single-line input
     if (key.name === 'return') {
       return;
     }
 
-    // ============================================
-    // Escape key
-    // ============================================
+    // Escape
     if (key.name === 'escape') {
       onCancel?.();
       return;
     }
 
-    // ============================================
     // Editing keys (Unicode-aware)
-    // ============================================
-
     if (key.name === 'backspace') {
-      if (cursorPosition > 0) {
-        const newValue = cpSlice(value, 0, cursorPosition - 1) + cpSlice(value, cursorPosition);
-        onChange(newValue);
-        setCursorPosition(cursorPosition - 1);
+      if (curCursor > 0) {
+        const newValue = cpSlice(curValue, 0, curCursor - 1) + cpSlice(curValue, curCursor);
+        commitChange(newValue, curCursor - 1);
       }
       return;
     }
 
     if (key.name === 'delete') {
-      if (cursorPosition < valueLen) {
-        const newValue = cpSlice(value, 0, cursorPosition) + cpSlice(value, cursorPosition + 1);
-        onChange(newValue);
+      if (curCursor < valueLen) {
+        const newValue = cpSlice(curValue, 0, curCursor) + cpSlice(curValue, curCursor + 1);
+        commitChange(newValue, curCursor);
       }
       return;
     }
 
-    // ============================================
     // Navigation keys
-    // ============================================
-
     if (key.name === 'left') {
-      if (cursorPosition > 0) {
-        setCursorPosition(cursorPosition - 1);
+      if (curCursor > 0) {
+        cursorRef.current = curCursor - 1;
+        setCursorPosition(curCursor - 1);
       }
       return;
     }
 
     if (key.name === 'right') {
-      if (cursorPosition < valueLen) {
-        setCursorPosition(cursorPosition + 1);
+      if (curCursor < valueLen) {
+        cursorRef.current = curCursor + 1;
+        setCursorPosition(curCursor + 1);
       }
       return;
     }
 
-    // Ctrl+A / Home: move to start (from InputPrompt lines 788-791)
     if (key.name === 'home' || (key.ctrl && key.name === 'a')) {
+      cursorRef.current = 0;
       setCursorPosition(0);
       return;
     }
 
-    // Ctrl+E / End: move to end (from InputPrompt lines 792-796)
     if (key.name === 'end' || (key.ctrl && key.name === 'e')) {
+      cursorRef.current = valueLen;
       setCursorPosition(valueLen);
       return;
     }
 
-    // ============================================
-    // Kill commands (from InputPrompt)
-    // ============================================
-
-    // Ctrl+U: kill line left (from InputPrompt lines 805-808)
+    // Kill commands
     if (key.ctrl && key.name === 'u') {
-      const newValue = cpSlice(value, cursorPosition);
-      onChange(newValue);
-      setCursorPosition(0);
+      const newValue = cpSlice(curValue, curCursor);
+      commitChange(newValue, 0);
       return;
     }
 
-    // Ctrl+K: kill line right (from InputPrompt lines 801-804)
     if (key.ctrl && key.name === 'k') {
-      const newValue = cpSlice(value, 0, cursorPosition);
-      onChange(newValue);
+      const newValue = cpSlice(curValue, 0, curCursor);
+      commitChange(newValue, curCursor);
       return;
     }
 
-    // Ctrl+W: delete word before cursor
     if (key.ctrl && key.name === 'w') {
-      const beforeCursor = cpSlice(value, 0, cursorPosition);
+      const beforeCursor = cpSlice(curValue, 0, curCursor);
       const match = beforeCursor.match(/\S*\s*$/);
       if (match) {
         const deleteLength = cpLen(match[0]);
-        const newValue = cpSlice(value, 0, cursorPosition - deleteLength) + cpSlice(value, cursorPosition);
-        onChange(newValue);
-        setCursorPosition(cursorPosition - deleteLength);
+        const newValue = cpSlice(curValue, 0, curCursor - deleteLength) + cpSlice(curValue, curCursor);
+        commitChange(newValue, curCursor - deleteLength);
       }
       return;
     }
 
-    // Ctrl+C: clear input (from InputPrompt lines 797-803)
     if (key.ctrl && key.name === 'c') {
-      if (value.length > 0) {
-        onChange('');
-        setCursorPosition(0);
+      if (curValue.length > 0) {
+        commitChange('', 0);
       }
       return;
     }
 
-    // ============================================
     // Ignore other control key combinations
-    // ============================================
     if (key.ctrl || key.meta) {
       return;
     }
 
     // ============================================
-    // Regular character input
+    // Regular character input (handles IME multi-char bursts correctly
+    // because we read latest state from refs, not from stale closure)
     // ============================================
     if (key.sequence && !key.ctrl && !key.meta) {
-      // Check if it's a printable character
-      // Handle both single-byte and multi-byte characters (emoji, CJK, etc.)
       const charCode = key.sequence.codePointAt(0);
       if (charCode !== undefined && charCode >= 32) {
-        const newValue = cpSlice(value, 0, cursorPosition) + key.sequence + cpSlice(value, cursorPosition);
-        onChange(newValue);
-        setCursorPosition(cursorPosition + cpLen(key.sequence));
+        const seqLen = cpLen(key.sequence);
+        const newValue = cpSlice(curValue, 0, curCursor) + key.sequence + cpSlice(curValue, curCursor);
+        commitChange(newValue, curCursor + seqLen);
       }
     }
-  }, [value, cursorPosition, onChange, onSubmit, onCancel]);
+  }, [commitChange, onSubmit, onCancel]);
 
   useKeypress(handleKeypress, { isActive });
 
