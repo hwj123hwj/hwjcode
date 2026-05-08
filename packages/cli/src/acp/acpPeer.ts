@@ -679,6 +679,15 @@ function toAcpToolCallConfirmation(
         type: 'edit', // delete操作在ACP中作为edit类型处理
         description: confirmationDetails.title,
       };
+    case 'question':
+      // AskUserQuestion 在 ACP 协议下降级为通用 fetch/info 风格的说明，
+      // 因为 ACP 客户端（IDE plugin 等）目前没有专门的 question 协议。
+      // 本地 CLI 始终走 AskUserQuestionMessage 原生 UI，不会走到这里。
+      return {
+        type: 'fetch',
+        urls: [],
+        description: confirmationDetails.title,
+      };
     default: {
       const unreachable: never = confirmationDetails;
       throw new Error(`Unexpected: ${unreachable}`);
