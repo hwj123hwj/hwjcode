@@ -25,6 +25,7 @@ import {
   SkillSource,
 } from './skill-types.js';
 import { SettingsManager, SkillsPaths } from './settings-manager.js';
+import { isDirentDirectoryFollowingSymlinks } from './utils/fs-helpers.js';
 import { MarketplaceManager } from './marketplace-manager.js';
 import { MarketplaceLoader } from './loaders/marketplace-loader.js';
 import { UnifiedComponent, ComponentType } from './models/unified.js';
@@ -145,6 +146,10 @@ export class SkillLoader {
 
   /**
    * 扫描技能目录
+   *
+   * 注意：必须跟随 symlink —— 用户用 `ln -s` 把 skill 指到 `~/.deepv/skills/` 的
+   * 场景很常见（尤其开发者在 monorepo 里软链接多套技能），若直接用
+   * `entry.isDirectory()` 会把 symlink 全部漏掉。
    */
   private async scanSkillDirectories(rootPath: string): Promise<string[]> {
     const skillDirs: string[] = [];
@@ -153,13 +158,14 @@ export class SkillLoader {
       const entries = await fs.readdir(rootPath, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const skillDir = path.join(rootPath, entry.name);
-          const skillPath = path.join(skillDir, 'SKILL.md');
+        const isDir = await isDirentDirectoryFollowingSymlinks(entry, rootPath);
+        if (!isDir) continue;
 
-          if (await fs.pathExists(skillPath)) {
-            skillDirs.push(skillDir);
-          }
+        const skillDir = path.join(rootPath, entry.name);
+        const skillPath = path.join(skillDir, 'SKILL.md');
+
+        if (await fs.pathExists(skillPath)) {
+          skillDirs.push(skillDir);
         }
       }
     } catch (error) {
