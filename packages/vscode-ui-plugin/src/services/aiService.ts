@@ -2311,11 +2311,44 @@ export class AIService {
 
   // 🎯 工具确认方法
 
-  async approveToolCall(toolId: string, userInput?: string): Promise<void> {
+  /**
+   * @param toolId
+   * @param userInput  兼容旧路径：edit 工具行内修改后的 newContent
+   * @param outcome    'proceed_once' | 'proceed_always' | 'proceed_always_project' 等
+   * @param extra      🎯 AskUserQuestion 的结构化答案（answers / annotations / feedback）
+   */
+  async approveToolCall(
+    toolId: string,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ): Promise<void> {
     if (!this.coreToolScheduler) throw new Error('Core scheduler not available');
 
-    const coreOutcome: ToolConfirmationOutcome = ToolConfirmationOutcome.ProceedOnce;
-    const confirmationPayload: ToolConfirmationPayload | undefined = userInput ? { newContent: String(userInput) } : undefined;
+    const coreOutcome: ToolConfirmationOutcome =
+      outcome === 'proceed_always' ? ToolConfirmationOutcome.ProceedAlways :
+      outcome === 'proceed_always_tool' ? ToolConfirmationOutcome.ProceedAlwaysTool :
+      outcome === 'proceed_always_server' ? ToolConfirmationOutcome.ProceedAlwaysServer :
+      outcome === 'proceed_always_project' ? ToolConfirmationOutcome.ProceedAlwaysProject :
+      outcome === 'modify_with_editor' ? ToolConfirmationOutcome.ModifyWithEditor :
+      ToolConfirmationOutcome.ProceedOnce;
+
+    // 🎯 构造 payload：优先携带 AskUserQuestion 的结构化答案，
+    // 兜底走旧的 newContent（edit 工具的行内改写路径）。
+    let confirmationPayload: ToolConfirmationPayload | undefined;
+    if (extra?.answers || extra?.annotations || extra?.feedback) {
+      confirmationPayload = {
+        ...(extra.answers && { answers: extra.answers }),
+        ...(extra.annotations && { annotations: extra.annotations }),
+        ...(extra.feedback && { feedback: extra.feedback }),
+      };
+    } else if (userInput) {
+      confirmationPayload = { newContent: String(userInput) };
+    }
 
     this.coreToolScheduler.handleConfirmationResponse(toolId, coreOutcome, confirmationPayload);
   }

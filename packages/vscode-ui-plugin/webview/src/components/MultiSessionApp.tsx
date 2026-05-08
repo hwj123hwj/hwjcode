@@ -1768,8 +1768,19 @@ User question: ${contentStr}`;
 
   /**
    * 处理工具确认响应
+   * 🎯 extra 是 AskUserQuestion 的结构化载荷（answers / annotations / feedback）
    */
-  const handleToolConfirmationResponse = (toolId: string, confirmed: boolean, userInput?: string, outcome?: string) => {
+  const handleToolConfirmationResponse = (
+    toolId: string,
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) => {
     const currentSession = getCurrentSession();
     if (!currentSession) return;
 
@@ -1778,7 +1789,8 @@ User question: ${contentStr}`;
       toolId,
       confirmed,
       userInput,
-      outcome
+      outcome,
+      extra
     );
 
     // 🎯 工具状态更新现在通过updateMessageToolCalls处理
