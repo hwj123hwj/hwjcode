@@ -27,6 +27,7 @@ import * as path from 'path';
 import * as os from 'os';
 import matter from 'gray-matter';
 import { getProjectSkillsDir } from '../utils/paths.js';
+import { isDirectoryFollowingSymlinksSync } from './utils/fs-helpers.js';
 import type {
   SkillsSettings,
   InstalledPlugins,
@@ -493,9 +494,13 @@ export class SkillsContextBuilder {
       const entries = fs.readdirSync(rootDir, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        // 🎯 follow symlinks：Dirent.isDirectory() 对 symlink 返回 false，
+        // 需要手动 statSync 跟随，否则用户 `ln -s` 进来的 skill 全部被漏掉。
+        const entryPath = path.join(rootDir, entry.name);
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+        if (entry.isSymbolicLink() && !isDirectoryFollowingSymlinksSync(entryPath)) continue;
 
-        const skillDir = path.join(rootDir, entry.name);
+        const skillDir = entryPath;
         const skillMdPath = path.join(skillDir, 'SKILL.md');
 
         if (!fs.existsSync(skillMdPath)) {

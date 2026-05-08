@@ -18,6 +18,7 @@ import {
 import { IPluginLoader } from './types.js';
 import { SettingsManager, SkillsPaths } from '../settings-manager.js';
 import { PluginStructureAnalyzer, ComponentParser } from '../parsers/index.js';
+import { isDirentDirectoryFollowingSymlinks } from '../utils/fs-helpers.js';
 import { PluginSource } from '../skill-types.js';
 
 /**
@@ -335,14 +336,19 @@ export class MarketplaceLoader implements IPluginLoader {
   private async discoverPluginDirs(mpPath: string): Promise<string[]> {
     const dirs: string[] = [];
 
+    // 注意：必须跟随 symlink —— marketplace 根下 plugin 可能是软链接到开发中
+    // 的仓库（monorepo workspace 常见），`Dirent.isDirectory()` 对 symlink 返回
+    // false，所以要显式 follow。
+
     // 1. 检查根目录下的插件 (DeepV Code 风格)
     const rootEntries = await fs.readdir(mpPath, { withFileTypes: true });
     for (const entry of rootEntries) {
-      if (entry.isDirectory() && !entry.name.startsWith('.')) {
-        // 排除 plugins 目录，因为它会被单独处理
-        if (entry.name !== 'plugins') {
-          dirs.push(path.join(mpPath, entry.name));
-        }
+      if (entry.name.startsWith('.')) continue;
+      const isDir = await isDirentDirectoryFollowingSymlinks(entry, mpPath);
+      if (!isDir) continue;
+      // 排除 plugins 目录，因为它会被单独处理
+      if (entry.name !== 'plugins') {
+        dirs.push(path.join(mpPath, entry.name));
       }
     }
 
@@ -351,9 +357,10 @@ export class MarketplaceLoader implements IPluginLoader {
     if (await fs.pathExists(pluginsPath)) {
       const pluginEntries = await fs.readdir(pluginsPath, { withFileTypes: true });
       for (const entry of pluginEntries) {
-        if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          dirs.push(path.join(pluginsPath, entry.name));
-        }
+        if (entry.name.startsWith('.')) continue;
+        const isDir = await isDirentDirectoryFollowingSymlinks(entry, pluginsPath);
+        if (!isDir) continue;
+        dirs.push(path.join(pluginsPath, entry.name));
       }
     }
 
