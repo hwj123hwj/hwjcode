@@ -160,16 +160,30 @@ export enum ToolCallStatus {
   BackgroundRunning = 'background_running'  // 🎯 后台运行中
 }
 
+// 🎯 AskUserQuestion 相关类型（镜像 core 的定义）
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface AskUserQuestion {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
 // 🎯 工具调用确认详情
 export interface ToolCallConfirmationDetails {
-  message: string;
-  requiresConfirmation: boolean;
+  message?: string;
+  requiresConfirmation?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
   affectedFiles?: string[];
   estimatedTime?: string;
   reversible?: boolean;
   // 🎯 确认类型（来自 core ToolCallConfirmationDetails）
-  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete';
+  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete' | 'question';
   title?: string;
   // 🎯 Edit 类型确认的完整字段（来自 core ToolEditConfirmationDetails）
   fileDiff?: string;
@@ -184,6 +198,9 @@ export interface ToolCallConfirmationDetails {
   // 🎯 Exec 类型确认的字段（来自 core ToolExecuteConfirmationDetails）
   command?: string;
   rootCommand?: string;
+  // 🎯 Question 类型（AskUserQuestion）
+  questions?: AskUserQuestion[];
+  metadata?: { source?: string };
 }
 
 /**

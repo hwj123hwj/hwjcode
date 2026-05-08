@@ -13,6 +13,7 @@ import {
   ToolConfirmationOutcome,
   ToolExecuteConfirmationDetails,
   ToolMcpConfirmationDetails,
+  ToolQuestionConfirmationDetails,
   Config,
 } from 'deepv-code-core';
 import {
@@ -20,6 +21,7 @@ import {
   RadioSelectItem,
 } from '../shared/RadioButtonSelect.js';
 import { MaxSizedBox } from '../shared/MaxSizedBox.js';
+import { AskUserQuestionMessage } from './AskUserQuestionMessage.js';
 import { t, tp, getCancelConfirmationText } from '../../utils/i18n.js';
 import { useSmallWindowOptimization, WindowSizeLevel } from '../../hooks/useSmallWindowOptimization.js';
 import { AudioNotification, NotificationSound } from '../../../utils/audioNotification.js';
@@ -66,6 +68,19 @@ export const ToolConfirmationMessage: React.FC<
       onConfirm(ToolConfirmationOutcome.Cancel);
     }
   });
+
+  // 🎯 AskUserQuestion 走独立的对话渲染 — 完整对齐 claude-code 的 "Ask User" 体验。
+  // 这个分支必须在通用 switch 之前，因为它的选项/布局与其他确认类型不同。
+  if (confirmationDetails.type === 'question') {
+    return (
+      <AskUserQuestionMessage
+        details={confirmationDetails as ToolQuestionConfirmationDetails}
+        isFocused={isFocused}
+        isInPlanMode={!!config?.getPlanModeActive?.()}
+        terminalWidth={terminalWidth}
+      />
+    );
+  }
 
   const handleSelect = (item: ToolConfirmationOutcome) => {
     // 🔧 调试日志

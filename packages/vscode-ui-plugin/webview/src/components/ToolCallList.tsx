@@ -11,6 +11,7 @@ import { TodoDisplayRenderer } from './renderers/TodoDisplayRenderer';
 import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { DiffRenderer } from './renderers/DiffRenderer';
 import { BackgroundTaskOutputRenderer } from './renderers/BackgroundTaskOutputRenderer';
+import { AskUserQuestionMessage } from './AskUserQuestionMessage';
 import './renderers/Renderers.css';
 
 // 结果类型检测函数
@@ -153,9 +154,19 @@ const ToolCallItem: React.FC<{
   toolCall: ToolCall;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  onConfirm: (confirmed: boolean, userInput?: string) => void;
+  onConfirm: (
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) => void;
   onMoveToBackground?: (toolCallId: string) => void;
-}> = ({ toolCall, isExpanded, onToggleExpand, onConfirm, onMoveToBackground }) => {
+  isInPlanMode?: boolean;
+}> = ({ toolCall, isExpanded, onToggleExpand, onConfirm, onMoveToBackground, isInPlanMode = false }) => {
   const { t } = useTranslation();
   const [userInput, setUserInput] = useState('');
   const liveOutputRef = useRef<HTMLDivElement>(null);
@@ -221,7 +232,7 @@ const ToolCallItem: React.FC<{
     }
 
     // 🎯 扩展onConfirm调用以传递outcome
-    (onConfirm as any)(confirmed, userInput.trim() || undefined, outcome);
+    onConfirm(confirmed, userInput.trim() || undefined, outcome);
   };
 
   // 🎯 获取工具执行结果摘要
@@ -647,8 +658,28 @@ const ToolCallItem: React.FC<{
         </div>
       )}
 
-      {/* 确认提示 - 现代设计 */}
-      {hasConfirmation && (
+      {/* 🎯 AskUserQuestion：独立的问答对话 UI，不走通用确认栏 */}
+      {hasConfirmation && toolCall.confirmationDetails?.type === 'question' && (
+        <AskUserQuestionMessage
+          confirmationDetails={toolCall.confirmationDetails}
+          isInPlanMode={isInPlanMode}
+          onConfirm={(payload) => {
+            onConfirm(
+              payload.confirmed,
+              undefined,
+              payload.outcome,
+              {
+                ...(payload.answers && { answers: payload.answers }),
+                ...(payload.annotations && { annotations: payload.annotations }),
+                ...(payload.feedback && { feedback: payload.feedback }),
+              }
+            );
+          }}
+        />
+      )}
+
+      {/* 确认提示 - 现代设计 (其他工具类型) */}
+      {hasConfirmation && toolCall.confirmationDetails?.type !== 'question' && (
         <div className="tool-confirmation-modern">
           {/* 预览区域 - 智能渲染 */}
           <div className="confirmation-preview">
@@ -856,12 +887,24 @@ const getStatusIcon = (status: string) => {
 
 interface ToolCallListProps {
   toolCalls: ToolCall[];
-  onConfirm?: (toolCallId: string, confirmed: boolean, userInput?: string, outcome?: string) => void;
+  onConfirm?: (
+    toolCallId: string,
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) => void;
   showCompact?: boolean;
   onMoveToBackground?: (toolCallId: string) => void;
+  /** True when the current session is in plan mode (enables "Skip interview" footer). */
+  isInPlanMode?: boolean;
 }
 
-export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm, showCompact = false, onMoveToBackground }) => {
+export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm, showCompact = false, onMoveToBackground, isInPlanMode = false }) => {
   // 🎯 初始化时，background_task_output 类型的工具默认展开
   const getDefaultExpandedTools = () => {
     const expanded = new Set<string>();
@@ -905,8 +948,17 @@ export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm
     });
   };
 
-  const handleConfirm = (toolCallId: string) => (confirmed: boolean, userInput?: string, outcome?: string) => {
-    onConfirm?.(toolCallId, confirmed, userInput, outcome);
+  const handleConfirm = (toolCallId: string) => (
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) => {
+    onConfirm?.(toolCallId, confirmed, userInput, outcome, extra);
   };
 
   return (
@@ -923,6 +975,7 @@ export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm
             onToggleExpand={() => toggleExpand(toolCall.id)}
             onConfirm={handleConfirm(toolCall.id)}
             onMoveToBackground={onMoveToBackground}
+            isInPlanMode={isInPlanMode}
           />
         );
       })}
