@@ -34,4 +34,13 @@ function cleanDirectory(dir) {
 const srcDir = path.join(__dirname, '..', 'src');
 console.log('Purging build artifacts from src directory...');
 cleanDirectory(srcDir);
+
+// Also clean webview/src — the webview has its own tsc/webpack build and
+// easily leaks compiled .js/.d.ts into sources if someone runs `tsc` without
+// `--noEmit`. These leftovers break typecheck because webview's tsconfig has
+// `allowJs: true` and the stale .js files lack JSX pragmas.
+const webviewSrcDir = path.join(__dirname, '..', 'webview', 'src');
+console.log('Purging build artifacts from webview/src directory...');
+cleanDirectory(webviewSrcDir);
+
 console.log('Cleanup task completed.');
