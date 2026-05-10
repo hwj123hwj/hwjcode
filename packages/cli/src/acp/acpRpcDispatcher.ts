@@ -196,6 +196,32 @@ export class GeminiAgent {
     return {};
   }
 
+  /**
+   * Handle `session/set_config_option`.
+   *
+   * DeepCode does not currently expose any per-session configuration options
+   * (timeout, tool permissions, etc.) through ACP. Rather than rejecting the
+   * request with `Method not found` — which several clients (OpenClaw,
+   * Zed's newer builds) treat as a hard error — we accept it silently and
+   * return an empty option set.
+   *
+   * When DeepCode grows a real session-config surface (e.g. per-session
+   * `timeout`, `tool_filter`), wire it in here and include the live values
+   * in the response's `configOptions` array.
+   */
+  async setSessionConfigOption(
+    params: acp.SetSessionConfigOptionRequest,
+  ): Promise<acp.SetSessionConfigOptionResponse> {
+    const session = this.sessionManager.getSession(params.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${params.sessionId}`,
+      );
+    }
+    return { configOptions: [] };
+  }
+
   async unstable_setSessionModel(
     params: acp.SetSessionModelRequest,
   ): Promise<acp.SetSessionModelResponse> {
