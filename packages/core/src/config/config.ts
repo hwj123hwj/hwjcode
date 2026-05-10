@@ -53,6 +53,10 @@ import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
+import {
+  type FileSystemService,
+  StandardFileSystemService,
+} from '../services/fileSystemService.js';
 import { GitService } from '../services/gitService.js';
 import { getProjectTempDir } from '../utils/paths.js';
 import {
@@ -237,6 +241,9 @@ export class Config {
   private resourceRegistry!: ResourceRegistry;
   private sessionId: string;
   private contentGeneratorConfig!: ContentGeneratorConfig;
+  private acpAuthApiKey?: string;
+  private acpAuthBaseUrl?: string;
+  private acpAuthCustomHeaders?: Record<string, string>;
   private readonly embeddingModel: string;
   private readonly sandbox: SandboxConfig | undefined;
   private readonly targetDir: string;
@@ -267,6 +274,7 @@ export class Config {
     enableRecursiveFileSearch: boolean;
   };
   private fileDiscoveryService: FileDiscoveryService | null = null;
+  private fileSystemService: FileSystemService | null = null;
   private gitService: GitService | undefined = undefined;
   private readonly checkpointing: boolean;
   private readonly proxy: string | undefined;
@@ -478,7 +486,14 @@ export class Config {
     }
   }
 
-  async refreshAuth(authMethod: AuthType) {
+  async refreshAuth(
+    authMethod: AuthType,
+    options?: {
+      apiKey?: string;
+      baseUrl?: string;
+      customHeaders?: Record<string, string>;
+    },
+  ) {
     // BUG修复: 保存当前模型设置，防止在重新配置时丢失
     // 修复策略: 在refreshAuth前保存模型，重新配置后恢复
     // 影响范围: packages/core/src/config/config.ts:refreshAuth方法
@@ -491,6 +506,19 @@ export class Config {
       authMethod,
     );
 
+    // 允许 ACP 客户端在认证时覆盖 apiKey / baseUrl / headers。
+    // DeepCode 的 ContentGeneratorConfig 目前只承载 authType / proxy，
+    // 这些扩展字段先存到 Config 实例上，供 ACP 适配层读取。
+    if (options?.apiKey !== undefined) {
+      this.acpAuthApiKey = options.apiKey;
+    }
+    if (options?.baseUrl !== undefined) {
+      this.acpAuthBaseUrl = options.baseUrl;
+    }
+    if (options?.customHeaders !== undefined) {
+      this.acpAuthCustomHeaders = options.customHeaders;
+    }
+
     // 恢复之前设置的模型（特别是Claude模型）
     // if (currentModel && this.contentGeneratorConfig) {
     //   this.contentGeneratorConfig.model = currentModel;
@@ -499,6 +527,21 @@ export class Config {
 
     this.geminiClient = new GeminiClient(this);
     await this.geminiClient.initialize(this.contentGeneratorConfig);
+  }
+
+  /** ACP 认证时透传的 API Key（可空）。 */
+  getAcpAuthApiKey(): string | undefined {
+    return this.acpAuthApiKey;
+  }
+
+  /** ACP 认证时透传的 base URL（可空）。 */
+  getAcpAuthBaseUrl(): string | undefined {
+    return this.acpAuthBaseUrl;
+  }
+
+  /** ACP 认证时透传的自定义 HTTP headers（可空）。 */
+  getAcpAuthCustomHeaders(): Record<string, string> | undefined {
+    return this.acpAuthCustomHeaders;
   }
 
   getSessionId(): string {
@@ -876,6 +919,23 @@ export class Config {
       this.fileDiscoveryService = new FileDiscoveryService(this.targetDir);
     }
     return this.fileDiscoveryService;
+  }
+
+  /**
+   * The text file read/write provider. Defaults to {@link StandardFileSystemService}
+   * (Node `fs/promises`). ACP clients can install an editor-backed provider
+   * via {@link setFileSystemService}.
+   */
+  getFileSystemService(): FileSystemService {
+    if (!this.fileSystemService) {
+      this.fileSystemService = new StandardFileSystemService();
+    }
+    return this.fileSystemService;
+  }
+
+  /** Replace the active {@link FileSystemService}. */
+  setFileSystemService(service: FileSystemService): void {
+    this.fileSystemService = service;
   }
 
   getUsageStatisticsEnabled(): boolean {

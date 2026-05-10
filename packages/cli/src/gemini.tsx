@@ -150,7 +150,7 @@ async function relaunchWithAdditionalArgs(additionalArgs: string[]) {
   await new Promise((resolve) => child.on('close', resolve));
   process.exit(0);
 }
-import { runAcpPeer } from './acp/acpPeer.js';
+import { runAcpClient } from './acp/acpStdioTransport.js';
 import { cleanupOldClipboardImages } from './ui/utils/clipboardUtils.js';
 import { exportSessionToMarkdown } from './utils/sessionExport.js';
 
@@ -191,8 +191,12 @@ async function askUserForAutoUpdate(): Promise<boolean> {
   });
 }
 
-// 询问用户是否进行可选更新
-async function askUserForUpdate(): Promise<boolean> {
+// 询问用户是否进行可选更新。assumeYes=true 时直接返回 true（-uy 场景）。
+async function askUserForUpdate(assumeYes: boolean = false): Promise<boolean> {
+  if (assumeYes) {
+    console.log(`\n${t('update.prompt.now')}y (auto-confirmed via -y)`);
+    return true;
+  }
   return new Promise((resolve) => {
     const rl = createConfirmationReadlineInterface({
       input: process.stdin,
@@ -456,8 +460,10 @@ export async function main() {
       console.log(message);
       console.log('='.repeat(60));
 
-      // 询问用户是否更新
-      const shouldUpdate = await askUserForUpdate();
+      // 询问用户是否更新。-u 上下文下的 -y / --yolo 视为"默认确认升级"
+      // （交互 REPL 里 -y 的 yolo 语义在这条单次升级分支里用不上，
+      //  挪用为 update 的 assume-yes 最符合用户对 `-uy` 的直觉）。
+      const shouldUpdate = await askUserForUpdate(!!argv.yolo);
       if (shouldUpdate) {
         const success = await executeUpdateCommand(updateCommand);
         if (success) {
@@ -831,7 +837,7 @@ export async function main() {
   // OAuth pre-authentication removed - only Cheeth OA supported
 
   if (config.getExperimentalAcp()) {
-    return runAcpPeer(config, settings);
+    return runAcpClient(config, settings, argv);
   }
 
   let input = config.getQuestion();
