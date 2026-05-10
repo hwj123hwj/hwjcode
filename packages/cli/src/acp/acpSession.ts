@@ -109,10 +109,22 @@ export class Session {
   }
 
   setModel(modelId: string): void {
+    // 1) Mutate Config so that *future* GeminiChat instances (e.g. sub-agents,
+    //    new sessions, compression chats) pick up the new model.
     const cfg = this.config as unknown as {
       setModel?: (modelId: string) => void;
     };
     cfg.setModel?.(modelId);
+
+    // 2) GeminiChat caches the resolved model on `specifiedModel` in its
+    //    constructor (see geminiChat.ts:170) and reads it on every
+    //    sendMessage call — Config.setModel alone is NOT enough to switch
+    //    the *current* conversation. Push the new model into the live chat
+    //    instance too.
+    const chat = this.chat as unknown as {
+      setSpecifiedModel?: (modelId: string) => void;
+    };
+    chat.setSpecifiedModel?.(modelId);
   }
 
   /**
