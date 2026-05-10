@@ -6,6 +6,10 @@
 
 // Export config
 export * from './config/config.js';
+export * from './config/agent-loop-context.js';
+export * from './policy/policy-engine.js';
+export * from './policy/policy-updater.js';
+export * from './confirmation-bus/message-bus.js';
 export * from './config/projectSettings.js';
 export * from './config/messageRoles.js';
 export * from './config/serverConfig.js';
@@ -24,6 +28,7 @@ export * from './core/prompts.js';
 export * from './core/tokenLimits.js';
 export * from './core/modelConfig.js';
 export * from './core/turn.js';
+export * from './core/invalidStreamError.js';
 export * from './core/geminiRequest.js';
 export * from './core/coreToolScheduler.js';
 export * from './core/nonInteractiveToolExecutor.js';
@@ -60,6 +65,12 @@ export * from './utils/modelDiagnostics.js';
 export * from './utils/logging.js';
 export * from './utils/pathUtils.js';
 export * from './utils/healthyUseReminderState.js';
+export * from './utils/constants.js';
+export * from './utils/stdio.js';
+export * from './utils/version.js';
+export * from './utils/events.js';
+export * from './utils/sessionUtils.js';
+export * from './utils/sessionSelector.js';
 
 export * from './utils/enhancedLogger.js';
 
@@ -77,6 +88,7 @@ export { AuthServer } from './auth/login/authServer.js';
 
 // Export services
 export * from './services/fileDiscoveryService.js';
+export * from './services/fileSystemService.js';
 export * from './services/gitService.js';
 export * from './services/sessionManager.js';
 export * from './services/mcpResponseGuard.js';
@@ -141,3 +153,6 @@ export * from './utils/browser.js';
 
 // Export skills system (consolidated from cli package)
 export * from './skills/index.js';
+
+// Export ACP-facing command helpers
+export * as AcpCommands from './commands/index.js';
