@@ -11,6 +11,7 @@ import {
   Kind,
   ApprovalMode,
   ToolConfirmationOutcome,
+  proxyAuthManager,
 } from 'deepv-code-core';
 import type * as acp from '@agentclientprotocol/sdk';
 import { z } from 'zod';
@@ -243,10 +244,10 @@ export function buildAvailableModes(
 /**
  * Build the list of models surfaced to the IDE for session-model switching.
  *
- * DeepCode resolves the concrete model server-side (`'auto'` is the common
- * default). We return the preferred model as a single entry so the IDE still
- * has something meaningful to display, while leaving room for the runtime
- * to expose a richer catalog later.
+ * Pulls the authoritative list from `Config.getCloudModels()` (populated by
+ * the proxy's `/web-api/models` endpoint — same source the interactive CLI
+ * uses for `/model`). Always prepends `auto` and guarantees the currently
+ * selected model is present, even when it's not in the cloud catalogue.
  */
 export function buildAvailableModels(
   config: Config,
@@ -261,21 +262,39 @@ export function buildAvailableModels(
 } {
   const current = config.getModel?.() ?? 'auto';
   const preferred = config.getPreferredModel?.() ?? current;
+  const cloudModels = config.getCloudModels?.() ?? [];
   const seen = new Set<string>();
   const models: Array<{
     modelId: string;
     name: string;
     description?: string;
   }> = [];
+
+  // 1) `auto` is always first — it's the server-pick default.
+  models.push({
+    modelId: 'auto',
+    name: 'Auto',
+    description: 'Server-selected model',
+  });
+  seen.add('auto');
+
+  // 2) Whatever the cloud says is available.
+  for (const m of cloudModels) {
+    if (!m?.name || seen.has(m.name)) continue;
+    if (m.available === false) continue;
+    seen.add(m.name);
+    models.push({ modelId: m.name, name: m.displayName || m.name });
+  }
+
+  // 3) Make sure the currently-selected and preferred ids are visible even
+  //    if they're not in the cloud list (user just switched to one via /model,
+  //    cache empty on first run, etc.).
   for (const id of [preferred, current]) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    models.push({
-      modelId: id,
-      name: id,
-      description: id === 'auto' ? 'Server-selected model' : undefined,
-    });
+    models.push({ modelId: id, name: id });
   }
+
   return { availableModels: models, currentModelId: current };
 }
 
@@ -288,17 +307,20 @@ export function buildAvailableModels(
  * accepted by `Config.setModel` without validation (the proxy will reject
  * at call time if the underlying account doesn't have access).
  */
-const KNOWN_MODEL_IDS: Array<{
+/**
+ * Fallback model ids when the server-provided list isn't available yet
+ * (e.g. first ACP session before /web-api/models has been fetched, or
+ * offline-ish scenarios). Only entries here that the proxy actually
+ * accepts will work; kept intentionally minimal to avoid surfacing
+ * decommissioned ids (we hit this exact bug with an outdated
+ * `claude-sonnet-4-5`).
+ */
+const FALLBACK_MODEL_IDS: Array<{
   value: string;
   name: string;
   description?: string;
 }> = [
   { value: 'auto', name: 'Auto', description: 'Server-selected model' },
-  { value: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-  { value: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
-  { value: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-  { value: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-  { value: 'gpt-5', name: 'GPT-5' },
 ];
 
 /**
@@ -306,6 +328,12 @@ const KNOWN_MODEL_IDS: Array<{
  *
  * The shape matches ACP's `SessionConfigOption`. We currently expose:
  *   - `model` (select): switches the LLM.
+ *
+ * The model list is pulled from `Config.getCloudModels()` — the authoritative
+ * list that the proxy server provides via `/web-api/models`. When that cache
+ * is empty (first run, no prior `/model` invocation, etc.) we fall back to
+ * showing just `auto` + whatever model `Config.getModel()` currently reports,
+ * so the IDE has at least one valid choice.
  *
  * When DeepCode ships more per-session knobs (thought level, turn timeout,
  * etc.) just add them here and to `Session.applyConfigOption`.
@@ -318,6 +346,33 @@ export function buildConfigOptionsSnapshot(
     (overrides.get('model') as string | undefined) ??
     config.getModel?.() ??
     'auto';
+
+  const cloudModels = config.getCloudModels?.() ?? [];
+  const seen = new Set<string>();
+  const options: Array<{ value: string; name: string; description?: string }> = [];
+
+  for (const entry of FALLBACK_MODEL_IDS) {
+    if (seen.has(entry.value)) continue;
+    seen.add(entry.value);
+    options.push(entry);
+  }
+  for (const m of cloudModels) {
+    if (!m?.name || seen.has(m.name)) continue;
+    if (m.available === false) continue;
+    seen.add(m.name);
+    options.push({
+      value: m.name,
+      name: m.displayName || m.name,
+    });
+  }
+  // Ensure the currently-selected model is in the list even if it's not
+  // marked available (server just rolled it back, user got it via /model,
+  // etc.). Without this, ACP clients may refuse the snapshot.
+  if (currentModel && !seen.has(currentModel)) {
+    seen.add(currentModel);
+    options.push({ value: currentModel, name: currentModel });
+  }
+
   const modelOption: acp.SessionConfigOption = {
     id: 'model',
     type: 'select',
@@ -325,11 +380,88 @@ export function buildConfigOptionsSnapshot(
     description: 'LLM used for this session',
     category: 'model',
     currentValue: currentModel,
-    options: KNOWN_MODEL_IDS.map((m) => ({
-      value: m.value,
-      name: m.name,
-      ...(m.description ? { description: m.description } : {}),
+    options: options.map((o) => ({
+      value: o.value,
+      name: o.name,
+      ...(o.description ? { description: o.description } : {}),
     })),
   };
   return [modelOption];
+}
+
+interface WebApiModelInfo {
+  name: string;
+  displayName: string;
+  creditsPerRequest?: number;
+  available?: boolean;
+  maxToken?: number;
+  highVolumeThreshold?: number;
+  highVolumeCredits?: number;
+}
+
+/**
+ * Fetch the authoritative list of models the proxy will accept and seed
+ * `Config.setCloudModels` with it.
+ *
+ * The interactive CLI does this lazily, on the first `/model` invocation.
+ * ACP clients never fire `/model` (they call `session/set_config_option`
+ * with whatever id the IDE's picker selected), so without this preload the
+ * ACP agent would advertise an empty/fallback model list and accept any
+ * string — then the server would reject it with a 500 "不支持的模型".
+ *
+ * Best-effort: network/auth failures here are logged but never fatal.
+ * Without the cache, the snapshot falls back to `auto` + the current model.
+ */
+export async function refreshCloudModelsForAcp(config: Config): Promise<void> {
+  if (!config.setCloudModels) return;
+  try {
+    const headers = await proxyAuthManager.getUserHeaders();
+    const baseUrl = proxyAuthManager.getProxyServerUrl();
+    if (!baseUrl) return;
+
+    const url = `${baseUrl.replace(/\/+$/, '')}/web-api/models`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'DeepCode ACP',
+        ...headers,
+      },
+    });
+    if (!res.ok) {
+      process.stderr.write(
+        `[acp] /web-api/models HTTP ${res.status}, skipping model-list preload\n`,
+      );
+      return;
+    }
+    const body = (await res.json()) as {
+      success?: boolean;
+      data?: WebApiModelInfo[];
+    };
+    if (!body?.success || !Array.isArray(body.data)) {
+      process.stderr.write(
+        '[acp] /web-api/models returned no data, skipping model-list preload\n',
+      );
+      return;
+    }
+    const models = body.data
+      .filter((m): m is WebApiModelInfo => !!m && typeof m.name === 'string')
+      .map((m) => ({
+        name: m.name,
+        displayName: m.displayName || m.name,
+        creditsPerRequest: m.creditsPerRequest ?? 0,
+        available: m.available !== false,
+        maxToken: m.maxToken ?? 0,
+        highVolumeThreshold: m.highVolumeThreshold ?? 0,
+        highVolumeCredits: m.highVolumeCredits ?? 0,
+      }));
+    config.setCloudModels(models);
+    process.stderr.write(
+      `[acp] loaded ${models.length} models from ${url}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[acp] model-list preload failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
 }
