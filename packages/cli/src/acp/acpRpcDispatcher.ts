@@ -11,7 +11,7 @@ import { SettingScope, type LoadedSettings } from '../config/settings.js';
 import type { CliArgs } from '../config/config.js';
 import { getAcpErrorMessage } from './acpErrors.js';
 import { AcpSessionManager, type AuthDetails } from './acpSessionManager.js';
-import { hasMeta } from './acpUtils.js';
+import { buildConfigOptionsSnapshot, hasMeta } from './acpUtils.js';
 
 /**
  * Top-level ACP request handler — implements `acp.Agent`.
@@ -199,15 +199,10 @@ export class GeminiAgent {
   /**
    * Handle `session/set_config_option`.
    *
-   * DeepCode does not currently expose any per-session configuration options
-   * (timeout, tool permissions, etc.) through ACP. Rather than rejecting the
-   * request with `Method not found` — which several clients (OpenClaw,
-   * Zed's newer builds) treat as a hard error — we accept it silently and
-   * return an empty option set.
-   *
-   * When DeepCode grows a real session-config surface (e.g. per-session
-   * `timeout`, `tool_filter`), wire it in here and include the live values
-   * in the response's `configOptions` array.
+   * DeepCode currently exposes one real configOption: `"model"`. Others are
+   * accepted (cached on the session) but have no backing effect yet. The
+   * response always contains the full, up-to-date `configOptions[]`
+   * snapshot so the IDE's UI state stays in sync.
    */
   async setSessionConfigOption(
     params: acp.SetSessionConfigOptionRequest,
@@ -219,7 +214,31 @@ export class GeminiAgent {
         `Session not found: ${params.sessionId}`,
       );
     }
-    return { configOptions: [] };
+
+    // Request is a discriminated union:
+    //   {type: 'boolean', value: boolean, configId, sessionId}
+    // | {value: SessionConfigValueId (string), configId, sessionId}
+    const rawValue = (params as { value: unknown }).value;
+    const configId = (params as { configId: string }).configId;
+    if (typeof rawValue !== 'string' && typeof rawValue !== 'boolean') {
+      throw new acp.RequestError(
+        -32602,
+        `Unsupported value shape for config option "${configId}"`,
+      );
+    }
+
+    try {
+      session.applyConfigOption(configId, rawValue);
+    } catch (e) {
+      throw new acp.RequestError(-32603, getAcpErrorMessage(e));
+    }
+
+    return {
+      configOptions: buildConfigOptionsSnapshot(
+        this.config,
+        session.getAllConfigValues(),
+      ),
+    };
   }
 
   async unstable_setSessionModel(

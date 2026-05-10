@@ -58,6 +58,12 @@ import { getAcpErrorMessage } from './acpErrors.js';
 export class Session {
   private pendingAbort?: AbortController;
   private readonly approvalModeUnsubscribe: () => void;
+  /**
+   * Runtime cache of session/set_config_option values. Used to answer
+   * subsequent `set_config_option` responses with the `currentValue` the
+   * client expects.
+   */
+  private readonly configValues = new Map<string, string | boolean>();
 
   constructor(
     readonly id: string,
@@ -107,6 +113,41 @@ export class Session {
       setModel?: (modelId: string) => void;
     };
     cfg.setModel?.(modelId);
+  }
+
+  /**
+   * Apply a single `session/set_config_option` request.
+   *
+   * Known configIds are routed to their real backing setter:
+   *   - `"model"`     → `Config.setModel`
+   *   - `"mode"`      → `Config.setApprovalMode`
+   *
+   * Everything else is cached on the session (so `buildConfigOptionsSnapshot`
+   * can echo it back) but has no runtime effect yet. That's fine — ACP
+   * clients pre-read the option schema from `newSession`'s `configOptions`,
+   * so unknown options never reach this method in the first place.
+   */
+  applyConfigOption(configId: string, value: string | boolean): void {
+    this.configValues.set(configId, value);
+    if (configId === 'model' && typeof value === 'string') {
+      this.setModel(value);
+    } else if (configId === 'mode' && typeof value === 'string') {
+      this.setMode(value);
+    }
+  }
+
+  /** Currently-cached value of a configOption, falling back to `defaultValue`. */
+  getConfigValue<T extends string | boolean>(
+    configId: string,
+    defaultValue: T,
+  ): T {
+    const v = this.configValues.get(configId);
+    return (v ?? defaultValue) as T;
+  }
+
+  /** Dump of everything set so far — exposed for snapshot helpers. */
+  getAllConfigValues(): ReadonlyMap<string, string | boolean> {
+    return this.configValues;
   }
 
   /**
