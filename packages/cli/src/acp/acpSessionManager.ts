@@ -21,7 +21,11 @@ import type { CliArgs } from '../config/config.js';
 import { Session } from './acpSession.js';
 import { AcpFileSystemService } from './acpFileSystemService.js';
 import { getAcpErrorMessage } from './acpErrors.js';
-import { buildAvailableModels, buildAvailableModes } from './acpUtils.js';
+import {
+  buildAvailableModels,
+  buildAvailableModes,
+  buildConfigOptionsSnapshot,
+} from './acpUtils.js';
 
 /** Optional auth overrides carried in `authenticate` / `newSession` `_meta`. */
 export interface AuthDetails {
@@ -125,6 +129,10 @@ export class AcpSessionManager {
         availableModels,
         currentModelId,
       },
+      configOptions: buildConfigOptionsSnapshot(
+        this.config,
+        session.getAllConfigValues(),
+      ),
     };
   }
 
@@ -195,6 +203,10 @@ export class AcpSessionManager {
         availableModels,
         currentModelId,
       },
+      configOptions: buildConfigOptionsSnapshot(
+        this.config,
+        session.getAllConfigValues(),
+      ),
     };
   }
 

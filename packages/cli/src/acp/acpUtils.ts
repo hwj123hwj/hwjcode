@@ -278,3 +278,58 @@ export function buildAvailableModels(
   }
   return { availableModels: models, currentModelId: current };
 }
+
+/**
+ * Model ids we always advertise in the `configOptions[id="model"]` selector.
+ *
+ * DeepCode resolves the final model server-side, so the client-visible list
+ * is short and curated rather than dynamically fetched. The `"auto"` entry
+ * keeps the legacy server-decides behavior. Every id in this list is
+ * accepted by `Config.setModel` without validation (the proxy will reject
+ * at call time if the underlying account doesn't have access).
+ */
+const KNOWN_MODEL_IDS: Array<{
+  value: string;
+  name: string;
+  description?: string;
+}> = [
+  { value: 'auto', name: 'Auto', description: 'Server-selected model' },
+  { value: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+  { value: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
+  { value: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { value: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { value: 'gpt-5', name: 'GPT-5' },
+];
+
+/**
+ * Snapshot the full `configOptions[]` array a client should see right now.
+ *
+ * The shape matches ACP's `SessionConfigOption`. We currently expose:
+ *   - `model` (select): switches the LLM.
+ *
+ * When DeepCode ships more per-session knobs (thought level, turn timeout,
+ * etc.) just add them here and to `Session.applyConfigOption`.
+ */
+export function buildConfigOptionsSnapshot(
+  config: Config,
+  overrides: ReadonlyMap<string, string | boolean>,
+): acp.SessionConfigOption[] {
+  const currentModel =
+    (overrides.get('model') as string | undefined) ??
+    config.getModel?.() ??
+    'auto';
+  const modelOption: acp.SessionConfigOption = {
+    id: 'model',
+    type: 'select',
+    name: 'Model',
+    description: 'LLM used for this session',
+    category: 'model',
+    currentValue: currentModel,
+    options: KNOWN_MODEL_IDS.map((m) => ({
+      value: m.value,
+      name: m.name,
+      ...(m.description ? { description: m.description } : {}),
+    })),
+  };
+  return [modelOption];
+}
