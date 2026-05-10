@@ -591,3 +591,41 @@ export interface ToolLocation {
   // Which line (if known)
   line?: number;
 }
+
+/**
+ * Semantic category of a tool. Used by clients (including ACP editors) to
+ * decide how to render tool calls and to infer safety properties.
+ *
+ * This is independent of {@link Icon}: `Kind` describes *what* a tool does,
+ * while `Icon` describes *how* it is visually represented.
+ */
+export enum Kind {
+  Read = 'read',
+  Edit = 'edit',
+  Delete = 'delete',
+  Move = 'move',
+  Search = 'search',
+  Execute = 'execute',
+  Think = 'think',
+  Agent = 'agent',
+  Fetch = 'fetch',
+  Communicate = 'communicate',
+  Plan = 'plan',
+  SwitchMode = 'switch_mode',
+  Other = 'other',
+}
+
+/** Tool kinds that perform side-effecting operations. */
+export const MUTATOR_KINDS: readonly Kind[] = [
+  Kind.Edit,
+  Kind.Delete,
+  Kind.Move,
+  Kind.Execute,
+] as const;
+
+/** Tool kinds that are read-only and safe to run in parallel. */
+export const READ_ONLY_KINDS: readonly Kind[] = [
+  Kind.Read,
+  Kind.Search,
+  Kind.Fetch,
+] as const;

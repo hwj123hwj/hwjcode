@@ -1,0 +1,212 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { AuthType, type Config, getVersion } from 'deepv-code-core';
+import * as acp from '@agentclientprotocol/sdk';
+import { z } from 'zod';
+import { SettingScope, type LoadedSettings } from '../config/settings.js';
+import type { CliArgs } from '../config/config.js';
+import { getAcpErrorMessage } from './acpErrors.js';
+import { AcpSessionManager, type AuthDetails } from './acpSessionManager.js';
+import { hasMeta } from './acpUtils.js';
+
+/**
+ * Top-level ACP request handler — implements `acp.Agent`.
+ *
+ * The class owns the per-process `AcpSessionManager`. Every JSON-RPC method
+ * defined by the `@agentclientprotocol/sdk` `Agent` contract is delegated to
+ * the session manager (or to the specific `Session` for session-scoped
+ * methods like `prompt` and `cancel`).
+ *
+ * NOTE: gemini-cli's version advertises multiple auth providers
+ * (`LOGIN_WITH_GOOGLE`, `USE_GEMINI`, `USE_VERTEX_AI`, `GATEWAY`). DeepCode
+ * has intentionally collapsed its auth model to a single `USE_PROXY_AUTH`
+ * path; we keep that here and simply accept `apiKey` / `baseUrl` overrides
+ * in `authenticate`.
+ */
+export class GeminiAgent {
+  private apiKey?: string;
+  private baseUrl?: string;
+  private customHeaders?: Record<string, string>;
+  private readonly sessionManager: AcpSessionManager;
+
+  constructor(
+    private readonly config: Config,
+    private readonly settings: LoadedSettings,
+    argv: CliArgs,
+    connection: acp.AgentSideConnection,
+  ) {
+    this.sessionManager = new AcpSessionManager(
+      config,
+      settings,
+      argv,
+      connection,
+    );
+  }
+
+  dispose(): void {
+    this.sessionManager.dispose();
+  }
+
+  async initialize(
+    args: acp.InitializeRequest,
+  ): Promise<acp.InitializeResponse> {
+    if (args.clientCapabilities) {
+      this.sessionManager.setClientCapabilities(args.clientCapabilities);
+    }
+
+    const version = await getVersion().catch(() => 'unknown');
+
+    return {
+      protocolVersion: acp.PROTOCOL_VERSION,
+      authMethods: [
+        {
+          id: AuthType.USE_PROXY_AUTH,
+          name: 'DeepV proxy auth',
+          description: 'Use DeepV Code proxy authentication',
+          _meta: {
+            'api-key': {
+              provider: 'deepv',
+            },
+            gateway: {
+              protocol: 'deepv',
+              restartRequired: 'false',
+            },
+          },
+        },
+      ],
+      agentInfo: {
+        name: 'dvcode',
+        title: 'DeepV Code',
+        version,
+      },
+      agentCapabilities: {
+        loadSession: true,
+        promptCapabilities: {
+          image: true,
+          audio: false,
+          embeddedContext: true,
+        },
+        mcpCapabilities: {
+          http: true,
+          sse: true,
+        },
+      },
+    };
+  }
+
+  async authenticate(req: acp.AuthenticateRequest): Promise<void> {
+    // DeepCode always resolves to USE_PROXY_AUTH, but we still accept any
+    // method id clients may send (Zed, gemini-cli compat shims, etc.).
+    const meta = hasMeta(req) ? req._meta : undefined;
+    const apiKey =
+      typeof meta?.['api-key'] === 'string' ? meta['api-key'] : undefined;
+
+    if (apiKey) this.apiKey = apiKey;
+
+    const gatewaySchema = z.object({
+      baseUrl: z.string().optional(),
+      headers: z.record(z.string()).optional(),
+    });
+    if (meta?.['gateway']) {
+      const parsed = gatewaySchema.safeParse(meta['gateway']);
+      if (!parsed.success) {
+        throw new acp.RequestError(
+          -32602,
+          `Malformed gateway payload: ${parsed.error.message}`,
+        );
+      }
+      this.baseUrl = parsed.data.baseUrl;
+      this.customHeaders = parsed.data.headers;
+    }
+
+    try {
+      await this.config.refreshAuth(AuthType.USE_PROXY_AUTH, {
+        apiKey: this.apiKey,
+        baseUrl: this.baseUrl,
+        customHeaders: this.customHeaders,
+      });
+    } catch (e) {
+      throw new acp.RequestError(-32000, getAcpErrorMessage(e));
+    }
+
+    this.settings.setValue(
+      SettingScope.User,
+      'selectedAuthType',
+      AuthType.USE_PROXY_AUTH,
+    );
+  }
+
+  private getAuthDetails(): AuthDetails {
+    return {
+      apiKey: this.apiKey,
+      baseUrl: this.baseUrl,
+      customHeaders: this.customHeaders,
+    };
+  }
+
+  async newSession(
+    params: acp.NewSessionRequest,
+  ): Promise<acp.NewSessionResponse> {
+    return this.sessionManager.newSession(params, this.getAuthDetails());
+  }
+
+  async loadSession(
+    params: acp.LoadSessionRequest,
+  ): Promise<acp.LoadSessionResponse> {
+    return this.sessionManager.loadSession(params, this.getAuthDetails());
+  }
+
+  async cancel(params: acp.CancelNotification): Promise<void> {
+    const session = this.sessionManager.getSession(params.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${params.sessionId}`,
+      );
+    }
+    await session.cancelPendingPrompt();
+  }
+
+  async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
+    const session = this.sessionManager.getSession(params.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${params.sessionId}`,
+      );
+    }
+    return session.prompt(params);
+  }
+
+  async setSessionMode(
+    params: acp.SetSessionModeRequest,
+  ): Promise<acp.SetSessionModeResponse> {
+    const session = this.sessionManager.getSession(params.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${params.sessionId}`,
+      );
+    }
+    session.setMode(params.modeId);
+    return {};
+  }
+
+  async unstable_setSessionModel(
+    params: acp.SetSessionModelRequest,
+  ): Promise<acp.SetSessionModelResponse> {
+    const session = this.sessionManager.getSession(params.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${params.sessionId}`,
+      );
+    }
+    session.setModel(params.modelId);
+    return {};
+  }
+}
