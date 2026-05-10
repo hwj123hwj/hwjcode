@@ -37,6 +37,7 @@ import type { LoadedSettings } from '../config/settings.js';
 import { SettingScope } from '../config/settings.js';
 import {
   RequestPermissionResponseSchema,
+  confirmationRequiresCallerApproval,
   hasMeta,
   toToolCallContent,
   toPermissionOptions,
@@ -517,52 +518,93 @@ export class Session {
     });
 
     // Confirm if necessary.
+    //
+    // ACP mode is agent-to-agent, so the calling agent is the "user". We
+    // split confirmations into three buckets:
+    //
+    //   1. Auto-approve (no roundtrip): routine `edit`, `write`, generic
+    //      `exec`, `mcp`, `info`. These are the tools that also auto-run
+    //      under TUI YOLO mode. We just call `onConfirm(ProceedOnce)` so
+    //      the tool's allowlist/state bookkeeping still runs.
+    //
+    //   2. Escalate to the caller agent via ACP `requestPermission`:
+    //      - `exec` with a `warning` (dangerous-command-detector matched
+    //        things like `rm -rf /`, `sudo`, fork bombs, etc.)
+    //      - `delete` (irreversible)
+    //      - `question` (`ask_user_question` — only the real user, i.e. the
+    //        caller agent's own prompter, can meaningfully answer)
+    //
+    //   3. If `requestPermission` itself fails (old ACP clients don't
+    //      implement it — they return "Permission prompt unavailable in
+    //      non-interactive mode"), we fall back to rejecting the dangerous
+    //      call. Auto-approved tools in bucket 1 never hit that path.
     const confirmation = await tool.shouldConfirmExecute(args, signal);
     if (confirmation) {
-      const options = toPermissionOptions(confirmation, this.config);
-      try {
-        const rawResp = await this.connection.requestPermission({
-          sessionId: this.id,
-          toolCall: {
-            toolCallId,
-            title: tool.getDescription?.(args) ?? fc.name,
-            kind: toolKind,
-          },
-          options,
-        });
-        const parsed = RequestPermissionResponseSchema.parse(rawResp);
-        if (parsed.outcome.outcome === 'cancelled') {
-          await this.sendUpdate({
-            sessionUpdate: 'tool_call_update',
-            toolCallId,
-            status: 'failed',
-          });
-          return errorResponse(
-            new Error(`Tool "${fc.name}" was canceled by the user.`),
-          );
+      const needsCallerApproval = confirmationRequiresCallerApproval(
+        confirmation,
+      );
+
+      if (!needsCallerApproval) {
+        // Bucket 1: silently proceed. Still invoke `onConfirm` so tools
+        // that track allowlist state (shell's rootCommand allowlist,
+        // ApprovalMode promotion on ProceedAlways) see the outcome.
+        try {
+          await confirmation.onConfirm(ToolConfirmationOutcome.ProceedOnce);
+        } catch {
+          // Non-fatal — onConfirm is usually a bookkeeping no-op.
         }
-        const outcome = parsed.outcome.optionId as ToolConfirmationOutcome;
-        if (outcome === ToolConfirmationOutcome.Cancel) {
+      } else {
+        const options = toPermissionOptions(confirmation, this.config);
+        try {
+          const rawResp = await this.connection.requestPermission({
+            sessionId: this.id,
+            toolCall: {
+              toolCallId,
+              title: tool.getDescription?.(args) ?? fc.name,
+              kind: toolKind,
+            },
+            options,
+          });
+          const parsed = RequestPermissionResponseSchema.parse(rawResp);
+          if (parsed.outcome.outcome === 'cancelled') {
+            await this.sendUpdate({
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: 'failed',
+            });
+            return errorResponse(
+              new Error(`Tool "${fc.name}" was canceled by the user.`),
+            );
+          }
+          const outcome = parsed.outcome.optionId as ToolConfirmationOutcome;
+          if (outcome === ToolConfirmationOutcome.Cancel) {
+            await confirmation.onConfirm(outcome);
+            await this.sendUpdate({
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: 'failed',
+            });
+            return errorResponse(
+              new Error(`Tool "${fc.name}" not allowed to run by the user.`),
+            );
+          }
           await confirmation.onConfirm(outcome);
+        } catch (err) {
+          // The ACP client couldn't/wouldn't surface the prompt. For
+          // dangerous operations we must refuse — never silently run.
           await this.sendUpdate({
             sessionUpdate: 'tool_call_update',
             toolCallId,
             status: 'failed',
           });
+          const msg =
+            err instanceof Error ? err.message : String(err);
           return errorResponse(
-            new Error(`Tool "${fc.name}" not allowed to run by the user.`),
+            new Error(
+              `Tool "${fc.name}" requires approval but the ACP client cannot present one (${msg}). Refusing to run.`,
+            ),
           );
         }
-        await confirmation.onConfirm(outcome);
-      } catch (err) {
-        await this.sendUpdate({
-          sessionUpdate: 'tool_call_update',
-          toolCallId,
-          status: 'failed',
-        });
-        return errorResponse(
-          err instanceof Error ? err : new Error(String(err)),
-        );
       }
     }
 
