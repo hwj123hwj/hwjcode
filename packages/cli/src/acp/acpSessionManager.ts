@@ -147,6 +147,17 @@ export class AcpSessionManager {
         this.config,
         session.getAllConfigValues(),
       ),
+      // Echo the sessionId inside `_meta` as well. ACP's top-level
+      // `sessionId` field is the canonical source, but OpenClaw / acpx
+      // runtime adapters read the agent/backend session identifiers via
+      // `_meta` projections (they scan for `agentSessionId` /
+      // `backendSessionId` to populate `SessionAcpIdentity`). Without this
+      // echo the adapter leaves those IDs empty, which breaks
+      // `sessions_spawn` + `resumeSessionId` matching later.
+      _meta: {
+        agentSessionId: sessionId,
+        backendSessionId: sessionId,
+      },
     };
   }
 
@@ -221,6 +232,13 @@ export class AcpSessionManager {
         this.config,
         session.getAllConfigValues(),
       ),
+      // Mirror the sessionId in `_meta` so acpx-style runtime adapters that
+      // scan meta projections can populate their `SessionAcpIdentity`. See
+      // `newSession` above for the full rationale.
+      _meta: {
+        agentSessionId: req.sessionId,
+        backendSessionId: req.sessionId,
+      },
     };
   }
 
