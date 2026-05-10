@@ -25,6 +25,7 @@ import {
   buildAvailableModels,
   buildAvailableModes,
   buildConfigOptionsSnapshot,
+  refreshCloudModelsForAcp,
 } from './acpUtils.js';
 
 /** Optional auth overrides carried in `authenticate` / `newSession` `_meta`. */
@@ -236,6 +237,20 @@ export class AcpSessionManager {
         getAcpErrorMessage(e) || 'Authentication required.',
       );
     }
+
+    // Once auth is fresh, prime `Config.cloudModels` from the proxy's
+    // `/web-api/models` endpoint so that `buildAvailableModels` /
+    // `buildConfigOptionsSnapshot` advertise real, server-accepted ids to
+    // the IDE. Without this, the IDE picks from a stale fallback list and
+    // the server rejects switches with a 500 "不支持的模型".
+    //
+    // Always refresh (not just when the cache is empty): the settings cache
+    // can easily outlive a model rollback on the server side — we hit this
+    // with `claude-sonnet-4-5` lingering after the server replaced it with
+    // `claude-sonnet-4-6`. Fire-and-forget so a slow/broken network never
+    // blocks session/new; the snapshot will use whatever cache exists
+    // (even stale) and pick up the fresh list for the next snapshot.
+    void refreshCloudModelsForAcp(this.config);
   }
 
   private installFileSystemServiceIfSupported(
