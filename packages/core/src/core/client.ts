@@ -453,6 +453,18 @@ export class GeminiClient {
     this.chat = await this.startChat();
   }
 
+  /**
+   * Replace the active {@link GeminiChat} with one hydrated from persisted
+   * history. Used by the ACP `loadSession` flow and by session-resume
+   * commands. The provided `history` is passed to {@link startChat} as
+   * `extraHistory`, which means the initial environment/system context is
+   * still prepended automatically.
+   */
+  async resumeChat(history: Content[]): Promise<void> {
+    this.resetCompressionFlag();
+    this.chat = await this.startChat(history);
+  }
+
   private async getEnvironment(): Promise<Part[]> {
     const cwd = this.config.getWorkingDir();
     const today = new Date().toLocaleDateString(undefined, {

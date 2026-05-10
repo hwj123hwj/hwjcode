@@ -66,6 +66,7 @@ export interface CliArgs {
   telemetryLogPrompts: boolean | undefined;
   telemetryOutfile: string | undefined;
   allowedMcpServerNames: string[] | undefined;
+  acp: boolean | undefined;
   experimentalAcp: boolean | undefined;
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
@@ -188,9 +189,14 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       description: 'Enables checkpointing of file edits',
       default: false,
     })
-    .option('experimental-acp', {
+    .option('acp', {
       type: 'boolean',
       description: 'Starts the agent in ACP mode',
+    })
+    .option('experimental-acp', {
+      type: 'boolean',
+      description:
+        'Starts the agent in ACP mode (deprecated, use --acp instead)',
     })
     .option('allowed-mcp-server-names', {
       type: 'array',
@@ -221,7 +227,8 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('update', {
       alias: 'u',
       type: 'boolean',
-      description: 'Force check for updates and prompt to install if available',
+      description:
+        'Force check for updates and prompt to install if available. Combine with -y (`-uy`) to auto-confirm optional updates without the y/N prompt.',
       default: false,
     })
     .option('continue', {
@@ -578,7 +585,17 @@ export async function loadCliConfig(
     userMemory: memoryContent,
     memoryTokenCount, // 新增
     geminiMdFileCount: fileCount,
-    approvalMode: argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT,
+    // ACP mode is agent-to-agent: there is no human to answer interactive
+    // permission prompts in the calling process. We default to YOLO so
+    // non-dangerous tools (edits, writes, MCP, generic shell) execute
+    // without prompting. Genuinely dangerous operations (destructive shell
+    // commands, `delete_file`, `ask_user_question`) still generate a
+    // confirmation that the ACP runtime forwards to the caller agent via
+    // `requestPermission`.
+    approvalMode:
+      argv.yolo || argv.acp || argv.experimentalAcp
+        ? ApprovalMode.YOLO
+        : ApprovalMode.DEFAULT,
     showMemoryUsage:
       argv.showMemoryUsage ||
       argv.show_memory_usage ||
@@ -620,7 +637,7 @@ export async function loadCliConfig(
     model: argv.model! || settings.preferredModel,
     extensionContextFilePaths,
     maxSessionTurns: settings.maxSessionTurns ?? -1,
-    experimentalAcp: argv.experimentalAcp || false,
+    experimentalAcp: argv.acp || argv.experimentalAcp || false,
     listExtensions: argv.listExtensions || false,
     listSessions: argv.listSessions || false,
     extensions: allExtensions,
