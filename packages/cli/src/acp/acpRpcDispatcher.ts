@@ -228,8 +228,18 @@ export class GeminiAgent {
     }
 
     try {
-      session.applyConfigOption(configId, rawValue);
+      const outcome = await session.applyConfigOption(configId, rawValue);
+      if (outcome.error) {
+        // Switch was vetoed by the compression-aware `GeminiClient.switchModel`
+        // (e.g. compression failed or already in progress). Surface this as
+        // an RPC error so ACP clients can show a meaningful message.
+        throw new acp.RequestError(
+          -32603,
+          `Failed to apply config option "${configId}": ${outcome.error}`,
+        );
+      }
     } catch (e) {
+      if (e instanceof acp.RequestError) throw e;
       throw new acp.RequestError(-32603, getAcpErrorMessage(e));
     }
 
@@ -251,7 +261,13 @@ export class GeminiAgent {
         `Session not found: ${params.sessionId}`,
       );
     }
-    session.setModel(params.modelId);
+    const result = await session.setModel(params.modelId);
+    if (result && !result.success) {
+      throw new acp.RequestError(
+        -32603,
+        `Failed to switch model to ${params.modelId}: ${result.error ?? 'unknown error'}`,
+      );
+    }
     return {};
   }
 }
