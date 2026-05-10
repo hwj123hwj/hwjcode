@@ -27,9 +27,12 @@ function checkDirectory(dir, violations = []) {
   return violations;
 }
 
-// Check src directory
+// Check src directory (and webview/src — same reason, webview has its own
+// tsc build and easily leaks .js/.d.ts when someone forgets --noEmit).
 const srcDir = path.join(__dirname, '..', 'src');
+const webviewSrcDir = path.join(__dirname, '..', 'webview', 'src');
 const violations = checkDirectory(srcDir);
+checkDirectory(webviewSrcDir, violations);
 
 if (violations.length > 0) {
   console.error('❌ Build artifacts found in src directory:');
