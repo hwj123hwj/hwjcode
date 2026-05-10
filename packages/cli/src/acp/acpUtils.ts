@@ -184,6 +184,44 @@ export function toPermissionOptions(
 }
 
 /**
+ * Decide whether an ACP caller (the upstream agent) should be asked to
+ * approve this tool call, or whether the dvcode ACP runtime can silently
+ * proceed.
+ *
+ * Rationale: ACP is agent-to-agent. The TUI equivalent is YOLO mode, which
+ * auto-runs routine edits/writes/shell commands but still hard-stops on
+ * dangerous shell invocations, destructive file deletes, and explicit
+ * `ask_user_question` calls. We mirror that split here:
+ *
+ *   - `question`            — always needs approval; only a real user can
+ *                             meaningfully answer a multiple-choice question.
+ *   - `exec` with `warning` — dangerous-command-detector matched; refuse
+ *                             to run silently even under YOLO.
+ *   - `delete`              — irreversible file removal.
+ *   - everything else       — proceed automatically (ProceedOnce).
+ *
+ * Unknown confirmation shapes default to "needs approval" (safe fallback).
+ */
+export function confirmationRequiresCallerApproval(
+  confirmation: ToolCallConfirmationDetails,
+): boolean {
+  switch (confirmation.type) {
+    case 'question':
+      return true;
+    case 'exec':
+      return Boolean((confirmation as { warning?: string }).warning);
+    case 'delete':
+      return true;
+    case 'edit':
+    case 'mcp':
+    case 'info':
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
  * Map DeepCode's {@link Kind} to the ACP `ToolKind` wire type.
  *
  * Several kinds that have no exact ACP counterpart (`Agent`, `Plan`,

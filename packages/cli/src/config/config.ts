@@ -584,7 +584,17 @@ export async function loadCliConfig(
     userMemory: memoryContent,
     memoryTokenCount, // 新增
     geminiMdFileCount: fileCount,
-    approvalMode: argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT,
+    // ACP mode is agent-to-agent: there is no human to answer interactive
+    // permission prompts in the calling process. We default to YOLO so
+    // non-dangerous tools (edits, writes, MCP, generic shell) execute
+    // without prompting. Genuinely dangerous operations (destructive shell
+    // commands, `delete_file`, `ask_user_question`) still generate a
+    // confirmation that the ACP runtime forwards to the caller agent via
+    // `requestPermission`.
+    approvalMode:
+      argv.yolo || argv.acp || argv.experimentalAcp
+        ? ApprovalMode.YOLO
+        : ApprovalMode.DEFAULT,
     showMemoryUsage:
       argv.showMemoryUsage ||
       argv.show_memory_usage ||
