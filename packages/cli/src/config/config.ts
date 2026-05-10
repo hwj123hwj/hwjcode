@@ -227,7 +227,8 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('update', {
       alias: 'u',
       type: 'boolean',
-      description: 'Force check for updates and prompt to install if available',
+      description:
+        'Force check for updates and prompt to install if available. Combine with -y (`-uy`) to auto-confirm optional updates without the y/N prompt.',
       default: false,
     })
     .option('continue', {
