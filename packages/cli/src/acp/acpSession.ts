@@ -34,6 +34,7 @@ import {
   type PartListUnion,
 } from '@google/genai';
 import type { LoadedSettings } from '../config/settings.js';
+import { SettingScope } from '../config/settings.js';
 import {
   RequestPermissionResponseSchema,
   hasMeta,
@@ -160,6 +161,7 @@ export class Session {
       const result = await client.switchModel(modelId, signal);
       // switchModel already does config.setModel + chat.setSpecifiedModel +
       // setTools + history compression internally on success.
+      if (result?.success !== false) this.persistPreferredModel(modelId);
       return result;
     }
 
@@ -169,7 +171,28 @@ export class Session {
       setSpecifiedModel?: (modelId: string) => void;
     };
     chat.setSpecifiedModel?.(modelId);
+    this.persistPreferredModel(modelId);
     return null;
+  }
+
+  /**
+   * Write the active model id into user-scope settings so the next dvcode
+   * process (TUI or ACP) comes up with the same model selected. This
+   * mirrors what `useModelCommand` / `/model` does in the interactive CLI:
+   * picking a model from the ACP picker is a persistent preference, not a
+   * one-off session option.
+   */
+  private persistPreferredModel(modelId: string): void {
+    try {
+      this._settings.setValue(SettingScope.User, 'preferredModel', modelId);
+    } catch (e) {
+      // Non-fatal: the in-memory switch already succeeded. Just log.
+      process.stderr.write(
+        `[acp] failed to persist preferredModel=${modelId}: ${
+          e instanceof Error ? e.message : String(e)
+        }\n`,
+      );
+    }
   }
 
   /**
