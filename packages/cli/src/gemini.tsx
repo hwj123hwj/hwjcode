@@ -150,7 +150,7 @@ async function relaunchWithAdditionalArgs(additionalArgs: string[]) {
   await new Promise((resolve) => child.on('close', resolve));
   process.exit(0);
 }
-import { runAcpPeer } from './acp/acpPeer.js';
+import { runAcpClient } from './acp/acpStdioTransport.js';
 import { cleanupOldClipboardImages } from './ui/utils/clipboardUtils.js';
 import { exportSessionToMarkdown } from './utils/sessionExport.js';
 
@@ -831,7 +831,7 @@ export async function main() {
   // OAuth pre-authentication removed - only Cheeth OA supported
 
   if (config.getExperimentalAcp()) {
-    return runAcpPeer(config, settings);
+    return runAcpClient(config, settings, argv);
   }
 
   let input = config.getQuestion();
