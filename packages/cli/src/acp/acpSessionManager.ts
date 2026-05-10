@@ -99,7 +99,20 @@ export class AcpSessionManager {
     this.installFileSystemServiceIfSupported(sessionId, cwd);
 
     const geminiClient = this.config.getGeminiClient();
-    const chat = await geminiClient.startChat();
+    // IMPORTANT: we deliberately share `GeminiClient.chat` with this session
+    // instead of building an independent one. `GeminiClient.switchModel`,
+    // `updateSystemPromptWithMcpPrompts`, compression, etc. all target
+    // `this.chat` via `getChat()`. If we held a separate chat here, every
+    // subsequent `set_config_option(model)` would update the client's chat
+    // but the session would keep sending prompts to a stale chat that knows
+    // neither the new model nor the `[Model switched from X to Y]` marker.
+    //
+    // ACP spec allows concurrent sessions, but OpenClaw / acpx spawn one
+    // dvcode process per session, so one-chat-per-process is safe in
+    // practice. If we ever need true per-session isolation we'd have to
+    // teach `GeminiClient` about a session id and route switchModel
+    // accordingly; for now the shared model/tool config is a feature.
+    const chat = geminiClient.getChat();
 
     const session = new Session(
       sessionId,
