@@ -108,44 +108,110 @@ export class Session {
     cfg.setApprovalMode?.(modeId);
   }
 
-  setModel(modelId: string): void {
-    // 1) Mutate Config so that *future* GeminiChat instances (e.g. sub-agents,
-    //    new sessions, compression chats) pick up the new model.
+  /**
+   * Switch the active model for this session.
+   *
+   * Mirrors the interactive CLI path (`useModelCommand` → `GeminiClient.switchModel`):
+   *   - compresses chat history to fit the new model's context window
+   *   - re-registers tools (Claude vs Gemini need different tool schemas)
+   *   - pushes a `[Model switched from X to Y]` system message into history
+   *   - only then mutates `Config.setModel` + `GeminiChat.setSpecifiedModel`
+   *
+   * Falls back to a pure `Config.setModel` + `chat.setSpecifiedModel` when
+   * `GeminiClient.switchModel` is unavailable (shouldn't happen in prod, but
+   * keeps this callable in minimal test harnesses).
+   *
+   * Returns a {@link ModelSwitchResult}-shaped object when the full switch
+   * path runs so callers can surface compression info / errors. Returns
+   * `null` when the simple fallback is used.
+   */
+  async setModel(
+    modelId: string,
+    abortSignal?: AbortSignal,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    compressionInfo?: { originalTokenCount: number; newTokenCount: number };
+    compressionSkipReason?: string;
+  } | null> {
     const cfg = this.config as unknown as {
       setModel?: (modelId: string) => void;
+      getGeminiClient?: () => {
+        switchModel?: (
+          newModel: string,
+          signal: AbortSignal,
+          knownTokenCount?: number,
+        ) => Promise<{
+          success: boolean;
+          error?: string;
+          compressionInfo?: {
+            originalTokenCount: number;
+            newTokenCount: number;
+          };
+          compressionSkipReason?: string;
+        }>;
+      };
     };
-    cfg.setModel?.(modelId);
 
-    // 2) GeminiChat caches the resolved model on `specifiedModel` in its
-    //    constructor (see geminiChat.ts:170) and reads it on every
-    //    sendMessage call — Config.setModel alone is NOT enough to switch
-    //    the *current* conversation. Push the new model into the live chat
-    //    instance too.
+    const client = cfg.getGeminiClient?.();
+    const signal = abortSignal ?? new AbortController().signal;
+
+    if (client?.switchModel) {
+      const result = await client.switchModel(modelId, signal);
+      // switchModel already does config.setModel + chat.setSpecifiedModel +
+      // setTools + history compression internally on success.
+      return result;
+    }
+
+    // Minimal fallback — Config only, no compression, no tool re-registration.
+    cfg.setModel?.(modelId);
     const chat = this.chat as unknown as {
       setSpecifiedModel?: (modelId: string) => void;
     };
     chat.setSpecifiedModel?.(modelId);
+    return null;
   }
 
   /**
    * Apply a single `session/set_config_option` request.
    *
    * Known configIds are routed to their real backing setter:
-   *   - `"model"`     → `Config.setModel`
+   *   - `"model"`     → `GeminiClient.switchModel` (full compression-aware path)
    *   - `"mode"`      → `Config.setApprovalMode`
    *
    * Everything else is cached on the session (so `buildConfigOptionsSnapshot`
    * can echo it back) but has no runtime effect yet. That's fine — ACP
    * clients pre-read the option schema from `newSession`'s `configOptions`,
    * so unknown options never reach this method in the first place.
+   *
+   * Returns extra metadata from the backing setter so the RPC layer can
+   * surface compression info (`configOptions` is too rigid for that).
    */
-  applyConfigOption(configId: string, value: string | boolean): void {
+  async applyConfigOption(
+    configId: string,
+    value: string | boolean,
+  ): Promise<{
+    compressionInfo?: { originalTokenCount: number; newTokenCount: number };
+    compressionSkipReason?: string;
+    error?: string;
+  }> {
     this.configValues.set(configId, value);
     if (configId === 'model' && typeof value === 'string') {
-      this.setModel(value);
+      const result = await this.setModel(value);
+      if (result && !result.success) {
+        // Switch was vetoed (compression failed etc.) — roll back the cache
+        // so `buildConfigOptionsSnapshot` keeps reflecting the real state.
+        this.configValues.delete(configId);
+        return { error: result.error };
+      }
+      return {
+        compressionInfo: result?.compressionInfo,
+        compressionSkipReason: result?.compressionSkipReason,
+      };
     } else if (configId === 'mode' && typeof value === 'string') {
       this.setMode(value);
     }
+    return {};
   }
 
   /** Currently-cached value of a configOption, falling back to `defaultValue`. */
