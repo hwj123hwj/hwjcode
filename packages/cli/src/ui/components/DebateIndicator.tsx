@@ -13,7 +13,7 @@ import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 
 // 闪烁持续时间（ms）和间隔（ms）
 const BLINK_INTERVAL_MS = 150;
-const BLINK_DURATION_MS = 900; // 共闪烁约 6 次
+const BLINK_DURATION_MS = 2000; // 共闪烁约 13 次
 
 /**
  * 🎭 辩论模式指示器
@@ -118,6 +118,11 @@ export const DebateIndicator: React.FC = () => {
   const statusLabel =
     debate.status === 'paused' ? texts.indicatorPaused : texts.indicatorRunning;
 
+  // 闪烁时外框颜色在原有颜色和明亮对比色之间切换
+  const borderColor = blinkVisible
+    ? statusColor
+    : (debate.status === 'paused' ? Colors.Foreground : Colors.AccentYellow);
+
   // 闪烁时用空白占位，保持布局宽度稳定
   const modelDisplay = blinkVisible ? currentModel : ' '.repeat(currentModel.length);
   const progressDisplay = blinkVisible
@@ -127,7 +132,7 @@ export const DebateIndicator: React.FC = () => {
   return (
     <Box
       borderStyle="round"
-      borderColor={statusColor}
+      borderColor={borderColor}
       paddingX={1}
       marginBottom={0}
     >
