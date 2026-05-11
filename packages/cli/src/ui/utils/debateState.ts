@@ -40,6 +40,8 @@ export interface ActiveDebate {
    * - done: no more auto-advance; new /debate required
    */
   status: 'running' | 'paused' | 'done';
+  /** Original model active before the debate started. */
+  originalModel?: string;
 }
 
 let active: ActiveDebate | null = null;
@@ -54,6 +56,7 @@ export function startDebate(args: {
   models: string[];
   rounds: number;
   language: string;
+  originalModel?: string;
 }): ActiveDebate {
   if (args.models.length < 2 || args.models.length > 4) {
     throw new Error(`debate requires 2-4 models, got ${args.models.length}`);
@@ -68,6 +71,7 @@ export function startDebate(args: {
     language: args.language,
     cursor: { round: 0, modelIdx: 0 },
     status: 'running',
+    originalModel: args.originalModel,
   };
   return active;
 }
