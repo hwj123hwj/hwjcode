@@ -56,6 +56,7 @@ import { hooksCommand } from '../ui/commands/hooksCommand.js';
 import { issueCommand } from '../ui/commands/issueCommand.js';
 import { newCommand } from '../ui/commands/newCommand.js';
 import { wikiCommand } from '../ui/commands/wikiCommand.js';
+import { debateCommand } from '../ui/commands/debateCommand.js';
 
 /**
  * Loads the core, hard-coded slash commands that are an integral part
@@ -120,6 +121,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       accountCommand,
       pptCommand,
       wikiCommand,
+      debateCommand,
     ];
 
     return allDefinitions.filter((cmd): cmd is SlashCommand => cmd !== null);
