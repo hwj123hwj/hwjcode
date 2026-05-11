@@ -79,6 +79,9 @@ export interface DebateI18nTexts {
   indicatorPaused: string;
   indicatorSpeaking: string;
   indicatorProgress: string;
+
+  // Post-debate summary
+  summaryGenerating: string;
 }
 
 const CHINESE_TEXTS: DebateI18nTexts = {
@@ -141,6 +144,8 @@ const CHINESE_TEXTS: DebateI18nTexts = {
   indicatorPaused: '辩论已暂停',
   indicatorSpeaking: '当前发言',
   indicatorProgress: '进度',
+
+  summaryGenerating: '🎭 辩论结束，正在生成总结报告……',
 };
 
 const ENGLISH_TEXTS: DebateI18nTexts = {
@@ -203,6 +208,8 @@ const ENGLISH_TEXTS: DebateI18nTexts = {
   indicatorPaused: 'Debate Paused',
   indicatorSpeaking: 'Speaking',
   indicatorProgress: 'Progress',
+
+  summaryGenerating: '🎭 Debate concluded. Generating summary report…',
 };
 
 /**

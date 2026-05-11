@@ -163,3 +163,62 @@ export function pickFollowup(language: string = 'en'): string {
   const base = pickRandom(pool.followup);
   return base + buildLanguageDirective(language);
 }
+
+// ============================================================================
+// SUMMARY MODEL
+// ============================================================================
+
+/**
+ * 辩论总结使用的模型。
+ * 选择 gemini-3-flash-preview 的原因：当前最先进的大上下文模型，
+ * 拥有极高的上下文窗口，确保能容纳并理解完整的辩论历史。
+ */
+export const DEBATE_SUMMARY_MODEL = 'gemini-3-flash-preview';
+
+/**
+ * 总结模型切换失败时的回退模型。
+ */
+export const DEBATE_SUMMARY_FALLBACK_MODEL = 'auto';
+
+/**
+ * Build the summary prompt sent after a debate finishes.
+ *
+ * The prompt asks the model to produce a structured report covering:
+ * - Each model's core position
+ * - Key points of disagreement
+ * - An overall conclusion / synthesis
+ *
+ * Language rules mirror pickOpening: zh/en use native templates; custom
+ * languages append an explicit language directive.
+ */
+export function buildSummaryPrompt(
+  topic: string,
+  models: string[],
+  language: string = 'en',
+): string {
+  const modelList = models.join('、');
+  const directive = buildLanguageDirective(language);
+
+  if (isChineseLanguage(language)) {
+    return (
+      `辩论已全部结束。话题是：${topic}。\n` +
+      `参与模型：${modelList}。\n\n` +
+      `请你作为中立的主持人，根据上面的完整辩论记录，生成一份简洁的总结报告，包含以下部分：\n` +
+      `1. 各模型的核心观点（逐一列出）\n` +
+      `2. 主要争议点\n` +
+      `3. 综合结论\n\n` +
+      `要求：直接输出报告内容，不要加多余的开场白，保持简练。`
+    );
+  }
+
+  return (
+    `The debate has concluded. Topic: ${topic}.\n` +
+    `Participating models: ${models.join(', ')}.\n\n` +
+    `As a neutral moderator, please generate a concise summary report based on the full debate above, covering:\n` +
+    `1. Each model's core position (listed individually)\n` +
+    `2. Main points of disagreement\n` +
+    `3. Overall conclusion / synthesis\n\n` +
+    `Output the report directly without preamble. Keep it concise.` +
+    directive
+  );
+}

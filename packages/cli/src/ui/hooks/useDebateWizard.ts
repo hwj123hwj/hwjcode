@@ -36,7 +36,9 @@ import {
   resumeDebate,
   pauseDebate,
 } from '../utils/debateState.js';
-import { pickOpening, pickFollowup } from '../utils/debatePhrases.js';
+import { pickOpening, pickFollowup, buildSummaryPrompt, DEBATE_SUMMARY_MODEL, DEBATE_SUMMARY_FALLBACK_MODEL } from '../utils/debatePhrases.js';
+import { getDebateI18nTexts } from '../utils/debateI18n.js';
+import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 import { loadPresets, savePreset, DebatePreset } from '../utils/debateStorage.js';
 import { loadCustomModels } from '../../config/customModelsStorage.js';
 
@@ -367,15 +369,45 @@ export function useDebateWizard(args: {
     resumeDebate();
 
     if (isDebateFinished) {
+      const finishedDebate = debate;
       advanceCursor();
       endDebate();
+      const summaryTexts = getDebateI18nTexts(
+        detectUILanguage(finishedDebate.language),
+      );
       addItem(
-        {
-          type: MessageType.INFO,
-          text: '🎭 辩论已是最后一轮，直接结束。',
-        },
+        { type: MessageType.INFO, text: summaryTexts.summaryGenerating },
         Date.now(),
       );
+
+      // 手动恢复到最后一轮结束时，尝试切换大上下文模型做总结
+      const client = config?.getGeminiClient();
+      const summaryAbortController = new AbortController();
+      if (client) {
+        let summaryModel = DEBATE_SUMMARY_MODEL;
+        let switchResult = await client.switchModel(
+          summaryModel,
+          summaryAbortController.signal,
+        );
+        if (!summaryAbortController.signal.aborted && !switchResult.success) {
+          await client.switchModel(
+            DEBATE_SUMMARY_FALLBACK_MODEL,
+            summaryAbortController.signal,
+          );
+        }
+      }
+
+      if (summaryAbortController.signal.aborted) return;
+
+      setTimeout(() => {
+        submitQuery(
+          buildSummaryPrompt(
+            finishedDebate.topic,
+            finishedDebate.models,
+            finishedDebate.language,
+          ),
+        );
+      }, 0);
       return;
     }
 
