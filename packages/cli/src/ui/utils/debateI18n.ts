@@ -1,0 +1,200 @@
+/**
+ * @license
+ * Copyright 2026 DeepV Code team
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Debate i18n configuration — Chinese and English prompts with language support.
+ * Used by DebateWizard and debate phrases to localize UI and mediator messages.
+ */
+
+export type DebateLanguage = 'zh' | 'en' | string; // string for custom user input
+
+export interface DebateI18nTexts {
+  // Wizard UI texts
+  wizardTitle: string;
+  stepPickLang: string;
+  stepModels: string;
+  stepRounds: string;
+  stepTopic: string;
+  stepConfirm: string;
+
+  // Descriptions
+  descPickLang: string;
+  descModels: string;
+  descRounds: string;
+  descTopic: string;
+  descConfirm: string;
+
+  // Options
+  roundOption1: string;
+  roundOption2: string;
+  roundOption3: string;
+
+  // Buttons
+  btnNewDebate: string;
+  btnStart: string;
+  btnBack: string;
+  btnCancel: string;
+
+  // Labels
+  labelTopic: string;
+  labelModels: string;
+  labelRounds: string;
+  labelTotalTurns: string;
+  labelLanguage: string;
+
+  // Messages
+  msgMinModels: string;
+  msgMaxModels: string;
+  msgInsufficientModels: string;
+  msgEmptyTopic: string;
+  msgConfigureModels: string;
+  msgPressEnter: string;
+  msgPressEsc: string;
+
+  // Language options
+  optChinese: string;
+  optEnglish: string;
+  optCustom: string;
+
+  // For custom language input
+  customLangPrompt: string;
+  customLangDesc: string;
+
+  // Preset loading
+  presetTopic: string;
+  presetModels: string;
+  presetRounds: string;
+  presetAgo: string;
+  agoDaysAgo: string;
+  agoHoursAgo: string;
+  agoMinsAgo: string;
+  agoJustNow: string;
+}
+
+const CHINESE_TEXTS: DebateI18nTexts = {
+  wizardTitle: '🎭 辩论模式配置',
+  stepPickLang: '选择辩论语言',
+  stepModels: '选择参赛模型',
+  stepRounds: '每人发言轮数',
+  stepTopic: '辩论话题',
+  stepConfirm: '确认开始',
+
+  descPickLang: '选择辩论所用的语言。这会影响开场白、推进提示词和模型回复的预期语言。',
+  descModels: `至少 2 个，最多 4 个。按空格勾选，回车确认。`,
+  descRounds: '每个模型在整场辩论中最多发言的次数。',
+  descTopic: '一句话描述你想辩论什么。例如：这段压缩修复的代码是否健壮。',
+  descConfirm: '再看一眼就开始。辩论会按显示顺序轮流发言。',
+
+  roundOption1: '1 轮（每人各自陈述）',
+  roundOption2: '2 轮（推荐：陈述 + 反驳）',
+  roundOption3: '3 轮（深度辩论）',
+
+  btnNewDebate: '➕ 新建辩论',
+  btnStart: '✓ 开始辩论',
+  btnBack: '↩ 返回修改',
+  btnCancel: '✗ 取消',
+
+  labelTopic: '话题：',
+  labelModels: '模型：',
+  labelRounds: '每人轮数：',
+  labelTotalTurns: '总发言次数：',
+  labelLanguage: '辩论语言：',
+
+  msgMinModels: '至少选 2 个模型',
+  msgMaxModels: '最多选 4 个模型',
+  msgInsufficientModels: '✗ 当前可用模型不足 2 个，无法进行辩论。',
+  msgEmptyTopic: '话题不能为空',
+  msgConfigureModels: '请先通过 /model 或 /add-model 配置更多模型。',
+  msgPressEnter: '回车确认',
+  msgPressEsc: '按 Esc 退出',
+
+  optChinese: '🇨🇳 中文',
+  optEnglish: '🇬🇧 English',
+  optCustom: '✏️ 自定义语言',
+
+  customLangPrompt: '输入自定义语言（如 "日语" 或 "法语"）',
+  customLangDesc: '模型会用这个语言进行辩论。',
+
+  presetTopic: '话题',
+  presetModels: '模型',
+  presetRounds: '轮',
+  presetAgo: '时间',
+  agoDaysAgo: '天前',
+  agoHoursAgo: '小时前',
+  agoMinsAgo: '分钟前',
+  agoJustNow: '刚刚',
+};
+
+const ENGLISH_TEXTS: DebateI18nTexts = {
+  wizardTitle: '🎭 Debate Mode Configuration',
+  stepPickLang: 'Select Debate Language',
+  stepModels: 'Select Competing Models',
+  stepRounds: 'Speaking Rounds per Model',
+  stepTopic: 'Debate Topic',
+  stepConfirm: 'Confirm & Start',
+
+  descPickLang: 'Choose the language for the debate. This affects the opening phrase, follow-up prompts, and expected model responses.',
+  descModels: `Select 2–4 models. Press space to toggle, Enter to confirm.`,
+  descRounds: 'Maximum number of times each model speaks during the entire debate.',
+  descTopic: 'Describe in one sentence what you want to debate. Example: Is this compression fix code robust?',
+  descConfirm: 'Review the settings before starting. Models will speak in the order shown.',
+
+  roundOption1: '1 Round (each model speaks once)',
+  roundOption2: '2 Rounds (recommended: statement + rebuttal)',
+  roundOption3: '3 Rounds (in-depth debate)',
+
+  btnNewDebate: '➕ New Debate',
+  btnStart: '✓ Start Debate',
+  btnBack: '↩ Go Back',
+  btnCancel: '✗ Cancel',
+
+  labelTopic: 'Topic:',
+  labelModels: 'Models:',
+  labelRounds: 'Rounds per Model:',
+  labelTotalTurns: 'Total Turns:',
+  labelLanguage: 'Debate Language:',
+
+  msgMinModels: 'Select at least 2 models',
+  msgMaxModels: 'Select at most 4 models',
+  msgInsufficientModels: '✗ Insufficient available models (need 2+) to start a debate.',
+  msgEmptyTopic: 'Topic cannot be empty',
+  msgConfigureModels: 'Please configure more models via /model or /add-model first.',
+  msgPressEnter: 'Press Enter to confirm',
+  msgPressEsc: 'Press Esc to exit',
+
+  optChinese: '🇨🇳 中文',
+  optEnglish: '🇬🇧 English',
+  optCustom: '✏️ Custom Language',
+
+  customLangPrompt: 'Enter custom language (e.g. "Japanese" or "French")',
+  customLangDesc: 'Models will conduct the debate in this language.',
+
+  presetTopic: 'topic',
+  presetModels: 'models',
+  presetRounds: 'rounds',
+  presetAgo: 'ago',
+  agoDaysAgo: 'd ago',
+  agoHoursAgo: 'h ago',
+  agoMinsAgo: 'm ago',
+  agoJustNow: 'now',
+};
+
+/**
+ * Get localized texts for the given language.
+ * If language is 'zh' or 'en', return the corresponding translation.
+ * Otherwise, return English as fallback.
+ */
+export function getDebateI18nTexts(language: DebateLanguage): DebateI18nTexts {
+  if (language === 'zh') {
+    return CHINESE_TEXTS;
+  }
+  return ENGLISH_TEXTS; // Default to English for 'en' and unknown languages
+}
+
+/**
+ * Check if language code is one of the predefined options ('zh' or 'en').
+ */
+export function isPredefinedLanguage(lang: string): lang is 'zh' | 'en' {
+  return lang === 'zh' || lang === 'en';
+}
