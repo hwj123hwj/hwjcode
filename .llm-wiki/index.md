@@ -56,5 +56,11 @@
 |------|-------------|
 | [overview](wiki/overview.md) | Project-level overview from README.md and package.json |
 
+## Features & Enhancements
+
+| Page | Description |
+|------|-------------|
+| [debate-i18n-enhancement](wiki/debate-i18n-enhancement.md) | Debate mode i18n & language selection — multilingual UI and prompts |
+
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->
