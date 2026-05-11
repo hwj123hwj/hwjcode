@@ -2187,9 +2187,8 @@ User question: ${queryStr}`;
                 if (abortController.signal.aborted) return;
 
                 if (!switchResult.success) {
-                  summaryModel = DEBATE_SUMMARY_FALLBACK_MODEL;
-                  switchResult = await geminiClient.switchModel(
-                    summaryModel,
+                  await geminiClient.switchModel(
+                    DEBATE_SUMMARY_FALLBACK_MODEL,
                     abortController.signal,
                   );
                 }
@@ -2207,6 +2206,21 @@ User question: ${queryStr}`;
                       finishedDebate.language,
                     ),
                   );
+                  // 总结请求发出后，异步执行模型还原
+                  if (finishedDebate.originalModel) {
+                    const originalModel = finishedDebate.originalModel;
+                    setTimeout(async () => {
+                      try {
+                        await geminiClient.switchModel(
+                          originalModel,
+                          new AbortController().signal, // 还原模型不应受当前辩论 abort 影响
+                        );
+                        appEvents.emit(AppEvent.ModelChanged, originalModel);
+                      } catch (err) {
+                        console.warn(`[Debate] Failed to restore original model ${originalModel}:`, err);
+                      }
+                    }, 100);
+                  }
                 }, 0);
                 return;
               }
