@@ -13,7 +13,7 @@ import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 
 // 闪烁持续时间（ms）和间隔（ms）
 const BLINK_INTERVAL_MS = 150;
-const BLINK_DURATION_MS = 2000; // 共闪烁约 13 次
+const BLINK_DURATION_MS = 1200; // 共闪烁约 8 次
 
 /**
  * 🎭 辩论模式指示器
@@ -31,7 +31,7 @@ const BLINK_DURATION_MS = 2000; // 共闪烁约 13 次
  * - debateState 是模块级单例，不走 React，所以需要用 setInterval 轮询同步到
  *   组件 state 里触发重渲染。200ms 的刷新间隔对终端 UI 完全够用，开销可忽略。
  * - 非辩论状态 / 辩论已结束 时返回 null，不占用任何空间。
- * - 模型或轮数变化时，对模型名称和进度数字触发短暂闪烁（约 900ms），
+ * - 模型或轮数变化时，对模型名称和进度数字触发短暂闪烁（约 1200ms），
  *   通过交替显示/隐藏文字实现视觉提示。
  */
 export const DebateIndicator: React.FC = () => {
@@ -61,6 +61,7 @@ export const DebateIndicator: React.FC = () => {
     blinkEndRef.current = setTimeout(() => {
       if (blinkIntervalRef.current) clearInterval(blinkIntervalRef.current);
       blinkIntervalRef.current = null;
+      blinkEndRef.current = null;
       setBlinkVisible(true); // 闪烁结束，恢复显示
     }, BLINK_DURATION_MS);
   };
@@ -119,9 +120,9 @@ export const DebateIndicator: React.FC = () => {
     debate.status === 'paused' ? texts.indicatorPaused : texts.indicatorRunning;
 
   // 闪烁时外框颜色在原有颜色和明亮对比色之间切换
-  const borderColor = blinkVisible
-    ? statusColor
-    : (debate.status === 'paused' ? Colors.Foreground : Colors.AccentYellow);
+  // running (Cyan) -> 对冲 Yellow; paused (Yellow) -> 对冲 Cyan
+  const contrastColor = debate.status === 'paused' ? Colors.AccentCyan : Colors.AccentYellow;
+  const borderColor = blinkVisible ? statusColor : contrastColor;
 
   // 闪烁时用空白占位，保持布局宽度稳定
   const modelDisplay = blinkVisible ? currentModel : ' '.repeat(currentModel.length);
