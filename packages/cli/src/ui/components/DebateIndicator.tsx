@@ -8,6 +8,8 @@ import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
 import { getActiveDebate, ActiveDebate } from '../utils/debateState.js';
+import { getDebateI18nTexts } from '../utils/debateI18n.js';
+import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 
 /**
  * 🎭 辩论模式指示器
@@ -51,6 +53,7 @@ export const DebateIndicator: React.FC = () => {
 
   if (!debate || debate.status === 'done') return null;
 
+  const texts = getDebateI18nTexts(detectUILanguage(debate.language));
   const currentModel = debate.models[debate.cursor.modelIdx] ?? '(unknown)';
   const totalTurns = debate.models.length * debate.rounds;
   const doneTurns =
@@ -58,7 +61,8 @@ export const DebateIndicator: React.FC = () => {
 
   const statusColor =
     debate.status === 'paused' ? Colors.AccentYellow : Colors.AccentCyan;
-  const statusLabel = debate.status === 'paused' ? '已暂停' : '进行中';
+  const statusLabel =
+    debate.status === 'paused' ? texts.indicatorPaused : texts.indicatorRunning;
 
   return (
     <Box
@@ -68,19 +72,19 @@ export const DebateIndicator: React.FC = () => {
       marginBottom={0}
     >
       <Text color={statusColor} bold>
-        🎭 辩论{statusLabel}
+        🎭 {statusLabel}
       </Text>
       <Text color={Colors.Gray}> │ </Text>
-      <Text>当前发言：</Text>
+      <Text>{texts.indicatorSpeaking}：</Text>
       <Text color={Colors.AccentYellow} bold>
         {currentModel}
       </Text>
       <Text color={Colors.Gray}> │ </Text>
-      <Text>进度：</Text>
+      <Text>{texts.indicatorProgress}：</Text>
       <Text color={Colors.AccentGreen} bold>
         {doneTurns}/{totalTurns}
       </Text>
-      <Text color={Colors.Gray}> 轮</Text>
+      <Text color={Colors.Gray}> {texts.presetRounds}</Text>
     </Box>
   );
 };
