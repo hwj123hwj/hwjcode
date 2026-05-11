@@ -67,6 +67,7 @@ export interface DebateWizardProps {
 enum Step {
   PICK_PRESET = 'pickPreset',
   PICK_LANGUAGE = 'pickLanguage',
+  PICK_CUSTOM_LANG = 'pickCustomLang',
   MODELS = 'models',
   ROUNDS = 'rounds',
   TOPIC = 'topic',
@@ -108,8 +109,10 @@ function relativeTime(iso: string, texts: ReturnType<typeof getDebateI18nTexts>)
 function stepTitle(step: Step, texts: ReturnType<typeof getDebateI18nTexts>): string {
   switch (step) {
     case Step.PICK_PRESET:
-      return '选择历史设定';
+      return texts.stepPickPreset;
     case Step.PICK_LANGUAGE:
+      return texts.stepPickLang;
+    case Step.PICK_CUSTOM_LANG:
       return texts.stepPickLang;
     case Step.MODELS:
       return texts.stepModels;
@@ -128,9 +131,11 @@ function stepTitle(step: Step, texts: ReturnType<typeof getDebateI18nTexts>): st
 function stepDescription(step: Step, texts: ReturnType<typeof getDebateI18nTexts>): string {
   switch (step) {
     case Step.PICK_PRESET:
-      return '你之前保存过辩论设定，可以直接复用，或新建一次。';
+      return texts.descPickPreset;
     case Step.PICK_LANGUAGE:
       return texts.descPickLang;
+    case Step.PICK_CUSTOM_LANG:
+      return texts.customLangDesc;
     case Step.MODELS:
       return texts.descModels;
     case Step.ROUNDS:
@@ -174,6 +179,9 @@ export function DebateWizard({
   const [topicInput, setTopicInput] = useState<string>('');
   const [customLangInput, setCustomLangInput] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  // 标记：当前是否正从 preset 加载（此时已经有 models/rounds/topic，
+  // 选完语言应直接去 CONFIRM，而不是再走 MODELS 向导）。
+  const [fromPreset, setFromPreset] = useState<boolean>(false);
 
   // ---------- Step: PICK_PRESET ----------
 
@@ -205,12 +213,19 @@ export function DebateWizard({
         }
         return;
       }
-      // Load preset into state and jump straight to CONFIRM.
+      // Load preset into state.
       setChosenModels([...p.models]);
       setChosenRounds(p.rounds);
       setTopic(p.topic);
       setTopicInput(p.topic);
-      setStep(Step.CONFIRM);
+      setFromPreset(true);
+      // 关键修复：即便使用历史设定，只要用户没配过 preferredLanguage
+      // 就先走语言选择，把选择写入 settings，避免静默用 'en'。
+      if (needsLanguageSelection) {
+        setStep(Step.PICK_LANGUAGE);
+      } else {
+        setStep(Step.CONFIRM);
+      }
     },
     [presets, needsLanguageSelection],
   );
@@ -226,34 +241,43 @@ export function DebateWizard({
   const handleLanguageSelect = useCallback(
     (value: string) => {
       if (value === 'custom') {
-        // For custom language, we'll use a text input in render
-        // Just set a flag and stay in this step
+        // Switch to custom language input step
+        setError(null);
+        setStep(Step.PICK_CUSTOM_LANG);
         return;
       }
       const lang = value as DebateLanguage;
       setChosenLanguage(lang);
       onLanguageSelected?.(lang);
-      setStep(Step.MODELS);
+      // 从 preset 进来的话，直接去 CONFIRM（已经有 models/rounds/topic）
+      setStep(fromPreset ? Step.CONFIRM : Step.MODELS);
     },
-    [onLanguageSelected],
+    [onLanguageSelected, fromPreset],
   );
 
   const handleCustomLangSubmit = useCallback(
     (value: string) => {
       const trimmed = value.trim();
       if (!trimmed) {
-        setError(uiTexts.msgEmptyTopic); // Reuse empty message
+        setError(uiTexts.msgEmptyCustomLang);
         return;
       }
       setError(null);
       setChosenLanguage(trimmed);
       onLanguageSelected?.(trimmed);
-      setStep(Step.MODELS);
+      setStep(fromPreset ? Step.CONFIRM : Step.MODELS);
     },
-    [uiTexts, onLanguageSelected],
+    [uiTexts, onLanguageSelected, fromPreset],
   );
 
+  const handleCustomLangCancel = useCallback(() => {
+    // ESC 回到语言选择页，而不是直接退出向导
+    setError(null);
+    setStep(Step.PICK_LANGUAGE);
+  }, []);
+
   // ESC on certain steps cancels the whole wizard.
+  // PICK_CUSTOM_LANG 有自己的 onCancel 回退到 PICK_LANGUAGE，不纳入这里。
   useKeypress(
     (key: Key) => {
       if (key.name === 'escape') onCancel();
@@ -364,7 +388,9 @@ export function DebateWizard({
   stepsOrder.push(Step.MODELS, Step.ROUNDS, Step.TOPIC, Step.CONFIRM);
 
   const totalSteps = stepsOrder.length;
-  const currentStepIdx = stepsOrder.indexOf(step);
+  // PICK_CUSTOM_LANG 视作 PICK_LANGUAGE 的延伸，显示同一步编号
+  const effectiveStep = step === Step.PICK_CUSTOM_LANG ? Step.PICK_LANGUAGE : step;
+  const currentStepIdx = stepsOrder.indexOf(effectiveStep);
   const displayStepNumber = currentStepIdx + 1;
 
   return (
@@ -422,6 +448,31 @@ export function DebateWizard({
                 <Text color={Colors.AccentRed}>✗ {error}</Text>
               </Box>
             )}
+          </Box>
+        )}
+
+        {step === Step.PICK_CUSTOM_LANG && (
+          <Box flexDirection="column">
+            <Box marginBottom={1}>
+              <Text color={Colors.Gray}>{uiTexts.customLangPrompt}</Text>
+            </Box>
+            <SimpleTextInput
+              value={customLangInput}
+              onChange={setCustomLangInput}
+              onSubmit={handleCustomLangSubmit}
+              onCancel={handleCustomLangCancel}
+              isActive
+            />
+            {error && (
+              <Box marginTop={1}>
+                <Text color={Colors.AccentRed}>✗ {error}</Text>
+              </Box>
+            )}
+            <Box marginTop={1}>
+              <Text color={Colors.Gray}>
+                {uiTexts.msgPressEnter}，{uiTexts.msgPressEsc}
+              </Text>
+            </Box>
           </Box>
         )}
 

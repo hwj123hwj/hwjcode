@@ -71,18 +71,71 @@ interface DebatePhrasesPool {
   followup: readonly string[];
 }
 
+/**
+ * 判断是否是中文语言标识。
+ * 涵盖 'zh'、'zh-CN'、'中文'、'Chinese' 等常见形式。
+ */
+function isChineseLanguage(lang: string): boolean {
+  const lower = lang.toLowerCase().trim();
+  return (
+    lower === 'zh' ||
+    lower.startsWith('zh-') ||
+    lower.startsWith('zh_') ||
+    lang === '中文' ||
+    lower === 'chinese' ||
+    lower === 'cn'
+  );
+}
+
+/**
+ * 判断是否是英文语言标识。
+ */
+function isEnglishLanguage(lang: string): boolean {
+  const lower = lang.toLowerCase().trim();
+  return (
+    lower === 'en' ||
+    lower.startsWith('en-') ||
+    lower.startsWith('en_') ||
+    lower === 'english'
+  );
+}
+
 function getPhrasesPool(language: string): DebatePhrasesPool {
-  if (language === 'zh' || language === '中文') {
+  if (isChineseLanguage(language)) {
     return {
       opening: CHINESE_OPENING_PHRASES,
       followup: CHINESE_FOLLOWUP_PHRASES,
     };
   }
-  // Default to English for 'en', 'en-US', or any other language
+  // 英文或其他语言都用英文模板作为基座，再靠 language 指令兜底
   return {
     opening: ENGLISH_OPENING_PHRASES,
     followup: ENGLISH_FOLLOWUP_PHRASES,
   };
+}
+
+/**
+ * 构造"请用 X 语言发言"的指令，作为开场白 / 推进提示的一部分追加到末尾。
+ *
+ * 策略：
+ * - 'zh' / 中文 / zh-CN → 不追加（模板本身已是中文）
+ * - 'en' / en-US → 不追加（模板本身已是英文）
+ * - 其他自定义值（如 "日语"、"Japanese"、"Français"）→ 追加明确的语言指令
+ *
+ * 指令用双语（中文 + 英文）同时说明，保证不同模型都能理解，避免只写一种语言
+ * 时小模型绕不过去。
+ */
+function buildLanguageDirective(language: string): string {
+  if (!language) return '';
+  if (isChineseLanguage(language)) return '';
+  if (isEnglishLanguage(language)) return '';
+
+  const trimmed = language.trim();
+  // 双语兜底：英文 + 中文，确保任何模型都能理解
+  return (
+    ` (Please respond in ${trimmed}. ` +
+    `请严格使用 ${trimmed} 进行这次辩论的发言。)`
+  );
 }
 
 function pickRandom<T>(pool: readonly T[]): T {
@@ -91,22 +144,22 @@ function pickRandom<T>(pool: readonly T[]): T {
 
 /**
  * Pick an opening phrase for the first speaker of a debate.
- * The placeholder `{topic}` is replaced with the provided topic string.
- * Language determines which phrase pool to use.
+ * - 中文/英文：使用对应语种模板，不追加额外指令
+ * - 自定义语言（如"日语"、"Français"）：用英文模板 + 明确的"请用 X 语言发言"指令
  */
 export function pickOpening(topic: string, language: string = 'en'): string {
   const pool = getPhrasesPool(language);
   const template = pickRandom(pool.opening);
-  return template.replace('{topic}', topic);
+  const base = template.replace('{topic}', topic);
+  return base + buildLanguageDirective(language);
 }
 
 /**
  * Pick a follow-up phrase for any speaker after the first.
- * Does not reference the previous model by name — the system-injected
- * `[Model switched from X to Y]` message already provides that context.
- * Language determines which phrase pool to use.
+ * 规则同 pickOpening：自定义语言时会追加语言指令，确保辩论不会跑偏语种。
  */
 export function pickFollowup(language: string = 'en'): string {
   const pool = getPhrasesPool(language);
-  return pickRandom(pool.followup);
+  const base = pickRandom(pool.followup);
+  return base + buildLanguageDirective(language);
 }
