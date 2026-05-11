@@ -12,6 +12,7 @@ export type DebateLanguage = 'zh' | 'en' | string; // string for custom user inp
 export interface DebateI18nTexts {
   // Wizard UI texts
   wizardTitle: string;
+  stepPickPreset: string;
   stepPickLang: string;
   stepModels: string;
   stepRounds: string;
@@ -19,6 +20,7 @@ export interface DebateI18nTexts {
   stepConfirm: string;
 
   // Descriptions
+  descPickPreset: string;
   descPickLang: string;
   descModels: string;
   descRounds: string;
@@ -48,6 +50,7 @@ export interface DebateI18nTexts {
   msgMaxModels: string;
   msgInsufficientModels: string;
   msgEmptyTopic: string;
+  msgEmptyCustomLang: string;
   msgConfigureModels: string;
   msgPressEnter: string;
   msgPressEsc: string;
@@ -74,12 +77,14 @@ export interface DebateI18nTexts {
 
 const CHINESE_TEXTS: DebateI18nTexts = {
   wizardTitle: '🎭 辩论模式配置',
+  stepPickPreset: '选择历史设定',
   stepPickLang: '选择辩论语言',
   stepModels: '选择参赛模型',
   stepRounds: '每人发言轮数',
   stepTopic: '辩论话题',
   stepConfirm: '确认开始',
 
+  descPickPreset: '你之前保存过辩论设定，可以直接复用，或新建一次。',
   descPickLang: '选择辩论所用的语言。这会影响开场白、推进提示词和模型回复的预期语言。',
   descModels: `至少 2 个，最多 4 个。按空格勾选，回车确认。`,
   descRounds: '每个模型在整场辩论中最多发言的次数。',
@@ -105,9 +110,10 @@ const CHINESE_TEXTS: DebateI18nTexts = {
   msgMaxModels: '最多选 4 个模型',
   msgInsufficientModels: '✗ 当前可用模型不足 2 个，无法进行辩论。',
   msgEmptyTopic: '话题不能为空',
+  msgEmptyCustomLang: '请输入语言名称，或按 Esc 返回',
   msgConfigureModels: '请先通过 /model 或 /add-model 配置更多模型。',
   msgPressEnter: '回车确认',
-  msgPressEsc: '按 Esc 退出',
+  msgPressEsc: '按 Esc 返回',
 
   optChinese: '🇨🇳 中文',
   optEnglish: '🇬🇧 English',
@@ -128,12 +134,14 @@ const CHINESE_TEXTS: DebateI18nTexts = {
 
 const ENGLISH_TEXTS: DebateI18nTexts = {
   wizardTitle: '🎭 Debate Mode Configuration',
+  stepPickPreset: 'Select Saved Preset',
   stepPickLang: 'Select Debate Language',
   stepModels: 'Select Competing Models',
   stepRounds: 'Speaking Rounds per Model',
   stepTopic: 'Debate Topic',
   stepConfirm: 'Confirm & Start',
 
+  descPickPreset: 'You have saved debate presets. Pick one to reuse, or start a new debate.',
   descPickLang: 'Choose the language for the debate. This affects the opening phrase, follow-up prompts, and expected model responses.',
   descModels: `Select 2–4 models. Press space to toggle, Enter to confirm.`,
   descRounds: 'Maximum number of times each model speaks during the entire debate.',
@@ -159,9 +167,10 @@ const ENGLISH_TEXTS: DebateI18nTexts = {
   msgMaxModels: 'Select at most 4 models',
   msgInsufficientModels: '✗ Insufficient available models (need 2+) to start a debate.',
   msgEmptyTopic: 'Topic cannot be empty',
+  msgEmptyCustomLang: 'Please enter a language name, or press Esc to go back',
   msgConfigureModels: 'Please configure more models via /model or /add-model first.',
   msgPressEnter: 'Press Enter to confirm',
-  msgPressEsc: 'Press Esc to exit',
+  msgPressEsc: 'Press Esc to go back',
 
   optChinese: '🇨🇳 中文',
   optEnglish: '🇬🇧 English',
