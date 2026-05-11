@@ -73,6 +73,12 @@ export interface DebateI18nTexts {
   agoHoursAgo: string;
   agoMinsAgo: string;
   agoJustNow: string;
+
+  // DebateIndicator
+  indicatorRunning: string;
+  indicatorPaused: string;
+  indicatorSpeaking: string;
+  indicatorProgress: string;
 }
 
 const CHINESE_TEXTS: DebateI18nTexts = {
@@ -130,6 +136,11 @@ const CHINESE_TEXTS: DebateI18nTexts = {
   agoHoursAgo: '小时前',
   agoMinsAgo: '分钟前',
   agoJustNow: '刚刚',
+
+  indicatorRunning: '辩论进行中',
+  indicatorPaused: '辩论已暂停',
+  indicatorSpeaking: '当前发言',
+  indicatorProgress: '进度',
 };
 
 const ENGLISH_TEXTS: DebateI18nTexts = {
@@ -187,6 +198,11 @@ const ENGLISH_TEXTS: DebateI18nTexts = {
   agoHoursAgo: 'h ago',
   agoMinsAgo: 'm ago',
   agoJustNow: 'now',
+
+  indicatorRunning: 'Debate in Progress',
+  indicatorPaused: 'Debate Paused',
+  indicatorSpeaking: 'Speaking',
+  indicatorProgress: 'Progress',
 };
 
 /**

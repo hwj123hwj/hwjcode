@@ -278,9 +278,16 @@ export function DebateWizard({
 
   // ESC on certain steps cancels the whole wizard.
   // PICK_CUSTOM_LANG 有自己的 onCancel 回退到 PICK_LANGUAGE，不纳入这里。
+  // PICK_LANGUAGE：如果存在 presets，ESC 应退回 PICK_PRESET 而不是直接退出向导。
   useKeypress(
     (key: Key) => {
-      if (key.name === 'escape') onCancel();
+      if (key.name === 'escape') {
+        if (step === Step.PICK_LANGUAGE && presets.length > 0) {
+          setStep(Step.PICK_PRESET);
+        } else {
+          onCancel();
+        }
+      }
     },
     {
       isActive:
@@ -367,12 +374,13 @@ export function DebateWizard({
           language: chosenLanguage,
         });
       } else if (value === 'back') {
-        setStep(Step.MODELS);
+        // fromPreset 路径跳过了 MODELS/ROUNDS/TOPIC，back 应退回 PICK_PRESET
+        setStep(fromPreset ? Step.PICK_PRESET : Step.MODELS);
       } else {
         onCancel();
       }
     },
-    [chosenModels, chosenRounds, topic, chosenLanguage, onComplete, onCancel],
+    [chosenModels, chosenRounds, topic, chosenLanguage, fromPreset, onComplete, onCancel],
   );
 
   // ---------- Rendering ----------
