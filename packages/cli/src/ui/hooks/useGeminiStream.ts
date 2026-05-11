@@ -2272,7 +2272,9 @@ User question: ${queryStr}`;
               const advancedDebate = getActiveDebate();
               setTimeout(() => {
                 if (getActiveDebate()?.status !== 'running') return;
-                submitQuery(pickFollowup(advancedDebate?.language || 'en'));
+                const isLastRound =
+                  !!(advancedDebate && advancedDebate.cursor.round === advancedDebate.rounds - 1);
+                submitQuery(pickFollowup(advancedDebate?.language || 'en', isLastRound));
               }, 0);
             } catch (err) {
               if (abortController.signal.aborted) {
