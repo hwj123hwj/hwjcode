@@ -42,6 +42,7 @@ import {
   HistoryItem,
   HistoryItemWithoutId,
   HistoryItemToolGroup,
+  HistoryItemCompression,
   MessageType,
   SlashCommandProcessorResult,
   ToolCallStatus,
@@ -1263,20 +1264,66 @@ export const useGeminiStream = (
   );
 
   const handleChatCompressionEvent = useCallback(
-    (eventValue: ServerGeminiChatCompressedEvent['value']) =>
+    (eventValue: ServerGeminiChatCompressedEvent['value']) => {
+      // 兼容旧格式：value 可能是 null（异常情况）
+      if (!eventValue) {
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: t('conversation.compress.failed.unknown'),
+          },
+          Date.now(),
+        );
+        return;
+      }
+
+      // 成功：分两种情况显示
+      if (eventValue.success) {
+        if (eventValue.degraded) {
+          // 降级模式：全量压缩失败，MicroCompact 兜底瘦身成功
+          // 用 INFO（而非 COMPRESSION）提示用户"以精简模式继续"，并告知兜底原因
+          addItem(
+            {
+              type: MessageType.INFO,
+              text: tp('conversation.compress.degraded', {
+                clearedCount: eventValue.clearedCount ?? 0,
+              }),
+            },
+            Date.now(),
+          );
+          return;
+        }
+
+        // 常规成功：使用与 /compress 命令一致的 COMPRESSION 消息类型
+        addItem(
+          {
+            type: MessageType.COMPRESSION,
+            compression: {
+              isPending: false,
+              originalTokenCount: eventValue.info?.originalTokenCount ?? null,
+              newTokenCount: eventValue.info?.newTokenCount ?? null,
+            },
+          } as HistoryItemCompression,
+          Date.now(),
+        );
+        return;
+      }
+
+      // 失败/熔断：明确告知用户，并建议手动 /compress 或 /session new
+      const reason = eventValue.reason ?? 'unknown';
+      const isCircuitBreaker = reason.startsWith('circuit_breaker');
+      const failureKey = isCircuitBreaker
+        ? 'conversation.compress.failed.circuit_breaker'
+        : 'conversation.compress.failed.generic';
       addItem(
         {
-          type: 'info',
-          text:
-            tp('conversation.token.limit.warning', {
-              model: config.getModel(),
-              originalTokens: eventValue?.originalTokenCount ?? 'unknown',
-              newTokens: eventValue?.newTokenCount ?? 'unknown'
-            }),
+          type: MessageType.ERROR,
+          text: tp(failureKey, { reason }),
         },
         Date.now(),
-      ),
-    [addItem, config],
+      );
+    },
+    [addItem],
   );
 
   const handleMaxSessionTurnsEvent = useCallback(
