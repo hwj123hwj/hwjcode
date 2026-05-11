@@ -472,11 +472,13 @@ export function useDebateWizard(args: {
       // DebateIndicator 的状态 poll 有机会刷新到新模型。
       advanceCursor();
       // 拿到推进后的 debate（包括正确的 language）；用不同的名字避免遮蔽
-      // 外层作用域的 debate 引起阅读歧义。
+      // 外层作用域合作 debate 引起阅读歧义。
       const advancedDebate = getActiveDebate();
       setTimeout(() => {
         if (getActiveDebate()?.status !== 'running') return;
-        submitQuery(pickFollowup(advancedDebate?.language || 'en'));
+        const isLastRound =
+          !!(advancedDebate && advancedDebate.cursor.round === advancedDebate.rounds - 1);
+        submitQuery(pickFollowup(advancedDebate?.language || 'en', isLastRound));
       }, 0);
     } catch (err) {
       if (abortController.signal.aborted) return;

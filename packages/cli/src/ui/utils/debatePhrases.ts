@@ -17,24 +17,30 @@
 // ============================================================================
 
 const CHINESE_OPENING_PHRASES: string[] = [
-  '咱们聊个事：{topic}。请先调用工具把相关代码读一遍，以你自己的阅读为准，言简意赅说结论，不要来回纠结。',
-  '有个问题想让你看看：{topic}。请先读代码，不要凭印象推断，读完直接说你的判断，保持简练。',
-  '{topic}。请先用工具读一下相关代码，确认实现细节后给出结论，不准长篇大论。',
-  '来帮我分析下：{topic}。必须先调用工具读代码，以实际代码为依据说结论，不要绕圈子。',
-  '{topic}，请先把代码读一遍，以你自己的阅读结果为准，言简意赅地说出你的看法。',
+  '咱们聊个事：{topic}。请先报出你的模型名称（如：我是 GPT-4o），然后调用工具把相关代码读一遍，以你自己的阅读为准，言简意赅说结论，不要来回纠结。',
+  '有个问题想让你看看：{topic}。请先报出你的模型名，然后开始读代码，不要凭印象推断，读完直接说你的判断，保持简练。',
+  '{topic}。请先自报家门，说明你是哪个模型。然后用工具读一下相关代码，确认实现细节后给出结论，不准长篇大论。',
+  '来帮我分析下：{topic}。请先说明你是哪个模型，然后必须调用工具读代码，以实际代码为依据说结论，不要绕圈子。',
+  '{topic}，请先报出模型名称。然后把代码读一遍，以你自己的阅读结果为准，言简意赅地说出你的看法。',
 ];
 
 const CHINESE_FOLLOWUP_PHRASES: string[] = [
-  '换你了。不要直接评价上面的说法——先自己调用工具把代码读一遍，以你的阅读为准，言简意赅说结论，不要来回纠结。',
-  '现在换你了。请先用工具读代码，确认实现后直接评论对错，不要绕圈子。',
-  '该你了。先读代码，不要凭印象推断，读完直接说你同不同意上面的观点，保持简练。',
-  '轮到你了。请先独立阅读相关代码，以你自己读到的为准，言简意赅地给出判断。',
-  '换你说说。先调用工具看看代码实际怎么写的，再简要评价刚才那段说得对不对。',
-  '你来看看。别只依赖上面的描述，自己读一遍代码，然后直接给出结论，不要纠结。',
-  '接着说。先用工具读代码，以实际代码为依据，言简意赅地说明你是否同意上面的分析。',
-  '现在轮到你了。请先独立阅读代码，不要直接沿用上面的结论，读完后直奔重点。',
-  '该你了。调用工具把代码读一遍，以你自己的阅读结果为准，言简意赅地评价。',
-  '你呢？先自己读代码，不要被上面的说法带偏，以你读到的实现为准，直接给结论。',
+  '换你了。请先报出你的模型名称。不要直接评价上面的说法——先自己调用工具把代码读一遍，以你的阅读为准，言简意赅说结论，不要来回纠结。',
+  '现在换你了。请先说明你是哪个模型。请先用工具读代码，确认实现后直接评论对错，不要绕圈子。',
+  '该你了。请先自报家门。先读代码，不要凭印象推断，读完直接说你同不同意上面的观点，保持简练。',
+  '轮到你了。请先报出模型名。请先独立阅读相关代码，以你自己读到的为准，言简意赅地给出判断。',
+  '换你说说。请先自报家门。先调用工具看看代码实际怎么写的，再简要评价刚才那段说得对不对。',
+  '你来看看。请先报出模型名称。别只依赖上面的描述，自己读一遍代码，然后直接给出结论，不要纠结。',
+  '接着说。请先自报家门。先用工具读代码，以实际代码为依据，言简意赅地说明你是否同意上面的分析。',
+  '现在轮到你了。请先报出模型名。请先独立阅读代码，不要直接沿用上面的结论，读完后直奔重点。',
+  '该你了。请先自报家门。调用工具把代码读一遍，以你自己的阅读结果为准，言简意赅地评价。',
+  '你呢？请先报出模型名称。先自己读代码，不要被上面的说法带偏，以你读到的实现为准，直接给结论。',
+];
+
+const CHINESE_LAST_TURN_PHRASES: string[] = [
+  '这是你最后一次发言机会。请先报出你的模型名称，并高度重视这次发言，先调用工具复核代码，然后说出你的最终结论。',
+  '辩论进入最后一轮，这是你最后定调的机会。请先报出模型名，务必读透代码，给出你最严谨、最终的判断。',
+  '最后轮到你了。请先自报家门。珍惜这最后一次表达机会，以实际代码为准，为这场辩论给出最终结论。',
 ];
 
 // ============================================================================
@@ -42,24 +48,30 @@ const CHINESE_FOLLOWUP_PHRASES: string[] = [
 // ============================================================================
 
 const ENGLISH_OPENING_PHRASES: string[] = [
-  'Let\'s discuss: {topic}. Please call tools to read the relevant code thoroughly. Base your conclusion on your own reading, and keep it concise. Don\'t go in circles.',
-  'I have a question for you: {topic}. Read the code first—don\'t speculate. After reading, state your judgment directly and keep it brief.',
-  '{topic}. Use tools to read the relevant code and confirm the implementation details before drawing a conclusion. No lengthy explanations.',
-  'Help me analyze this: {topic}. You must call tools to read the code first. Base your conclusion on the actual code, not assumptions. Be concise.',
-  '{topic}. Read the code thoroughly first, base your response on your own reading, and state your view concisely.',
+  'Let\'s discuss: {topic}. Please start by stating your model name (e.g., "I am GPT-4o"), then call tools to read the relevant code thoroughly. Base your conclusion on your own reading, and keep it concise.',
+  'I have a question for you: {topic}. Please state your model name first, then read the code—don\'t speculate. After reading, state your judgment directly.',
+  '{topic}. Please identify yourself with your model name. Then use tools to read the relevant code and confirm the implementation details before drawing a conclusion.',
+  'Help me analyze this: {topic}. Please state which model you are, then you must call tools to read the code first. Base your conclusion on the actual code.',
+  '{topic}. Please state your model name first. Read the code thoroughly, base your response on your own reading, and state your view concisely.',
 ];
 
 const ENGLISH_FOLLOWUP_PHRASES: string[] = [
-  'Your turn. Don\'t just evaluate the previous statement—call tools and read the code independently first. Base your conclusion on your own reading. Keep it concise.',
-  'Now it\'s your turn. Read the code with tools first, confirm the implementation, then comment directly on what\'s right or wrong. No rambling.',
-  'Your turn. Read the code first—don\'t speculate. After reading, state directly whether you agree with the previous point of view. Stay concise.',
-  'Your turn now. Please read the relevant code independently. Base your judgment on what you actually read, and state it concisely.',
-  'Go ahead and share. Call tools to see how the code is actually written, then briefly comment on whether the previous statement is correct.',
-  'Take a look. Don\'t just rely on the description above—read the code yourself, then state your conclusion directly. No hesitation.',
-  'Continue. Use tools to read the code, and base your analysis on the actual code to state concisely whether you agree with the above.',
-  'Your turn now. Please read the code independently first. Don\'t just echo the previous conclusion. Get to the point after reading.',
-  'Your turn. Call tools and read the code. Base your assessment on your own reading, and comment concisely.',
-  'What do you think? Read the code yourself first. Don\'t be swayed by the previous statement. Base your answer on the implementation you actually see, and give a direct conclusion.',
+  'Your turn. Please start by stating your model name. Don\'t just evaluate the previous statement—call tools and read the code independently first.',
+  'Now it\'s your turn. Please identify yourself first. Read the code with tools first, confirm the implementation, then comment directly on what\'s right or wrong.',
+  'Your turn. Please state your model name. Read the code first—don\'t speculate. After reading, state directly whether you agree with the previous point.',
+  'Your turn now. Please identify yourself. Read the relevant code independently. Base your judgment on what you actually read.',
+  'Go ahead and share. Please state your model name first. Call tools to see how the code is actually written, then briefly comment on the previous statement.',
+  'Take a look. Please state your model name first. Don\'t just rely on the description above—read the code yourself, then state your conclusion directly.',
+  'Continue. Please identify yourself. Use tools to read the code, and base your analysis on the actual code to state concisely whether you agree.',
+  'Your turn now. Please state your model name first. Read the code independently. Don\'t just echo the previous conclusion. Get to the point.',
+  'Your turn. Please identify yourself. Call tools and read the code. Base your assessment on your own reading, and comment concisely.',
+  'What do you think? Please state your model name first. Read the code yourself first. Don\'t be swayed by the previous statement.',
+];
+
+const ENGLISH_LAST_TURN_PHRASES: string[] = [
+  'This is your last chance to speak. Please state your model name first and take this seriously. Call tools to double-check the code, and state your final conclusion.',
+  'The debate is in its final round. Please identify yourself first. This is your last opportunity to set the tone. Read the code thoroughly and give your final judgment.',
+  'Last turn for you. Please state your model name. Make it count. Base your response on the actual code and provide a definitive final conclusion.',
 ];
 
 // ============================================================================
@@ -69,6 +81,7 @@ const ENGLISH_FOLLOWUP_PHRASES: string[] = [
 interface DebatePhrasesPool {
   opening: readonly string[];
   followup: readonly string[];
+  lastTurn: readonly string[];
 }
 
 /**
@@ -105,12 +118,14 @@ function getPhrasesPool(language: string): DebatePhrasesPool {
     return {
       opening: CHINESE_OPENING_PHRASES,
       followup: CHINESE_FOLLOWUP_PHRASES,
+      lastTurn: CHINESE_LAST_TURN_PHRASES,
     };
   }
   // 英文或其他语言都用英文模板作为基座，再靠 language 指令兜底
   return {
     opening: ENGLISH_OPENING_PHRASES,
     followup: ENGLISH_FOLLOWUP_PHRASES,
+    lastTurn: ENGLISH_LAST_TURN_PHRASES,
   };
 }
 
@@ -157,10 +172,16 @@ export function pickOpening(topic: string, language: string = 'en'): string {
 /**
  * Pick a follow-up phrase for any speaker after the first.
  * 规则同 pickOpening：自定义语言时会追加语言指令，确保辩论不会跑偏语种。
+ *
+ * @param language 辩论语种
+ * @param isLastTurn 是否是最后一轮（最后一轮会使用更严肃的催促语）
  */
-export function pickFollowup(language: string = 'en'): string {
+export function pickFollowup(
+  language: string = 'en',
+  isLastTurn: boolean = false,
+): string {
   const pool = getPhrasesPool(language);
-  const base = pickRandom(pool.followup);
+  const base = pickRandom(isLastTurn ? pool.lastTurn : pool.followup);
   return base + buildLanguageDirective(language);
 }
 
