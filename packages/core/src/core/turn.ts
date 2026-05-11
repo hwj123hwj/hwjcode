@@ -142,6 +142,23 @@ export interface ChatCompressionInfo {
   newTokenCount: number;
 }
 
+/**
+ * 自动压缩事件 payload。
+ * - success=true：压缩成功，info 非空，携带 original/new token count
+ * - success=true + degraded=true：全量 LLM 压缩失败，但兜底的 MicroCompact 瘦身成功
+ *   （通过清除旧工具输出为占位符的方式释放了上下文），clearedCount 说明清了多少条
+ * - success=false：压缩完全失败或熔断器跳闸，reason 说明原因
+ */
+export interface ChatCompressionEventPayload {
+  success: boolean;
+  info?: ChatCompressionInfo;
+  reason?: string;
+  /** 降级模式：全量压缩失败，仅依靠 MicroCompact 兜底瘦身 */
+  degraded?: boolean;
+  /** 降级模式下清除的旧工具结果数量 */
+  clearedCount?: number;
+}
+
 export interface ModelSwitchResult {
   success: boolean;
   modelName: string;
@@ -163,7 +180,7 @@ export interface TokenUsageInfo {
 
 export type ServerGeminiChatCompressedEvent = {
   type: GeminiEventType.ChatCompressed;
-  value: ChatCompressionInfo | null;
+  value: ChatCompressionEventPayload | null;
 };
 
 export type ServerGeminiMaxSessionTurnsEvent = {

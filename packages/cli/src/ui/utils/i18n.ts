@@ -345,6 +345,12 @@ export const translations = {
 
     // Conversation limits
     'conversation.token.limit.warning': 'IMPORTANT: Context approaching limit. Conversation context will be compressed for future messages.\nIf you notice the model becomes less focused, use "/session new" to start a fresh conversation.',
+    'conversation.compress.failed.generic': '⚠️ Auto-compression failed ({reason}). The conversation may be too long to continue safely.\nPlease run /compress manually, or start a fresh conversation with /session new.',
+    'conversation.compress.failed.circuit_breaker': '⚠️ Auto-compression has failed repeatedly and is temporarily disabled ({reason}).\nPlease run /compress manually to force a compression, or start a fresh conversation with /session new.',
+    'conversation.compress.failed.unknown': '⚠️ Auto-compression failed unexpectedly. Please run /compress manually, or start a fresh conversation with /session new.',
+    'conversation.compress.degraded': 'ℹ️ Full compression unavailable — continuing in lightweight mode (cleared {clearedCount} old tool outputs to free context).\nIf responses become less focused, run /compress manually or start a fresh conversation with /session new.',
+    'compression.in_progress': 'Compressing chat history...',
+    'compression.success': 'Chat history compressed successfully.',
 
     // Tool Names
     'tool.edit': 'Edit',
@@ -1732,6 +1738,12 @@ export const translations = {
 
     // Conversation limits
     'conversation.token.limit.warning': '重要提示：上下文即将达到限制，对话上下文将被压缩以继续会话。\n如果你发现模型变得不够专注，可以使用 "/session new" 开启全新对话。',
+    'conversation.compress.failed.generic': '⚠️ 自动压缩失败（{reason}）。当前对话可能已超长无法安全继续。\n请手动运行 /compress 强制压缩，或使用 /session new 开启全新对话。',
+    'conversation.compress.failed.circuit_breaker': '⚠️ 自动压缩连续失败，已被临时禁用（{reason}）。\n请手动运行 /compress 强制压缩，或使用 /session new 开启全新对话。',
+    'conversation.compress.failed.unknown': '⚠️ 自动压缩异常失败。请手动运行 /compress，或使用 /session new 开启全新对话。',
+    'conversation.compress.degraded': 'ℹ️ 完整压缩不可用，已切换到精简模式继续（清理了 {clearedCount} 条旧工具输出以释放上下文）。\n如果模型变得不够专注，可以手动运行 /compress，或使用 /session new 开启全新对话。',
+    'compression.in_progress': '正在压缩对话历史...',
+    'compression.success': '对话历史压缩成功。',
 
     // Tool Names
     'tool.edit': '编辑',
