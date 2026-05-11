@@ -104,3 +104,4 @@ DeepV Code (Monorepo)
 - `DEEPV.md` - 本文件（AI记忆文件）
 - `docs/index.md` - 文档总索引
 - ls-dev 是用户的常驻开发分支，提 MR 时绝对不要加 --remove-source-branch。
+- DeepVCode 项目发布规则（CI）：package.json 里的版本号无所谓（CI 发布时会自动注入真实版本号），但 **package.json 的版本号必须严格低于 release tag 的版本号**，否则 CI 会失败。例如 release tag 为 cli-release-v1.0.334 时，package.json 版本必须 < 1.0.334（例如 1.0.319 就满足）。打 tag 前务必确认版本号关系。
