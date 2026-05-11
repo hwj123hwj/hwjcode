@@ -194,6 +194,7 @@ export function useDebateWizard(args: {
           models: result.models,
           rounds: result.rounds,
           language: result.language,
+          originalModel: config?.getModel(),
         });
       } catch (err) {
         addItem(
@@ -382,22 +383,24 @@ export function useDebateWizard(args: {
 
       // 手动恢复到最后一轮结束时，尝试切换大上下文模型做总结
       const client = config?.getGeminiClient();
-      const summaryAbortController = new AbortController();
+      const abortController = new AbortController();
+      advanceAbortRef.current = abortController;
+
       if (client) {
         let summaryModel = DEBATE_SUMMARY_MODEL;
         let switchResult = await client.switchModel(
           summaryModel,
-          summaryAbortController.signal,
+          abortController.signal,
         );
-        if (!summaryAbortController.signal.aborted && !switchResult.success) {
+        if (!abortController.signal.aborted && !switchResult.success) {
           await client.switchModel(
             DEBATE_SUMMARY_FALLBACK_MODEL,
-            summaryAbortController.signal,
+            abortController.signal,
           );
         }
       }
 
-      if (summaryAbortController.signal.aborted) return;
+      if (abortController.signal.aborted) return;
 
       setTimeout(() => {
         submitQuery(
@@ -407,6 +410,24 @@ export function useDebateWizard(args: {
             finishedDebate.language,
           ),
         );
+        // 总结请求发出后，异步执行模型还原
+        if (finishedDebate.originalModel) {
+          const originalModel = finishedDebate.originalModel;
+          const geminiClient = config?.getGeminiClient();
+          if (geminiClient) {
+            setTimeout(async () => {
+              try {
+                await geminiClient.switchModel(
+                  originalModel,
+                  new AbortController().signal,
+                );
+                appEvents.emit(AppEvent.ModelChanged, originalModel);
+              } catch (err) {
+                console.warn(`[Debate] Failed to restore original model ${originalModel}:`, err);
+              }
+            }, 100);
+          }
+        }
       }, 0);
       return;
     }
