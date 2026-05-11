@@ -2214,10 +2214,10 @@ User question: ${queryStr}`;
               // 会反映这个变化。submitQuery 用 0ms setTimeout 让出一帧，给
               // Ink 刷新 DebateIndicator 的机会，保证新模型开口前指示器已更新。
               advanceCursor();
-              const debate = getActiveDebate();
+              const advancedDebate = getActiveDebate();
               setTimeout(() => {
                 if (getActiveDebate()?.status !== 'running') return;
-                submitQuery(pickFollowup(debate?.language || 'en'));
+                submitQuery(pickFollowup(advancedDebate?.language || 'en'));
               }, 0);
             } catch (err) {
               if (abortController.signal.aborted) {

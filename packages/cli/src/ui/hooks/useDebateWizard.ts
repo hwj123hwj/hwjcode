@@ -22,7 +22,7 @@ import type { PartListUnion } from '@google/genai';
 import { MessageType } from '../types.js';
 import type { HistoryItem } from '../types.js';
 import type { LoadedSettings } from '../../config/settings.js';
-import { SettingScope, saveSettings } from '../../config/settings.js';
+import { SettingScope } from '../../config/settings.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
 import {
   DebateWizardAvailableModel,
@@ -418,10 +418,12 @@ export function useDebateWizard(args: {
       // （因为不再有需要"抢救显示"的确认行），但保留 0ms 让出一帧，让
       // DebateIndicator 的状态 poll 有机会刷新到新模型。
       advanceCursor();
-      const debate = getActiveDebate();
+      // 拿到推进后的 debate（包括正确的 language）；用不同的名字避免遮蔽
+      // 外层作用域的 debate 引起阅读歧义。
+      const advancedDebate = getActiveDebate();
       setTimeout(() => {
         if (getActiveDebate()?.status !== 'running') return;
-        submitQuery(pickFollowup(debate?.language || 'en'));
+        submitQuery(pickFollowup(advancedDebate?.language || 'en'));
       }, 0);
     } catch (err) {
       if (abortController.signal.aborted) return;
