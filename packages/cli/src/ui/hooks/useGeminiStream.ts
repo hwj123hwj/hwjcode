@@ -68,7 +68,9 @@ import {
   pauseDebate,
   endDebate,
 } from '../utils/debateState.js';
-import { pickFollowup } from '../utils/debatePhrases.js';
+import { pickFollowup, buildSummaryPrompt, DEBATE_SUMMARY_MODEL, DEBATE_SUMMARY_FALLBACK_MODEL } from '../utils/debatePhrases.js';
+import { getDebateI18nTexts } from '../utils/debateI18n.js';
+import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 import {
   useReactToolScheduler,
   mapToDisplay as mapTrackedToolCallsToDisplay,
@@ -2164,9 +2166,48 @@ User question: ${queryStr}`;
 
               if (isDebateFinished || !nextModel) {
                 // 最后一位刚说完 → 辩论自然结束
+                const finishedDebate = getActiveDebate()!;
                 advanceCursor(); // 推到 done 状态（仅为了 status 一致）
                 endDebate();
-                addItem({ type: MessageType.INFO, text: '🎭 辩论结束。' }, Date.now());
+                const summaryTexts = getDebateI18nTexts(
+                  detectUILanguage(finishedDebate.language),
+                );
+                addItem(
+                  { type: MessageType.INFO, text: summaryTexts.summaryGenerating },
+                  Date.now(),
+                );
+
+                // 使用大上下文模型进行总结，如果失败则回退到 auto
+                let summaryModel = DEBATE_SUMMARY_MODEL;
+                let switchResult = await geminiClient.switchModel(
+                  summaryModel,
+                  abortController.signal,
+                );
+
+                if (abortController.signal.aborted) return;
+
+                if (!switchResult.success) {
+                  summaryModel = DEBATE_SUMMARY_FALLBACK_MODEL;
+                  switchResult = await geminiClient.switchModel(
+                    summaryModel,
+                    abortController.signal,
+                  );
+                }
+
+                if (abortController.signal.aborted) return;
+
+                // 即使 auto 也失败了，不阻塞报告生成，继续用当前模型尝试（此时可能报错超长）
+
+                // 提交总结 Prompt
+                setTimeout(() => {
+                  submitQuery(
+                    buildSummaryPrompt(
+                      finishedDebate.topic,
+                      finishedDebate.models,
+                      finishedDebate.language,
+                    ),
+                  );
+                }, 0);
                 return;
               }
 
