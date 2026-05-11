@@ -212,9 +212,10 @@ const statusCommand: SlashCommand = {
         : debate.models[nextModelIdx] ?? '(结束)';
 
     const totalTurns = debate.models.length * debate.rounds;
-    // 已完成发言数：cursor 从 (0,0) 起算，所以需要 +1
+    // 已完成发言数：cursor 从 (0,0) 起算。当 status 为 running 且模型正在开口时，
+    // 算作“正在进行第 N 轮”，已完成数不包含当前这位。
     const doneTurns =
-      debate.cursor.round * debate.models.length + debate.cursor.modelIdx + 1;
+      debate.cursor.round * debate.models.length + debate.cursor.modelIdx;
     return {
       type: 'message',
       messageType: 'info',
@@ -222,7 +223,7 @@ const statusCommand: SlashCommand = {
         `🎭 辩论状态\n` +
         `   话题：${debate.topic}\n` +
         `   模型：${debate.models.join(' → ')}\n` +
-        `   进度：${doneTurns}/${totalTurns} 轮（当前：${currentModel}，第 ${
+        `   进度：${doneTurns}/${totalTurns} 轮（正在进行：${currentModel}，第 ${
           debate.cursor.round + 1
         } 轮；下一个：${nextLabel}）\n` +
         `   状态：${debate.status}`,

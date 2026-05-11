@@ -22,6 +22,7 @@ import type { PartListUnion } from '@google/genai';
 import { MessageType } from '../types.js';
 import type { HistoryItem } from '../types.js';
 import type { LoadedSettings } from '../../config/settings.js';
+import { SettingScope, saveSettings } from '../../config/settings.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
 import {
   DebateWizardAvailableModel,
@@ -43,9 +44,11 @@ interface UseDebateWizardReturn {
   isDebateWizardOpen: boolean;
   debateWizardModels: DebateWizardAvailableModel[];
   debateWizardPresets: DebatePreset[];
+  debatePreferredLanguage: string | undefined;
   openDebateWizard: () => void;
   handleDebateWizardComplete: (result: DebateWizardResult) => void;
   handleDebateWizardCancel: () => void;
+  handleDebateLanguageSelected: (language: string) => void;
   /** Resume a paused debate: switch to next speaker, submit followup. */
   handleResumeDebate: () => void;
 }
@@ -188,6 +191,7 @@ export function useDebateWizard(args: {
           topic: result.topic,
           models: result.models,
           rounds: result.rounds,
+          language: result.language,
         });
       } catch (err) {
         addItem(
@@ -208,7 +212,9 @@ export function useDebateWizard(args: {
             `🎭 辩论开始\n` +
             `   话题：${result.topic}\n` +
             `   参赛：${result.models.join(' → ')}\n` +
+            `   语言：${result.language}\n` +
             `   每人 ${result.rounds} 轮，共 ${result.models.length * result.rounds} 轮发言\n` +
+            `   📌 规则：每位发言前必须先调用工具阅读代码，以自己的阅读结果为准再下结论\n` +
             `   按 Esc 可暂停，用 /debate continue 恢复、/debate end 结束`,
         },
         Date.now(),
@@ -229,17 +235,8 @@ export function useDebateWizard(args: {
       const abortController = new AbortController();
       advanceAbortRef.current = abortController;
 
-      // UI 提示用户正在切换，避免用户误以为"卡住了"。
-      // addItem 后让出一次宏任务，强制 React commit 这条消息，避免与后续
-      // addItem / submitQuery 被 React 18 自动 batching 合并导致 UI 看不见。
-      addItem(
-        {
-          type: MessageType.INFO,
-          text: `🎭 切换到 ${firstModel}...`,
-        },
-        Date.now(),
-      );
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      // 不再打"🎭 切换到 X..."的瞬时提示——DebateIndicator 常驻显示当前发言
+      // 模型，不会被 React 18 批处理/流式响应吞掉。切换失败时仍然打 ERROR。
 
       try {
         if (!client) throw new Error('GeminiClient 未就绪');
@@ -258,19 +255,19 @@ export function useDebateWizard(args: {
           endDebate();
           return;
         }
-        // 切换成功后如实汇报：当前模型 + 压缩信息（若有）。
-        // emit ModelChanged 让 footer 等 UI 组件更新显示的模型名字。
+        // 切换成功：emit ModelChanged 让 footer 等组件更新显示。
+        // 压缩信息若有则打一条 INFO（一次性的有价值信息，不是"切换提示"），
+        // 没有压缩就不打任何消息——当前发言模型由 DebateIndicator 常驻展示。
         appEvents.emit(AppEvent.ModelChanged, firstModel);
-        const confirmText = switchResult.compressionInfo
-          ? `✓ 已切换到 ${firstModel}（上下文压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens）`
-          : `✓ 已切换到 ${firstModel}`;
-        addItem(
-          {
-            type: MessageType.INFO,
-            text: confirmText,
-          },
-          Date.now(),
-        );
+        if (switchResult.compressionInfo) {
+          addItem(
+            {
+              type: MessageType.INFO,
+              text: `📦 上下文压缩：${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`,
+            },
+            Date.now(),
+          );
+        }
       } catch (err) {
         // 被 ESC 主动中止：不报错，保留 debate 以便 continue 恢复
         if (abortController.signal.aborted) return;
@@ -301,7 +298,7 @@ export function useDebateWizard(args: {
       //    先 commit 到终端。
       setTimeout(() => {
         if (getActiveDebate()?.status !== 'running') return;
-        submitQuery(pickOpening(result.topic));
+        submitQuery(pickOpening(result.topic, result.language));
       }, 50);
     },
     [config, addItem, submitQuery, advanceAbortRef],
@@ -386,15 +383,7 @@ export function useDebateWizard(args: {
     const abortController = new AbortController();
     advanceAbortRef.current = abortController;
 
-    // UI 提示用户正在切换，addItem 后让出宏任务避免与后续 addItem/submitQuery 被 batch 合并
-    addItem(
-      {
-        type: MessageType.INFO,
-        text: `🎭 切换到 ${nextModel}...`,
-      },
-      Date.now(),
-    );
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    // 不再打瞬时"切换到 X..."提示，DebateIndicator 常驻展示当前发言。
 
     try {
       const switchResult = await client.switchModel(
@@ -413,26 +402,27 @@ export function useDebateWizard(args: {
         );
         return;
       }
-      // 如实汇报切换结果
+      // 切换成功：emit ModelChanged；压缩信息（若有）打一条 INFO。
       appEvents.emit(AppEvent.ModelChanged, nextModel);
-      const confirmText = switchResult.compressionInfo
-        ? `✓ 已切换到 ${nextModel}（上下文压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens）`
-        : `✓ 已切换到 ${nextModel}`;
-      addItem(
-        {
-          type: MessageType.INFO,
-          text: confirmText,
-        },
-        Date.now(),
-      );
+      if (switchResult.compressionInfo) {
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: `📦 上下文压缩：${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`,
+          },
+          Date.now(),
+        );
+      }
 
-      // 推进 cursor，然后用 setTimeout 延后 submitQuery，防止被 React batching
-      // 合并导致 confirm 行看不见（详见 useGeminiStream 同名注释）
+      // 推进 cursor，再发 followup。不再需要 setTimeout 规避 batching
+      // （因为不再有需要"抢救显示"的确认行），但保留 0ms 让出一帧，让
+      // DebateIndicator 的状态 poll 有机会刷新到新模型。
       advanceCursor();
+      const debate = getActiveDebate();
       setTimeout(() => {
         if (getActiveDebate()?.status !== 'running') return;
-        submitQuery(pickFollowup());
-      }, 50);
+        submitQuery(pickFollowup(debate?.language || 'en'));
+      }, 0);
     } catch (err) {
       if (abortController.signal.aborted) return;
       pauseDebate();
@@ -450,13 +440,28 @@ export function useDebateWizard(args: {
     }
   }, [config, addItem, submitQuery, advanceAbortRef]);
 
+  // Handle language selection and persist to preferredLanguage
+  const handleDebateLanguageSelected = useCallback(
+    (language: string) => {
+      // Save to workspace settings
+      try {
+        settings.setValue(SettingScope.Workspace, 'preferredLanguage', language);
+      } catch (err) {
+        console.warn(`Failed to save preferredLanguage: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [settings],
+  );
+
   return {
     isDebateWizardOpen: isOpen,
     debateWizardModels: models,
     debateWizardPresets: presets,
+    debatePreferredLanguage: settings.merged.preferredLanguage,
     openDebateWizard,
     handleDebateWizardComplete,
     handleDebateWizardCancel,
+    handleDebateLanguageSelected,
     handleResumeDebate,
   };
 }

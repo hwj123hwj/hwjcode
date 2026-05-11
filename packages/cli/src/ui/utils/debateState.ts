@@ -23,6 +23,8 @@ export interface ActiveDebate {
   models: string[];
   /** Max rounds per model. 1..N. */
   rounds: number;
+  /** Debate language (e.g. 'zh', 'en', or custom like '日语'). */
+  language: string;
   /**
    * The CURRENT speaker position. round is 0-indexed, modelIdx is 0-indexed.
    * On debate start the cursor is (0,0) — model 0 has just been prompted
@@ -51,6 +53,7 @@ export function startDebate(args: {
   topic: string;
   models: string[];
   rounds: number;
+  language: string;
 }): ActiveDebate {
   if (args.models.length < 2 || args.models.length > 4) {
     throw new Error(`debate requires 2-4 models, got ${args.models.length}`);
@@ -62,6 +65,7 @@ export function startDebate(args: {
     topic: args.topic,
     models: [...args.models],
     rounds: args.rounds,
+    language: args.language,
     cursor: { round: 0, modelIdx: 0 },
     status: 'running',
   };
