@@ -56,6 +56,8 @@ import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
 import { DebateWizard } from './components/DebateWizard.js';
+import { DebateIndicator } from './components/DebateIndicator.js';
+import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
 import { LoginDialog } from './components/LoginDialog.js';
 import { AuthInProgress } from './components/AuthInProgress.js';
@@ -810,9 +812,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     isDebateWizardOpen,
     debateWizardModels,
     debateWizardPresets,
+    debatePreferredLanguage,
     openDebateWizard,
     handleDebateWizardComplete,
     handleDebateWizardCancel,
+    handleDebateLanguageSelected,
     handleResumeDebate,
   } = useDebateWizard({
     settings,
@@ -842,6 +846,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
             },
             Date.now(),
           );
+          endDebate();
           return;
         }
         setTimeout(tick, 50);
@@ -2398,8 +2403,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
               <DebateWizard
                 availableModels={debateWizardModels}
                 presets={debateWizardPresets}
+                preferredLanguage={debatePreferredLanguage}
                 onComplete={handleDebateWizardComplete}
                 onCancel={handleDebateWizardCancel}
+                onLanguageSelected={handleDebateLanguageSelected}
               />
             </Box>
           ) : isPluginInstallDialogOpen ? (
@@ -2739,6 +2746,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   </Box>
                 </Box>
               ) : null}
+
+              {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
+                   相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
+                   React 18 批处理或流式响应覆盖，任何时候都能看清当前状态。 */}
+              <DebateIndicator />
 
               {shouldRenderInputPrompt ? (
                 <InputPrompt

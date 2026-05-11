@@ -49,13 +49,12 @@ function ensureDir(filePath: string): void {
 }
 
 /**
- * Canonical key for dedup. Models are sorted so ["opus","haiku"] and
- * ["haiku","opus"] with the same topic+rounds are treated as the same preset.
- * (Speaking order may differ but the "who's participating" intent is the same.)
+ * Canonical key for dedup. Speaking order matters in a debate (who reads the
+ * code first vs who rebuts later is a different conversation), so models are
+ * NOT sorted here — `[opus, haiku]` and `[haiku, opus]` are distinct presets.
  */
 function presetKey(p: Pick<DebatePreset, 'topic' | 'models' | 'rounds'>): string {
-  const sortedModels = [...p.models].sort();
-  return `${p.rounds}|${sortedModels.join(',')}|${p.topic}`;
+  return `${p.rounds}|${p.models.join(',')}|${p.topic}`;
 }
 
 /**

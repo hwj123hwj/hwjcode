@@ -7,18 +7,17 @@
 /**
  * DebateWizard — interactive wizard for configuring a /debate session.
  *
- * Flow:
+ * Flow (with language selection if needed):
  *   Step 0 (PICK_PRESET)  - shown only if project has saved presets.
- *                           User picks one -> jumps straight to CONFIRM with
- *                           that preset's fields. Or picks "New debate" -> MODELS.
- *   Step 1 (MODELS)       - multi-select 2-4 models.
- *   Step 2 (ROUNDS)       - single-select rounds per model (1/2/3).
- *   Step 3 (TOPIC)        - free-text topic input.
- *   Step 4 (CONFIRM)      - review summary, start or go back.
+ *   Step 1 (PICK_LANGUAGE) - shown only if preferredLanguage is not set. User picks language, saves it.
+ *   Step 2 (MODELS)       - multi-select 2-4 models.
+ *   Step 3 (ROUNDS)       - single-select rounds per model (1/2/3).
+ *   Step 4 (TOPIC)        - free-text topic input.
+ *   Step 5 (CONFIRM)      - review summary, start or go back.
  *
  * Design notes:
- * - We intentionally mirror the look of CustomModelWizard (bordered box, step
- *   counter, description line) so users get a consistent wizard feel.
+ * - i18n support: UI language is automatically detected (Chinese/English).
+ * - Language selection: Only if preferredLanguage not set, otherwise use it directly.
  * - Model list is provided by the caller (debateCommand) so this component
  *   stays pure/testable — it doesn't know how to enumerate models.
  */
@@ -31,11 +30,14 @@ import { RadioButtonSelect } from './shared/RadioButtonSelect.js';
 import { SelectMulti } from './shared/SelectMulti.js';
 import { useKeypress, Key } from '../hooks/useKeypress.js';
 import type { DebatePreset } from '../utils/debateStorage.js';
+import { getDebateI18nTexts, type DebateLanguage } from '../utils/debateI18n.js';
+import { detectUILanguage } from '../utils/debateLanguageUtils.js';
 
 export interface DebateWizardResult {
   topic: string;
   models: string[];
   rounds: number;
+  language: DebateLanguage;
 }
 
 export interface DebateWizardAvailableModel {
@@ -52,80 +54,91 @@ export interface DebateWizardProps {
   availableModels: DebateWizardAvailableModel[];
   /** Previously saved presets for this project, newest first. May be empty. */
   presets: DebatePreset[];
+  /** User's preferred language setting (if any). Used to skip language step or set default. */
+  preferredLanguage?: string;
   /** User accepted final config — host should start the debate. */
   onComplete: (result: DebateWizardResult) => void;
   /** User escaped out — no debate starts. */
   onCancel: () => void;
+  /** Called when user selects a language to persist it in settings. */
+  onLanguageSelected?: (language: DebateLanguage) => void;
 }
 
 enum Step {
   PICK_PRESET = 'pickPreset',
+  PICK_LANGUAGE = 'pickLanguage',
   MODELS = 'models',
   ROUNDS = 'rounds',
   TOPIC = 'topic',
   CONFIRM = 'confirm',
 }
 
-const ROUND_OPTIONS = [
-  { label: '1 轮（每人各自陈述）', value: 1 },
-  { label: '2 轮（推荐：陈述 + 反驳）', value: 2 },
-  { label: '3 轮（深度辩论）', value: 3 },
-];
-
 const MIN_MODELS = 2;
 const MAX_MODELS = 4;
 
-function formatPresetLabel(p: DebatePreset): string {
-  const ago = relativeTime(p.savedAt);
+// Helper: format preset label with i18n support
+function formatPresetLabel(
+  p: DebatePreset,
+  texts: ReturnType<typeof getDebateI18nTexts>,
+): string {
+  const ago = relativeTime(p.savedAt, texts);
   const modelsStr = p.models.join(' + ');
-  return `${p.topic}  ·  ${modelsStr}, ${p.rounds}轮  ·  ${ago}`;
+  const rounds = texts.presetRounds;
+  return `${p.topic}  ·  ${modelsStr}, ${p.rounds}${rounds}  ·  ${ago}`;
 }
 
-function relativeTime(iso: string): string {
+// Helper: calculate relative time with i18n support
+function relativeTime(iso: string, texts: ReturnType<typeof getDebateI18nTexts>): string {
   try {
     const then = new Date(iso).getTime();
     const delta = Date.now() - then;
     const m = Math.floor(delta / 60000);
-    if (m < 1) return '刚刚';
-    if (m < 60) return `${m} 分钟前`;
+    if (m < 1) return texts.agoJustNow;
+    if (m < 60) return `${m}${texts.agoMinsAgo}`;
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h} 小时前`;
+    if (h < 24) return `${h}${texts.agoHoursAgo}`;
     const d = Math.floor(h / 24);
-    return `${d} 天前`;
+    return `${d}${texts.agoDaysAgo}`;
   } catch {
     return iso;
   }
 }
 
-function stepTitle(step: Step): string {
+// Helper: get step title with i18n support
+function stepTitle(step: Step, texts: ReturnType<typeof getDebateI18nTexts>): string {
   switch (step) {
     case Step.PICK_PRESET:
       return '选择历史设定';
+    case Step.PICK_LANGUAGE:
+      return texts.stepPickLang;
     case Step.MODELS:
-      return '选择参赛模型';
+      return texts.stepModels;
     case Step.ROUNDS:
-      return '每人发言轮数';
+      return texts.stepRounds;
     case Step.TOPIC:
-      return '辩论话题';
+      return texts.stepTopic;
     case Step.CONFIRM:
-      return '确认开始';
+      return texts.stepConfirm;
     default:
       return '';
   }
 }
 
-function stepDescription(step: Step): string {
+// Helper: get step description with i18n support
+function stepDescription(step: Step, texts: ReturnType<typeof getDebateI18nTexts>): string {
   switch (step) {
     case Step.PICK_PRESET:
       return '你之前保存过辩论设定，可以直接复用，或新建一次。';
+    case Step.PICK_LANGUAGE:
+      return texts.descPickLang;
     case Step.MODELS:
-      return `至少 ${MIN_MODELS} 个，最多 ${MAX_MODELS} 个。按空格勾选，回车确认。`;
+      return texts.descModels;
     case Step.ROUNDS:
-      return '每个模型在整场辩论中最多发言的次数。';
+      return texts.descRounds;
     case Step.TOPIC:
-      return '一句话描述你想辩论什么。例如：这段压缩修复的代码是否健壮。';
+      return texts.descTopic;
     case Step.CONFIRM:
-      return '再看一眼就开始。辩论会按显示顺序轮流发言。';
+      return texts.descConfirm;
     default:
       return '';
   }
@@ -134,39 +147,62 @@ function stepDescription(step: Step): string {
 export function DebateWizard({
   availableModels,
   presets,
+  preferredLanguage,
   onComplete,
   onCancel,
+  onLanguageSelected,
 }: DebateWizardProps): React.JSX.Element {
-  // Initial step: if we have presets, let the user pick one first.
-  const [step, setStep] = useState<Step>(
-    presets.length > 0 ? Step.PICK_PRESET : Step.MODELS,
-  );
+  // Detect UI language for displaying wizard text
+  const uiLang = detectUILanguage(preferredLanguage);
+  const uiTexts = getDebateI18nTexts(uiLang);
+
+  // Determine initial step based on whether user has presets and preferred language
+  const needsLanguageSelection = !preferredLanguage;
+  const initialStep = (() => {
+    if (presets.length > 0) return Step.PICK_PRESET;
+    if (needsLanguageSelection) return Step.PICK_LANGUAGE;
+    return Step.MODELS;
+  })();
+
+  const [step, setStep] = useState<Step>(initialStep);
   const [chosenModels, setChosenModels] = useState<string[]>([]);
   const [chosenRounds, setChosenRounds] = useState<number>(2);
+  const [chosenLanguage, setChosenLanguage] = useState<DebateLanguage>(
+    preferredLanguage || 'en',
+  );
   const [topic, setTopic] = useState<string>('');
   const [topicInput, setTopicInput] = useState<string>('');
+  const [customLangInput, setCustomLangInput] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   // ---------- Step: PICK_PRESET ----------
 
   const presetItems = [
     ...presets.map((p, i) => ({
-      label: formatPresetLabel(p),
+      label: formatPresetLabel(p, uiTexts),
       value: `preset:${i}`,
     })),
-    { label: '➕ 新建辩论', value: 'new' },
+    { label: uiTexts.btnNewDebate, value: 'new' },
   ];
 
   const handlePresetSelect = useCallback(
     (value: string) => {
       if (value === 'new') {
-        setStep(Step.MODELS);
+        if (needsLanguageSelection) {
+          setStep(Step.PICK_LANGUAGE);
+        } else {
+          setStep(Step.MODELS);
+        }
         return;
       }
       const idx = Number(value.replace('preset:', ''));
       const p = presets[idx];
       if (!p) {
-        setStep(Step.MODELS);
+        if (needsLanguageSelection) {
+          setStep(Step.PICK_LANGUAGE);
+        } else {
+          setStep(Step.MODELS);
+        }
         return;
       }
       // Load preset into state and jump straight to CONFIRM.
@@ -176,16 +212,59 @@ export function DebateWizard({
       setTopicInput(p.topic);
       setStep(Step.CONFIRM);
     },
-    [presets],
+    [presets, needsLanguageSelection],
+  );
+
+  // ---------- Step: PICK_LANGUAGE ----------
+
+  const languageItems = [
+    { label: uiTexts.optChinese, value: 'zh' },
+    { label: uiTexts.optEnglish, value: 'en' },
+    { label: uiTexts.optCustom, value: 'custom' },
+  ];
+
+  const handleLanguageSelect = useCallback(
+    (value: string) => {
+      if (value === 'custom') {
+        // For custom language, we'll use a text input in render
+        // Just set a flag and stay in this step
+        return;
+      }
+      const lang = value as DebateLanguage;
+      setChosenLanguage(lang);
+      onLanguageSelected?.(lang);
+      setStep(Step.MODELS);
+    },
+    [onLanguageSelected],
+  );
+
+  const handleCustomLangSubmit = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        setError(uiTexts.msgEmptyTopic); // Reuse empty message
+        return;
+      }
+      setError(null);
+      setChosenLanguage(trimmed);
+      onLanguageSelected?.(trimmed);
+      setStep(Step.MODELS);
+    },
+    [uiTexts, onLanguageSelected],
   );
 
   // ESC on certain steps cancels the whole wizard.
-  // Models and Topic steps are handled by their respective input components.
   useKeypress(
     (key: Key) => {
       if (key.name === 'escape') onCancel();
     },
-    { isActive: step === Step.PICK_PRESET || step === Step.ROUNDS || step === Step.CONFIRM },
+    {
+      isActive:
+        step === Step.PICK_PRESET ||
+        step === Step.PICK_LANGUAGE ||
+        step === Step.ROUNDS ||
+        step === Step.CONFIRM,
+    },
   );
 
   // ---------- Step: MODELS ----------
@@ -196,21 +275,30 @@ export function DebateWizard({
     description: m.description,
   }));
 
-  const handleModelsSubmit = useCallback((values: string[]) => {
-    if (values.length < MIN_MODELS) {
-      setError(`至少选 ${MIN_MODELS} 个模型`);
-      return;
-    }
-    if (values.length > MAX_MODELS) {
-      setError(`最多选 ${MAX_MODELS} 个模型`);
-      return;
-    }
-    setError(null);
-    setChosenModels(values);
-    setStep(Step.ROUNDS);
-  }, []);
+  const handleModelsSubmit = useCallback(
+    (values: string[]) => {
+      if (values.length < MIN_MODELS) {
+        setError(uiTexts.msgMinModels);
+        return;
+      }
+      if (values.length > MAX_MODELS) {
+        setError(uiTexts.msgMaxModels);
+        return;
+      }
+      setError(null);
+      setChosenModels(values);
+      setStep(Step.ROUNDS);
+    },
+    [uiTexts],
+  );
 
   // ---------- Step: ROUNDS ----------
+
+  const roundOptions = [
+    { label: uiTexts.roundOption1, value: 1 },
+    { label: uiTexts.roundOption2, value: 2 },
+    { label: uiTexts.roundOption3, value: 3 },
+  ];
 
   const handleRoundsSelect = useCallback((value: number) => {
     setChosenRounds(value);
@@ -219,18 +307,20 @@ export function DebateWizard({
 
   // ---------- Step: TOPIC ----------
 
-  const handleTopicSubmit = useCallback((value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setError('话题不能为空');
-      return;
-    }
-    setError(null);
-    setTopic(trimmed);
-    setStep(Step.CONFIRM);
-  }, []);
+  const handleTopicSubmit = useCallback(
+    (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        setError(uiTexts.msgEmptyTopic);
+        return;
+      }
+      setError(null);
+      setTopic(trimmed);
+      setStep(Step.CONFIRM);
+    },
+    [uiTexts],
+  );
 
-  // ESC in text-input step cancels.
   const handleTopicCancel = useCallback(() => {
     onCancel();
   }, [onCancel]);
@@ -238,9 +328,9 @@ export function DebateWizard({
   // ---------- Step: CONFIRM ----------
 
   const confirmItems = [
-    { label: '✓ 开始辩论', value: 'start' },
-    { label: '↩ 返回修改', value: 'back' },
-    { label: '✗ 取消', value: 'cancel' },
+    { label: uiTexts.btnStart, value: 'start' },
+    { label: uiTexts.btnBack, value: 'back' },
+    { label: uiTexts.btnCancel, value: 'cancel' },
   ];
 
   const handleConfirm = useCallback(
@@ -250,28 +340,28 @@ export function DebateWizard({
           topic,
           models: chosenModels,
           rounds: chosenRounds,
+          language: chosenLanguage,
         });
       } else if (value === 'back') {
-        // "Back" from confirm sends the user to MODELS (start of edit flow).
         setStep(Step.MODELS);
       } else {
         onCancel();
       }
     },
-    [chosenModels, chosenRounds, topic, onComplete, onCancel],
+    [chosenModels, chosenRounds, topic, chosenLanguage, onComplete, onCancel],
   );
 
   // ---------- Rendering ----------
 
-  // Total logical steps depends on whether we show the preset picker.
-  // 1. Pick Preset (optional)
-  // 2. Models
-  // 3. Rounds
-  // 4. Topic
-  // 5. Confirm
-  const stepsOrder = presets.length > 0
-    ? [Step.PICK_PRESET, Step.MODELS, Step.ROUNDS, Step.TOPIC, Step.CONFIRM]
-    : [Step.MODELS, Step.ROUNDS, Step.TOPIC, Step.CONFIRM];
+  // Calculate steps order based on conditions
+  let stepsOrder: Step[] = [];
+  if (presets.length > 0) {
+    stepsOrder.push(Step.PICK_PRESET);
+  }
+  if (needsLanguageSelection) {
+    stepsOrder.push(Step.PICK_LANGUAGE);
+  }
+  stepsOrder.push(Step.MODELS, Step.ROUNDS, Step.TOPIC, Step.CONFIRM);
 
   const totalSteps = stepsOrder.length;
   const currentStepIdx = stepsOrder.indexOf(step);
@@ -289,16 +379,16 @@ export function DebateWizard({
     >
       <Box marginBottom={1}>
         <Text color={Colors.AccentCyan} bold>
-          🎭 辩论模式配置
+          {uiTexts.wizardTitle}
         </Text>
       </Box>
       <Box marginBottom={1}>
         <Text color={Colors.Gray}>
-          Step {displayStepNumber}/{totalSteps}: {stepTitle(step)}
+          Step {displayStepNumber}/{totalSteps}: {stepTitle(step, uiTexts)}
         </Text>
       </Box>
       <Box marginBottom={1}>
-        <Text color={Colors.Comment}>{stepDescription(step)}</Text>
+        <Text color={Colors.Comment}>{stepDescription(step, uiTexts)}</Text>
       </Box>
 
       <Box
@@ -318,16 +408,31 @@ export function DebateWizard({
           />
         )}
 
+        {step === Step.PICK_LANGUAGE && (
+          <Box flexDirection="column">
+            <RadioButtonSelect
+              items={languageItems}
+              initialIndex={1} // Default to English
+              onSelect={handleLanguageSelect}
+              onHighlight={() => {}}
+              isFocused
+            />
+            {error && (
+              <Box marginTop={1}>
+                <Text color={Colors.AccentRed}>✗ {error}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+
         {step === Step.MODELS && (
           <Box flexDirection="column">
             {modelItems.length < MIN_MODELS ? (
               <Box flexDirection="column">
-                <Text color={Colors.AccentRed}>
-                  ✗ 当前可用模型不足 {MIN_MODELS} 个，无法进行辩论。
-                </Text>
-                <Text color={Colors.Gray}>请先通过 /model 或 /add-model 配置更多模型。</Text>
+                <Text color={Colors.AccentRed}>{uiTexts.msgInsufficientModels}</Text>
+                <Text color={Colors.Gray}>{uiTexts.msgConfigureModels}</Text>
                 <Box marginTop={1}>
-                  <Text color={Colors.Gray}>按 Esc 退出</Text>
+                  <Text color={Colors.Gray}>{uiTexts.msgPressEsc}</Text>
                 </Box>
               </Box>
             ) : (
@@ -350,11 +455,11 @@ export function DebateWizard({
 
         {step === Step.ROUNDS && (
           <RadioButtonSelect
-            items={ROUND_OPTIONS.map((o) => ({
+            items={roundOptions.map((o) => ({
               label: o.label,
               value: String(o.value),
             }))}
-            initialIndex={ROUND_OPTIONS.findIndex((o) => o.value === chosenRounds)}
+            initialIndex={roundOptions.findIndex((o) => o.value === chosenRounds)}
             onSelect={(v) => handleRoundsSelect(Number(v))}
             onHighlight={() => {}}
             isFocused
@@ -376,7 +481,9 @@ export function DebateWizard({
               </Box>
             )}
             <Box marginTop={1}>
-              <Text color={Colors.Gray}>回车确认，Esc 取消</Text>
+              <Text color={Colors.Gray}>
+                {uiTexts.msgPressEnter}，{uiTexts.msgPressEsc}
+              </Text>
             </Box>
           </Box>
         )}
@@ -385,19 +492,33 @@ export function DebateWizard({
           <Box flexDirection="column">
             <Box flexDirection="column" marginBottom={1}>
               <Text>
-                <Text color={Colors.AccentCyan} bold>话题：</Text>
+                <Text color={Colors.AccentCyan} bold>
+                  {uiTexts.labelLanguage}
+                </Text>
+                <Text> {chosenLanguage}</Text>
+              </Text>
+              <Text>
+                <Text color={Colors.AccentCyan} bold>
+                  {uiTexts.labelTopic}
+                </Text>
                 <Text>{topic}</Text>
               </Text>
               <Text>
-                <Text color={Colors.AccentCyan} bold>模型：</Text>
+                <Text color={Colors.AccentCyan} bold>
+                  {uiTexts.labelModels}
+                </Text>
                 <Text>{chosenModels.join(' → ')}</Text>
               </Text>
               <Text>
-                <Text color={Colors.AccentCyan} bold>每人轮数：</Text>
+                <Text color={Colors.AccentCyan} bold>
+                  {uiTexts.labelRounds}
+                </Text>
                 <Text>{chosenRounds}</Text>
               </Text>
               <Text>
-                <Text color={Colors.AccentCyan} bold>总发言次数：</Text>
+                <Text color={Colors.AccentCyan} bold>
+                  {uiTexts.labelTotalTurns}
+                </Text>
                 <Text>{chosenModels.length * chosenRounds}</Text>
               </Text>
             </Box>

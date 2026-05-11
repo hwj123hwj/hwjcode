@@ -2172,20 +2172,8 @@ User question: ${queryStr}`;
 
               // 切到下一个模型。switchModel 失败时返回 { success:false }，必须检查，
               // 否则中介话会发到错的模型上。
-              // 先 UI 提示用户正在切换，避免用户误以为"卡住了"。
-              //
-              // 关键：addItem 后必须让出一次宏任务（setTimeout 0），强制 React
-              // commit 这条消息。否则后续 submitQuery 的 setState 会与这条
-              // addItem 被 React 18 自动 batching 合并，导致"切换到 xxx"
-              // 提示在 UI 上看不见。
-              addItem(
-                {
-                  type: MessageType.INFO,
-                  text: `🎭 切换到 ${nextModel}...`,
-                },
-                Date.now(),
-              );
-              await new Promise<void>(resolve => setTimeout(resolve, 0));
+              // 不再打"🎭 切换到 X..."瞬时提示——DebateIndicator 常驻显示当前
+              // 发言模型，不受 React 18 批处理/Ink 渲染吞帧影响。
 
               const switchResult = await geminiClient.switchModel(
                 nextModel,
@@ -2207,37 +2195,30 @@ User question: ${queryStr}`;
                 return;
               }
 
-              // 切换成功后如实汇报：当前模型（名字）+ 压缩信息（若有）。
-              // 不管有没有压缩都打一条确认，让用户明确知道现在谁在发言。
-              //
-              // 同时 emit AppEvent.ModelChanged 通知 UI（如 footer 的 Model 字段）
-              // 刷新显示。core 的 switchModel 只更新 config，不发事件；
-              // modelCommand.ts:709 的处理方式就是手动 emit，这里保持一致。
+              // 切换成功 → emit ModelChanged → 推进 cursor → 发 followup。
+              // 压缩信息（若有）打一条 INFO（一次性的有价值信息）。
+              // 不再打"✓ 已切换到 X"——DebateIndicator 会在下次 poll 时
+              // 自动反映新的 cursor，用户任何时候抬头都能看见当前发言方。
               appEvents.emit(AppEvent.ModelChanged, nextModel);
-              const confirmText = switchResult.compressionInfo
-                ? `✓ 已切换到 ${nextModel}（上下文压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens）`
-                : `✓ 已切换到 ${nextModel}`;
-              addItem(
-                {
-                  type: MessageType.INFO,
-                  text: confirmText,
-                },
-                Date.now(),
-              );
+              if (switchResult.compressionInfo) {
+                addItem(
+                  {
+                    type: MessageType.INFO,
+                    text: `📦 上下文压缩：${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`,
+                  },
+                  Date.now(),
+                );
+              }
 
-              // 切换成功 → 推进 cursor（指向新说话的人）→ 发 followup 唤起新模型。
-              //
-              // 关键：submitQuery 内部会立刻 setIsResponding(true)，React 18
-              // 会把"addItem(confirmText)"的 setState 和"setIsResponding"的
-              // setState 合并 flush——哪怕我们 await setTimeout 0——造成 confirm
-              // 行被流式响应覆盖看不见。
-              // 解决：用 setTimeout 把 submitQuery 推到下一个宏任务且给 Ink 一帧
-              // 渲染时间，保证 confirm 行一定 commit 到终端后再启动下一轮响应。
+              // 推进 cursor 到新发言人。DebateIndicator 下次 poll（最多 200ms）
+              // 会反映这个变化。submitQuery 用 0ms setTimeout 让出一帧，给
+              // Ink 刷新 DebateIndicator 的机会，保证新模型开口前指示器已更新。
               advanceCursor();
+              const debate = getActiveDebate();
               setTimeout(() => {
                 if (getActiveDebate()?.status !== 'running') return;
-                submitQuery(pickFollowup());
-              }, 50);
+                submitQuery(pickFollowup(debate?.language || 'en'));
+              }, 0);
             } catch (err) {
               if (abortController.signal.aborted) {
                 // 被主动中止（用户暂停/结束），不报错
