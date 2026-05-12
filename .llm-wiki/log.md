@@ -2,6 +2,22 @@
 
 > Chronological record of wiki operations.
 
+## [2026-01-23] feat | Debate UI Enhancement Documentation
+
+### Pages Added
+- `wiki/debate-i18n-enhancement.md` — Comprehensive documentation of multilingual debate mode
+  - I18n support for Chinese/English UI
+  - Language selection workflow
+  - Dual-language prompt phrases
+  - Settings integration with `preferredLanguage`
+  - Implementation details for all 9 modified files
+
+### Index Updated
+- Added "Features & Enhancements" section to `index.md`
+- Listed new `debate-i18n-enhancement` page
+
+---
+
 ## [2026-04-10] lint | Health Check
 
 ### Scan Results (32 pages)
