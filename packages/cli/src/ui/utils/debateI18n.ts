@@ -26,11 +26,15 @@ export interface DebateI18nTexts {
   descRounds: string;
   descTopic: string;
   descConfirm: string;
+  /**
+   * CONFIRM 步骤的费用/token 警告。独立出来是为了在 UI 里用醒目的颜色
+   * （黄色加粗）单独渲染，避免和普通 descConfirm 的暗色说明混为一谈。
+   */
+  descConfirmWarning: string;
 
   // Options
   roundOption1: string;
   roundOption2: string;
-  roundOption3: string;
 
   // Buttons
   btnNewDebate: string;
@@ -95,14 +99,14 @@ const CHINESE_TEXTS: DebateI18nTexts = {
 
   descPickPreset: '你之前保存过辩论设定，可以直接复用，或新建一次。',
   descPickLang: '选择辩论所用的语言。这会影响开场白、推进提示词和模型回复的预期语言。',
-  descModels: `至少 2 个，最多 4 个。按空格勾选，回车确认。`,
+  descModels: `至少 2 个，最多 3 个。按空格勾选，回车确认。`,
   descRounds: '每个模型在整场辩论中最多发言的次数。',
   descTopic: '一句话描述你想辩论什么。例如：这段压缩修复的代码是否健壮。',
-  descConfirm: '再看一眼就开始。辩论会按显示顺序轮流发言。\n⚠️ 注意：辩论涉及多次模型切换，会破坏 Prompt 缓存并消耗大量 Token，价格可能较高。建议选 3 个不同档次（如便宜、中档、高档）的模型搭配，且每人发言不超过 2 轮。建议总发言次数最多 6 次。',
+  descConfirm: '再看一眼就开始。辩论会按显示顺序轮流发言。',
+  descConfirmWarning: '⚠️ 注意：辩论涉及多次模型切换，会破坏 Prompt 缓存并消耗大量 Token，价格可能较高。当前上限为 3 模型 × 2 轮（最多 6 次发言），建议按不同档次（便宜 / 中档 / 高档）选模型，避免全选高档。',
 
   roundOption1: '1 轮（每人各自陈述）',
   roundOption2: '2 轮（推荐：陈述 + 反驳）',
-  roundOption3: '3 轮（深度辩论）',
 
   btnNewDebate: '➕ 新建辩论',
   btnStart: '✓ 开始辩论',
@@ -116,7 +120,7 @@ const CHINESE_TEXTS: DebateI18nTexts = {
   labelLanguage: '辩论语言：',
 
   msgMinModels: '至少选 2 个模型',
-  msgMaxModels: '最多选 4 个模型',
+  msgMaxModels: '最多选 3 个模型',
   msgInsufficientModels: '✗ 当前可用模型不足 2 个，无法进行辩论。',
   msgEmptyTopic: '话题不能为空',
   msgEmptyCustomLang: '请输入语言名称，或按 Esc 返回',
@@ -159,14 +163,14 @@ const ENGLISH_TEXTS: DebateI18nTexts = {
 
   descPickPreset: 'You have saved debate presets. Pick one to reuse, or start a new debate.',
   descPickLang: 'Choose the language for the debate. This affects the opening phrase, follow-up prompts, and expected model responses.',
-  descModels: `Select 2–4 models. Press space to toggle, Enter to confirm.`,
+  descModels: `Select 2–3 models. Press space to toggle, Enter to confirm.`,
   descRounds: 'Maximum number of times each model speaks during the entire debate.',
   descTopic: 'Describe in one sentence what you want to debate. Example: Is this compression fix code robust?',
-  descConfirm: 'Review the settings before starting. Models will speak in the order shown.\n⚠️ Note: Multi-model debates frequently switch models, breaking prompt caches and increasing Token usage. Costs may be high. We recommend selecting 3 models across different price tiers (cheap, mid, high) and limiting each to 2 rounds. Total turns should ideally not exceed 6.',
+  descConfirm: 'Review the settings before starting. Models will speak in the order shown.',
+  descConfirmWarning: '⚠️ Note: Multi-model debates frequently switch models, breaking prompt caches and increasing Token usage. Costs may be high. The current upper bound is 3 models × 2 rounds (up to 6 turns). We recommend mixing different price tiers (cheap / mid / high) rather than picking all high-tier models.',
 
   roundOption1: '1 Round (each model speaks once)',
   roundOption2: '2 Rounds (recommended: statement + rebuttal)',
-  roundOption3: '3 Rounds (in-depth debate)',
 
   btnNewDebate: '➕ New Debate',
   btnStart: '✓ Start Debate',
@@ -180,7 +184,7 @@ const ENGLISH_TEXTS: DebateI18nTexts = {
   labelLanguage: 'Debate Language:',
 
   msgMinModels: 'Select at least 2 models',
-  msgMaxModels: 'Select at most 4 models',
+  msgMaxModels: 'Select at most 3 models',
   msgInsufficientModels: '✗ Insufficient available models (need 2+) to start a debate.',
   msgEmptyTopic: 'Topic cannot be empty',
   msgEmptyCustomLang: 'Please enter a language name, or press Esc to go back',

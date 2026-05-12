@@ -19,9 +19,9 @@
 export interface ActiveDebate {
   /** Topic string entered by the user. */
   topic: string;
-  /** Participating model IDs, in speaking order. 2-4 items. */
+  /** Participating model IDs, in speaking order. 2-3 items. */
   models: string[];
-  /** Max rounds per model. 1..N. */
+  /** Max rounds per model. 1..2. */
   rounds: number;
   /** Debate language (e.g. 'zh', 'en', or custom like '日语'). */
   language: string;
@@ -58,11 +58,11 @@ export function startDebate(args: {
   language: string;
   originalModel?: string;
 }): ActiveDebate {
-  if (args.models.length < 2 || args.models.length > 4) {
-    throw new Error(`debate requires 2-4 models, got ${args.models.length}`);
+  if (args.models.length < 2 || args.models.length > 3) {
+    throw new Error(`debate requires 2-3 models, got ${args.models.length}`);
   }
-  if (args.rounds < 1) {
-    throw new Error(`debate rounds must be >= 1, got ${args.rounds}`);
+  if (args.rounds < 1 || args.rounds > 2) {
+    throw new Error(`debate rounds must be 1 or 2, got ${args.rounds}`);
   }
   active = {
     topic: args.topic,
@@ -144,4 +144,24 @@ export function peekCurrentModel(): string | null {
 export function isAtOpening(): boolean {
   if (!active) return false;
   return active.cursor.round === 0 && active.cursor.modelIdx === 0;
+}
+
+/**
+ * True if the given debate's cursor points at the final speaker of the final
+ * round — i.e. the upcoming speech is the closing turn of the whole debate.
+ *
+ * Call this AFTER `advanceCursor()` (so the cursor reflects the speaker who
+ * is about to talk) and BEFORE `submitQuery(followup)` — it decides whether
+ * `pickFollowup` should use the "last turn" phrase pool.
+ *
+ * Accepts the debate explicitly (rather than reading `active`) so callers
+ * can pass the snapshot they already hold, avoiding a redundant
+ * `getActiveDebate()` call and any TOCTOU concerns.
+ */
+export function isLastTurn(debate: ActiveDebate | null | undefined): boolean {
+  if (!debate) return false;
+  return (
+    debate.cursor.round === debate.rounds - 1 &&
+    debate.cursor.modelIdx === debate.models.length - 1
+  );
 }
