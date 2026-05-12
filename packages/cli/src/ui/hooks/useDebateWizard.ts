@@ -472,13 +472,18 @@ export function useDebateWizard(args: {
       // DebateIndicator 的状态 poll 有机会刷新到新模型。
       advanceCursor();
       // 拿到推进后的 debate（包括正确的 language）；用不同的名字避免遮蔽
-      // 外层作用域合作 debate 引起阅读歧义。
+      // 外层作用域的 debate 引起阅读歧义。
       const advancedDebate = getActiveDebate();
       setTimeout(() => {
         if (getActiveDebate()?.status !== 'running') return;
-        const isLastRound =
-          !!(advancedDebate && advancedDebate.cursor.round === advancedDebate.rounds - 1);
-        submitQuery(pickFollowup(advancedDebate?.language || 'en', isLastRound));
+        // isLastTurn：当前推进后的 cursor 指向即将发言的模型。
+        // 只有同时满足"最后一轮 + 本轮最后一位模型"才是真正的收官发言。
+        const isLastTurn = !!(
+          advancedDebate &&
+          advancedDebate.cursor.round === advancedDebate.rounds - 1 &&
+          advancedDebate.cursor.modelIdx === advancedDebate.models.length - 1
+        );
+        submitQuery(pickFollowup(advancedDebate?.language || 'en', isLastTurn));
       }, 0);
     } catch (err) {
       if (abortController.signal.aborted) return;
