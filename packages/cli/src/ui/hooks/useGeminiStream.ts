@@ -63,6 +63,16 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { AudioNotification, NotificationSound } from '../../utils/audioNotification.js';
 import {
+  getActiveDebate,
+  advanceCursor,
+  pauseDebate,
+  endDebate,
+  isLastTurn,
+} from '../utils/debateState.js';
+import { pickFollowup, buildSummaryPrompt, DEBATE_SUMMARY_MODEL, DEBATE_SUMMARY_FALLBACK_MODEL } from '../utils/debatePhrases.js';
+import { getDebateI18nTexts } from '../utils/debateI18n.js';
+import { detectUILanguage } from '../utils/debateLanguageUtils.js';
+import {
   useReactToolScheduler,
   mapToDisplay as mapTrackedToolCallsToDisplay,
   TrackedToolCall,
@@ -312,6 +322,9 @@ export const useGeminiStream = (
   setEstimatedInputTokens?: React.Dispatch<React.SetStateAction<number | undefined>>,
   settings?: LoadedSettings,
   customProxyUrl?: string,
+  // 🎭 辩论推进的 AbortController ref。由 App.tsx 持有并共享给 useDebateWizard，
+  // 让首启 switchModel 和自动推进的 switchModel 用同一个可中止句柄。
+  debateAdvanceAbortRef?: React.MutableRefObject<AbortController | null>,
 ) => {
   const [initError, setInitError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -807,6 +820,23 @@ export const useGeminiStream = (
       setIsResponding(false);
       clearEstimatedTokens(); // 清除预估token
 
+      // 🎭 辩论模式：ESC 必须立即暂停辩论，否则紧随其后的 Idle 事件会继续
+      //    推进到下一个模型，造成"按 ESC 反而触发下一轮"的现象。
+      //    handleUserCancelledEvent 路径已有同样处理；此处是 useInput 直接
+      //    拦截 ESC 时走的独立路径，必须也加上。
+      if (getActiveDebate()) {
+        debateAbortRef.current?.abort();
+        debateAbortRef.current = null;
+        pauseDebate();
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: '🎭 辩论已暂停。使用 /debate continue 继续，或 /debate end 结束。',
+          },
+          Date.now(),
+        );
+      }
+
       // Linus fix: ESC取消时也要执行内存清理，防止内存泄漏
       if (typeof global !== 'undefined' && global.gc) {
         try {
@@ -1103,6 +1133,19 @@ export const useGeminiStream = (
         { type: MessageType.INFO, text: 'User cancelled the request.' },
         userMessageTimestamp,
       );
+      // 🎭 若当前在辩论中，中止正在进行的模型切换，并标记为暂停
+      if (getActiveDebate()) {
+        debateAbortRef.current?.abort();
+        debateAbortRef.current = null;
+        pauseDebate();
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: '🎭 辩论已暂停。使用 /debate continue 继续，或 /debate end 结束。',
+          },
+          userMessageTimestamp,
+        );
+      }
       // 🛡️ 重置同步标志位
       processingRef.current = false;
       setIsResponding(false);
@@ -2055,6 +2098,11 @@ User question: ${queryStr}`;
   // 🎯 记住在当前响应周期中是否有过工具调用
   const [hadToolsInCurrentResponse, setHadToolsInCurrentResponse] = useState(false);
 
+  // 🎭 辩论推进的 AbortController ref（可能由外部传入共享）。
+  //    落到一个内部 fallback ref 上，保证在未传入时也能工作。
+  const internalDebateAdvanceAbortRef = useRef<AbortController | null>(null);
+  const debateAbortRef = debateAdvanceAbortRef ?? internalDebateAdvanceAbortRef;
+
   // 🎯 记住上一次的流状态，用于检测状态变化
   const previousStreamingStateRef = useRef<StreamingState>(StreamingState.Idle);
 
@@ -2072,6 +2120,187 @@ User question: ${queryStr}`;
         AudioNotification.play(NotificationSound.RESPONSE_COMPLETE).catch(err => {
           console.debug('[AudioNotification] Failed to play response complete sound:', err);
         });
+
+        // 🎭 辩论模式：一轮响应完成后，切到下一个模型并喂中介话
+        //
+        // Cursor 语义（CURRENT speaker）：
+        //   debate.cursor 指向**刚刚说完话的那个人**。Wizard 完成发开场白时
+        //   cursor=(0,0)，模型 0 说完后本块触发，我们计算"下一位是谁"，切模型，
+        //   成功后再 advanceCursor 把 cursor 推到新说话的人。
+        //   当"下一位"越过最后一轮 → 辩论结束。
+        //
+        // 关键约束：
+        // 1. 只有 status === 'running' 才推进。
+        //    注意：不需要再检查"本轮是否有工具调用"——streamingState 的 useMemo
+        //    实现里已经把"有未 submitted 给模型的已完成工具"也算作 Responding，
+        //    所以 Idle 状态意味着"模型真的停了 + 所有工具回填完毕"，正是推进时机。
+        //    之前用 toolCalls.length>0 的判断有 bug：toolCalls 数组是整个会话累积
+        //    的，never cleared，会让会话里曾有工具调用后辩论永远无法推进。
+        // 2. switchModel 不 throw，只返回 { success, error } —— 必须显式检查，
+        //    否则中介话会被发到错的模型上
+        // 3. advanceCursor() 必须在 switchModel 成功后才调用，否则 cursor 和
+        //    currentModel 会错位
+        // 4. switchModel 使用共享的 debateAbortRef，暂停/结束时能打断
+        const debate = getActiveDebate();
+        if (debate && debate.status === 'running') {
+          // 计算下一位说话人的 (round, modelIdx)。若越过最后一轮末位，就是结束。
+          let nextModelIdx = debate.cursor.modelIdx + 1;
+          let nextRound = debate.cursor.round;
+          if (nextModelIdx >= debate.models.length) {
+            nextModelIdx = 0;
+            nextRound += 1;
+          }
+          const isDebateFinished = nextRound >= debate.rounds;
+          const nextModel = isDebateFinished ? null : debate.models[nextModelIdx]!;
+
+          // 用共享 ref 存 AbortController，让 pauseDebate/endDebate/ESC 能打断 switchModel
+          const abortController = new AbortController();
+          debateAbortRef.current = abortController;
+
+          (async () => {
+            try {
+              // 让当前帧 UI commit 完成后再开始切换
+              await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+              // 切换前检查：如果已被暂停/结束则放弃
+              if (getActiveDebate()?.status !== 'running') return;
+
+              if (isDebateFinished || !nextModel) {
+                // 最后一位刚说完 → 辩论自然结束
+                const finishedDebate = getActiveDebate()!;
+                advanceCursor(); // 推到 done 状态（仅为了 status 一致）
+                endDebate();
+                const summaryTexts = getDebateI18nTexts(
+                  detectUILanguage(finishedDebate.language),
+                );
+                addItem(
+                  { type: MessageType.INFO, text: summaryTexts.summaryGenerating },
+                  Date.now(),
+                );
+
+                // 使用大上下文模型进行总结，如果失败则回退到 auto
+                let summaryModel = DEBATE_SUMMARY_MODEL;
+                let switchResult = await geminiClient.switchModel(
+                  summaryModel,
+                  abortController.signal,
+                );
+
+                if (abortController.signal.aborted) return;
+
+                if (!switchResult.success) {
+                  await geminiClient.switchModel(
+                    DEBATE_SUMMARY_FALLBACK_MODEL,
+                    abortController.signal,
+                  );
+                }
+
+                if (abortController.signal.aborted) return;
+
+                // 即使 auto 也失败了，不阻塞报告生成，继续用当前模型尝试（此时可能报错超长）
+
+                // 提交总结 Prompt
+                setTimeout(() => {
+                  submitQuery(
+                    buildSummaryPrompt(
+                      finishedDebate.topic,
+                      finishedDebate.models,
+                      finishedDebate.language,
+                    ),
+                  );
+                  // 总结请求发出后，异步执行模型还原
+                  if (finishedDebate.originalModel) {
+                    const originalModel = finishedDebate.originalModel;
+                    setTimeout(async () => {
+                      try {
+                        await geminiClient.switchModel(
+                          originalModel,
+                          new AbortController().signal, // 还原模型不应受当前辩论 abort 影响
+                        );
+                        appEvents.emit(AppEvent.ModelChanged, originalModel);
+                      } catch (err) {
+                        console.warn(`[Debate] Failed to restore original model ${originalModel}:`, err);
+                      }
+                    }, 100);
+                  }
+                }, 0);
+                return;
+              }
+
+              // 切到下一个模型。switchModel 失败时返回 { success:false }，必须检查，
+              // 否则中介话会发到错的模型上。
+              // 不再打"🎭 切换到 X..."瞬时提示——DebateIndicator 常驻显示当前
+              // 发言模型，不受 React 18 批处理/Ink 渲染吞帧影响。
+
+              const switchResult = await geminiClient.switchModel(
+                nextModel,
+                abortController.signal,
+              );
+
+              // switchModel 期间可能被中止或暂停
+              if (abortController.signal.aborted || getActiveDebate()?.status !== 'running') return;
+
+              if (!switchResult.success) {
+                pauseDebate();
+                addItem(
+                  {
+                    type: MessageType.ERROR,
+                    text: `⚠️ 辩论推进失败：切换到 ${nextModel} 失败（${switchResult.error ?? '未知错误'}）。使用 /debate continue 恢复。`,
+                  },
+                  Date.now(),
+                );
+                return;
+              }
+
+              // 切换成功 → emit ModelChanged → 推进 cursor → 发 followup。
+              // 压缩信息（若有）打一条 INFO（一次性的有价值信息）。
+              // 不再打"✓ 已切换到 X"——DebateIndicator 会在下次 poll 时
+              // 自动反映新的 cursor，用户任何时候抬头都能看见当前发言方。
+              appEvents.emit(AppEvent.ModelChanged, nextModel);
+              if (switchResult.compressionInfo) {
+                addItem(
+                  {
+                    type: MessageType.INFO,
+                    text: `📦 上下文压缩：${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`,
+                  },
+                  Date.now(),
+                );
+              }
+
+              // 推进 cursor 到新发言人。DebateIndicator 下次 poll（最多 200ms）
+              // 会反映这个变化。submitQuery 用 0ms setTimeout 让出一帧，给
+              // Ink 刷新 DebateIndicator 的机会，保证新模型开口前指示器已更新。
+              advanceCursor();
+              const advancedDebate = getActiveDebate();
+              setTimeout(() => {
+                if (getActiveDebate()?.status !== 'running') return;
+                submitQuery(
+                  pickFollowup(
+                    advancedDebate?.language || 'en',
+                    isLastTurn(advancedDebate),
+                  ),
+                );
+              }, 0);
+            } catch (err) {
+              if (abortController.signal.aborted) {
+                // 被主动中止（用户暂停/结束），不报错
+                return;
+              }
+              console.warn(`[debate] advance failed: ${err instanceof Error ? err.message : String(err)}`);
+              pauseDebate();
+              addItem(
+                {
+                  type: MessageType.ERROR,
+                  text: `⚠️ 辩论推进失败：切换到 ${nextModel ?? '(unknown)'} 时出错。使用 /debate continue 恢复。`,
+                },
+                Date.now(),
+              );
+            } finally {
+              if (debateAbortRef.current === abortController) {
+                debateAbortRef.current = null;
+              }
+            }
+          })();
+        }
       }
 
       // 响应结束，重置状态
@@ -2080,7 +2309,14 @@ User question: ${queryStr}`;
 
     // 更新上一次状态
     previousStreamingStateRef.current = currentState;
-  }, [streamingState, toolCalls.length, config]);
+  }, [
+    streamingState,
+    toolCalls.length,
+    addItem,
+    submitQuery,
+    geminiClient,
+    config,
+  ]);
 
   // 🎯 计算是否有工具正在执行（用于Token指示器显示）
   const isExecutingTools = useMemo(() => {
