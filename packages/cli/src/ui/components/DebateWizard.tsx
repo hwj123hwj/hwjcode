@@ -10,8 +10,8 @@
  * Flow (with language selection if needed):
  *   Step 0 (PICK_PRESET)  - shown only if project has saved presets.
  *   Step 1 (PICK_LANGUAGE) - shown only if preferredLanguage is not set. User picks language, saves it.
- *   Step 2 (MODELS)       - multi-select 2-4 models.
- *   Step 3 (ROUNDS)       - single-select rounds per model (1/2/3).
+ *   Step 2 (MODELS)       - multi-select 2-3 models.
+ *   Step 3 (ROUNDS)       - single-select rounds per model (1/2).
  *   Step 4 (TOPIC)        - free-text topic input.
  *   Step 5 (CONFIRM)      - review summary, start or go back.
  *
@@ -75,7 +75,7 @@ enum Step {
 }
 
 const MIN_MODELS = 2;
-const MAX_MODELS = 4;
+const MAX_MODELS = 3;
 
 // Helper: format preset label with i18n support
 function formatPresetLabel(
@@ -328,7 +328,6 @@ export function DebateWizard({
   const roundOptions = [
     { label: uiTexts.roundOption1, value: 1 },
     { label: uiTexts.roundOption2, value: 2 },
-    { label: uiTexts.roundOption3, value: 3 },
   ];
 
   const handleRoundsSelect = useCallback((value: number) => {
@@ -421,8 +420,13 @@ export function DebateWizard({
           Step {displayStepNumber}/{totalSteps}: {stepTitle(step, uiTexts)}
         </Text>
       </Box>
-      <Box marginBottom={1}>
+      <Box marginBottom={1} flexDirection="column">
         <Text color={Colors.Comment}>{stepDescription(step, uiTexts)}</Text>
+        {step === Step.CONFIRM && (
+          <Text color={Colors.AccentYellow} bold>
+            {uiTexts.descConfirmWarning}
+          </Text>
+        )}
       </Box>
 
       <Box

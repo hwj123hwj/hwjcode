@@ -67,6 +67,7 @@ import {
   advanceCursor,
   pauseDebate,
   endDebate,
+  isLastTurn,
 } from '../utils/debateState.js';
 import { pickFollowup, buildSummaryPrompt, DEBATE_SUMMARY_MODEL, DEBATE_SUMMARY_FALLBACK_MODEL } from '../utils/debatePhrases.js';
 import { getDebateI18nTexts } from '../utils/debateI18n.js';
@@ -2272,14 +2273,12 @@ User question: ${queryStr}`;
               const advancedDebate = getActiveDebate();
               setTimeout(() => {
                 if (getActiveDebate()?.status !== 'running') return;
-                // isLastTurn：当前推进后的 cursor 指向即将发言的模型。
-                // 只有同时满足"最后一轮 + 本轮最后一位模型"才是真正的收官发言。
-                const isLastTurn = !!(
-                  advancedDebate &&
-                  advancedDebate.cursor.round === advancedDebate.rounds - 1 &&
-                  advancedDebate.cursor.modelIdx === advancedDebate.models.length - 1
+                submitQuery(
+                  pickFollowup(
+                    advancedDebate?.language || 'en',
+                    isLastTurn(advancedDebate),
+                  ),
                 );
-                submitQuery(pickFollowup(advancedDebate?.language || 'en', isLastTurn));
               }, 0);
             } catch (err) {
               if (abortController.signal.aborted) {
