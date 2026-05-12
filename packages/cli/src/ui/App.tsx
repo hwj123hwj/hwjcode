@@ -17,6 +17,7 @@ import {
   type Key as InkKeyType,
 } from 'ink';
 import { StreamingState, type HistoryItem, MessageType, ToolCallStatus, type IndividualToolCallDisplay } from './types.js';
+import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
 import { useAnimatedTitleIcon } from './hooks/useAnimatedTitleIcon.js';
@@ -27,6 +28,7 @@ import { TaskCompletionSummary } from './components/TaskCompletionSummary.js';
 import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
+import { useDebateWizard } from './hooks/useDebateWizard.js';
 import { useAuthCommand } from './hooks/useAuthCommand.js';
 import { useLoginCommand } from './hooks/useLoginCommand.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
@@ -53,6 +55,9 @@ import { ThemeDialog } from './components/ThemeDialog.js';
 import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
+import { DebateWizard } from './components/DebateWizard.js';
+import { DebateIndicator } from './components/DebateIndicator.js';
+import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
 import { LoginDialog } from './components/LoginDialog.js';
 import { AuthInProgress } from './components/AuthInProgress.js';
@@ -793,6 +798,64 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     handleWizardCancel,
   } = useCustomModelWizard(settings, addItem, config);
 
+  // 🎭 辩论向导。useDebateWizard 在 wizard 完成时需要 submitQuery 提交开场白，
+  // 但 submitQuery 是 useGeminiStream 返回的、定义在下面。用 ref 中转解决前后依赖。
+  // 同时共享一个 AbortController ref 给 useGeminiStream 和 useDebateWizard，
+  // 让首启 switchModel 和自动推进的 switchModel 用同一个可中止句柄。
+  type DebateSubmitQuery = (
+    query: PartListUnion,
+    options?: { isContinuation?: boolean; silent?: boolean },
+  ) => void;
+  const submitQueryForDebateRef = useRef<DebateSubmitQuery | null>(null);
+  const debateAdvanceAbortRef = useRef<AbortController | null>(null);
+  const {
+    isDebateWizardOpen,
+    debateWizardModels,
+    debateWizardPresets,
+    debatePreferredLanguage,
+    openDebateWizard,
+    handleDebateWizardComplete,
+    handleDebateWizardCancel,
+    handleDebateLanguageSelected,
+    handleResumeDebate,
+  } = useDebateWizard({
+    settings,
+    config,
+    addItem,
+    submitQuery: (q, o) => {
+      const impl = submitQueryForDebateRef.current;
+      if (impl) {
+        impl(q, o);
+        return;
+      }
+      // submitQuery 尚未挂上。实践中这种 race 窗口非常窄（只发生在首次
+      // App mount 后立即打开 wizard 并 confirm）。轮询重试最多 ~1s，
+      // 超时后补一条 ERROR 提示，避免静默丢消息。
+      const deadline = Date.now() + 1000;
+      const tick = () => {
+        const impl2 = submitQueryForDebateRef.current;
+        if (impl2) {
+          impl2(q, o);
+          return;
+        }
+        if (Date.now() > deadline) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: '❌ 辩论启动失败：submitQuery 未就绪（超时 1s）。请再次执行 /debate。',
+            },
+            Date.now(),
+          );
+          endDebate();
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      setTimeout(tick, 50);
+    },
+    advanceAbortRef: debateAdvanceAbortRef,
+  });
+
   const {
     isSettingsMenuDialogOpen,
     openSettingsMenuDialog,
@@ -1151,6 +1214,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openSettingsMenuDialog, // 🆕 传递 openSettingsMenuDialog
     openInitChoiceDialog, // 🆕 传递 openInitChoiceDialog
     openPluginInstallDialog, // 🆕 传递 openPluginInstallDialog
+    openDebateWizard, // 🎭 传递 openDebateWizard
+    handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
   );
 
   const {
@@ -1181,7 +1246,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     setEstimatedInputTokens, // 传递预估token设置函数
     settings, // 传递设置对象以支持异步模型配置更新
     customProxyUrl,
+    debateAdvanceAbortRef, // 🎭 共享的辩论推进 AbortController ref
   );
+
+  // 🎭 把真正的 submitQuery 绑到 ref 上，让 useDebateWizard 能在开始辩论时用它
+  // 发开场白（提交给首个模型）。effect 每次 submitQuery 引用变化时更新。
+  useEffect(() => {
+    submitQueryForDebateRef.current = submitQuery;
+  }, [submitQuery]);
 
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
   const currentTitleIcon = useAnimatedTitleIcon(streamingState);
@@ -2326,6 +2398,17 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onCancel={handleWizardCancel}
               />
             </Box>
+          ) : isDebateWizardOpen ? (
+            <Box flexDirection="column">
+              <DebateWizard
+                availableModels={debateWizardModels}
+                presets={debateWizardPresets}
+                preferredLanguage={debatePreferredLanguage}
+                onComplete={handleDebateWizardComplete}
+                onCancel={handleDebateWizardCancel}
+                onLanguageSelected={handleDebateLanguageSelected}
+              />
+            </Box>
           ) : isPluginInstallDialogOpen ? (
             <Box flexDirection="column">
               <PluginInstallDialog
@@ -2664,6 +2747,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 </Box>
               ) : null}
 
+              {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
+                   相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
+                   React 18 批处理或流式响应覆盖，任何时候都能看清当前状态。 */}
+              <DebateIndicator />
+
               {shouldRenderInputPrompt ? (
                 <InputPrompt
                   buffer={buffer}
@@ -2683,7 +2771,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}
