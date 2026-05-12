@@ -20,7 +20,7 @@ import {
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { remoteLogger } from './remoteLogger.js';
 import { getMCPDiscoveryState, MCPDiscoveryState, getMCPServerStatus, MCPServerStatus } from 'deepv-code-core';
-import { t, isChineseLocale } from '../ui/utils/i18n.js';
+import { t, tp, isChineseLocale } from '../ui/utils/i18n.js';
 
 /**
  * 格式化时间戳为 yyyy-mm-dd HH:mm:ss 格式
@@ -746,10 +746,61 @@ export class RemoteSession {
 
         break;
 
-      case GeminiEventType.ChatCompressed:
-        // 对话压缩通知
-        remoteLogger.info('RemoteSession', `对话已自动压缩: ${this.sessionId}`, event.value);
+      case GeminiEventType.ChatCompressed: {
+        // 对话压缩通知 - 按成功/降级/失败分类处理。
+        // 关键：remoteLogger 只写服务端本地日志文件，不经 WebSocket。
+        // 必须同时 sendMessage 把状态发到远端客户端，否则远程用户会遇到
+        // 和本地 CLI 一样的"无声停止"问题——屏幕上没任何提示，对话已被截停。
+        const payload = event.value;
+        if (payload?.success) {
+          if (payload.degraded) {
+            // 降级：全量压缩失败，但 MicroCompact 兜底清理了若干旧工具输出。
+            // 对话仍可继续，只是上下文更紧。告知用户但不升级为错误。
+            remoteLogger.info(
+              'RemoteSession',
+              `对话已自动压缩(轻量模式): ${this.sessionId}, clearedCount=${payload.clearedCount}, reason=${payload.reason}`,
+              payload,
+            );
+            this.sendMessage(
+              MessageFactory.createOutput(
+                `\n${tp('conversation.compress.degraded', {
+                  clearedCount: payload.clearedCount ?? 0,
+                })}\n`,
+                true,
+                'stdout',
+              ),
+            );
+          } else {
+            // 完整成功：对话无损继续，不需要打扰用户（与本地 CLI 行为一致，
+            // 本地只在 /compress 手动触发时才显式展示成功消息）。
+            remoteLogger.info(
+              'RemoteSession',
+              `对话已自动压缩(完整): ${this.sessionId}`,
+              payload,
+            );
+          }
+        } else {
+          // 失败：core 层已经 return new Turn() 停掉了这一轮对话。
+          // 必须告知远端用户要么手动 /compress 要么 /session new，
+          // 否则用户只看到"AI 没回复"，完全不知道发生了什么。
+          const reason = payload?.reason ?? 'unknown';
+          const isCircuitBreaker = reason.startsWith('circuit_breaker');
+          const failureKey = isCircuitBreaker
+            ? 'conversation.compress.failed.circuit_breaker'
+            : 'conversation.compress.failed.generic';
+          const message = payload
+            ? tp(failureKey, { reason })
+            : t('conversation.compress.failed.unknown');
+
+          remoteLogger.warn(
+            'RemoteSession',
+            `对话自动压缩失败: ${this.sessionId}, reason=${reason}`,
+            payload,
+          );
+          this.sendError(message);
+        }
         break;
+      }
 
       case GeminiEventType.MaxSessionTurns:
         // 达到最大会话轮次
