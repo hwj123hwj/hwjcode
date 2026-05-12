@@ -74,60 +74,213 @@ export function findGitRoot(directory: string): string | null {
 }
 
 /**
- * Gets all remote names and their URLs for the git repository.
- * Strips embedded credentials (userinfo) from URLs for safety.
- * @param directory The directory within the git repository
- * @returns A record of remote name → sanitized URL, or null if unavailable
+ * Resolves the actual `.git` directory for a given working directory.
+ * Handles three cases:
+ *   1. `.git` is a directory (normal repo)       → return it
+ *   2. `.git` is a file (worktree/submodule)     → read `gitdir: <path>` pointer
+ *   3. not found in cwd, walk up until repo root → return that `.git`
+ * @returns Absolute path to the real .git directory, or null if not in a repo.
  */
-export function getGitRemotes(directory: string): Record<string, string> | null {
+function resolveGitDir(directory: string): string | null {
   try {
-    const output = execSync('git remote -v', {
-      cwd: directory,
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    if (!output) return null;
-
-    const remotes: Record<string, string> = {};
-    for (const line of output.split('\n')) {
-      // Format: "origin\thttps://github.com/org/repo.git (fetch)"
-      const match = line.match(/^(\S+)\t(\S+)\s+\(fetch\)$/);
-      if (match) {
-        remotes[match[1]] = sanitizeGitUrl(match[2]);
-      }
+    const root = findGitRoot(directory);
+    if (!root) return null;
+    const gitPath = path.join(root, '.git');
+    const stat = fs.statSync(gitPath);
+    if (stat.isDirectory()) return gitPath;
+    if (stat.isFile()) {
+      // worktree / submodule: contains `gitdir: <relative-or-absolute-path>`
+      const content = fs.readFileSync(gitPath, 'utf-8').trim();
+      const match = content.match(/^gitdir:\s*(.+)$/m);
+      if (!match) return null;
+      const target = match[1].trim();
+      return path.isAbsolute(target) ? target : path.resolve(root, target);
     }
-    return Object.keys(remotes).length > 0 ? remotes : null;
-  } catch (_error) {
+    return null;
+  } catch {
     return null;
   }
 }
 
 /**
+ * Minimal git INI config parser. Extracts `[remote "<name>"] url = <url>` entries.
+ * Tolerant of comments, whitespace, and quoted values. Does NOT implement
+ * `include.path` or conditional includes — those are rarely used for remotes.
+ */
+function parseGitConfigRemotes(configPath: string): Record<string, string> | null {
+  try {
+    const text = fs.readFileSync(configPath, 'utf-8');
+    const remotes: Record<string, string> = {};
+    let currentRemote: string | null = null;
+
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+
+      // Section header: [remote "origin"]  or  [section]  or  [section "sub"]
+      const sectionMatch = line.match(/^\[([\w.-]+)(?:\s+"([^"]*)")?\]$/);
+      if (sectionMatch) {
+        currentRemote = sectionMatch[1] === 'remote' ? (sectionMatch[2] || null) : null;
+        continue;
+      }
+
+      if (!currentRemote) continue;
+
+      // Key-value: url = https://...   (key is case-insensitive per git-config)
+      const kvMatch = line.match(/^(\w[\w-]*)\s*=\s*(.*)$/);
+      if (!kvMatch) continue;
+      if (kvMatch[1].toLowerCase() !== 'url') continue;
+
+      let value = kvMatch[2].trim();
+      // Strip inline comments (but not inside quotes)
+      const hashIdx = value.search(/\s[#;]/);
+      if (hashIdx !== -1) value = value.slice(0, hashIdx).trim();
+      // Unquote
+      if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+        value = value.slice(1, -1);
+      }
+      if (value) remotes[currentRemote] = sanitizeGitUrl(value);
+    }
+
+    return Object.keys(remotes).length > 0 ? remotes : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads HEAD and resolves it to a branch name or short hash.
+ * Works without invoking `git` — reads `.git/HEAD` directly.
+ */
+function readGitHeadBranch(gitDir: string): string | null {
+  try {
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf-8').trim();
+    // Symbolic ref: "ref: refs/heads/main"
+    const refMatch = head.match(/^ref:\s*refs\/heads\/(.+)$/);
+    if (refMatch) return refMatch[1].trim();
+    // Detached HEAD — full hash; return short form
+    if (/^[0-9a-f]{40}$/i.test(head) || /^[0-9a-f]{64}$/i.test(head)) {
+      return head.slice(0, 7);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wrapper around execSync that is more forgiving on Windows:
+ *   - `windowsHide: true` prevents any console window from flashing (critical for
+ *     packaged/Electron-hosted CLIs where a CMD black box would otherwise blink)
+ *   - larger timeout (Windows git.exe startup is slow with AV hooks)
+ *   - on Windows, re-tries under cmd.exe shell so PATHEXT (.cmd / .bat shims)
+ *     is honored — still with windowsHide, so no window flashes
+ */
+function safeExecGit(cmd: string, cwd: string): string | null {
+  const baseOpts = {
+    cwd,
+    encoding: 'utf-8' as const,
+    timeout: 15000,
+    stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
+    windowsHide: true, // no flashing console window on Windows
+    maxBuffer: 10 * 1024 * 1024,
+  };
+
+  try {
+    return execSync(cmd, baseOpts).toString().trim();
+  } catch {
+    // Windows fallback: some setups only expose `git.cmd` shim, which
+    // CreateProcess won't resolve without a shell. `windowsHide` is inherited
+    // from baseOpts and re-asserted explicitly below to guarantee no black
+    // CMD window ever flashes on screen, even if baseOpts changes later.
+    if (process.platform === 'win32') {
+      try {
+        return execSync(cmd, {
+          ...baseOpts,
+          shell: 'cmd.exe',
+          windowsHide: true, // explicit — do not let a CMD window flash
+        }).toString().trim();
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+/**
+ * Gets all remote names and their URLs for the git repository.
+ * Strips embedded credentials (userinfo) from URLs for safety.
+ *
+ * Strategy (with fallbacks):
+ *   1. Try `git remote -v` (authoritative — respects includes, conditional config)
+ *   2. On Windows, retry under cmd.exe shell (for .cmd shims)
+ *   3. Parse `.git/config` directly (no git binary required, 100% fallback)
+ *
+ * @param directory The directory within the git repository
+ * @returns A record of remote name → sanitized URL, or null if unavailable
+ */
+export function getGitRemotes(directory: string): Record<string, string> | null {
+  // --- Strategy 1 & 2: invoke git ---
+  const output = safeExecGit('git remote -v', directory);
+  if (output) {
+    const remotes: Record<string, string> = {};
+    for (const rawLine of output.split(/\r?\n/)) {
+      // Normalize: trim BOM / trailing CR / surrounding whitespace.
+      const line = rawLine.replace(/^\uFEFF/, '').trim();
+      if (!line) continue;
+      // `git remote -v` output formats observed in the wild:
+      //   "origin\thttps://github.com/org/repo.git (fetch)"         ← classic (tab)
+      //   "origin https://github.com/org/repo.git (fetch)"          ← some Win builds (space)
+      //   "origin  git@host:org/repo.git  (fetch)"                  ← double-space
+      //   "origin\tgit@host:org/repo.git (fetch)" with trailing CR  ← CRLF terminals
+      // Strategy: split on any run of whitespace into [name, url, marker].
+      // Marker must be exactly "(fetch)" — we ignore "(push)" entries.
+      const parts = line.split(/\s+/);
+      if (parts.length < 3) continue;
+      const marker = parts[parts.length - 1];
+      if (marker !== '(fetch)') continue;
+      const name = parts[0];
+      // URL may theoretically contain whitespace in exotic cases — rejoin middle parts.
+      const url = parts.slice(1, -1).join(' ');
+      if (name && url) {
+        remotes[name] = sanitizeGitUrl(url);
+      }
+    }
+    if (Object.keys(remotes).length > 0) return remotes;
+  }
+
+  // --- Strategy 3: parse .git/config directly ---
+  const gitDir = resolveGitDir(directory);
+  if (!gitDir) return null;
+  return parseGitConfigRemotes(path.join(gitDir, 'config'));
+}
+
+/**
  * Gets the current branch name of the git repository.
  * Returns the short commit hash if in detached HEAD state.
+ *
+ * Strategy (with fallbacks):
+ *   1. `git rev-parse --abbrev-ref HEAD`
+ *   2. Read `.git/HEAD` directly (no git binary required)
+ *
  * @param directory The directory within the git repository
  * @returns The branch name or short hash, or null if unavailable
  */
 export function getGitBranch(directory: string): string | null {
-  try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-      cwd: directory,
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    if (branch && branch !== 'HEAD') return branch;
-    // Detached HEAD — fall back to short hash
-    return execSync('git rev-parse --short HEAD', {
-      cwd: directory,
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim() || null;
-  } catch (_error) {
-    return null;
+  // --- Strategy 1: invoke git ---
+  const branch = safeExecGit('git rev-parse --abbrev-ref HEAD', directory);
+  if (branch && branch !== 'HEAD') return branch;
+  if (branch === 'HEAD') {
+    // Detached — try short hash via git
+    const short = safeExecGit('git rev-parse --short HEAD', directory);
+    if (short) return short;
   }
+
+  // --- Strategy 2: read .git/HEAD directly ---
+  const gitDir = resolveGitDir(directory);
+  if (!gitDir) return null;
+  return readGitHeadBranch(gitDir);
 }
 
 /**
@@ -152,8 +305,8 @@ export function getSubdirectoryGitInfos(directory: string): Array<{
       // 跳过含非 ASCII 字符的目录名（如中文），避免 HTTP header 中出现非 Latin-1 字符导致 ByteString 错误
       if (!/^[\x20-\x7E]+$/.test(entry.name)) continue;
       const subDir = path.join(resolvedDir, entry.name);
-      const gitDir = path.join(subDir, '.git');
-      if (!fs.existsSync(gitDir)) continue;
+      const gitMarker = path.join(subDir, '.git');
+      if (!fs.existsSync(gitMarker)) continue;
 
       const remotes = getGitRemotes(subDir);
       if (!remotes) continue;
