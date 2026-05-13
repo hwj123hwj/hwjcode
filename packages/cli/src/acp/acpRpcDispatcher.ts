@@ -270,4 +270,65 @@ export class GeminiAgent {
     }
     return {};
   }
+
+  /**
+   * Fallback handler for non-standard ACP methods.
+   *
+   * The SDK's `AgentSideConnection` dispatcher hits this hook whenever it
+   * sees a method name that isn't in its hardcoded `AGENT_METHODS` switch.
+   * We use it to ship `_dvcode/*` extensions while staying inside the
+   * standard JSON-RPC envelope — IDEs that don't know about them just get
+   * a `methodNotFound` after the SDK strips the call here.
+   *
+   * Currently exposed:
+   *   - `_dvcode/session/rewind` — truncate chat history before the
+   *     N-th user message (0-based). Used by the IDE's "rewind" UI to keep
+   *     the agent's view of history in sync with what the user sees.
+   */
+  async extMethod(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    switch (method) {
+      case '_dvcode/session/rewind':
+        return this.handleRewind(params);
+      default:
+        throw new acp.RequestError(-32601, `Method not found: ${method}`);
+    }
+  }
+
+  private async handleRewind(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const schema = z.object({
+      sessionId: z.string(),
+      // 0-based index of the user message to rewind *before*. `0` clears
+      // history entirely; passing a value >= the user-message count is a
+      // no-op (clamped to "history unchanged").
+      beforeUserMessageIndex: z.number().int().nonnegative(),
+    });
+    const parsed = schema.safeParse(params);
+    if (!parsed.success) {
+      throw new acp.RequestError(
+        -32602,
+        `Invalid params for _dvcode/session/rewind: ${parsed.error.message}`,
+      );
+    }
+    const session = this.sessionManager.getSession(parsed.data.sessionId);
+    if (!session) {
+      throw new acp.RequestError(
+        -32602,
+        `Session not found: ${parsed.data.sessionId}`,
+      );
+    }
+    const stats = await session.rewindToBeforeUserMessage(
+      parsed.data.beforeUserMessageIndex,
+    );
+    return {
+      keptContentCount: stats.keptContentCount,
+      keptUserMessageCount: stats.keptUserMessageCount,
+      droppedContentCount: stats.droppedContentCount,
+      persisted: stats.persisted,
+    };
+  }
 }
