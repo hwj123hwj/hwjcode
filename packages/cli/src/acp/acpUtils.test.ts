@@ -6,8 +6,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { Kind, ApprovalMode } from 'deepv-code-core';
+import type { Config } from 'deepv-code-core';
+import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import {
   buildAvailableModes,
+  buildUsageUpdate,
   hasMeta,
   toAcpToolKind,
 } from './acpUtils.js';
@@ -55,5 +58,55 @@ describe('buildAvailableModes', () => {
     const defaultModes = buildAvailableModes(false);
     const planModes = buildAvailableModes(true);
     expect(planModes.length).toBe(defaultModes.length);
+  });
+});
+
+describe('buildUsageUpdate', () => {
+  // Minimal Config stub: `tokenLimit()` only reads `getCloudModelInfo`,
+  // and `buildUsageUpdate` reads `getModel`. Anything else is fine to
+  // leave as `undefined` for these unit tests.
+  const fakeConfig = {
+    getModel: () => 'auto',
+    getCloudModelInfo: (name: string) =>
+      name === 'auto' ? { maxToken: 200000 } : undefined,
+  } as unknown as Config;
+
+  it('returns null when usageMetadata is missing', () => {
+    expect(buildUsageUpdate(undefined, fakeConfig)).toBeNull();
+  });
+
+  it('returns null when no tokens were spent', () => {
+    expect(
+      buildUsageUpdate(
+        { totalTokenCount: 0 } as GenerateContentResponseUsageMetadata,
+        fakeConfig,
+      ),
+    ).toBeNull();
+  });
+
+  it('emits a `usage_update` with the model token limit', () => {
+    const update = buildUsageUpdate(
+      { totalTokenCount: 1234 } as GenerateContentResponseUsageMetadata,
+      fakeConfig,
+    );
+    expect(update).toEqual({
+      sessionUpdate: 'usage_update',
+      used: 1234,
+      size: 200000,
+    });
+  });
+
+  it('falls back to prompt+candidates when totalTokenCount is absent', () => {
+    const update = buildUsageUpdate(
+      {
+        promptTokenCount: 800,
+        candidatesTokenCount: 200,
+      } as GenerateContentResponseUsageMetadata,
+      fakeConfig,
+    );
+    expect(update).toMatchObject({
+      sessionUpdate: 'usage_update',
+      used: 1000,
+    });
   });
 });

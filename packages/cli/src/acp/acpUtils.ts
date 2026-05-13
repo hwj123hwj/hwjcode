@@ -12,10 +12,54 @@ import {
   ApprovalMode,
   ToolConfirmationOutcome,
   proxyAuthManager,
+  tokenLimit,
 } from 'deepv-code-core';
 import type * as acp from '@agentclientprotocol/sdk';
+import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import { z } from 'zod';
 import type { LoadedSettings } from '../config/settings.js';
+
+/**
+ * Build the `session/update` payload for `sessionUpdate: 'usage_update'`.
+ *
+ * `UsageUpdate` is marked UNSTABLE in the ACP SDK schema (see
+ * `node_modules/@agentclientprotocol/sdk/dist/schema/types.gen.d.ts` —
+ * `UsageUpdate`), but the wire shape is stable: `{ used, size, cost? }`.
+ *
+ *   - `used`  — total tokens currently in the chat's context window for the
+ *               most recent turn. Pulled from the model's `usageMetadata`
+ *               via {@link GeminiChat.getFinalUsageMetadata}.
+ *   - `size`  — total context window of the *currently selected* model,
+ *               resolved through {@link tokenLimit} (server-authoritative
+ *               via `Config.getCloudModelInfo`).
+ *
+ * Returns `null` when neither token count nor a model is known yet — caller
+ * should skip emitting in that case so the IDE keeps showing its previous
+ * estimate instead of flickering to 0/0.
+ */
+export function buildUsageUpdate(
+  usage: GenerateContentResponseUsageMetadata | undefined,
+  config: Config,
+): acp.SessionUpdate | null {
+  // The Gemini SDK reports usage in slightly different fields depending on
+  // backend (Gemini vs proxy-Claude). `totalTokenCount` is the canonical
+  // "what's currently being billed for this turn"; fall back to the sum
+  // when the proxy only reports the split.
+  const used =
+    usage?.totalTokenCount ??
+    ((usage?.promptTokenCount ?? 0) + (usage?.candidatesTokenCount ?? 0));
+  if (!used) return null;
+
+  const model = config.getModel?.() ?? 'auto';
+  const size = tokenLimit(model, config);
+  if (!size) return null;
+
+  return {
+    sessionUpdate: 'usage_update',
+    used,
+    size,
+  } as acp.SessionUpdate;
+}
 
 /** Type guard: does `obj` carry a `_meta` field (per ACP spec)? */
 export function hasMeta(
