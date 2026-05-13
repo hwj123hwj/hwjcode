@@ -121,6 +121,7 @@ export class AcpSessionManager {
       this.config,
       this.connection,
       this.settings,
+      cwd,
     );
     this.sessions.set(sessionId, session);
 
@@ -200,6 +201,7 @@ export class AcpSessionManager {
       this.config,
       this.connection,
       this.settings,
+      cwd,
     );
 
     // Replace any prior in-memory session with the same id.

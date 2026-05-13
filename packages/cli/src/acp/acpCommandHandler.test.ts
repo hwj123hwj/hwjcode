@@ -40,10 +40,13 @@ describe('CommandHandler', () => {
         'memory show',
         'memory list',
         'init',
-        'restore',
         'extensions',
       ]),
     );
+    // `/restore` is intentionally not advertised to ACP clients while the
+    // checkpoint flow is still a core-side stub. The user-facing rewind
+    // gesture goes through the `_dvcode/session/rewind` extension RPC.
+    expect(names).not.toContain('restore');
   });
 
   it('returns false for non-slash text', async () => {

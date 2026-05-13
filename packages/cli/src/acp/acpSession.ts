@@ -23,6 +23,7 @@ import {
   ToolConfirmationOutcome,
   coreEvents,
   CoreEvent,
+  SessionManager as CoreSessionManager,
 } from 'deepv-code-core';
 import * as acp from '@agentclientprotocol/sdk';
 import * as fs from 'node:fs/promises';
@@ -37,6 +38,7 @@ import type { LoadedSettings } from '../config/settings.js';
 import { SettingScope } from '../config/settings.js';
 import {
   RequestPermissionResponseSchema,
+  buildUsageUpdate,
   confirmationRequiresCallerApproval,
   hasMeta,
   toToolCallContent,
@@ -44,6 +46,52 @@ import {
   toAcpToolKind,
 } from './acpUtils.js';
 import { getAcpErrorMessage } from './acpErrors.js';
+import type { GenerateContentResponse } from '@google/genai';
+
+/**
+ * Slice a persisted `SessionData.history` array (the UI-shape one stored at
+ * `<sessionDir>/history.json`) so it ends just before the
+ * `keepUserMessageCount`-th user-typed entry.
+ *
+ * Tolerates both shapes the SessionManager produces:
+ *   1. Ink/gemini-cli style: `{ type: 'user' | 'gemini' | 'info' | ... }`.
+ *      We count `type === 'user'`. Slash-only / question-only inputs are
+ *      *also* counted because they appear as bubbles in the IDE's
+ *      transcript — `keepUserMessageCount` should match exactly what the
+ *      caller sees on screen.
+ *   2. Native Gemini style: `{ role: 'user' | 'model', parts: [...] }`,
+ *      same convention as `Session.rewindToBeforeUserMessage` — a
+ *      `role:'user'` entry that contains a `functionResponse` part is a
+ *      tool-result turn, not a real user input, and is skipped.
+ *
+ * Anything we don't recognise is preserved as part of the prefix (it
+ * trails the most recent counted user entry until we hit the next one).
+ *
+ * Exported for unit testing.
+ */
+export function truncateUiHistoryByUserMessageCount(
+  history: ReadonlyArray<Record<string, unknown>>,
+  keepUserMessageCount: number,
+): Array<Record<string, unknown>> {
+  if (keepUserMessageCount <= 0) return [];
+
+  let userSeen = 0;
+  for (let i = 0; i < history.length; i++) {
+    const entry = history[i] ?? {};
+    const isCountable =
+      entry['type'] === 'user' ||
+      (entry['role'] === 'user' &&
+        !(entry['parts'] as Array<Record<string, unknown>> | undefined)?.some(
+          (p) => p && 'functionResponse' in p,
+        ));
+    if (!isCountable) continue;
+    if (userSeen === keepUserMessageCount) {
+      return history.slice(0, i);
+    }
+    userSeen += 1;
+  }
+  return [...history];
+}
 
 /**
  * One live ACP chat session.
@@ -73,6 +121,17 @@ export class Session {
     private readonly config: Config,
     private readonly connection: acp.AgentSideConnection,
     private readonly _settings: LoadedSettings,
+    /**
+     * Working directory the surrounding ACP session was created with
+     * (`session/new#cwd` / `session/load#cwd`). Used so that the persistence
+     * writes inside `rewindToBeforeUserMessage` hit the *same* on-disk
+     * `<projectTempDir>/sessions/<sessionId>/` that `loadSession` originally
+     * read from. Falls back to `Config.getProjectRoot()` when not supplied —
+     * both should resolve to the same path in practice but we don't want
+     * truncation to silently drift to a different directory if they ever
+     * diverge.
+     */
+    private readonly cwd?: string,
   ) {
     this.approvalModeUnsubscribe = coreEvents.on(
       CoreEvent.ApprovalModeChanged,
@@ -98,6 +157,161 @@ export class Session {
   async cancelPendingPrompt(): Promise<void> {
     this.pendingAbort?.abort();
     this.pendingAbort = undefined;
+  }
+
+  /**
+   * Truncate the chat history to the prefix that ends just before the
+   * `beforeUserMessageIndex`-th user message (0-based). Used by the ACP
+   * `_dvcode/session/rewind` extension method so an IDE that "rewound" its
+   * UI also makes the agent forget the trailing exchange.
+   *
+   * Why mutate `chat.setHistory` directly (instead of `client.resumeChat`):
+   *   `resumeChat` rebuilds an entirely new `GeminiChat` and swaps it onto
+   *   the shared `GeminiClient`. Any prior `Session` (incl. *this* one) keeps
+   *   a `private readonly chat` reference to the *old* chat object, so the
+   *   rewind would only take effect for sessions created *after* the swap.
+   *   Going through `setHistory` keeps the same `GeminiChat` instance and
+   *   guarantees the next prompt sees the truncated history.
+   *
+   * Persistence: in addition to the in-memory truncation, this method also
+   * overwrites `<projectTempDir>/sessions/<sessionId>/{history,context}.json`
+   * via {@link CoreSessionManager.saveSessionHistory} so that:
+   *   - the next `session/load` for the same id surfaces the truncated
+   *     transcript instead of the full pre-rewind one ("history coming
+   *     back from the dead"), and
+   *   - `history.json` (UI shape) and `context.json` (Gemini `Content[]`)
+   *     stay coherent — they are sliced at the same logical user-message
+   *     index. Without this, the UI replay would show a truncated
+   *     transcript while the next prompt still sends the full pre-rewind
+   *     conversation to the model.
+   *
+   * Persistence failures are logged but never propagated — a successful
+   * in-memory truncation is more important than the disk write succeeding,
+   * and the disk view will eventually re-converge on the next save.
+   *
+   * Returns the number of `Content` entries kept after the truncation, so
+   * the RPC can report it back to the client.
+   */
+  async rewindToBeforeUserMessage(beforeUserMessageIndex: number): Promise<{
+    keptContentCount: number;
+    keptUserMessageCount: number;
+    droppedContentCount: number;
+    persisted: boolean;
+  }> {
+    if (
+      !Number.isFinite(beforeUserMessageIndex) ||
+      beforeUserMessageIndex < 0
+    ) {
+      throw new acp.RequestError(
+        -32602,
+        `Invalid beforeUserMessageIndex: ${beforeUserMessageIndex}`,
+      );
+    }
+
+    // Cancel any pending prompt — its outputContent could otherwise land
+    // *after* our truncation when the model finishes streaming.
+    this.pendingAbort?.abort();
+    this.pendingAbort = undefined;
+
+    const history = this.chat.getHistory(false);
+
+    // Find the position in the curated history that corresponds to the
+    // requested user-message index. We scan top-down: each `role: 'user'`
+    // entry that does NOT start with a `functionResponse` part counts as a
+    // "real user message" — the others are tool-result turns and shouldn't
+    // be exposed as rewind anchors.
+    let userMessageSeen = 0;
+    let cutAt = history.length;
+    for (let i = 0; i < history.length; i++) {
+      const entry = history[i];
+      const isUserText =
+        entry.role === MESSAGE_ROLES.USER &&
+        !(entry.parts ?? []).some(
+          (p) => (p as { functionResponse?: unknown }).functionResponse,
+        );
+      if (!isUserText) continue;
+      if (userMessageSeen === beforeUserMessageIndex) {
+        cutAt = i;
+        break;
+      }
+      userMessageSeen += 1;
+    }
+
+    const truncated = history.slice(0, cutAt);
+    this.chat.setHistory(truncated);
+
+    const keptUserMessageCount = Math.min(
+      userMessageSeen,
+      beforeUserMessageIndex,
+    );
+    const persisted = await this.persistTruncatedHistory(
+      truncated,
+      keptUserMessageCount,
+    );
+
+    return {
+      keptContentCount: truncated.length,
+      keptUserMessageCount,
+      droppedContentCount: history.length - truncated.length,
+      persisted,
+    };
+  }
+
+  /**
+   * Overwrite the on-disk `history.json` + `context.json` with the
+   * post-rewind state. See {@link rewindToBeforeUserMessage} for the
+   * persistence rationale.
+   *
+   * Strategy:
+   *   - `clientHistory` (`context.json`) gets the freshly-truncated
+   *     in-memory `Content[]` straight from `GeminiChat.getHistory()` —
+   *     this is the array the model will see on the next prompt, so it
+   *     IS the source of truth.
+   *   - `history` (`history.json`) is loaded from disk and sliced to the
+   *     same logical "before the N-th user bubble" cut-point. We have no
+   *     in-memory mirror of the UI history in ACP mode (unlike the Ink
+   *     CLI's `useSessionAutoSave` hook), but the disk copy was last
+   *     written by either an Ink session that owned this id or by an
+   *     earlier rewind, so it's authoritative for UI shape.
+   *
+   * If `history.json` does not exist yet (pure ACP session that never
+   * went through `useSessionAutoSave`), we still write `context.json` and
+   * a synthetic empty `history` — a missing UI history is better than a
+   * stale one. Returns `true` iff both writes succeeded.
+   */
+  private async persistTruncatedHistory(
+    truncatedClientHistory: Content[],
+    keptUserMessageCount: number,
+  ): Promise<boolean> {
+    const projectRoot = this.cwd ?? this.config.getProjectRoot?.();
+    if (!projectRoot) {
+      this.debug('persistTruncatedHistory skipped: no projectRoot');
+      return false;
+    }
+
+    try {
+      const mgr = new CoreSessionManager(projectRoot);
+      const existing = await mgr.loadSession(this.id);
+      const truncatedUiHistory = truncateUiHistoryByUserMessageCount(
+        (existing?.history as unknown as Array<Record<string, unknown>>) ?? [],
+        keptUserMessageCount,
+      );
+      await mgr.saveSessionHistory(
+        this.id,
+        truncatedUiHistory,
+        truncatedClientHistory,
+      );
+      return true;
+    } catch (err) {
+      // Best-effort: a failed disk write must not abort the in-memory
+      // rewind. Worst case the next save (model switch, next ACP rewind,
+      // or an Ink autosave if the same project is opened in TUI) will
+      // re-converge `history.json`/`context.json` to the truncated state.
+      this.debug(
+        `persistTruncatedHistory failed: ${getAcpErrorMessage(err)}`,
+      );
+      return false;
+    }
   }
 
   setMode(modeId: string): void {
@@ -374,10 +588,14 @@ export class Session {
     try {
       while (nextMessage !== null) {
         if (abort.signal.aborted) {
-          this.chat.addHistory(nextMessage);
           return { stopReason: 'cancelled' };
         }
         const functionCalls: FunctionCall[] = [];
+        // Collected stream chunks for this turn — used to extract the
+        // model's `usageMetadata` after the stream completes so we can
+        // emit a `session/update#usage_update` with up-to-date context
+        // window stats (see `emitUsageUpdate` below).
+        const streamChunks: GenerateContentResponse[] = [];
         try {
           const toolRegistry = await this.config.getToolRegistry();
           const stream = await this.chat.sendMessageStream(
@@ -399,6 +617,7 @@ export class Session {
           nextMessage = null;
           for await (const resp of stream) {
             if (abort.signal.aborted) return { stopReason: 'cancelled' };
+            streamChunks.push(resp);
             const candidate = resp.candidates?.[0];
             for (const part of candidate?.content?.parts ?? []) {
               if (!part.text) continue;
@@ -425,6 +644,11 @@ export class Session {
           }
           throw err;
         }
+
+        // After each model turn, emit a usage_update so the IDE can keep
+        // its "ctx remaining" indicator in sync. Best-effort: a missing or
+        // malformed usageMetadata just means we skip the emit.
+        await this.emitUsageUpdate(streamChunks);
 
         if (functionCalls.length > 0) {
           const responseParts: Part[] = [];
@@ -456,6 +680,31 @@ export class Session {
     } catch (err) {
       // A failed update must not crash the prompt loop.
       this.debug(`sessionUpdate failed: ${getAcpErrorMessage(err)}`);
+    }
+  }
+
+  /**
+   * Aggregate `usageMetadata` from the just-completed stream and push a
+   * `session/update#usage_update` event to the IDE. Mirrors the TUI's
+   * "ctx remaining" indicator and the vscode-ui-plugin's `token_usage_update`
+   * bus event — neither of which travelled over ACP before this method.
+   *
+   * Safe no-ops:
+   *   - Empty `chunks` (e.g. cancelled before the model produced anything).
+   *   - Stream missing `usageMetadata` entirely (some legacy proxy paths).
+   *   - Helper returns `null` because we can't resolve a token limit yet.
+   */
+  private async emitUsageUpdate(
+    chunks: GenerateContentResponse[],
+  ): Promise<void> {
+    if (chunks.length === 0) return;
+    try {
+      const usage = this.chat.getFinalUsageMetadata?.(chunks);
+      const update = buildUsageUpdate(usage, this.config);
+      if (update) await this.sendUpdate(update);
+    } catch (err) {
+      // Telemetry is best-effort — never let it break the prompt loop.
+      this.debug(`emitUsageUpdate skipped: ${getAcpErrorMessage(err)}`);
     }
   }
 

@@ -12,7 +12,6 @@ import type {
 import { CommandRegistry } from './commands/commandRegistry.js';
 import { MemoryCommand } from './commands/memory.js';
 import { InitCommand } from './commands/init.js';
-import { RestoreCommand } from './commands/restore.js';
 import { AboutCommand } from './commands/about.js';
 import { HelpCommand } from './commands/help.js';
 import { ExtensionsCommand } from './commands/extensions.js';
@@ -23,6 +22,13 @@ import { ExtensionsCommand } from './commands/extensions.js';
  * Mirrors gemini-cli's command handler, but registers the (smaller) set of
  * commands DeepCode ships today. Additional commands can be added simply by
  * pushing them into {@link CommandHandler.createRegistry}.
+ *
+ * NOTE: `/restore` is intentionally not registered here. Checkpoint
+ * restoration in DeepCode is still a stub at the core layer (see
+ * `core/src/commands/restore.ts`), and exposing the slash command would
+ * surface a non-functional button to ACP clients. The user-facing "rewind
+ * conversation" gesture is handled by the `_dvcode/session/rewind`
+ * extension RPC instead — IDEs trigger it directly from their UI.
  */
 export class CommandHandler {
   private readonly registry: CommandRegistry;
@@ -36,7 +42,6 @@ export class CommandHandler {
     registry.register(new MemoryCommand());
     registry.register(new ExtensionsCommand());
     registry.register(new InitCommand());
-    registry.register(new RestoreCommand());
     registry.register(new AboutCommand());
     registry.register(new HelpCommand(registry));
     return registry;
