@@ -386,33 +386,6 @@ export class GeminiClient {
   }
 
   /**
-   * 兜底瘦身：在全量 LLM 压缩失败或熔断器跳闸后调用。
-   *
-   * 强制执行一次 MicroCompact（忽略其内置的 idle/token 阈值检查），
-   * 将旧的可压缩工具输出替换为占位符，为对话争取继续运行的空间。
-   *
-   * 这是一种轻量、零 LLM 调用的降级策略 —— 即便 LLM 摘要不可用，
-   * 也能让用户的对话继续下去，而不是直接 dead-end 等待手动 /compress。
-   *
-   * @returns MicroCompact 执行结果（是否应用、清除条数）
-   */
-  private runMicroCompactFallback(): { applied: boolean; clearedCount: number } {
-    try {
-      const curHistory = this.getChat().getHistory(true);
-      // 直接调用 microCompactMessages，不走 shouldMicroCompact，因为这里是兜底
-      // 场景（全量压缩已失败），idle 时间不再是判断依据——能清多少是多少。
-      const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
-      if (mcResult.applied) {
-        this.getChat().setHistory(curHistory);
-      }
-      return { applied: mcResult.applied, clearedCount: mcResult.clearedCount };
-    } catch (err) {
-      console.warn(`[runMicroCompactFallback] MicroCompact fallback threw: ${err instanceof Error ? err.message : String(err)}`);
-      return { applied: false, clearedCount: 0 };
-    }
-  }
-
-  /**
    * 等待压缩完成
    * @param abortSignal 用于取消等待的信号
    * @param maxWaitMs 最大等待时间（毫秒）
@@ -747,103 +720,40 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     this.checkCompression();
     // 基于响应的智能压缩：检查是否需要在本次对话前进行压缩
     // 只有当 needsCompression 标记为 true 时才尝试压缩，否则不触发压缩流程和 PreCompress 钩子
+    //
+    // 设计原则：自动压缩与手动 /compress 走完全相同的路径——
+    //   - 不检查熔断器（force=true 直接尝试）
+    //   - 使用普通 AbortController().signal，不设独立超时
+    //   - 失败就直接 yield 失败事件，不再做 MicroCompact 兜底
+    // 仅保留 yield ChatCompressed 事件（流式协议必需，UI 借此显示压缩气泡）
     if (this.needsCompression) {
-      // 熔断器检查：仅非强制路径需要尊重熔断器。
-      // 自动压缩虽然调用 tryCompressChat(force=true)，但在 circuit breaker 跳闸时
-      // 通常意味着压缩能力本身有问题，继续盲冲会让用户陷入更长的卡顿。
-      // 策略：先尝试 MicroCompact 兜底瘦身，兜底成功则继续对话（降级模式）；
-      //      否则 yield 失败事件让 UI 明确提示用户手动 /compress。
-      if (this.compressionService.isCircuitBreakerTripped()) {
-        const failureCount = this.compressionService.getConsecutiveFailures();
-        console.warn(`[sendMessageStream] Auto-compress circuit breaker tripped (${failureCount} consecutive failures). Attempting MicroCompact fallback.`);
-        this.needsCompression = false; // 清除标记避免反复打印
+      console.log('[sendMessageStream] Token threshold exceeded, performing compression before new conversation');
 
-        const fallback = this.runMicroCompactFallback();
-        if (fallback.applied) {
-          yield {
-            type: GeminiEventType.ChatCompressed,
-            value: {
-              success: true,
-              degraded: true,
-              clearedCount: fallback.clearedCount,
-              reason: `circuit_breaker:${failureCount}`,
-            },
-          };
-          // 降级兜底成功：继续对话流程，不 return。
-        } else {
-          yield {
-            type: GeminiEventType.ChatCompressed,
-            value: {
-              success: false,
-              reason: `circuit_breaker:${failureCount}`,
-            },
-          };
-          return new Turn(this.getChat(), prompt_id, this.config.getModel());
-        }
+      let compressed: ChatCompressionInfo | null = null;
+      let compressionError: string | undefined;
+      try {
+        compressed = await this.tryCompressChat(prompt_id, new AbortController().signal, true);
+      } catch (err) {
+        compressionError = err instanceof Error ? err.message : String(err);
+        console.warn(`[sendMessageStream] Auto-compress threw: ${compressionError}`);
+      }
+
+      if (compressed) {
+        yield {
+          type: GeminiEventType.ChatCompressed,
+          value: { success: true, info: compressed },
+        };
+        this.resetCompressionFlag(); // 压缩完成后重置标记
       } else {
-        console.log('[sendMessageStream] Token threshold exceeded, performing compression before new conversation');
-
-        // 🔑 关键修复：使用独立 AbortController，与用户那轮对话的 signal 解耦。
-        // 否则用户手抖按 ESC 或新输入会中断压缩 → retryWithBackoff 对 AbortError 不重试 →
-        // 压缩静默失败 → 熔断器累加 → 后续自动压缩全部跳过（必须手动 /compress 才能恢复）。
-        // 同时设置 2 分钟超时兜底，防止极端情况下压缩无限阻塞用户输入。
-        const compressionAbort = new AbortController();
-        const compressionTimeoutMs = 120_000;
-        const compressionTimeoutHandle = setTimeout(() => {
-          console.warn('[sendMessageStream] Auto-compress timeout reached, aborting');
-          compressionAbort.abort();
-        }, compressionTimeoutMs);
-
-        let compressed: ChatCompressionInfo | null = null;
-        let compressionError: string | undefined;
-        try {
-          compressed = await this.tryCompressChat(prompt_id, compressionAbort.signal, true);
-        } catch (err) {
-          compressionError = err instanceof Error ? err.message : String(err);
-          console.warn(`[sendMessageStream] Auto-compress threw: ${compressionError}`);
-        } finally {
-          clearTimeout(compressionTimeoutHandle);
-        }
-
-        if (compressed) {
-          yield {
-            type: GeminiEventType.ChatCompressed,
-            value: { success: true, info: compressed },
-          };
-          this.resetCompressionFlag(); // 压缩完成后重置标记
-        } else {
-          // 全量 LLM 压缩失败：尝试 MicroCompact 兜底瘦身。
-          // 兜底成功（清除了若干旧工具输出）→ yield 成功事件（degraded=true），继续对话。
-          // 兜底也失败（没东西可清）→ yield 失败事件，return 避免让未瘦身的 history 去撞 API。
-          console.warn('[sendMessageStream] Full compression failed, attempting MicroCompact fallback');
-          const fallback = this.runMicroCompactFallback();
-          if (fallback.applied) {
-            console.log(`[sendMessageStream] MicroCompact fallback succeeded: cleared ${fallback.clearedCount} old tool results`);
-            yield {
-              type: GeminiEventType.ChatCompressed,
-              value: {
-                success: true,
-                degraded: true,
-                clearedCount: fallback.clearedCount,
-                reason: compressionError ?? 'compression_returned_null',
-              },
-            };
-            // 降级成功：清除 needsCompression 标记，让后续对话正常进行。
-            // 注意：我们没真正压缩到安全比例，下次 token 超阈值时会再次尝试全量压缩（如果熔断器未触发）。
-            this.resetCompressionFlag();
-          } else {
-            console.warn('[sendMessageStream] MicroCompact fallback also failed (nothing to clear)');
-            yield {
-              type: GeminiEventType.ChatCompressed,
-              value: {
-                success: false,
-                reason: compressionError ?? 'compression_returned_null',
-              },
-            };
-            // 注意：不清除 needsCompression 标记。下次用户发消息时会再试一次（除非熔断）。
-            return new Turn(this.getChat(), prompt_id, this.config.getModel());
-          }
-        }
+        yield {
+          type: GeminiEventType.ChatCompressed,
+          value: {
+            success: false,
+            reason: compressionError ?? 'compression_returned_null',
+          },
+        };
+        // 注意：不清除 needsCompression 标记。下次用户发消息时会再试一次。
+        return new Turn(this.getChat(), prompt_id, this.config.getModel());
       }
     }
 
