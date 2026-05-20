@@ -18,6 +18,7 @@ import {
   isApiError,
   isStructuredError,
   isCustomModel,
+  formatHttpErrorFallback,
 } from 'deepv-code-core';
 import { isChineseLocale } from './i18n.js';
 
@@ -543,6 +544,13 @@ export function parseAndFormatApiError(
         fallbackModel,
       );
     }
+    // 🆕 Fallback：若已匹配到 status，使用统一的 [HTTP xxx] 前缀，确保 code+message 都展示给用户
+    const fallback = formatHttpErrorFallback(error);
+    if (fallback) {
+      return error.status === 429
+        ? `${fallback}${getRateLimitMessage(authType, error, userTier, currentModel, fallbackModel)}`
+        : fallback;
+    }
     return text;
   }
 
@@ -572,7 +580,8 @@ export function parseAndFormatApiError(
 
     const jsonStart = error.indexOf('{');
     if (jsonStart === -1) {
-      return `[API Error: ${error}]`; // Not a JSON error, return as is.
+      // 🆕 非 JSON 字符串错误兜底：尽量识别 status code 后展示
+      return formatHttpErrorFallback(error) ?? `[API Error: ${error}]`;
     }
 
     const jsonString = error.substring(jsonStart);
@@ -632,7 +641,12 @@ export function parseAndFormatApiError(
         } catch (_e) {
           // It's not a nested JSON error, so we just use the message as is.
         }
-        let text = `[API Error: ${finalMessage} (Status: ${parsedError.error.status})]`;
+        // 🆕 统一为 [HTTP xxx] 前缀，确保 code 和 message 都展示
+        let text =
+          formatHttpErrorFallback({
+            status: parsedError.error.code,
+            message: finalMessage,
+          }) ?? `[API Error: ${finalMessage} (Status: ${parsedError.error.status})]`;
         if (parsedError.error.code === 429) {
           text += getRateLimitMessage(
             authType,
@@ -647,8 +661,10 @@ export function parseAndFormatApiError(
     } catch (_e) {
       // Not a valid JSON, fall through and return the original message.
     }
-    return `[API Error: ${error}]`;
+    // 🆕 JSON 路径未命中：尝试从原始字符串提取 status，否则原样展示
+    return formatHttpErrorFallback(error) ?? `[API Error: ${error}]`;
   }
 
-  return '[API Error: An unknown error occurred.]';
+  // 🆕 完全未知错误：尝试从对象/Error 实例中提取 message + status
+  return formatHttpErrorFallback(error) ?? '[API Error: An unknown error occurred.]';
 }
