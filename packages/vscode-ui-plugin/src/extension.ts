@@ -31,7 +31,7 @@ import { SlashCommandService } from './services/slashCommandService';
 import { TerminalOutputService } from './services/terminalOutputService';
 import { McpEnabledStateService } from './services/mcpEnabledStateService';
 import { AIService } from './services/aiService';
-import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus } from 'deepv-code-core';
+import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus, isOurAuthError } from 'deepv-code-core';
 import { SessionType, SessionStatus } from './constants/sessionConstants';
 import { SessionInfo } from './types/sessionTypes';
 
@@ -390,9 +390,19 @@ export async function deactivate(): Promise<void> {
 // 当服务端返回 401 时，说明用户登录已过期，需要立即通知 webview 切换到登录页
 async function handleHttpAuthError(response: Response): Promise<boolean> {
   if (response.status === 401) {
-    logger.warn('🔐 HTTP 401 detected, triggering auth expired notification');
-    await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
-    return true;
+    try {
+      const clonedResponse = response.clone();
+      const text = await clonedResponse.text();
+      if (isOurAuthError(text)) {
+        logger.warn('🔐 HTTP 401 detected with AUTHENTICATION_FAILED, triggering auth expired notification');
+        await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
+        return true;
+      } else {
+        logger.warn('🔐 HTTP 401 detected but it is not from our auth service, ignoring login expiration flow');
+      }
+    } catch (err) {
+      logger.debug('Failed to parse 401 response body for auth check', err instanceof Error ? err : undefined);
+    }
   }
   return false;
 }
