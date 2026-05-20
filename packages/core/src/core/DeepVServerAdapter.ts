@@ -23,7 +23,7 @@ import { proxyAuthManager } from './proxyAuth.js';
 import { getActiveProxyServerUrl } from '../config/proxyConfig.js';
 import { logger } from '../utils/enhancedLogger.js';
 import { getDefaultAuthHandler } from '../auth/authNavigator.js';
-import { UnauthorizedError } from '../utils/errors.js';
+import { UnauthorizedError, isOurAuthError } from '../utils/errors.js';
 import { SceneType, SceneManager } from './sceneManager.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 import { isDeepXQuotaError } from '../utils/quotaErrorDetection.js';
@@ -473,7 +473,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         const errorText = await response.text();
 
         // 401错误特殊处理
-        if (response.status === 401) {
+        if (response.status === 401 && isOurAuthError(errorText)) {
           console.error('[DeepV Server] 401 Unauthorized - triggering auth dialog');
           if (this.authHandler) {
             await this.authHandler();
@@ -900,7 +900,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         const errorText = await response.text();
 
         // 401错误特殊处理 - 与非流式API保持一致
-        if (response.status === 401) {
+        if (response.status === 401 && isOurAuthError(errorText)) {
           console.error('[DeepV Server] Stream 401 Unauthorized - triggering auth dialog');
           if (this.authHandler) {
             await this.authHandler();
@@ -1409,7 +1409,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         const errorText = await response.text();
 
         // 401错误特殊处理
-        if (response.status === 401) {
+        if (response.status === 401 && isOurAuthError(errorText)) {
           console.error('[DeepV Server] Token count 401 Unauthorized');
           if (this.authHandler) {
             await this.authHandler();
