@@ -1733,11 +1733,13 @@ export class AIService {
             }
 
             // 🔐 检测认证过期错误（HTTP 401），触发自动登出
+            // 🆕 必须同时包含 AUTHENTICATION_FAILED，说明是我们服务端的 401，而不是上游模型的 401
             const isAuthError =
-              errorMessage.includes('401') ||
-              errorMessage.includes('Unauthorized') ||
-              errorMessage.includes('Authentication required') ||
-              errorMessage.includes('re-authenticate');
+              errorMessage.includes('AUTHENTICATION_FAILED') &&
+              (errorMessage.includes('401') ||
+               errorMessage.includes('Unauthorized') ||
+               errorMessage.includes('Authentication required') ||
+               errorMessage.includes('re-authenticate'));
 
             if (isAuthError && this.communicationService) {
               this.logger.warn('🔐 Authentication error detected in AI stream, triggering auth expired');

@@ -6,7 +6,7 @@
 
 import { CommandKind, CommandContext, MessageActionReturn, OpenDialogActionReturn, SlashCommand } from './types.js';
 import { SettingScope } from '../../config/settings.js';
-import { proxyAuthManager, Config, generateCustomModelId } from 'deepv-code-core';
+import { proxyAuthManager, Config, generateCustomModelId, isOurAuthError } from 'deepv-code-core';
 import { HistoryItemWithoutId } from '../types.js';
 import { t, tp } from '../utils/i18n.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
@@ -212,11 +212,12 @@ async function fetchModelsFromServer(): Promise<{ models: ModelInfo[]; modelName
     });
 
     if (!response.ok) {
-      if (response.status === 401) {
+      const errorText = await response.text();
+      if (response.status === 401 && isOurAuthError(errorText)) {
         // 抛出特定的认证错误，让调用方可以区分处理
         throw new AuthenticationRequiredError();
       }
-      throw new Error(`API request failed (${response.status}): ${await response.text()}`);
+      throw new Error(`API request failed (${response.status}): ${errorText}`);
     }
 
     const apiResponse: ApiResponse<ModelInfo[]> = await response.json();
