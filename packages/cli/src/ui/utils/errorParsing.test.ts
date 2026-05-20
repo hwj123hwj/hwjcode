@@ -41,7 +41,7 @@ describe('parseAndFormatApiError', () => {
     const errorMessage =
       'got status: 400 Bad Request. {"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}';
     const expected =
-      '[API Error: API key not valid. Please pass a valid API key. (Status: INVALID_ARGUMENT)]';
+      '[HTTP 400] API key not valid. Please pass a valid API key.';
     expect(parseAndFormatApiError(errorMessage)).toBe(expected);
   });
 
@@ -122,7 +122,7 @@ describe('parseAndFormatApiError', () => {
       message: 'A structured error occurred',
       status: 500,
     };
-    const expected = '[API Error: A structured error occurred]';
+    const expected = '[HTTP 500] A structured error occurred';
     expect(parseAndFormatApiError(error)).toBe(expected);
   });
 
