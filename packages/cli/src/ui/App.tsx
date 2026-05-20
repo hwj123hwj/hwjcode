@@ -201,7 +201,20 @@ const detectIDEAEnvironment = (): boolean => {
 };
 
 /**
- * Cross-platform clear screen function that properly clears scroll buffer on Windows
+ * Cross-platform visible-screen clear for automatic UI redraws.
+ *
+ * This deliberately does not clear terminal scrollback. Automatic redraws can be
+ * triggered by terminal resize/layout changes, and clearing scrollback there can
+ * make the terminal viewport appear to jump back to the top while the user is
+ * typing or pasting.
+ */
+const clearVisibleScreen = (stdout: NodeJS.WriteStream) => {
+  stdout.write(ansiEscapes.clearScreen);
+  stdout.write(ansiEscapes.cursorTo(0, 0));
+};
+
+/**
+ * Cross-platform explicit clear screen function that also clears scrollback.
  * 特别优化了IDEA环境下的兼容性
  */
 const clearScreenWithScrollBuffer = (stdout: NodeJS.WriteStream) => {
@@ -209,14 +222,12 @@ const clearScreenWithScrollBuffer = (stdout: NodeJS.WriteStream) => {
 
   if (isIDEAEnv) {
     // IDEA环境特殊处理：使用更温和的清屏方式，避免光标位置错乱
-    stdout.write(ansiEscapes.clearScreen); // 只清屏，不重置
-    stdout.write(ansiEscapes.cursorTo(0, 0)); // 移动光标到顶部
+    clearVisibleScreen(stdout);
     // 不使用滚动缓冲区清理，避免IDEA终端的兼容性问题
   } else if (process.platform === 'win32') {
     // On Windows, use full reset to properly clear screen and scroll buffer
     stdout.write('\x1Bc'); // Full reset
-    stdout.write(ansiEscapes.clearScreen);
-    stdout.write(ansiEscapes.cursorTo(0, 0));
+    clearVisibleScreen(stdout);
   } else {
     // On Unix-like systems, clear screen + scroll buffer + move cursor to top
     stdout.write('\x1B[2J\x1B[3J\x1B[H');
@@ -456,10 +467,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 🎯 小窗口优化 - 根据窗口大小调整渲染策略
   const smallWindowConfig = useSmallWindowOptimization();
 
-  const refreshStatic = useCallback(() => {
+  const refreshStatic = useCallback((clearScrollback = false) => {
     // 🎯 小窗口优化 - 在极小窗口下减少清屏操作
     if (smallWindowConfig.sizeLevel !== 'tiny') {
-      clearScreenWithScrollBuffer(stdout);
+      if (clearScrollback) {
+        clearScreenWithScrollBuffer(stdout);
+      } else {
+        clearVisibleScreen(stdout);
+      }
     }
     setStaticKey((prev) => prev + 1);
   }, [setStaticKey, stdout, smallWindowConfig.sizeLevel]);
@@ -1145,6 +1160,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     20,
     Math.floor(terminalWidth * widthFraction) - 3,
   );
+  const inputViewportHeight = Math.max(
+    1,
+    Math.min(15, Math.floor(inputWidth / 10)),
+  );
   const suggestionsWidth = Math.max(60, Math.floor(terminalWidth * 0.8));
 
   // Utility callbacks
@@ -1619,7 +1638,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   const buffer = useTextBuffer({
     initialText: '',
-    viewport: { height: 50, width: inputWidth }, // Increased from 10 to 50 to support large pastes
+    viewport: { height: inputViewportHeight, width: inputWidth },
     stdin,
     setRawMode,
     isValidPath,
@@ -1996,9 +2015,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const handleClearScreen = useCallback(() => {
     clearItems();
     clearConsoleMessagesState();
-    clearScreenWithScrollBuffer(stdout);
-    refreshStatic();
-  }, [clearItems, clearConsoleMessagesState, stdout, refreshStatic]);
+    refreshStatic(true);
+  }, [clearItems, clearConsoleMessagesState, refreshStatic]);
 
   const mainControlsRef = useRef<DOMElement>(null);
   const pendingHistoryItemRef = useRef<DOMElement>(null);
