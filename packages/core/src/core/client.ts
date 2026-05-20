@@ -386,6 +386,26 @@ export class GeminiClient {
   }
 
   /**
+   * 兜底瘦身：在全量 LLM 自动压缩失败后调用。
+   * 强制执行一次 MicroCompact，将旧的可压缩工具输出替换为占位符，为对话争取继续运行的空间。
+   *
+   * @returns MicroCompact 执行结果（是否应用、清除条数）
+   */
+  private runMicroCompactFallback(): { applied: boolean; clearedCount: number } {
+    try {
+      const curHistory = this.getChat().getHistory(true);
+      const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
+      if (mcResult.applied) {
+        this.getChat().setHistory(curHistory);
+      }
+      return { applied: mcResult.applied, clearedCount: mcResult.clearedCount };
+    } catch (err) {
+      console.warn(`[runMicroCompactFallback] MicroCompact fallback threw: ${err instanceof Error ? err.message : String(err)}`);
+      return { applied: false, clearedCount: 0 };
+    }
+  }
+
+  /**
    * 等待压缩完成
    * @param abortSignal 用于取消等待的信号
    * @param maxWaitMs 最大等待时间（毫秒）
@@ -745,15 +765,34 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
         };
         this.resetCompressionFlag(); // 压缩完成后重置标记
       } else {
-        yield {
-          type: GeminiEventType.ChatCompressed,
-          value: {
-            success: false,
-            reason: compressionError ?? 'compression_returned_null',
-          },
-        };
-        // 注意：不清除 needsCompression 标记。下次用户发消息时会再试一次。
-        return new Turn(this.getChat(), prompt_id, this.config.getModel());
+        // 全量 LLM 压缩失败：尝试 MicroCompact 兜底瘦身。
+        // 兜底成功（清除了若干旧工具输出）→ yield 成功事件（degraded=true），继续对话。
+        // 兜底也失败（没东西可清）→ yield 失败事件，return 避免让未瘦身的 history 去撞 API。
+        console.warn('[sendMessageStream] Full compression failed, attempting MicroCompact fallback');
+        const fallback = this.runMicroCompactFallback();
+        if (fallback.applied) {
+          console.log(`[sendMessageStream] MicroCompact fallback succeeded: cleared ${fallback.clearedCount} old tool results`);
+          yield {
+            type: GeminiEventType.ChatCompressed,
+            value: {
+              success: true,
+              degraded: true,
+              clearedCount: fallback.clearedCount,
+              reason: compressionError ?? 'compression_returned_null',
+            },
+          };
+          this.resetCompressionFlag(); // 降级成功后也重置标记，让对话继续
+        } else {
+          yield {
+            type: GeminiEventType.ChatCompressed,
+            value: {
+              success: false,
+              reason: compressionError ?? 'compression_returned_null',
+            },
+          };
+          // 注意：不清除 needsCompression 标记。下次用户发消息时会再试一次。
+          return new Turn(this.getChat(), prompt_id, this.config.getModel());
+        }
       }
     }
 

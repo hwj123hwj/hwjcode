@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../utils/logger';
+import { isOurAuthError } from 'deepv-code-core';
 
 // 模型信息接口（匹配服务端API响应）
 export interface ModelInfo {
@@ -106,7 +107,6 @@ export class ModelService {
       if (!response.ok) {
         const errorText = await response.text();
         if (response.status === 401) {
-          const { isOurAuthError } = require('deepv-code-core');
           if (isOurAuthError(errorText)) {
             throw new Error('Authentication required - please re-authenticate');
           }

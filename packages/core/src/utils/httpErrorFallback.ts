@@ -151,15 +151,14 @@ export function formatHttpErrorFallback(error: unknown): string | undefined {
   const status = extractHttpStatusCode(error);
   const message = extractErrorMessage(error).trim();
 
-  if (!message && status === undefined) {
+  // 🆕 仅对具有明确 HTTP 状态码的错误进行 HTTP 兜底格式化。
+  // 若无状态码，则返回 undefined 让上层调用方（如 errorParsing）走其原本的错误格式化。
+  if (status === undefined) {
     return undefined;
   }
 
-  if (status !== undefined && message) {
+  if (message) {
     return `[HTTP ${status}] ${message}`;
   }
-  if (status !== undefined) {
-    return `[HTTP ${status}]`;
-  }
-  return `[Error] ${message}`;
+  return `[HTTP ${status}]`;
 }

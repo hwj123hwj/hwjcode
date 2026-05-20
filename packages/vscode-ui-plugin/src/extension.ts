@@ -31,7 +31,7 @@ import { SlashCommandService } from './services/slashCommandService';
 import { TerminalOutputService } from './services/terminalOutputService';
 import { McpEnabledStateService } from './services/mcpEnabledStateService';
 import { AIService } from './services/aiService';
-import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus } from 'deepv-code-core';
+import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus, isOurAuthError } from 'deepv-code-core';
 import { SessionType, SessionStatus } from './constants/sessionConstants';
 import { SessionInfo } from './types/sessionTypes';
 
@@ -393,7 +393,6 @@ async function handleHttpAuthError(response: Response): Promise<boolean> {
     try {
       const clonedResponse = response.clone();
       const text = await clonedResponse.text();
-      const { isOurAuthError } = require('deepv-code-core');
       if (isOurAuthError(text)) {
         logger.warn('🔐 HTTP 401 detected with AUTHENTICATION_FAILED, triggering auth expired notification');
         await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
