@@ -45,7 +45,7 @@ export const useSlashCommandProcessor = (
   addItem: UseHistoryManagerReturn['addItem'],
   clearItems: UseHistoryManagerReturn['clearItems'],
   loadHistory: UseHistoryManagerReturn['loadHistory'],
-  refreshStatic: () => void,
+  refreshStatic: (clearScrollback?: boolean) => void,
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
   onDebugMessage: (message: string) => void,
   openThemeDialog: () => void,
@@ -165,8 +165,7 @@ export const useSlashCommandProcessor = (
         addItem,
         clear: () => {
           clearItems();
-          console.clear();
-          refreshStatic();
+          refreshStatic(true);
         },
         loadHistory,
         setDebugMessage: onDebugMessage,
