@@ -52,7 +52,8 @@ import {
   MCPServerStatus,
   MCPDiscoveryState,
   unloadMcpServer,
-  UnauthorizedError
+  UnauthorizedError,
+  formatHttpErrorFallback
 } from 'deepv-code-core';
 
 import { ContextBuilder } from './contextBuilder';
@@ -1505,7 +1506,8 @@ export class AIService {
       }
 
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Edit Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message
+        const errorMessage = `Edit Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     }
@@ -1603,7 +1605,8 @@ export class AIService {
       }
 
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message，避免错误被原始堆栈淹没
+        const errorMessage = `Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     }
@@ -1650,7 +1653,8 @@ export class AIService {
       }
 
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message，避免错误被原始堆栈淹没
+        const errorMessage = `Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     } finally {
@@ -1744,7 +1748,10 @@ export class AIService {
             }
 
             if (this.communicationService && this.sessionId) {
-              await this.communicationService.sendChatError(this.sessionId, `❌ AI响应时出现错误：${errorMessage}`);
+              // 🆕 使用 core 的 fallback 工具，确保 HTTP code + message 都展示给用户
+              // 而不是直接显示原始堆栈或被吞掉。优先使用 fallback，否则退回原始 message。
+              const fallback = formatHttpErrorFallback(event.value.error) ?? errorMessage;
+              await this.communicationService.sendChatError(this.sessionId, `❌ AI响应时出现错误：${fallback}`);
             }
             return;
 
@@ -1842,7 +1849,9 @@ export class AIService {
       this.setProcessingState(false, null, false);
 
       if (this.communicationService && this.sessionId) {
-        await this.communicationService.sendChatError(this.sessionId, `❌ 处理AI流式响应时出错`);
+        // 🆕 把 streamError 的 HTTP code + message 暴露出来，便于排查
+        const detail = formatHttpErrorFallback(streamError) ?? (streamError instanceof Error ? streamError.message : String(streamError));
+        await this.communicationService.sendChatError(this.sessionId, `❌ 处理AI流式响应时出错：${detail}`);
       }
     }
   }
