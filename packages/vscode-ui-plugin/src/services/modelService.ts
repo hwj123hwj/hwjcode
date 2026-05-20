@@ -104,10 +104,14 @@ export class ModelService {
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
         if (response.status === 401) {
-          throw new Error('Authentication required - please re-authenticate');
+          const { isOurAuthError } = require('deepv-code-core');
+          if (isOurAuthError(errorText)) {
+            throw new Error('Authentication required - please re-authenticate');
+          }
         }
-        throw new Error(`API request failed (${response.status}): ${await response.text()}`);
+        throw new Error(`API request failed (${response.status}): ${errorText}`);
       }
 
       const apiResponse = await response.json() as ApiResponse<ModelInfo[]>;
