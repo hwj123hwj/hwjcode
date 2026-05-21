@@ -324,6 +324,85 @@ export function getSubdirectoryGitInfos(directory: string): Array<{
 }
 
 /**
+ * Gets the full 40-character commit SHA of the current HEAD.
+ * Returns null (never throws) if the directory is not a git repo or git is unavailable.
+ *
+ * Strategy (with fallbacks):
+ *   1. `git rev-parse HEAD` via execSync
+ *   2. Read `.git/HEAD` directly (handles detached HEAD and no-git-binary cases)
+ *
+ * @param directory The working directory
+ * @returns 40-character hex SHA, or null if unavailable
+ */
+export function getGitCommitSha(directory: string): string | null {
+  // --- Strategy 1: invoke git ---
+  const result = safeExecGit('git rev-parse HEAD', directory);
+  if (result && /^[0-9a-f]{40}$/i.test(result)) {
+    return result.toLowerCase();
+  }
+
+  // --- Strategy 2: read .git/HEAD directly ---
+  try {
+    const gitDir = resolveGitDir(directory);
+    if (!gitDir) return null;
+    const headContent = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf-8').trim();
+    // Detached HEAD: HEAD contains the sha directly
+    if (/^[0-9a-f]{40}$/i.test(headContent)) {
+      return headContent.toLowerCase();
+    }
+    // Symbolic ref: resolve to the ref file
+    const refMatch = headContent.match(/^ref:\s*(.+)$/);
+    if (refMatch) {
+      const refFile = path.join(gitDir, refMatch[1].trim());
+      const refSha = fs.readFileSync(refFile, 'utf-8').trim();
+      if (/^[0-9a-f]{40}$/i.test(refSha)) {
+        return refSha.toLowerCase();
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts a "namespace/repo" project path from the git remote origin URL.
+ * Supports SSH (`git@host:ns/repo.git`) and HTTPS (`https://host/ns/repo.git`) formats.
+ * Falls back to the first available remote if `origin` is absent.
+ * Returns null (never throws) if no remotes exist or the URL cannot be parsed.
+ *
+ * @param directory The working directory
+ * @returns Project path in "namespace/repo" format, or null if unavailable
+ */
+export function getGitProjectPath(directory: string): string | null {
+  try {
+    const remotes = getGitRemotes(directory);
+    if (!remotes) return null;
+
+    // Prefer origin; fall back to first remote
+    const remoteUrl = remotes['origin'] ?? Object.values(remotes)[0];
+    if (!remoteUrl) return null;
+
+    // SSH format: git@gitlab.example.com:namespace/repo.git
+    //             git@gitlab.example.com:/namespace/repo.git (leading slash variant)
+    const sshMatch = remoteUrl.match(/:[/]?(.+?)(\.git)?$/);
+    if (sshMatch && !remoteUrl.startsWith('http')) {
+      return sshMatch[1].replace(/^\//, '');
+    }
+
+    // HTTPS / HTTP format: https://gitlab.example.com/namespace/repo.git
+    const httpsMatch = remoteUrl.match(/https?:\/\/[^/]+\/(.+?)(\.git)?$/);
+    if (httpsMatch) {
+      return httpsMatch[1];
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Removes embedded credentials from a git URL.
  * e.g. https://user:token@github.com/org/repo.git → https://github.com/org/repo.git
  * SSH URLs (git@...) are returned as-is since they don't embed passwords.
