@@ -159,7 +159,7 @@ export class AskUserQuestionTool extends BaseTool<
                           'Optional preview content (markdown) rendered side-by-side when this option is focused. Single-select only.',
                       },
                     },
-                    required: ['label', 'description'],
+                    required: ['label'],
                   },
                 },
                 multiSelect: {
@@ -168,7 +168,7 @@ export class AskUserQuestionTool extends BaseTool<
                     'Set to true to allow selecting multiple options. Defaults to false.',
                 },
               },
-              required: ['question', 'header', 'options'],
+              required: ['question', 'options'],
             },
           },
           metadata: {
@@ -194,6 +194,51 @@ export class AskUserQuestionTool extends BaseTool<
   }
 
   override validateToolParams(params: AskUserQuestionParams): string | null {
+    // 🚀 防御性数据自愈与容错：静默修复小的不合规（如缺失 header、超长 header、省略 description、传入 options 为字符串数组等）
+    if (params && Array.isArray(params.questions)) {
+      params.questions = params.questions.map((q) => {
+        if (!q || typeof q !== 'object') return q;
+
+        // 1. 修复 header 缺失
+        let header = q.header;
+        if (!header || typeof header !== 'string' || !header.trim()) {
+          header = 'Question';
+        }
+        // 2. 修复 header 超长（自动截断到 12 字符内）
+        if (header.length > 12) {
+          header = header.substring(0, 12);
+        }
+
+        // 3. 修复 options 的各种不规范情况
+        let options = q.options;
+        if (Array.isArray(options)) {
+          options = options.map((opt) => {
+            if (typeof opt === 'string') {
+              return { label: opt, description: '' };
+            }
+            if (opt && typeof opt === 'object') {
+              // 容错：如果把选项写成只有 label/value 或无 description 的情况
+              const rawLabel = (opt as any).label || (opt as any).value || 'Option';
+              const label = String(rawLabel).trim() || 'Option';
+              const description = opt.description ? String(opt.description).trim() : '';
+              return {
+                ...opt,
+                label,
+                description,
+              };
+            }
+            return { label: 'Option', description: '' };
+          });
+        }
+
+        return {
+          ...q,
+          header,
+          options,
+        };
+      });
+    }
+
     const errors = SchemaValidator.validate(
       this.schema.parameters,
       params,
