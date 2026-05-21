@@ -2394,6 +2394,10 @@ function setupLoginHandlers() {
         await sessionManager.updateSessionModelConfig(payload.sessionId, {
           modelName: payload.modelName
         });
+
+        // 🎯 通知前端模型切换完成（前端不做乐观更新，等此事件后才更新 selectedModelId）
+        // 这样保证：UI 显示 = modelConfig = runtime 三者一致
+        await communicationService.sendModelSwitchComplete(payload.sessionId, payload.modelName);
       }
 
       await communicationService.sendModelResponse(payload.requestId, {

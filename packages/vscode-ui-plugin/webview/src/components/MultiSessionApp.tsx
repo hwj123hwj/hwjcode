@@ -174,8 +174,6 @@ export const MultiSessionApp: React.FC = () => {
   const [compressionConfirmation, setCompressionConfirmation] = useState<CompressionConfirmationRequest | null>(null);
   // 🎯 压缩进行中状态
   const [isCompressing, setIsCompressing] = useState(false);
-  // 🎯 保存取消压缩时需要回滚到的原模型
-  const [previousModelBeforeSwitch, setPreviousModelBeforeSwitch] = useState<string | null>(null);
 
   // 🆕 流中断恢复状态
   const [streamRecoveryVisible, setStreamRecoveryVisible] = useState(false);
@@ -420,7 +418,6 @@ export const MultiSessionApp: React.FC = () => {
     setIsModelSwitching(false);
     setCompressionConfirmation(null);
     setIsCompressing(false);
-    setPreviousModelBeforeSwitch(null);
 
     // 4. 通知后端切换session
     getGlobalMessageService().switchSession(sessionId);
@@ -868,7 +865,6 @@ export const MultiSessionApp: React.FC = () => {
         setIsCompressing(false);
         setIsModelSwitching(false); // 🎯 切换彻底完成
         setCompressionConfirmation(null);
-        setPreviousModelBeforeSwitch(null); // 🎯 清除保存的原模型
       } else {
         console.warn('📊 [MultiSessionApp] Missing sessionId or modelName in payload!');
       }
@@ -1826,27 +1822,26 @@ User question: ${contentStr}`;
       return;
     }
 
-    // 🎯 记录旧模型，以便回滚
-    const previousModelId = selectedModelId;
+    // 🎯 已经是当前模型，无需切换
+    if (modelId === selectedModelId) return;
 
-    console.log('🤖 Attempting to change model:', previousModelId, '→', modelId);
-    setSelectedModelId(modelId);
-    setPreviousModelBeforeSwitch(previousModelId); // 🎯 保存原模型用于取消时回滚
-    setIsModelSwitching(true); // 🎯 开始切换
+    console.log('🤖 Attempting to change model:', selectedModelId, '→', modelId);
+
+    // 🎯 不做乐观更新：仅显示 loading，selectedModelId 保持原值
+    // 等后端 switchModel 真正成功（model_switch_complete 事件）时才更新 selectedModelId
+    // 这样保证：UI显示 = modelConfig = runtime，永远三者一致
+    setIsModelSwitching(true);
 
     try {
       await webviewModelService.setCurrentModel(modelId, state.currentSessionId || undefined);
-
-      // 🎯 如果调用 setCurrentModel 成功但没有抛异常，说明请求已发送
-      // 后续的处理由以下几种情况处理：
-      // 1. 如果需要压缩，onCompressionConfirmationRequest 会被触发
-      // 2. 如果不需要压缩或压缩完成，轮询会检测到模型已切换并清除 isModelSwitching
-      // 3. 前端的轮询机制（1000ms）会定期检查当前模型是否匹配预期模型
+      // 🎯 请求已发送，后续由以下机制驱动 UI 更新：
+      // 1. 不需要压缩 → 后端发 model_switch_complete → 前端 setSelectedModelId(目标模型)
+      // 2. 需要压缩 → onCompressionConfirmationRequest → 用户确认/取消 → 走对应分支
+      // 3. 兜底：1000ms 轮询检查 modelConfig 是否已变（防止事件丢失导致界面卡死）
     } catch (error) {
-      console.error('❌ Failed to change model, rolling back:', error);
-      setSelectedModelId(previousModelId); // 🎯 失败回滚
+      // 🎯 失败：什么都不动（selectedModelId 本就是旧值），仅关闭 loading
+      console.error('❌ Failed to change model:', error);
       setIsModelSwitching(false);
-      setPreviousModelBeforeSwitch(null);
     }
   };
 
@@ -2425,16 +2420,12 @@ User question: ${contentStr}`;
               confirmed: false
             });
 
-            // 🎯 立即回滚到原模型
-            console.log('🔄 [Compression] User cancelled, rolling back to:', previousModelBeforeSwitch);
-            if (previousModelBeforeSwitch) {
-              setSelectedModelId(previousModelBeforeSwitch);
-            }
+            // 🎯 不需要回滚 selectedModelId：因为新模式下没做乐观更新，它本就是旧模型
+            console.log('🔄 [Compression] User cancelled, staying on:', selectedModelId);
 
-            // 🎯 立即清除所有状态，停止模型切换流程
+            // 🎯 立即清除所有切换流程状态
             setIsModelSwitching(false);
             setCompressionConfirmation(null);
-            setPreviousModelBeforeSwitch(null);
           }
         }}
       />
