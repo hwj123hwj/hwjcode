@@ -81,7 +81,7 @@ export function findGitRoot(directory: string): string | null {
  *   3. not found in cwd, walk up until repo root → return that `.git`
  * @returns Absolute path to the real .git directory, or null if not in a repo.
  */
-function resolveGitDir(directory: string): string | null {
+export function resolveGitDir(directory: string): string | null {
   try {
     const root = findGitRoot(directory);
     if (!root) return null;
@@ -332,7 +332,7 @@ export function getSubdirectoryGitInfos(directory: string): Array<{
  *   2. Read `.git/HEAD` directly (handles detached HEAD and no-git-binary cases)
  *
  * @param directory The working directory
- * @returns 40-character hex SHA, or null if unavailable
+ * @returns 40-character lowercase hex SHA, or null if unavailable
  */
 export function getGitCommitSha(directory: string): string | null {
   // --- Strategy 1: invoke git ---
@@ -385,6 +385,7 @@ export function getGitProjectPath(directory: string): string | null {
 
     // SSH format: git@gitlab.example.com:namespace/repo.git
     //             git@gitlab.example.com:/namespace/repo.git (leading slash variant)
+    //             git@gitlab.example.com:group/subgroup/repo.git (multi-level subgroup)
     const sshMatch = remoteUrl.match(/:[/]?(.+?)(\.git)?$/);
     if (sshMatch && !remoteUrl.startsWith('http')) {
       return sshMatch[1].replace(/^\//, '');

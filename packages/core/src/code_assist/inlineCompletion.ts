@@ -6,6 +6,8 @@
 
 import { proxyAuthManager } from '../core/proxyAuth.js';
 import { getActiveProxyServerUrl } from '../config/proxyConfig.js';
+import { getSessionId } from '../utils/session.js';
+import { getGitBranch, getGitCommitSha, getGitProjectPath, getGitRemotes } from '../utils/gitUtils.js';
 
 /**
  * FIM 补全专用模型 - 固定使用 Codestral 2
@@ -279,6 +281,10 @@ export class InlineCompletionService {
         headers: {
           'Content-Type': 'application/json',
           ...userHeaders,
+          // 协议 v1.4.2 新增 header
+          'X-DVCode-Scene': 'inline_complete',
+          'X-Session-ID': getSessionId(),
+          ...getInlineGitHeaders(),
         },
         body: requestBody,
         signal: controller.signal,
@@ -385,5 +391,41 @@ export class InlineCompletionService {
    */
   clearCache(): void {
     this.cache.clear();
+  }
+}
+
+/**
+ * inline_complete 链路专用 git header 采集。
+ * 仅对内部员工（@cmcm.com / @orionstar.com / @aicfcf.com）发送，与主链路白名单一致。
+ * 静默处理所有异常，git 信息缺失不影响补全功能。
+ */
+const INTERNAL_EMAIL_DOMAINS = ['@cmcm.com', '@orionstar.com', '@aicfcf.com'];
+
+function getInlineGitHeaders(): Record<string, string> {
+  try {
+    const email = proxyAuthManager.getUserInfo()?.email?.toLowerCase() ?? '';
+    const isInternal = INTERNAL_EMAIL_DOMAINS.some((d) => email.endsWith(d));
+    if (!isInternal) return {};
+
+    const cwd = process.cwd();
+    const headers: Record<string, string> = {};
+
+    const remotes = getGitRemotes(cwd);
+    if (remotes) {
+      headers['X-Git-Remotes'] = JSON.stringify(remotes);
+    }
+
+    const branch = getGitBranch(cwd);
+    if (branch) headers['X-Git-Branch'] = branch;
+
+    const commitSha = getGitCommitSha(cwd);
+    if (commitSha) headers['X-Git-Commit'] = commitSha;
+
+    const projectPath = getGitProjectPath(cwd);
+    if (projectPath) headers['X-Git-Project-Path'] = projectPath;
+
+    return headers;
+  } catch {
+    return {};
   }
 }
