@@ -88,6 +88,12 @@
         "icon": "$(book)"
       },
       {
+        "command": "deepv.openGoalWizard",
+        "title": "Goal-Driven Mode",
+        "category": "DeepV Code",
+        "icon": "$(target)"
+      },
+      {
         "command": "deepv.revertToPrevious",
         "title": "Revert to Previous Version",
         "category": "DeepV Code",
@@ -169,6 +175,9 @@
         {
           "command": "deepv.generateTests",
           "when": "editorHasSelection"
+        },
+        {
+          "command": "deepv.openGoalWizard"
         }
       ]
     },
