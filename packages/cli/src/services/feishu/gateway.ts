@@ -55,6 +55,10 @@ export class FeishuGateway {
   private _onReady: (() => void) | null = null;
   private _onDisconnect: ((error?: Error) => void) | null = null;
 
+  /** 消息去重：记录已处理的消息 ID（LRU 缓存，最多保留 1000 条） */
+  private processedMessages: Set<string> = new Set();
+  private readonly maxProcessedMessages = 1000;
+
   /** 外部注入的消息处理回调 */
   onMessage: OnMessageCallback | null = null;
 
@@ -129,13 +133,15 @@ export class FeishuGateway {
         const message = event.message || {};
         const sender = event.sender || {};
 
-        // 解析文本内容
+        // 解析文本内容，确保始终返回字符串
         let text = '';
         try {
           const content = JSON.parse(message.content || '{}');
-          text = content.text || '';
+          // 确保 text 是字符串类型
+          text = typeof content.text === 'string' ? content.text : String(content.text || '');
         } catch {
-          text = message.content || '';
+          // JSON 解析失败，直接使用 content（确保转为字符串）
+          text = typeof message.content === 'string' ? message.content : String(message.content || '');
         }
 
         // 去掉 @bot 占位符
@@ -162,6 +168,20 @@ export class FeishuGateway {
           })),
           messageType: message.message_type || 'text',
         };
+
+        // 消息去重：跳过已处理的消息
+        if (this.processedMessages.has(feishuMsg.messageId)) {
+          console.log(`⏭️ 跳过重复消息: ${feishuMsg.messageId}`);
+          return { code: 0 };
+        }
+
+        // 记录已处理的消息（LRU 淘汰）
+        this.processedMessages.add(feishuMsg.messageId);
+        if (this.processedMessages.size > this.maxProcessedMessages) {
+          const iterator = this.processedMessages.values();
+          const oldest = iterator.next().value;
+          if (oldest) this.processedMessages.delete(oldest);
+        }
 
         if (this.onMessage) {
           try {
