@@ -64,38 +64,6 @@ function helpText(): string {
   ].join('\n');
 }
 
-/**
- * 解析命令参数
- */
-function parseArgs(args: string): { subcommand: string; flags: Record<string, string | boolean | string[]> } {
-  const parts = args.trim().split(/\s+/);
-  const subcommand = parts[0] || '';
-  const flags: Record<string, string | boolean | string[]> = {};
-  const positional: string[] = [];
-  let i = 1;
-  while (i < parts.length) {
-    const p = parts[i];
-    if (p.startsWith('--')) {
-      const key = p.slice(2);
-      // 如果下一个参数不是 -- 开头，则作为值
-      if (i + 1 < parts.length && !parts[i + 1].startsWith('--')) {
-        flags[key] = parts[i + 1];
-        i += 2;
-      } else {
-        flags[key] = true;
-        i += 1;
-      }
-    } else {
-      positional.push(p);
-      i += 1;
-    }
-  }
-  if (positional.length > 0) {
-    flags._ = positional;
-  }
-  return { subcommand, flags };
-}
-
 async function handleSetup(args: string): Promise<string> {
   const trimmed = args.trim();
   // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
@@ -548,48 +516,9 @@ async function handleInteractive(): Promise<string> {
   return '✅ 飞书 Bot 正在运行中。输入 /feishu stop 停止。';
 }
 
-/**
- * 主分发
- */
-async function feishuAction(_context: any, args: string): Promise<SlashCommandActionReturn | void> {
-  const trimmed = args.trim();
-  const { subcommand } = parseArgs(trimmed);
-
-  let output: string;
-
-  switch (subcommand) {
-    case 'setup':
-      output = await handleSetup(args.replace(/^setup\s*/i, ''));
-      break;
-    case 'start':
-      output = await handleStart(_context);
-      break;
-    case 'stop':
-      output = await handleStop();
-      break;
-    case 'status':
-      output = await handleStatus();
-      break;
-    case 'logout':
-      output = await handleLogout();
-      break;
-    case 'help':
-    case '--help':
-    case '-h':
-      output = helpText();
-      break;
-    case '':
-      output = await handleInteractive();
-      break;
-    default:
-      output = `未知子命令: ${subcommand}\n\n${helpText()}`;
-  }
-
-  return {
-    type: 'message',
-    messageType: 'info',
-    content: output,
-  };
+/** 通用 MessageActionReturn 包装 */
+function msg(content: string): SlashCommandActionReturn {
+  return { type: 'message', messageType: 'info', content };
 }
 
 export const feishuCommand: SlashCommand = {
@@ -597,7 +526,46 @@ export const feishuCommand: SlashCommand = {
   altNames: ['飞书'],
   description: '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
   kind: CommandKind.BUILT_IN,
-  action: feishuAction,
-  // ⚠ 不设置 subCommands：框架的 subCommand 匹配会吃掉子命令名，导致 args 不完整。
-  // feishuAction 内部的 parseArgs 自己处理子命令解析。
+
+  // /feishu（无子命令）→ 显示帮助
+  action: async () => msg(await handleInteractive()),
+
+  subCommands: [
+    {
+      name: 'setup',
+      description: '配置飞书应用凭证（扫码或手动输入）',
+      kind: CommandKind.BUILT_IN,
+      action: async (_ctx, args) => msg(await handleSetup(args)),
+    },
+    {
+      name: 'start',
+      description: '启动飞书 Bot（WS 长连接）',
+      kind: CommandKind.BUILT_IN,
+      action: async (ctx) => msg(await handleStart(ctx)),
+    },
+    {
+      name: 'stop',
+      description: '停止飞书 Bot',
+      kind: CommandKind.BUILT_IN,
+      action: async () => msg(await handleStop()),
+    },
+    {
+      name: 'status',
+      description: '查看飞书 Bot 连接状态',
+      kind: CommandKind.BUILT_IN,
+      action: async () => msg(await handleStatus()),
+    },
+    {
+      name: 'logout',
+      description: '清除飞书凭证并断开连接',
+      kind: CommandKind.BUILT_IN,
+      action: async () => msg(await handleLogout()),
+    },
+    {
+      name: 'help',
+      description: '显示飞书帮助',
+      kind: CommandKind.BUILT_IN,
+      action: async () => msg(helpText()),
+    },
+  ],
 };
