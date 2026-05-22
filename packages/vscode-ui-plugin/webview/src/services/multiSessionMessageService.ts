@@ -437,16 +437,26 @@ export class MultiSessionMessageService {
 
   /**
    * 发送聊天消息
+   *
+   * @param goalContext 可选 — /goal 模式启动元数据。仅由 GoalWizardDialog
+   *   提交路径传入；extension 侧在 onChatMessage 收到后会先 setGoalContext
+   *   再处理消息内容。详见 types/messages.ts 的 ChatMessage.goalContext 注释。
    */
-  sendChatMessage(sessionId: string, content: MessageContent, msgId: string) {
+  sendChatMessage(
+    sessionId: string,
+    content: MessageContent,
+    msgId: string,
+    goalContext?: { startedAt: number; hours: number; task: string },
+  ) {
     this.sendMessage({
       type: 'chat_message',
       payload: {
         sessionId,
         id: msgId,
         content,
-        timestamp: Date.now()
-      }
+        timestamp: Date.now(),
+        ...(goalContext ? { goalContext } : {}),
+      },
     });
   }
 
