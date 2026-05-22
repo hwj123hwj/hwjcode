@@ -4053,6 +4053,25 @@ function registerCommands(context: vscode.ExtensionContext) {
       }
     }),
 
+    // 🎯 打开目标驱动模式向导（/goal 等价命令）
+    vscode.commands.registerCommand('deepv.openGoalWizard', async () => {
+      logger.info('deepv.openGoalWizard command executed');
+      try {
+        // 先聚焦侧边栏（确保 webview 已经打开）
+        await vscode.commands.executeCommand('deepv.aiAssistant.focus');
+        // 等 webview ready，最多 3s
+        await communicationService.waitForReady(3000);
+        // 通知 webview 打开 GoalWizardDialog
+        await communicationService.sendMessage({
+          type: 'open_goal_wizard',
+          payload: {}
+        });
+      } catch (error) {
+        logger.error('Failed to open goal wizard', error instanceof Error ? error : undefined);
+        vscode.window.showErrorMessage('Failed to open Goal-Driven Mode');
+      }
+    }),
+
     // 🔌 MCP 相关命令
     vscode.commands.registerCommand('deepv.showMCPStatus', async () => {
       logger.info('deepv.showMCPStatus command executed');

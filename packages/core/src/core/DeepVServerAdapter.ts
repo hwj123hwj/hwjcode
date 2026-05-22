@@ -994,6 +994,19 @@ export class DeepVServerAdapter implements ContentGenerator {
     let totalBytesRead = 0;
     let lastUsageMetadata: any = null;
 
+    // 🛡️ 工具调用累积器：服务端常常把同一个 functionCall 拆成多个 SSE chunk
+    // 推送（先 name、再分批 args、最后 finishReason）。如果客户端把每个 chunk
+    // 立即 yield 给 Turn.run()，turn 会对每个 chunk 都执行
+    // handlePendingFunctionCall —— 结果就是把同一个工具调用 push 成多个残缺
+    // 的 ToolCallRequest（甚至出现 args 缺失或 name 缺失），最终
+    // finishReason=FUNCTION_CALL 但 functionCalls=0 / 或重复调用。
+    //
+    // 修复：仅对含 functionCall 的 chunk 累积合并，等流结束（[DONE] 或 reader.done）
+    // 才 yield 一次完整的合并 chunk。纯文本 chunk 仍然立即 yield，保留流式打字体感。
+    //
+    // 注：mergeStreamContent 之前是死代码（定义但从未调用）；此处启用它。
+    let accumulatedToolChunk: any = null;
+
     // 🎯 关键保护机制：监听客户端取消信号
     // 当用户中断时，立即释放流读取器并停止消费数据
     const handleAbort = () => {
@@ -1087,7 +1100,15 @@ export class DeepVServerAdapter implements ContentGenerator {
         }
 
         const { done, value } = readResult;
-        if (done) break;
+        if (done) {
+          // 🛡️ 流自然结束：flush 累积的工具调用 chunk
+          if (accumulatedToolChunk) {
+            this.finalizeAccumulatedToolChunk(accumulatedToolChunk);
+            yield accumulatedToolChunk;
+            accumulatedToolChunk = null;
+          }
+          break;
+        }
 
         totalBytesRead += value.length;
         buffer += decoder.decode(value, { stream: true });
@@ -1098,6 +1119,12 @@ export class DeepVServerAdapter implements ContentGenerator {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') {
+              // 🛡️ 收到 [DONE]：flush 累积的工具调用 chunk
+              if (accumulatedToolChunk) {
+                this.finalizeAccumulatedToolChunk(accumulatedToolChunk);
+                yield accumulatedToolChunk;
+                accumulatedToolChunk = null;
+              }
               return; // 流结束
             }
 
@@ -1119,9 +1146,33 @@ export class DeepVServerAdapter implements ContentGenerator {
                 lastUsageMetadata = chunk.usageMetadata;
               }
 
-              // 🚀 立即转换并发送 - 真正的流式
+              // 🚀 立即转换 - 但是否立即 yield 取决于 chunk 是否含 functionCall
               const genaiResponse = this.convertStreamChunkToGenAI(chunk);
-              if (genaiResponse) {
+              if (!genaiResponse) {
+                continue;
+              }
+
+              // 🛡️ 区分工具调用 chunk 与纯文本 chunk
+              const parts = genaiResponse.candidates?.[0]?.content?.parts ?? [];
+              const hasFunctionCall = parts.some((p: any) => p.functionCall);
+
+              if (hasFunctionCall) {
+                // 含 functionCall 的 chunk —— 不立即 yield，先累积合并
+                accumulatedToolChunk = this.mergeStreamContent(
+                  accumulatedToolChunk,
+                  genaiResponse,
+                );
+              } else if (accumulatedToolChunk) {
+                // 已经在累积工具调用了：把后续 chunk（可能携带 finishReason
+                // 或 usageMetadata）也合并进去，等流结束再统一发出。
+                // 这样能避免 finishReason 提前到达 turn.ts 时 functionCalls
+                // 还没合并完整的竞态。
+                accumulatedToolChunk = this.mergeStreamContent(
+                  accumulatedToolChunk,
+                  genaiResponse,
+                );
+              } else {
+                // 纯文本 / thought / reasoning chunk —— 立即 yield，保留流式
                 yield genaiResponse;
               }
 
@@ -1203,71 +1254,161 @@ export class DeepVServerAdapter implements ContentGenerator {
   }
 
   /**
-   * 🆕 合并流式内容（用于累积显示）
+   * 把累积器里残留的"字符串形式 args"归一化成对象。
+   *
+   * server 端流式分片可能把 args 作为 JSON 字符串增量推送（"{\"k\":", "\"v\"}"），
+   * mergeStreamContent 仅做字符串拼接；但下游 SchemaValidator 期望 args 是
+   * 对象，不归一会报 "params must be an object"。在 yield 累积器前调用此函数。
+   *
+   * 失败容忍：JSON.parse 抛错时保持原字符串不动，让下游能输出更准确的错误。
+   */
+  private finalizeAccumulatedToolChunk(chunk: any): void {
+    const parts = chunk?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) return;
+    for (const p of parts) {
+      const fc = p?.functionCall;
+      if (!fc) continue;
+      if (typeof fc.args === 'string') {
+        const trimmed = fc.args.trim();
+        if (trimmed.length === 0) {
+          fc.args = {};
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object') {
+            fc.args = parsed;
+          }
+        } catch (e) {
+          console.warn(
+            `[DeepV Server] Failed to parse accumulated functionCall.args as JSON for tool "${fc.name}". Keeping raw string for downstream error reporting. Raw: ${trimmed.substring(0, 200)}`,
+          );
+        }
+      } else if (fc.args === undefined || fc.args === null) {
+        fc.args = {};
+      }
+    }
+  }
+
+  /**
+   * 合并流式 chunk 到累积器中。
+   *
+   * 用于把 SSE 工具调用流（一个 functionCall 被服务端拆成多个 chunk：
+   * 先 name、再分批 args、最后 finishReason）重新拼回成一个完整的 chunk，
+   * 然后由 createStreamGenerator 在流结束时一次性 yield 给上层。这样
+   * Turn.run 看到的"含 functionCall 的 chunk"就一定是完整的、最终的，
+   * 不会出现 turn.ts 对同一个工具调用 push 多个残缺 ToolCallRequest。
+   *
+   * 关键点：
+   *   - 第一次合并（accumulated === null）做深拷贝，避免污染原始 chunk；
+   *   - 遍历 newChunk 的所有 parts（不是只看 parts[0]），同 chunk 同时
+   *     含 text + functionCall 的情况也能正确处理；
+   *   - 文本 part 累积到 accumulator 末尾的同质 part 上，避免文本碎片；
+   *   - functionCall part 按"最后一个未完成的 functionCall"原则合并：
+   *     先取 accumulator 末尾若是 functionCall 就 in-place 合并；否则
+   *     新增一个独立 part；
+   *   - args 的合并兼容字符串增量（流式 JSON 拼接）和对象增量（浅合并）；
+   *   - usageMetadata 与 finishReason 始终用最新 chunk 的值覆盖累积器。
    */
   private mergeStreamContent(accumulated: any, newChunk: GenerateContentResponse): GenerateContentResponse {
     if (!accumulated) {
-      return newChunk;
+      // 🛡️ 深拷贝首个含 functionCall 的 chunk 作为累积器底座，避免后续
+      // mutate 污染原始 chunk（原始 chunk 的 candidates 引用可能被其他
+      // 路径读取，例如 chunks[] 历史持久化）。
+      const cloned: any = {
+        candidates: newChunk.candidates ? structuredClone(newChunk.candidates) : [],
+        usageMetadata: newChunk.usageMetadata,
+      };
+      // 重新挂上 functionCalls getter（structuredClone 会丢掉 defineProperty 注入）
+      Object.defineProperty(cloned, 'functionCalls', {
+        get: function () {
+          const parts = this.candidates?.[0]?.content?.parts;
+          if (!parts || parts.length === 0) return undefined;
+          const fcs = parts
+            .filter((p: any) => p.functionCall)
+            .map((p: any) => p.functionCall)
+            .filter((fc: any) => fc !== undefined);
+          return fcs.length === 0 ? undefined : fcs;
+        },
+        enumerable: false,
+        configurable: true,
+      });
+
+      // 🚀 ID 补全：首个 chunk 里若有 functionCall 但缺 id，立即补全
+      const firstParts = cloned.candidates?.[0]?.content?.parts || [];
+      for (const p of firstParts) {
+        if (p.functionCall && !p.functionCall.id) {
+          const generatedId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          console.log(`[DeepV Server] 补全缺失的工具 ID (Merge init): ${p.functionCall.name} -> ${generatedId}`);
+          p.functionCall.id = generatedId;
+        }
+      }
+
+      return cloned as GenerateContentResponse;
     }
 
-    // 合并文本内容
-    const accumulatedParts = accumulated.candidates?.[0]?.content?.parts || [];
-    const newParts = newChunk.candidates?.[0]?.content?.parts || [];
+    const accumulatedParts: any[] = accumulated.candidates?.[0]?.content?.parts || [];
+    const newParts: any[] = newChunk.candidates?.[0]?.content?.parts || [];
 
-    if (newParts.length > 0 && newParts[0].text) {
-      // 如果有新的文本，累积到现有文本中
-      const lastAccPart = accumulatedParts[accumulatedParts.length - 1];
-      if (lastAccPart && lastAccPart.text && !lastAccPart.functionCall) {
-        lastAccPart.text += newParts[0].text;
-      } else {
-        accumulatedParts.push(...newParts);
+    // 🛡️ 遍历新 chunk 的每一个 part，按 part 类型分别合并
+    for (const newPart of newParts) {
+      if (newPart.text !== undefined) {
+        // 文本累积：粘到 accumulator 末尾同质（纯 text、无 functionCall）part 上
+        const lastAccPart = accumulatedParts[accumulatedParts.length - 1];
+        if (lastAccPart && lastAccPart.text !== undefined && !lastAccPart.functionCall) {
+          lastAccPart.text = (lastAccPart.text || '') + (newPart.text || '');
+        } else {
+          accumulatedParts.push({ ...newPart });
+        }
+        continue;
       }
-    } else if (newParts.length > 0 && newParts[0].functionCall) {
-      // 🎯 修复：合并流式工具调用内容
-      const lastAccPart = accumulatedParts[accumulatedParts.length - 1];
-      const newPart = newParts[0];
 
-      if (lastAccPart && lastAccPart.functionCall) {
-        // 如果最后一个部分也是工具调用，则进行合并
-        const accFc = lastAccPart.functionCall;
-        const newFc = newPart.functionCall;
+      if (newPart.functionCall) {
+        // functionCall 合并：找 accumulator 末尾是否已有 functionCall，
+        // 优先 in-place 合并（同一 callId / 同一 part 的增量 chunk）。
+        const lastAccPart = accumulatedParts[accumulatedParts.length - 1];
+        if (lastAccPart && lastAccPart.functionCall) {
+          const accFc = lastAccPart.functionCall;
+          const newFc = newPart.functionCall;
 
-        if (newFc) {
-          // 合并基础字段
-          // 🛡️ FIX: trim 工具名称，防止模型返回带空格的工具名
-          if (newFc.name) accFc.name = newFc.name.trim();
-          // 如果新分片有 ID，覆盖旧的（通常 ID 在第一个分片）
+          // 🛡️ name: trim 防止模型返回带空格的工具名
+          if (newFc.name) accFc.name = String(newFc.name).trim();
+          // id 通常在第一个分片就到，但若后到也覆盖
           if (newFc.id) accFc.id = newFc.id;
 
-          // 合并参数 (args)
-          if (newFc.args) {
+          // args 增量合并
+          if (newFc.args !== undefined && newFc.args !== null) {
             if (typeof newFc.args === 'string' && typeof accFc.args === 'string') {
-              // 如果是增量字符串（常见于流式 JSON 片段），进行累加
-              accFc.args += newFc.args;
-            } else if (typeof newFc.args === 'object' && newFc.args !== null) {
-              // 如果已经是解析好的对象，进行浅合并
+              accFc.args = (accFc.args || '') + newFc.args;
+            } else if (typeof newFc.args === 'object') {
               accFc.args = {
-                ...(typeof accFc.args === 'object' ? accFc.args : {}),
-                ...newFc.args
+                ...(typeof accFc.args === 'object' && accFc.args ? accFc.args : {}),
+                ...newFc.args,
               };
             } else {
-              // 其他情况直接覆盖
               accFc.args = newFc.args;
             }
           }
+        } else {
+          // 新的独立 functionCall part
+          const partToPush: any = { ...newPart, functionCall: { ...newPart.functionCall } };
+          if (!partToPush.functionCall.id) {
+            const generatedId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            console.log(`[DeepV Server] 补全缺失的工具 ID (Merge): ${partToPush.functionCall.name} -> ${generatedId}`);
+            partToPush.functionCall.id = generatedId;
+          }
+          accumulatedParts.push(partToPush);
         }
-      } else {
-        // 否则直接添加新部分
-        const partToPush = { ...newPart };
-        // 🚀 关键增强：如果模型返回的工具调用缺失 ID，在客户端侧补全它
-        // 这确保了内部状态追踪和后续发回模型的 response ID 保持一致
-        if (partToPush.functionCall && !partToPush.functionCall.id) {
-          const generatedId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          console.log(`[DeepV Server] 补全缺失的工具 ID: ${partToPush.functionCall.name} -> ${generatedId}`);
-          partToPush.functionCall.id = generatedId;
-        }
-        accumulatedParts.push(partToPush);
+        continue;
       }
+
+      // 其他类型 part（thought / functionResponse 等）：直接 push（不合并）
+      accumulatedParts.push({ ...newPart });
+    }
+
+    // 确保 candidates[0].content.parts 引用回写（万一 accumulator 没建立 parts）
+    if (accumulated.candidates?.[0]?.content) {
+      accumulated.candidates[0].content.parts = accumulatedParts;
     }
 
     // 更新使用统计（使用最新的）
@@ -1275,9 +1416,10 @@ export class DeepVServerAdapter implements ContentGenerator {
       accumulated.usageMetadata = newChunk.usageMetadata;
     }
 
-    // 更新完成原因
-    if (newChunk.candidates?.[0]?.finishReason) {
-      accumulated.candidates[0].finishReason = newChunk.candidates[0].finishReason;
+    // 更新完成原因（始终以最新 chunk 为准）
+    const newFinishReason = newChunk.candidates?.[0]?.finishReason;
+    if (newFinishReason && accumulated.candidates?.[0]) {
+      accumulated.candidates[0].finishReason = newFinishReason;
     }
 
     return accumulated;
