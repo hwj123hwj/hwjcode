@@ -347,6 +347,31 @@ export class Turn {
         // Handle function calls (requesting tool execution)
         const functionCalls = resp.functionCalls ?? [];
         for (const fnCall of functionCalls) {
+          // 🛡️ 防御：跳过明显残缺的 functionCall（无 name 或 name 为空）。
+          // 流式合并失败时（DeepVServerAdapter.mergeStreamContent 兜底之外
+          // 的边缘情况）可能会传到这里。残缺的 fnCall 进入 pendingToolCalls
+          // 后会以 "undefined_tool_name" 调度，污染会话历史并导致后续模型
+          // 困惑。这里直接丢弃 + 警告。
+          const fnName = (fnCall.name || '').toString().trim();
+          if (!fnName) {
+            console.warn(
+              `[Turn] Dropping incomplete functionCall (no name). args=${JSON.stringify(fnCall.args ?? null).substring(0, 200)}`,
+            );
+            continue;
+          }
+          // 🛡️ 防御：去重 callId。流式合并失败可能让同一 callId 的 functionCall
+          // 在多个 chunk 里被反复 push。pendingToolCalls 重复会导致工具被多次
+          // 调度，污染历史。
+          const callId = fnCall.id;
+          if (
+            callId &&
+            this.pendingToolCalls.some((tc) => tc.callId === callId)
+          ) {
+            console.warn(
+              `[Turn] Dropping duplicate functionCall with callId=${callId} name=${fnName}`,
+            );
+            continue;
+          }
           const event = this.handlePendingFunctionCall(fnCall);
           if (event) {
             yield event;
