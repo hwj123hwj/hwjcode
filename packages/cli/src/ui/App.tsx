@@ -29,6 +29,7 @@ import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
 import { useDebateWizard } from './hooks/useDebateWizard.js';
+import { useGoalWizard } from './hooks/useGoalWizard.js';
 import { useAuthCommand } from './hooks/useAuthCommand.js';
 import { useLoginCommand } from './hooks/useLoginCommand.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
@@ -56,6 +57,7 @@ import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
 import { DebateWizard } from './components/DebateWizard.js';
+import { GoalWizard } from './components/GoalWizard.js';
 import { DebateIndicator } from './components/DebateIndicator.js';
 import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
@@ -871,6 +873,47 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     advanceAbortRef: debateAdvanceAbortRef,
   });
 
+  // 🎯 目标驱动模式向导。和 debate 一样，submitQuery 在下面才被定义，
+  // 走同一个 ref 中转。
+  const submitQueryForGoalRef = useRef<DebateSubmitQuery | null>(null);
+  const {
+    isGoalWizardOpen,
+    openGoalWizard,
+    handleGoalWizardComplete,
+    handleGoalWizardCancel,
+  } = useGoalWizard({
+    config,
+    addItem,
+    submitQuery: (q, o) => {
+      const impl = submitQueryForGoalRef.current;
+      if (impl) {
+        impl(q, o);
+        return;
+      }
+      // submitQuery 尚未挂上：与 debate 同样的 race window，轮询重试 1s。
+      const deadline = Date.now() + 1000;
+      const tick = () => {
+        const impl2 = submitQueryForGoalRef.current;
+        if (impl2) {
+          impl2(q, o);
+          return;
+        }
+        if (Date.now() > deadline) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: t('goalWizard.submit_not_ready'),
+            },
+            Date.now(),
+          );
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      setTimeout(tick, 50);
+    },
+  });
+
   const {
     isSettingsMenuDialogOpen,
     openSettingsMenuDialog,
@@ -991,7 +1034,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     addItem(
       {
         type: MessageType.INFO,
-        text: 'Refreshing hierarchical memory (DEEPV.md or other context files)...',
+        text: t('memory.refreshing'),
       },
       Date.now(),
     );
@@ -1009,9 +1052,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       config.setGeminiMdFileCount(fileCount);
       setGeminiMdFileCount(fileCount);
 
-      let successMessage = `Memory refreshed successfully. ${memoryContent.length > 0 ? `Loaded ${memoryContent.length} characters from ${fileCount} file(s).` : 'No memory content found.'}`;
-      if (fileCount > 0 && filePaths.length > 0) {
-        successMessage += `\nMemory files:\n${filePaths.map(f => `  - ${f}`).join('\n')}`;
+      let successMessage = memoryContent.length > 0 ? tp('memory.refresh_success_loaded', { characters: memoryContent.length, count: fileCount }) : t('memory.refresh_success_no_content');      if (fileCount > 0 && filePaths.length > 0) {
+        successMessage += tp('memory.files_list', { files: filePaths.map(f => `  - ${f}`).join('\n') });
       }
 
       addItem(
@@ -1034,7 +1076,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       addItem(
         {
           type: MessageType.ERROR,
-          text: `Error refreshing memory: ${errorMessage}`,
+          text: tp('memory.refresh_error', { errorMessage }),
         },
         Date.now(),
       );
@@ -1235,6 +1277,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openPluginInstallDialog, // 🆕 传递 openPluginInstallDialog
     openDebateWizard, // 🎭 传递 openDebateWizard
     handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
+    openGoalWizard, // 🎯 传递 openGoalWizard
   );
 
   const {
@@ -1272,6 +1315,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 发开场白（提交给首个模型）。effect 每次 submitQuery 引用变化时更新。
   useEffect(() => {
     submitQueryForDebateRef.current = submitQuery;
+    submitQueryForGoalRef.current = submitQuery;
   }, [submitQuery]);
 
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
@@ -2427,6 +2471,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onLanguageSelected={handleDebateLanguageSelected}
               />
             </Box>
+          ) : isGoalWizardOpen ? (
+            <Box flexDirection="column">
+              <GoalWizard
+                onComplete={handleGoalWizardComplete}
+                onCancel={handleGoalWizardCancel}
+              />
+            </Box>
           ) : isPluginInstallDialogOpen ? (
             <Box flexDirection="column">
               <PluginInstallDialog
@@ -2789,7 +2840,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}

@@ -34,6 +34,38 @@ describe('MicroCompactService', () => {
       service.setEnabled(false);
       expect(service.shouldMicroCompact()).toBe(false);
     });
+
+    // ─────────── 回归测试：shouldMicroCompact 双触发条件 ───────────
+    it('should trigger when idle exceeds idleThresholdMinutes', () => {
+      // 条件1：长时间空闲（>= idleThresholdMinutes，本测试用例为 60 分钟）
+      (service as any).lastAssistantMessageTime = Date.now() - (61 * 60 * 1000);
+      expect(service.shouldMicroCompact()).toBe(true);
+    });
+
+    it('should trigger when token usage is high AND idle > 6 minutes', () => {
+      // 条件2：tokenUsageRatio >= tokenUsageThreshold（默认 0.7）且 idle > 6 分钟
+      (service as any).lastAssistantMessageTime = Date.now() - (7 * 60 * 1000); // 7 分钟前
+      expect(service.shouldMicroCompact(0.75)).toBe(true);
+    });
+
+    it('should NOT trigger token-based path when idle <= 6 minutes', () => {
+      // 即使 token 用量超阈值，如果 idle <= 6 分钟，缓存仍热，不触发
+      (service as any).lastAssistantMessageTime = Date.now() - (5 * 60 * 1000);
+      expect(service.shouldMicroCompact(0.95)).toBe(false);
+    });
+
+    it('should NOT trigger token-based path when ratio below threshold', () => {
+      (service as any).lastAssistantMessageTime = Date.now() - (10 * 60 * 1000);
+      // tokenUsageThreshold 默认 0.7，0.5 < 0.7 不触发
+      expect(service.shouldMicroCompact(0.5)).toBe(false);
+    });
+
+    it('should NOT trigger when disabled even if idle exceeds threshold', () => {
+      service.setEnabled(false);
+      (service as any).lastAssistantMessageTime = Date.now() - (61 * 60 * 1000);
+      expect(service.shouldMicroCompact()).toBe(false);
+      expect(service.shouldMicroCompact(0.99)).toBe(false);
+    });
   });
 
   describe('microCompactMessages', () => {
@@ -58,13 +90,22 @@ describe('MicroCompactService', () => {
       { role: 'user', parts: [{ functionResponse: { name: 'read_file', response: { output: 'File content B' }, id: 'call_5' } } as any] },
     ];
 
-    it('should not clear when not idle enough', () => {
+    it('should not clear when not idle enough (gated by shouldMicroCompact at call site)', () => {
+      // 业务设计：microCompactMessages 本身不再检查 idle 时间，只看 enabled。
+      // idle 判断由调用方在调用前通过 shouldMicroCompact() 把关
+      // （见 packages/core/src/core/client.ts 的 runMicroCompactFallback 调用链）。
+      // 因此本用例从 shouldMicroCompact 的 gate 视角验证："recently active 时不应该触发微压缩"。
       const history = createHistoryWithToolResults();
       service.updateLastAssistantMessageTime(); // just active
-      const result = service.microCompactMessages(history, 2);
 
-      expect(result.applied).toBe(false);
-      expect(result.clearedCount).toBe(0);
+      // gate：active 状态下 shouldMicroCompact 应返回 false，调用方不会调用 microCompactMessages
+      expect(service.shouldMicroCompact()).toBe(false);
+
+      // 直接调用（绕过 gate）会按设计执行清理 —— 验证"绕过 gate"行为符合业务设计
+      const result = service.microCompactMessages(history, 2);
+      // 4 个可压缩工具结果（read_file x2, search_file_content, glob），keepRecent=2 → 清掉 2 个
+      expect(result.applied).toBe(true);
+      expect(result.clearedCount).toBe(2);
     });
 
     it('should clear old compactable tool results when idle', () => {

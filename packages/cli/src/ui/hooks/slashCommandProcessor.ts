@@ -71,6 +71,7 @@ export const useSlashCommandProcessor = (
   openPluginInstallDialog?: () => void, // 🆕 接收 openPluginInstallDialog
   openDebateWizard?: () => void, // 🎭 接收 openDebateWizard
   resumeDebate?: () => void, // 🎭 接收 resumeDebate (由 /debate continue 触发)
+  openGoalWizard?: () => void, // 🎯 接收 openGoalWizard (由 /goal 触发)
 ) => {
   const session = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
@@ -417,6 +418,12 @@ export const useSlashCommandProcessor = (
                       setShowHelp(false);
                       if (resumeDebate) {
                         resumeDebate();
+                      }
+                      return { type: 'handled' };
+                    case 'goal-wizard':
+                      setShowHelp(false);
+                      if (openGoalWizard) {
+                        openGoalWizard();
                       }
                       return { type: 'handled' };
                     default: {

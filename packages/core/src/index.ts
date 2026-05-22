@@ -127,6 +127,7 @@ export * from './tools/read-many-files.js';
 export * from './tools/read-lints.js';
 export * from './tools/lint-fix.js';
 export * from './tools/ask-user-question.js';
+export * from './tools/local-time.js';
 export * from './tools/mcp-client.js';
 export * from './tools/mcp-tool.js';
 

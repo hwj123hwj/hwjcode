@@ -440,6 +440,7 @@ export type ExtensionToWebViewMessage =
   | { type: 'rules_save_response'; payload: { success: boolean; error?: string } }
   | { type: 'rules_delete_response'; payload: { success: boolean; error?: string } }
   | { type: 'open_rules_management'; payload: {} }
+  | { type: 'open_goal_wizard'; payload: {} }
   // 🎯 NanoBanana 图像生成（支持多轮会话 + 多图参考）
   | { type: 'nanobanana_upload_response'; payload: { success: boolean; publicUrl?: string; error?: string } }
   | { type: 'nanobanana_batch_upload_response'; payload: { success: boolean; publicUrls?: string[]; error?: string } }
