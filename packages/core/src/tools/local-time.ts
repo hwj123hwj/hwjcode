@@ -10,32 +10,33 @@ import { BaseTool, Icon, ToolResult } from './tools.js';
 import { Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 
+/**
+ * Parameters for the LocalTimeTool.
+ */
 export interface LocalTimeParams {
+  /**
+   * Optional IANA timezone name (e.g. "Asia/Shanghai", "UTC").
+   * If omitted, the system local timezone is used.
+   */
   timezone?: string;
 }
 
-const LOCAL_TIME_DESCRIPTION =
-  'Returns the current wall-clock local time of the machine running DeepV Code.\n\n' +
-  'Use this tool to:\n' +
-  '- Determine the current real-world time.\n' +
-  '- Record a "start time" at the beginning of a long task.\n' +
-  '- Calculate elapsed task duration by comparing two readings.\n' +
-  '- Timestamp checkpoints, logs, or todo updates.\n\n' +
-  'The tool is fast, side-effect free, and never requires user confirmation, so you may call it as often as needed.\n\n' +
-  'Returned JSON fields: iso (ISO 8601 UTC timestamp), unix_ms (number), unix_s (number), timezone (IANA name), local (YYYY-MM-DD HH:MM:SS), weekday (English).';
-
 /**
- * LocalTimeTool — returns current wall-clock time. Pure function, no side effects.
+ * A tool that returns the current wall-clock local time of the host machine.
+ * Pure function with no external I/O. Used by /goal mode for elapsed checks
+ * but generally useful for any time-stamping or duration calculation.
  */
 export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
   static readonly Name: string = 'local_time';
 
+  // Config is accepted for parity with other core tools, even though this
+  // tool does not need any configuration at runtime.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  constructor(private readonly _config: Config) {
+  constructor(private readonly config: Config) {
     super(
       LocalTimeTool.Name,
       'LocalTime',
-      LOCAL_TIME_DESCRIPTION,
+      'Returns the current wall-clock local time of the machine running DeepV Code. Use this tool to determine the current real-world time, record a start time at the beginning of a long task, calculate elapsed task duration by comparing two readings, or timestamp checkpoints, logs, or todo updates. The tool is fast, side-effect free, and never requires user confirmation, so you may call it as often as needed. Returned JSON fields: iso (ISO 8601 UTC timestamp), unix_ms (number), unix_s (number), timezone (IANA name), local (YYYY-MM-DD HH:MM:SS), weekday (English).',
       Icon.Info,
       {
         type: Type.OBJECT,
@@ -51,7 +52,10 @@ export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
     );
   }
 
-  override validateToolParams(params: LocalTimeParams): string | null {
+  /**
+   * Validates the parameters for the LocalTimeTool.
+   */
+  validateToolParams(params: LocalTimeParams): string | null {
     const errors = SchemaValidator.validate(
       this.schema.parameters,
       params,
@@ -72,13 +76,13 @@ export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
     return null;
   }
 
-  override getDescription(params: LocalTimeParams): string {
+  getDescription(params: LocalTimeParams): string {
     return params.timezone
       ? `Get current time in timezone "${params.timezone}"`
       : 'Get current local time';
   }
 
-  override async execute(
+  async execute(
     params: LocalTimeParams,
     _signal: AbortSignal,
   ): Promise<ToolResult> {
@@ -108,7 +112,7 @@ export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
         timeZone: tz,
       }).format(now);
     } catch (error) {
-      // Invalid timezone — fall back to system local but report which one failed.
+      // Invalid timezone - fall back to system local but report which one failed.
       tz = systemTz;
       local = formatLocal(now, tz);
       weekday = new Intl.DateTimeFormat('en-US', {
@@ -132,7 +136,7 @@ export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
     }
 
     const display = warning
-      ? `Local time: ${local} (${tz}, ${weekday}) — ${warning}`
+      ? `Local time: ${local} (${tz}, ${weekday}) - ${warning}`
       : `Local time: ${local} (${tz}, ${weekday})`;
 
     return {

@@ -226,13 +226,17 @@ describe('Turn', () => {
       );
     });
 
-    it('should handle function calls with undefined name or args', async () => {
+    it('should drop function calls with empty name and accept only well-formed ones', async () => {
+      // 🛡️ 防御性修复（2026-05-22）：流式合并失败时残缺的 functionCall
+      // 不应进入 pendingToolCalls。Turn.run() 现在会丢弃 name 为空 / 重复
+      // callId 的 functionCall，仅保留具备 name 的项。args 缺失时由
+      // handlePendingFunctionCall 兜底成 {}。
       const mockResponseStream = (async function* () {
         yield {
           functionCalls: [
-            { id: 'fc1', name: undefined, args: { arg1: 'val1' } },
-            { id: 'fc2', name: 'tool2', args: undefined },
-            { id: 'fc3', name: undefined, args: undefined },
+            { id: 'fc1', name: undefined, args: { arg1: 'val1' } }, // 应丢弃 (no name)
+            { id: 'fc2', name: 'tool2', args: undefined },           // 应保留 (args -> {})
+            { id: 'fc3', name: undefined, args: undefined },         // 应丢弃 (no name)
           ],
         } as unknown as GenerateContentResponse;
       })();
@@ -246,22 +250,11 @@ describe('Turn', () => {
         events.push(event);
       }
 
-      expect(events.length).toBe(3);
+      // 只有 fc2 (name='tool2') 通过防御过滤
+      expect(events.length).toBe(1);
       const event1 = events[0] as ServerGeminiToolCallRequestEvent;
       expect(event1.type).toBe(GeminiEventType.ToolCallRequest);
       expect(event1.value).toEqual(
-        expect.objectContaining({
-          callId: 'fc1',
-          name: 'undefined_tool_name',
-          args: { arg1: 'val1' },
-          isClientInitiated: false,
-        }),
-      );
-      expect(turn.pendingToolCalls[0]).toEqual(event1.value);
-
-      const event2 = events[1] as ServerGeminiToolCallRequestEvent;
-      expect(event2.type).toBe(GeminiEventType.ToolCallRequest);
-      expect(event2.value).toEqual(
         expect.objectContaining({
           callId: 'fc2',
           name: 'tool2',
@@ -269,20 +262,39 @@ describe('Turn', () => {
           isClientInitiated: false,
         }),
       );
-      expect(turn.pendingToolCalls[1]).toEqual(event2.value);
-
-      const event3 = events[2] as ServerGeminiToolCallRequestEvent;
-      expect(event3.type).toBe(GeminiEventType.ToolCallRequest);
-      expect(event3.value).toEqual(
-        expect.objectContaining({
-          callId: 'fc3',
-          name: 'undefined_tool_name',
-          args: {},
-          isClientInitiated: false,
-        }),
-      );
-      expect(turn.pendingToolCalls[2]).toEqual(event3.value);
+      expect(turn.pendingToolCalls.length).toBe(1);
+      expect(turn.pendingToolCalls[0]).toEqual(event1.value);
       expect(turn.getDebugResponses().length).toBe(1);
+    });
+
+    it('should drop duplicate function calls with the same callId across chunks', async () => {
+      // 🛡️ 防御性修复（2026-05-22）：流式合并失败时同一 callId 的 functionCall
+      // 可能在多个 chunk 里被重复 push。Turn.run() 现在去重 callId。
+      const mockResponseStream = (async function* () {
+        yield {
+          functionCalls: [
+            { id: 'dup-id', name: 'tool_x', args: { a: 1 } },
+            { id: 'dup-id', name: 'tool_x', args: { a: 1 } }, // 应丢弃 (duplicate callId)
+            { id: 'unique-id', name: 'tool_y', args: { b: 2 } },
+          ],
+        } as unknown as GenerateContentResponse;
+      })();
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+      const events = [];
+      const reqParts: Part[] = [{ text: 'Test duplicate tool calls' }];
+      for await (const event of turn.run(
+        reqParts,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events.length).toBe(2);
+      expect(turn.pendingToolCalls.length).toBe(2);
+      expect(turn.pendingToolCalls[0].callId).toBe('dup-id');
+      expect(turn.pendingToolCalls[0].name).toBe('tool_x');
+      expect(turn.pendingToolCalls[1].callId).toBe('unique-id');
+      expect(turn.pendingToolCalls[1].name).toBe('tool_y');
     });
 
     it('should yield finished event when response has finish reason', async () => {
