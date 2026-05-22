@@ -10,7 +10,6 @@ import {
   PartListUnion,
   Content,
   Tool,
-  GenerateContentResponse,
 } from '@google/genai';
 import { getFolderStructure } from '../utils/getFolderStructure.js';
 import { detectTerminalEnvironment, formatTerminalInfo } from '../utils/terminalDetection.js';
@@ -47,10 +46,14 @@ import { ideContext } from '../ide/ideContext.js';
 import { logFlashDecidedToContinue } from '../telemetry/loggers.js';
 import { FlashDecidedToContinueEvent, LoopType } from '../telemetry/types.js';
 import { logger } from '../utils/enhancedLogger.js';
+import {
+  buildGoalContinuationMessage,
+  type GoalContext,
+} from '../utils/goalContinuationPrompt.js';
 
 import { DeepVServerAdapter } from './DeepVServerAdapter.js';
 
-function isThinkingSupported(model: string) {
+function isThinkingSupported(_model: string) {
   // ✅ 服务端内部决定模型 - 客户端总是尝试启用thinking
   // 如果服务端选择的模型不支持，会被忽略，不会出错
   return true; // 让服务端处理thinking支持判断
@@ -86,6 +89,18 @@ export class GeminiClient {
   private compressionThreshold: number = 0.8; // 动态压缩阈值
   private readonly emergencyStopThreshold: number = 0.9; // 🚨 紧急制动阈值：90%
   private needsCompression: boolean = false; // 是否需要在下次对话前压缩
+
+  /**
+   * /goal 模式上下文，仅在内存中保留。
+   *
+   * 设置时机：useGoalWizard 在 submitQuery 之前调用 setGoalContext。
+   * 用途：自动压缩 (tryCompressChat) 完成后，如果该字段非空，
+   *       会把原始 goal prompt + T0 时间锚 + 行动指令重新注入历史，
+   *       防止 summarizer 把契约（最低工时、no-stop 纪律、安全栏等）压没了。
+   * 清除时机：用户再次执行 /goal（被新 goal 覆盖）；进程退出（自动）。
+   * 不清除的情况：/clear（仅清屏不清上下文）；普通会话切换。
+   */
+  private activeGoalContext: GoalContext | null = null;
 
   constructor(private config: Config) {
     if (config.getProxy()) {
@@ -178,6 +193,40 @@ export class GeminiClient {
     return this.config;
   }
 
+  // ───────────────── Goal 模式上下文管理 ─────────────────
+  // 仅供 /goal 启动钩子（packages/cli useGoalWizard）调用。
+  // 这些方法不会触发任何对话或副作用——只是更新内存里的标志位。
+
+  /**
+   * 启动 /goal 模式时调用。会覆盖任何已存在的 goal context（即"再开一次 /goal
+   * 自动结束上一个"），符合用户预期的清除时机。
+   */
+  setGoalContext(ctx: GoalContext): void {
+    this.activeGoalContext = ctx;
+    logger.info(
+      `[GeminiClient] Goal context activated. T0=${new Date(ctx.startedAt).toISOString()}, hours=${ctx.hours}, taskLen=${ctx.task.length}`,
+    );
+  }
+
+  /**
+   * 显式清除 goal context。当前没有 UI 入口直接调用，但保留供
+   * 未来 `/goal cancel` 之类的命令、以及测试使用。
+   */
+  clearGoalContext(): void {
+    if (this.activeGoalContext) {
+      logger.info('[GeminiClient] Goal context cleared.');
+    }
+    this.activeGoalContext = null;
+  }
+
+  /**
+   * 当前是否有活跃的 goal context。返回拷贝引用而非克隆——调用方
+   * 不应该修改该对象。
+   */
+  getGoalContext(): GoalContext | null {
+    return this.activeGoalContext;
+  }
+
   /**
    * 获取自定义模型信息（用于系统提示注入）
    * 如果当前模型是自定义模型，返回其详细信息；否则返回 undefined
@@ -219,7 +268,7 @@ export class GeminiClient {
    * 获取通用内容生成器
    * DeepVServerAdapter 支持所有模型：Claude模型进行参数转换，Gemini模型直接转发
    */
-  private async getContentGeneratorForModel(model: string): Promise<ContentGenerator> {
+  private async getContentGeneratorForModel(_model: string): Promise<ContentGenerator> {
     // 创建通用适配器，支持Claude和Gemini模型
     const { hasAvailableProxyServer, getActiveProxyServerUrl } = await import('../config/proxyConfig.js');
 
@@ -357,7 +406,7 @@ export class GeminiClient {
   private updateTokenCountAndCheckCompression(inputTokens: number, outputTokens: number): void {
     this.sessionTokenCount = inputTokens + outputTokens;
 
-    let compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
+    const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
     // 检查是否超过压缩阈值
     if (this.sessionTokenCount >= compressionTokenThreshold) {
       this.needsCompression = true;
@@ -368,7 +417,7 @@ export class GeminiClient {
   // 切换模型的话，需要再次检测压缩阈值
   private checkCompression(): void {
     if (!this.needsCompression) {
-      let compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
+      const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
       if (this.sessionTokenCount >= compressionTokenThreshold) {
         this.needsCompression = true;
         logger.info(`[GeminiClient] Token threshold reached: ${this.sessionTokenCount} >= ${this.compressionThreshold}, scheduling compression for next conversation`);
@@ -498,7 +547,8 @@ export class GeminiClient {
     let environmentInfo = '';
     try {
       // 使用 setTimeout 让环境检测异步进行，避免阻塞UI
-      const terminalInfo = await new Promise<any>((resolve) => {
+      type TerminalInfo = ReturnType<typeof detectTerminalEnvironment>;
+      const terminalInfo = await new Promise<TerminalInfo>((resolve) => {
         setTimeout(() => {
           try {
             const result = detectTerminalEnvironment();
@@ -698,7 +748,7 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
               message: `Agent execution blocked by BeforeAgent hook`
             }
           }
-        } as any;
+        };
         return new Turn(this.getChat(), prompt_id, this.config.getModel(), this.config);
       }
     } catch (hookError) {
@@ -879,8 +929,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
       // 记录 Finished 事件的 finishReason
       if (event.type === GeminiEventType.Finished) {
-        lastFinishReason = (event as any).value;
-        logger.info(`[STOP-DEBUG] sendMessageStream: received Finished event, finishReason=${lastFinishReason}, errorDetails=${(event as any).errorDetails || 'none'}`);
+        lastFinishReason = event.value;
+        logger.info(`[STOP-DEBUG] sendMessageStream: received Finished event, finishReason=${lastFinishReason}, errorDetails=${event.errorDetails || 'none'}`);
       }
 
       // 处理TokenUsage事件，累积token计数并判断是否需要下次压缩
@@ -1065,6 +1115,43 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           }
         } catch (restorationError) {
           console.warn(`[tryCompressChat] Post-compact restoration failed (non-fatal): ${restorationError}`);
+        }
+
+        // 🎯 /goal 模式上下文恢复
+        // 如果当前会话处于 /goal 模式，将原始 goal prompt + T0 时间锚 + 立即行动指令
+        // 重新注入历史，让 model 重新看到完整契约。详见 goalContinuationPrompt.ts。
+        //
+        // 设计要点：
+        //   - 这条 user 消息**有意成为最后一条 user 消息**——它本身就是给 model 的
+        //     "继续干活"指令；model 接下来的回复就会是它对该指令的响应。
+        //   - 因此这里只追加 user 消息，不附带 model ack。
+        //   - 它会自动通过下面"确保不以 model 结尾"块的检查（最后一条已经是 user）。
+        //   - 每次压缩都重新注入完整原 prompt：保证经过多次压缩后契约依然完整。
+        if (this.activeGoalContext) {
+          try {
+            const currentHistory = this.getChat().getHistory(true);
+            const lastMsg = currentHistory[currentHistory.length - 1];
+
+            // 角色交替守卫：如果上一条已经是 user，先补一条 model 占位。
+            // 通常 postCompactRestoration 追加的末尾是 model(ack)，所以一般不会触发。
+            if (lastMsg && lastMsg.role === MESSAGE_ROLES.USER) {
+              currentHistory.push({
+                role: MESSAGE_ROLES.MODEL,
+                parts: [{ text: 'Understood.' }],
+              });
+            }
+
+            currentHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: buildGoalContinuationMessage(this.activeGoalContext) }],
+            });
+            this.getChat().setHistory(currentHistory);
+            console.log(
+              `[tryCompressChat] Goal continuation injected. T0=${new Date(this.activeGoalContext.startedAt).toISOString()}, elapsedMin=${Math.floor((Date.now() - this.activeGoalContext.startedAt) / 60000)}`,
+            );
+          } catch (goalRestoreError) {
+            console.warn(`[tryCompressChat] Goal continuation injection failed (non-fatal): ${goalRestoreError}`);
+          }
         }
 
         // 🔧 安全保障：确保压缩后 history 不以 model 结尾

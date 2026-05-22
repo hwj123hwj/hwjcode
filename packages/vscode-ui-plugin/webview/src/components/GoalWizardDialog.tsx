@@ -36,8 +36,21 @@ interface GoalWizardDialogProps {
    * 提交回调：父级负责把组装好的 prompt 当 user 消息塞给 AI service。
    * 这里不直接调 sendChatMessage，是为了和 MultiSessionApp 的 plan-mode
    * 拦截 / queue 等逻辑保持一致路径。
+   *
+   * @param content   组装好的 user 消息内容（含完整 goal prompt）。
+   * @param goalContext  本次 /goal 启动的元数据。父级会把它透传给
+   *   `handleSendMessage(..., { goalContext })`，最终随同 chat_message 送
+   *   达 extension，extension 端会在 onChatMessage 处先调用
+   *   `GeminiClient.setGoalContext(...)` 再处理消息——保证自动/手动压缩
+   *   后能触发原始 goal prompt 重新注入。
+   *
+   *   T0 (`startedAt`) 在 webview 这一侧用 `Date.now()` 捕获，避免 IPC
+   *   延迟造成 T0 漂移；与 CLI 端 useGoalWizard 的捕获时机一致。
    */
-  onSubmit: (content: MessageContent) => void;
+  onSubmit: (
+    content: MessageContent,
+    goalContext: { startedAt: number; hours: number; task: string },
+  ) => void;
 }
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
@@ -132,6 +145,8 @@ ${INTENSITY_DISCIPLINE[input.intensity]}
    - 收尾条件 A（提前完成）：全部"达标特征"客观满足——这时不管 elapsed 是多少，立即收尾，绝不凑时间。
    - 收尾条件 B（达标 + 达时）：全部"达标特征"客观满足 且 elapsed >= ${input.hours} 小时。
 4. 以上两种收尾条件任一成立才能停。如果达标特征未全部满足，无论你主观上多么觉得"差不多"，都必须继续深入、加固、扩展、复核。
+5. 当且仅当上述任一收尾条件成立时，必须调用 goal_achieved 工具来正式宣告任务完成。该工具的 reason 参数必填，要逐条说明"达标特征"中每一条是如何被客观满足的（引用具体文件、测试结果、可观察行为等；不要写"完成了"、"看起来不错"这种敷衍理由）。在 goal_achieved 返回之前，不要单纯用文字宣布"任务完成"——只有这次工具调用才算正式收尾，否则系统会一直认为你还在 goal 模式中。
+6. 如果在执行过程中遇到客观上无法克服的障碍（不是主观觉得"差不多"，而是确实无路可走），不要调用 goal_achieved——按契约纪律向用户清晰汇报障碍，由用户决定是否 /goal clear；切忌把 goal_achieved 当作"逃避困难"的出口。
 
 现在开始。`;
 }
@@ -249,9 +264,20 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
         await updateYoloMode(true);
       }
 
-      // 2) Assemble & submit prompt
+      // 2) Assemble & submit prompt + goal-context metadata
+      //
+      //    T0 is captured HERE (webview-side wallclock) so the time anchor
+      //    stays stable across IPC. The extension side will use this exact
+      //    timestamp when calling GeminiClient.setGoalContext, and core's
+      //    tryCompressChat will re-inject it verbatim after every
+      //    compression cycle. See ChatMessage.goalContext (types/messages.ts).
       const prompt = buildGoalPrompt({ task, forbidden, criteria, hours, intensity });
-      onSubmit([{ type: 'text', value: prompt }]);
+      const goalContext = {
+        startedAt: Date.now(),
+        hours,
+        task,
+      };
+      onSubmit([{ type: 'text', value: prompt }], goalContext);
 
       // 3) Close
       onClose();

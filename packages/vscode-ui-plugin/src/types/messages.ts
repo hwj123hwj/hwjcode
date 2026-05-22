@@ -51,6 +51,34 @@ export interface ChatMessage {
   type: 'user' | 'assistant' | 'system';
   // 🎯 新增：工具调用相关
   associatedToolCalls?: ToolCall[];
+  /**
+   * 🎯 /goal 模式启动元数据。
+   *
+   * 当且仅当本条 chat_message 是由 GoalWizardDialog 提交的"goal 启动消息"时
+   * 才会被设置。extension 侧在 onChatMessage 入口看到该字段后，会先在
+   * GeminiClient 上调用 setGoalContext({...})，再走正常的 processChatMessage
+   * 流程——这样"注册 goal context"和"发出原始 goal prompt"在同一个事件内
+   * 原子完成，不存在竞态。
+   *
+   * 价值：core 的 tryCompressChat 在每次自动/手动压缩后会检查
+   * activeGoalContext，若非空则把原 prompt + T0 时间锚 + 立即行动指令重新
+   * 注入历史，防止 summarizer 把 /goal 契约（最低工时、no-stop 纪律、
+   * 安全栏等）压没了导致 agent 在压缩后停摆。
+   *
+   * 字段：
+   *   - startedAt: T0 (Date.now())，由 webview 在 wizard 点击"启动"时捕获。
+   *     extension 不重新生成时间戳——避免 IPC 延迟造成 T0 漂移。
+   *   - hours:    最低连续工时下限。
+   *   - task:     任务摘要，用于日志/未来 UI。
+   *
+   * 注意：originalPrompt 不在这里——它就是 message.content 里的那条 text
+   * part，extension 端从 content 提取即可，避免冗余传递造成的不一致风险。
+   */
+  goalContext?: {
+    startedAt: number;
+    hours: number;
+    task: string;
+  };
 }
 
 export interface ChatResponse {
