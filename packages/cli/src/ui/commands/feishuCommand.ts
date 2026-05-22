@@ -26,8 +26,13 @@ import {
   probeCredentials,
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
-import { SceneType } from 'deepv-code-core';
-import { HistoryItemWithoutId } from '../types.js';
+import {
+  executeToolCall,
+  ToolRegistry,
+  GeminiEventType,
+  ToolCallRequestInfo,
+} from 'deepv-code-core';
+import { Part, PartListUnion } from '@google/genai';
 
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
@@ -263,73 +268,87 @@ async function handleStart(context?: CommandContext): Promise<string> {
   const config = context?.services?.config;
   const geminiClient = config?.getGeminiClient?.();
 
-  // 设置消息处理
+  // 设置消息处理 — 使用主会话的 agent 模式（带工具执行能力）
   gateway.onMessage = async (msg: FeishuMessage): Promise<string | null> => {
-    // 调试：直接返回调试信息
-    const debugInfo = [
-      `[DEBUG] msg.text type: ${typeof msg.text}`,
-      `[DEBUG] msg.text value: ${JSON.stringify(msg.text)}`,
-      `[DEBUG] msg.text constructor: ${(msg.text as any)?.constructor?.name}`,
-    ].join('\n');
-    console.log(debugInfo);
-
-    // 防御性检查：确保消息文本是有效字符串
     const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
     if (!messageText) {
-      console.log('⏭️ 跳过空消息');
       return null;
     }
 
     // 同步显示飞书消息到 TUI
-    const feishuUserMsg: HistoryItemWithoutId = {
-      type: 'user',
-      text: `[飞书] ${messageText}`,
-    };
-    tuiContext?.addItem(feishuUserMsg, Date.now());
+    tuiContext?.addItem({ type: 'user', text: `[飞书] ${messageText}` }, Date.now());
 
-    if (!geminiClient) {
-      const noLlmReply = `收到你的消息: "${messageText}"\n\n(消息 ID: ${msg.messageId.slice(0, 8)}...)\n\n⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。`;
-      // 同步显示错误到 TUI
+    if (!geminiClient || !config) {
+      const noLlmReply = '⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。';
       tuiContext?.addItem({ type: 'info', text: noLlmReply }, Date.now());
       return noLlmReply;
     }
 
+    const toolRegistry: ToolRegistry = await config.getToolRegistry();
+    const abortController = new AbortController();
+    const promptId = `feishu-${Date.now()}`;
+
     try {
-      // 用 createTemporaryChat，禁用 system prompt 以避免继承 agent 工具
-      const chat = await geminiClient.createTemporaryChat(
-        SceneType.SUB_AGENT,
-        undefined,
-        undefined,
-        { disableSystemPrompt: true },
-      );
+      // 确保 chat 已初始化
+      await geminiClient.waitForChatInitialized();
 
-      // 移除工具声明，确保 LLM 只做纯文本回复
-      chat.setTools([]);
+      // Agent 循环：和 TUI 共享同一个会话，走 geminiClient.sendMessageStream
+      let currentMessage: PartListUnion = messageText;
+      const MAX_TURNS = 20;
 
-      // 确保是纯字符串
-      const safeMessage = String(messageText);
+      for (let turn = 0; turn < MAX_TURNS; turn++) {
+        const stream = geminiClient.sendMessageStream(
+          currentMessage,
+          abortController.signal,
+          promptId,
+        );
 
-      const response = await chat.sendMessage(
-        { message: safeMessage },
-        `feishu-${Date.now()}`,
-        SceneType.SUB_AGENT,
-      );
-      // 提取回复文本（过滤掉 functionCall）
-      const textParts = response.candidates?.[0]?.content?.parts
-        ?.filter((p: any) => p.text)
-        .map((p: any) => p.text) || [];
-      const replyText = textParts.join('') || '（无回复）';
+        let responseText = '';
+        const toolCallRequests: ToolCallRequestInfo[] = [];
 
-      // 同步显示 LLM 回复到 TUI
-      tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
+        for await (const event of stream) {
+          switch (event.type) {
+            case GeminiEventType.Content:
+              responseText += event.value;
+              break;
+            case GeminiEventType.ToolCallRequest:
+              toolCallRequests.push(event.value);
+              break;
+            case GeminiEventType.ChatCompressed:
+              tuiContext?.addItem({ type: 'info', text: '📦 上下文已自动压缩' }, Date.now());
+              break;
+            case GeminiEventType.Error:
+              throw new Error(event.value?.error?.message || '未知错误');
+          }
+        }
 
+        // 无工具调用 → 返回最终文本
+        if (toolCallRequests.length === 0) {
+          const replyText = responseText || '（无回复）';
+          tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
+          return replyText;
+        }
+
+        // 执行工具调用，收集 functionResponse
+        const toolResponseParts: Part[] = [];
+        for (const req of toolCallRequests) {
+          const toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+          if (toolResponse.responseParts) {
+            const parts = Array.isArray(toolResponse.responseParts) ? toolResponse.responseParts : [toolResponse.responseParts];
+            toolResponseParts.push(...(parts as Part[]));
+          }
+        }
+
+        // 将工具结果作为下一轮输入
+        currentMessage = toolResponseParts;
+      }
+
+      const replyText = '（达到最大对话轮数限制）';
+      tuiContext?.addItem({ type: 'info', text: replyText }, Date.now());
       return replyText;
     } catch (err: any) {
-      console.error('❌ 飞书 LLM 回答错误:', err.message);
-      console.error('❌ 错误堆栈:', err.stack);
-
-      // 把完整错误信息显示在 TUI 和返回给飞书
-      const errorReply = `❌ 处理消息时出错: ${err.message}\n\n堆栈:\n${err.stack?.slice(0, 500) || '无'}`;
+      console.error('❌ 飞书 Agent 处理错误:', err.message);
+      const errorReply = `❌ 处理消息时出错: ${err.message}`;
       tuiContext?.addItem({ type: 'error', text: errorReply }, Date.now());
       return errorReply;
     }
