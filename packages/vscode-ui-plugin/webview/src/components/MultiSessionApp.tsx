@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Settings, History } from 'lucide-react';
+import { Settings, History, Target } from 'lucide-react';
 import { useMultiSessionState } from '../hooks/useMultiSessionState';
 import { getGlobalMessageService } from '../services/globalMessageService';
 import { webviewModelService } from '../services/webViewModelService';
@@ -28,6 +28,7 @@ import { ChatHistoryModal } from './ChatHistoryModal';
 import { NanoBananaDialog } from './NanoBananaDialog';
 import { NanoBananaIcon } from './NanoBananaIcon';
 import { PPTGeneratorDialog } from './PPTGeneratorDialog';
+import { GoalWizardDialog } from './GoalWizardDialog';
 import { PPTGeneratorIcon } from './PPTGeneratorIcon';
 import { CompressionConfirmationDialog } from './CompressionConfirmationDialog';
 import { HealthyUseReminder } from './HealthyUseReminder';
@@ -169,6 +170,7 @@ export const MultiSessionApp: React.FC = () => {
   const [isNanoBananaOpen, setIsNanoBananaOpen] = useState(false);
   // 🎯 PPT生成对话框状态
   const [isPPTGeneratorOpen, setIsPPTGeneratorOpen] = useState(false);
+  const [isGoalWizardOpen, setIsGoalWizardOpen] = useState(false);
 
   // 🎯 压缩确认弹窗状态（模型切换时上下文超限）
   const [compressionConfirmation, setCompressionConfirmation] = useState<CompressionConfirmationRequest | null>(null);
@@ -1137,6 +1139,12 @@ export const MultiSessionApp: React.FC = () => {
       setIsRulesManagementOpen(true);
     }));
 
+    // 🎯 监听 extension 端的"打开 Goal Wizard"指令（命令面板触发）
+    cleanups.push(messageService.onOpenGoalWizard(() => {
+      console.log('🎯 Opening goal wizard dialog');
+      setIsGoalWizardOpen(true);
+    }));
+
     // =============================================================================
     // 🎯 MCP 状态管理监听器（带防抖稳定化）
     // =============================================================================
@@ -1423,7 +1431,15 @@ export const MultiSessionApp: React.FC = () => {
   }, [state.currentSessionId, togglePlanMode]);
 
   // 🎯 处理发送消息
-  const handleSendMessage = React.useCallback((content: MessageContent, targetSessionId?: string) => {
+  const handleSendMessage = React.useCallback((
+    content: MessageContent,
+    targetSessionId?: string,
+    opts?: { silent?: boolean },
+  ) => {
+    // silent=true：消息照样发到后端触发一轮 AI 回复，但不在前端 UI 上
+    // 添加用户消息气泡。用于 /goal 之类把内部 prompt 发给模型、又不希望
+    // prompt 内容（含契约 / 系统硬红线等内部资产）泄漏到聊天历史的场景。
+    const silent = opts?.silent === true;
     // 优先使用目标 Session ID，否则使用当前 Session ID
     const sessionId = targetSessionId || state.currentSessionId;
     if (!sessionId) return;
@@ -1464,7 +1480,10 @@ export const MultiSessionApp: React.FC = () => {
       timestamp: Date.now()
     };
 
-    addMessage(sessionId, userMessage);
+    // silent 模式：跳过 UI 渲染，但仍走 sendChatMessage 触发 AI 回复
+    if (!silent) {
+      addMessage(sessionId, userMessage);
+    }
     setSessionLoading(sessionId, true);
 
     // 🎯 不在前端手动生成标题，让后端在保存时自动提取第一条消息作为标题
@@ -2174,6 +2193,15 @@ User question: ${contentStr}`;
           >
             <PPTGeneratorIcon size={18} />
           </button>
+          {/* 🎯 目标驱动模式入口 */}
+          <button
+            className="multi-session-app__manage-btn multi-session-app__goal-btn"
+            onClick={() => setIsGoalWizardOpen(true)}
+            title={t('goalWizard.buttonTooltip', {}, 'Goal-Driven Mode (auto YOLO + persistent)')}
+            style={{ marginRight: '8px' }}
+          >
+            <Target size={18} />
+          </button>
           {/* 🎯 NanoBanana 图像生成入口 */}
           <button
             className="multi-session-app__manage-btn multi-session-app__nanobanana-btn"
@@ -2391,6 +2419,14 @@ User question: ${contentStr}`;
       <PPTGeneratorDialog
         isOpen={isPPTGeneratorOpen}
         onClose={() => setIsPPTGeneratorOpen(false)}
+      />
+
+      {/* 🎯 目标驱动模式对话框 — 内部 prompt 含契约 / 系统硬红线等不公开内容，
+          走 silent 路径：发到后端触发 AI，但不在 UI 渲染用户气泡。 */}
+      <GoalWizardDialog
+        isOpen={isGoalWizardOpen}
+        onClose={() => setIsGoalWizardOpen(false)}
+        onSubmit={(content) => handleSendMessage(content, undefined, { silent: true })}
       />
 
       {/* 🎯 压缩确认弹窗（模型切换时上下文超限） */}

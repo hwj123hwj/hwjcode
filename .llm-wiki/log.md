@@ -2,6 +2,33 @@
 
 > Chronological record of wiki operations.
 
+## [2026-05-22] feat | Built-in Tool Checklist (from local_time debugging)
+
+### Pages Added
+- `wiki/adding-builtin-tool-checklist.md` — Checklist & pitfalls for adding
+  a new built-in tool to `packages/core/src/tools/`. Captures lessons from
+  the `local_time` bug where the tool registered correctly but Anthropic/
+  proxy parsed `functionCalls=0` from a `FUNCTION_CALL` finishReason because
+  of schema/description format drift from canonical tools.
+
+### Key Lessons Captured
+- Description strings must not start with `\n` or contain em-dashes / smart
+  quotes / embedded ISO-format quotes
+- Constructor should not over-specify the 4 boolean flags; rely on
+  [[BaseTool]] defaults like `web-search.ts` does
+- `validateToolParams` must call `SchemaValidator.validate` first
+- `displayName` should be a single PascalCase word
+- Avoid emoji in `returnDisplay` for cross-context safety
+- Always `summary` field for UI history collapse
+- Bundle must be rebuilt for source changes to take effect
+- Reference tools by complexity: `web-search.ts`, `read-lints.ts`,
+  `local-time.ts`, `ask-user-question.ts`
+
+### Index Updated
+- Added "Guides & Checklists" section with link to the new page
+
+---
+
 ## [2026-01-23] feat | Debate UI Enhancement Documentation
 
 ### Pages Added

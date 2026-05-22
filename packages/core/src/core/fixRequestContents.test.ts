@@ -353,13 +353,33 @@ describe('GeminiChat.fixRequestContents', () => {
     });
 
     it('没有 function call 的内容应该保持不变', () => {
+      // 注意：业务的"安全保障"逻辑会在 contents 以 model 结尾时追加一条 user placeholder
+      // （防止 assistant-prefill error）。这里使用以 user 结尾的输入，验证非 function call 场景下
+      // 既不会被错误修改也不会触发 placeholder 注入。
+      const input: Content[] = [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '你好' }] },
+        { role: MESSAGE_ROLES.MODEL, parts: [{ text: '你好！有什么可以帮你的吗？' }] },
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' }] }
+      ];
+
+      const result = callFixRequestContents(input);
+      expect(result).toEqual(input);
+    });
+
+    it('contents 以 model 消息结尾时应该追加 user placeholder（防止 assistant-prefill error）', () => {
+      // 业务安全保障：某些模型（如 AWS Bedrock 上的 Claude）不支持 assistant prefill，
+      // 要求对话必须以 user 消息结尾。此处验证该保障逻辑生效。
       const input: Content[] = [
         { role: MESSAGE_ROLES.USER, parts: [{ text: '你好' }] },
         { role: MESSAGE_ROLES.MODEL, parts: [{ text: '你好！有什么可以帮你的吗？' }] }
       ];
 
       const result = callFixRequestContents(input);
-      expect(result).toEqual(input);
+      expect(result).toHaveLength(3);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1]).toEqual(input[1]);
+      expect(result[2].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[2].parts).toEqual([{ text: '[Conversation continues]' }]);
     });
 
     it('function call 在最后一条消息时应该补全', () => {
@@ -730,6 +750,48 @@ describe('GeminiChat.fixRequestContents', () => {
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 调整了第2条消息的内容顺序，function-response 在前')
       );
+    });
+  });
+
+  // ─────────── 回归测试：末尾 user placeholder 安全保障 ───────────
+  describe('末尾安全保障 (assistant-prefill 防护)', () => {
+    it('contents 以 user 消息结尾时不应追加 placeholder', () => {
+      const input: Content[] = [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '你好' }] },
+      ];
+      const result = callFixRequestContents(input);
+      // 只有一条 user 消息，不应被改动
+      expect(result).toHaveLength(1);
+      expect(result[result.length - 1].role).toBe(MESSAGE_ROLES.USER);
+      const lastText = (result[result.length - 1].parts?.[0] as any).text;
+      expect(lastText).not.toBe('[Conversation continues]');
+    });
+
+    it('空数组不应被追加 placeholder', () => {
+      const result = callFixRequestContents([]);
+      expect(result).toEqual([]);
+    });
+
+    it('contents 以 model 消息结尾且只有 functionCall 时（被 fix 后）不应额外追加 placeholder', () => {
+      // 业务行为：当 model 末尾是 functionCall 时，会先补 user-cancel functionResponse；
+      // 这种补全已经把末尾变成了 user，因此不需要再追加 [Conversation continues] placeholder。
+      const input: Content[] = [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '搜天气' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [{ functionCall: { name: 'search', id: 'xyz', args: { q: '天气' } } }]
+        }
+      ];
+      const result = callFixRequestContents(input);
+      // 末尾应是 user 消息（functionResponse 补全），且不是 [Conversation continues] 占位符
+      expect(result[result.length - 1].role).toBe(MESSAGE_ROLES.USER);
+      const lastPart = result[result.length - 1].parts?.[0] as any;
+      expect(lastPart.functionResponse).toBeDefined();
+      // 确认没有 [Conversation continues] 文本被追加在末尾
+      const allText = result.flatMap(c => c.parts || [])
+        .map((p: any) => p.text)
+        .filter(Boolean);
+      expect(allText).not.toContain('[Conversation continues]');
     });
   });
 });
