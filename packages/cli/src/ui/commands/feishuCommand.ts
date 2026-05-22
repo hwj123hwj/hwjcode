@@ -31,6 +31,7 @@ import {
   ToolRegistry,
   GeminiEventType,
   ToolCallRequestInfo,
+  SessionManager,
 } from 'deepv-code-core';
 import { Part, PartListUnion } from '@google/genai';
 
@@ -237,6 +238,72 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
   return lines.join('\n');
 }
 
+/** 飞书支持的斜杠命令列表（用于 /help 展示） */
+const FEISHU_SLASH_COMMANDS: Record<string, string> = {
+  '/new':      '新建会话（重置对话历史，保留工具能力）',
+  '/compress': '压缩对话历史（释放上下文窗口）',
+  '/compact':  '同 /compress',
+  '/help':     '显示此帮助',
+};
+
+/**
+ * 处理飞书端的斜杠命令（不发给 LLM，本地执行）
+ *
+ * 返回 null 表示不是命令，应走 LLM agent 流程
+ */
+async function handleFeishuCommand(
+  messageText: string,
+  geminiClient: any,
+  config: any,
+): Promise<string | null> {
+  const cmd = messageText.split(/\s+/)[0].toLowerCase();
+
+  switch (cmd) {
+    case '/new': {
+      try {
+        await geminiClient.resetChat();
+        // 同时创建新的 session 记录
+        const sessionManager = new SessionManager(config?.getProjectRoot() || process.cwd());
+        const newSession = await sessionManager.createNewSession(undefined, process.cwd());
+        return `✅ 新会话已创建\n📝 Session ID: ${newSession.sessionId}\n💬 可以开始新的对话了`;
+      } catch (err: any) {
+        return `❌ 创建新会话失败: ${err.message}`;
+      }
+    }
+
+    case '/compress':
+    case '/compact': {
+      try {
+        const promptId = `feishu-compress-${Date.now()}`;
+        const result = await geminiClient.tryCompressChat(
+          promptId,
+          new AbortController().signal,
+          true,
+        );
+        if (result) {
+          return `✅ 对话已压缩\n📦 原始 token: ${result.originalTokenCount}\n📦 压缩后 token: ${result.newTokenCount}`;
+        }
+        return '⚠️ 没有需要压缩的内容';
+      } catch (err: any) {
+        return `❌ 压缩失败: ${err.message}`;
+      }
+    }
+
+    case '/help': {
+      const lines = ['📖 飞书可用命令:', ''];
+      for (const [name, desc] of Object.entries(FEISHU_SLASH_COMMANDS)) {
+        lines.push(`  ${name.padEnd(12)} ${desc}`);
+      }
+      lines.push('');
+      lines.push('💡 其他任何消息都会发送给 AI Agent 处理（支持工具调用）');
+      return lines.join('\n');
+    }
+
+    default:
+      return null; // 不是命令，走 LLM
+  }
+}
+
 /**
  * 启动网关（从已保存的凭证）
  */
@@ -277,6 +344,21 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     // 同步显示飞书消息到 TUI
     tuiContext?.addItem({ type: 'user', text: `[飞书] ${messageText}` }, Date.now());
+
+    // 拦截斜杠命令（/new, /compress, /help 等），不发给 LLM
+    if (messageText.startsWith('/')) {
+      const cmdResult = await handleFeishuCommand(messageText, geminiClient, config);
+      if (cmdResult !== null) {
+        tuiContext?.addItem({ type: 'info', text: cmdResult }, Date.now());
+        return cmdResult;
+      }
+      // 未知斜杠命令 — 提示可用命令，不要当普通消息发给 LLM（避免 LLM 幻觉回复）
+      if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
+        const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
+        tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
+        return hint;
+      }
+    }
 
     if (!geminiClient || !config) {
       const noLlmReply = '⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。';
