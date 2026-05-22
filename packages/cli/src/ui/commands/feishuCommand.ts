@@ -64,7 +64,7 @@ function helpText(): string {
   ].join('\n');
 }
 
-async function handleSetup(args: string): Promise<string> {
+async function handleSetup(args: string, projectRoot?: string): Promise<string> {
   const trimmed = args.trim();
   // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
   const manualMatch = trimmed.match(/^--manual\s+(.+)$/s);
@@ -74,11 +74,11 @@ async function handleSetup(args: string): Promise<string> {
     const parts = rest.split(/\s+/).filter(Boolean);
     const appId = parts[0];
     const appSecret = parts[1];
-    return await handleManualSetup(appId, appSecret);
+    return await handleManualSetup(appId, appSecret, projectRoot);
   }
 
   // 没有 --manual 则走 QR
-  return await handleQrSetup();
+  return await handleQrSetup(projectRoot);
 }
 
 /**
@@ -87,7 +87,7 @@ async function handleSetup(args: string): Promise<string> {
  * 同步等待扫码结果（最多 expireIn 秒），结果显示在命令返回的消息中。
  * 这样可以避免 TUI 模式下后台 console.log 不可见的问题。
  */
-async function handleQrSetup(): Promise<string> {
+async function handleQrSetup(projectRoot?: string): Promise<string> {
   const lines: string[] = ['📱 档 1: 扫码自动建应用'];
   lines.push('  正在连接飞书...');
 
@@ -145,13 +145,13 @@ async function handleQrSetup(): Promise<string> {
       botOpenId: botInfo?.botOpenId,
     };
 
-    await saveCredentials(creds);
+    await saveCredentials(creds, projectRoot);
 
     lines.push('');
     lines.push('✅ 飞书应用创建成功！');
     lines.push(`  App ID:      ${creds.appId}`);
     if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
-    lines.push('  凭证已保存到 ~/.deepv/feishu-credentials.json');
+    lines.push(`  凭证已保存到 ${projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/'}feishu-credentials.json`);
     lines.push('');
     lines.push('  下一步: 输入 /feishu start 启动 Bot');
     return lines.join('\n');
@@ -168,7 +168,7 @@ async function handleQrSetup(): Promise<string> {
 /**
  * 档 3：手动输入凭据
  */
-async function handleManualSetup(appId?: string, appSecret?: string): Promise<string> {
+async function handleManualSetup(appId?: string, appSecret?: string, projectRoot?: string): Promise<string> {
   if (!appId || !appSecret) {
     return [
       '📝 档 3: 手动输入凭证',
@@ -195,11 +195,11 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
     botOpenId: botInfo?.botOpenId,
   };
 
-  await saveCredentials(creds);
+  await saveCredentials(creds, projectRoot);
 
   lines.push(botInfo ? '  ✅ 凭证有效' : '  ⚠️ 凭证已保存但验证失败（可在开放平台检查是否已启用 Bot 能力）');
   if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
-  lines.push('  凭证已保存到 ~/.deepv/feishu-credentials.json');
+  lines.push(`  凭证已保存到 ${projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/'}feishu-credentials.json`);
   lines.push('');
   lines.push('  下一步: 输入 /feishu start 启动 Bot');
 
@@ -276,7 +276,8 @@ async function handleFeishuCommand(
  * 启动网关（从已保存的凭证）
  */
 async function handleStart(context?: CommandContext): Promise<string> {
-  const creds = await loadCredentials();
+  const projectRoot = context?.services?.config?.getProjectRoot();
+  const creds = await loadCredentials(projectRoot);
   if (!creds) {
     return [
       '⚠️ 未找到飞书凭证',
@@ -445,8 +446,8 @@ async function handleStop(): Promise<string> {
 /**
  * 查看状态
  */
-async function handleStatus(): Promise<string> {
-  const creds = await loadCredentials();
+async function handleStatus(projectRoot?: string): Promise<string> {
+  const creds = await loadCredentials(projectRoot);
   const lines: string[] = ['📊 飞书状态:'];
 
   if (creds) {
@@ -473,21 +474,21 @@ async function handleStatus(): Promise<string> {
 /**
  * 清除凭证
  */
-async function handleLogout(): Promise<string> {
+async function handleLogout(projectRoot?: string): Promise<string> {
   if (activeGateway) {
     await activeGateway.disconnect();
     activeGateway = null;
   }
   tuiContext = null; // 清除 TUI 上下文
-  await clearCredentials();
+  await clearCredentials(projectRoot);
   return '🗑️ 飞书凭证已清除，Bot 已断开。';
 }
 
 /**
  * 交互式主入口
  */
-async function handleInteractive(): Promise<string> {
-  const creds = await loadCredentials();
+async function handleInteractive(projectRoot?: string): Promise<string> {
+  const creds = await loadCredentials(projectRoot);
 
   if (!creds) {
     // 未配置，引导 setup
@@ -528,14 +529,20 @@ export const feishuCommand: SlashCommand = {
   kind: CommandKind.BUILT_IN,
 
   // /feishu（无子命令）→ 显示帮助
-  action: async () => msg(await handleInteractive()),
+  action: async (ctx) => {
+    const pr = ctx.services?.config?.getProjectRoot();
+    return msg(await handleInteractive(pr));
+  },
 
   subCommands: [
     {
       name: 'setup',
       description: '配置飞书应用凭证（扫码或手动输入）',
       kind: CommandKind.BUILT_IN,
-      action: async (_ctx, args) => msg(await handleSetup(args)),
+      action: async (ctx, args) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleSetup(args, pr));
+      },
     },
     {
       name: 'start',
@@ -547,19 +554,28 @@ export const feishuCommand: SlashCommand = {
       name: 'stop',
       description: '停止飞书 Bot',
       kind: CommandKind.BUILT_IN,
-      action: async () => msg(await handleStop()),
+      action: async (ctx) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleStop());
+      },
     },
     {
       name: 'status',
       description: '查看飞书 Bot 连接状态',
       kind: CommandKind.BUILT_IN,
-      action: async () => msg(await handleStatus()),
+      action: async (ctx) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleStatus(pr));
+      },
     },
     {
       name: 'logout',
       description: '清除飞书凭证并断开连接',
       kind: CommandKind.BUILT_IN,
-      action: async () => msg(await handleLogout()),
+      action: async (ctx) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleLogout(pr));
+      },
     },
     {
       name: 'help',
