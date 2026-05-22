@@ -1548,6 +1548,10 @@ export const translations = {
     // /goal command + GoalWizard (UI labels only — the prompt itself is intentionally not i18n'd)
     'goalCommand.description': 'Start Goal-Driven Mode (auto YOLO + persistence-time floor)',
     'goalCommand.config_not_ready': 'Configuration not ready. Try again after the CLI finishes loading.',
+    'goalCommand.new.description': 'Open the Goal-Driven Mode wizard to start a new goal',
+    'goalCommand.clear.description': 'Clear the active /goal contract (release the no-stop discipline)',
+    'goalCommand.clear.not_active': 'No active /goal mode to clear.',
+    'goalCommand.clear.cleared_announce': '🎯 /goal cleared. Contract released; goal-mode discipline no longer applies. Subsequent compressions will not re-inject the goal prompt.',
     'goalWizard.title': '🎯 Goal-Driven Mode',
     'goalWizard.intensity.steady': 'Steady — calmer pace, self-check elapsed every completed todo',
     'goalWizard.intensity.standard': 'Standard (Recommended) — proactive, self-check every 3 todos / milestone',
@@ -2998,6 +3002,10 @@ export const translations = {
     // /goal 命令 + GoalWizard（仅界面文案，提交给模型的 prompt 内容刻意不走 i18n）
     'goalCommand.description': '启动目标驱动模式（自动开启 YOLO + 设置持续工作时间下限）',
     'goalCommand.config_not_ready': '配置尚未就绪，请等待 CLI 加载完成后重试。',
+    'goalCommand.new.description': '打开目标驱动模式向导，启动一个新的 goal 任务',
+    'goalCommand.clear.description': '主动结束当前 /goal 契约（解除最低工时与不许停纪律）',
+    'goalCommand.clear.not_active': '当前未处于 /goal 模式，无需清理。',
+    'goalCommand.clear.cleared_announce': '🎯 已清理 /goal 契约。最低工时与不许停纪律均已解除；后续压缩不会再重新注入原 goal prompt。',
     'goalWizard.title': '🎯 目标驱动模式 / Goal-Driven Mode',
     'goalWizard.intensity.steady': '平稳模式 — 稳健节奏，每完成 1 项调用 local_time 自检',
     'goalWizard.intensity.standard': '标准模式（推荐）— 主动规划，每 3 项或里程碑自检',

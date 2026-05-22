@@ -72,6 +72,7 @@ export * from './utils/version.js';
 export * from './utils/events.js';
 export * from './utils/sessionUtils.js';
 export * from './utils/sessionSelector.js';
+export * from './utils/goalContinuationPrompt.js';
 
 export * from './utils/enhancedLogger.js';
 
@@ -128,6 +129,7 @@ export * from './tools/read-lints.js';
 export * from './tools/lint-fix.js';
 export * from './tools/ask-user-question.js';
 export * from './tools/local-time.js';
+export * from './tools/goal-achieved.js';
 export * from './tools/mcp-client.js';
 export * from './tools/mcp-tool.js';
 

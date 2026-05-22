@@ -38,6 +38,7 @@ import { useSettingsMenu } from './hooks/useSettingsMenu.js';
 import { usePluginInstallCommand } from './hooks/usePluginInstallCommand.js';
 import { useSlashCommandProcessor } from './hooks/slashCommandProcessor.js';
 import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
+import { useGoalActive } from './hooks/useGoalActive.js';
 import { useConsoleMessages } from './hooks/useConsoleMessages.js';
 import { useBackgroundTaskNotifications, formatBackgroundTaskResult } from './hooks/useBackgroundTaskNotifications.js';
 import { BackgroundTaskPanel } from './components/BackgroundTaskPanel.js';
@@ -46,6 +47,7 @@ import { Header } from './components/Header.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { LoadingIndicator } from './components/LoadingIndicator.js';
 import { AutoAcceptIndicator } from './components/AutoAcceptIndicator.js';
+import { GoalActiveIndicator } from './components/GoalActiveIndicator.js';
 import { ShellModeIndicator } from './components/ShellModeIndicator.js';
 import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
@@ -1731,6 +1733,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
 
+  // 🎯 /goal 模式心跳：每秒探测 GeminiClient.activeGoalContext，让底部状态栏
+  // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
+  const isGoalActive = useGoalActive(config);
+
   const handleExit = useCallback(
     (
       pressedOnce: boolean,
@@ -2652,8 +2658,16 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 </Box>
                 <Box>
                   {planModeActive ? <PlanModeIndicator /> : null}
+                  {/* 🎯 状态栏优先级：plan > goal > YOLO/AUTO_EDIT。
+                      goal 模式下强制启用 YOLO，再显示 "YOLO mode (ctrl+y)"
+                      就只是噪音；用 goal 指示器替代它，告诉用户"长时任务在跑、
+                      已运行多久"，更有信息量。/goal clear 后 isGoalActive 变 false，
+                      立即恢复原有 YOLO/AUTO_EDIT 显示。 */}
+                  {!planModeActive && isGoalActive && !shellModeActive && !helpModeActive ? (
+                    <GoalActiveIndicator config={config} />
+                  ) : null}
                   {showAutoAcceptIndicator !== ApprovalMode.DEFAULT &&
-                    !shellModeActive && !helpModeActive && !planModeActive ? (
+                    !shellModeActive && !helpModeActive && !planModeActive && !isGoalActive ? (
                       <AutoAcceptIndicator
                         approvalMode={showAutoAcceptIndicator}
                       />
