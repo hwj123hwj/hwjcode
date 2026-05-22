@@ -25,6 +25,7 @@ import {
   buildGoalPrompt,
   type GoalWizardResult,
 } from '../components/GoalWizard.js';
+import { t, tp } from '../utils/i18n.js';
 
 interface UseGoalWizardArgs {
   config: Config | null;
@@ -55,7 +56,7 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
     addItem(
       {
         type: MessageType.INFO,
-        text: 'ℹ️ 目标驱动模式已取消。',
+        text: t('goalWizard.cancelled'),
       },
       Date.now(),
     );
@@ -74,9 +75,7 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
             addItem(
               {
                 type: MessageType.INFO,
-                text:
-                  '🚀 已自动开启 YOLO 模式（目标驱动模式要求所有工具调用免确认）。' +
-                  '\n   退出后可用 /yolo 再次切换。',
+                text: t('goalWizard.yolo_auto_enabled'),
               },
               Date.now(),
             );
@@ -84,7 +83,9 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
             addItem(
               {
                 type: MessageType.ERROR,
-                text: `⚠️ 自动开启 YOLO 失败：${err instanceof Error ? err.message : String(err)}。请手动 /yolo 后再试。`,
+                text: tp('goalWizard.yolo_enable_failed', {
+                  error: err instanceof Error ? err.message : String(err),
+                }),
               },
               Date.now(),
             );
@@ -94,14 +95,14 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
       }
 
       // 2) Announce.
+      const intensityLabel = t(`goalWizard.intensity.${result.intensity}`);
       addItem(
         {
           type: MessageType.INFO,
-          text:
-            `🎯 目标驱动模式启动\n` +
-            `   持续下限：${result.hours} 小时\n` +
-            `   档位：${result.intensity}\n` +
-            `   AI 将先调用 local_time 记录起始时间，然后规划清单并自主推进。`,
+          text: tp('goalWizard.launched_announce', {
+            hours: result.hours,
+            intensity: intensityLabel,
+          }),
         },
         Date.now(),
       );
