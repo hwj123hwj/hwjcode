@@ -28,21 +28,25 @@ export interface FeishuCredentials {
 const FEISHU_CREDENTIALS_FILE = 'feishu-credentials.json';
 const ENCRYPTION_KEY_FILE = 'feishu-key';
 
-function credDir(): string {
-  return path.join(os.homedir(), '.deepv');
+/** 优先用项目目录，fallback 到全局目录 */
+function credDir(projectRoot?: string): string {
+  return projectRoot
+    ? path.join(projectRoot, '.deepv')
+    : path.join(os.homedir(), '.deepv');
 }
 
-function credPath(): string {
-  return path.join(credDir(), FEISHU_CREDENTIALS_FILE);
+function credPath(projectRoot?: string): string {
+  return path.join(credDir(projectRoot), FEISHU_CREDENTIALS_FILE);
 }
 
-function keyPath(): string {
-  return path.join(credDir(), ENCRYPTION_KEY_FILE);
+function keyPath(projectRoot?: string): string {
+  return path.join(credDir(projectRoot), ENCRYPTION_KEY_FILE);
 }
 
-async function loadOrCreateKey(): Promise<Buffer> {
-  const kp = keyPath();
-  await fs.mkdir(credDir(), { recursive: true });
+async function loadOrCreateKey(projectRoot?: string): Promise<Buffer> {
+  const dir = credDir(projectRoot);
+  const kp = keyPath(projectRoot);
+  await fs.mkdir(dir, { recursive: true });
   try {
     const existing = await fs.readFile(kp);
     return existing;
@@ -69,10 +73,10 @@ function decrypt(data: string, key: Buffer): string {
   return decrypted.toString('utf8');
 }
 
-export async function loadCredentials(): Promise<FeishuCredentials | null> {
+export async function loadCredentials(projectRoot?: string): Promise<FeishuCredentials | null> {
   try {
-    const key = await loadOrCreateKey();
-    const encrypted = await fs.readFile(credPath(), 'utf8');
+    const key = await loadOrCreateKey(projectRoot);
+    const encrypted = await fs.readFile(credPath(projectRoot), 'utf8');
     const json = decrypt(encrypted.trim(), key);
     return JSON.parse(json) as FeishuCredentials;
   } catch {
@@ -80,17 +84,17 @@ export async function loadCredentials(): Promise<FeishuCredentials | null> {
   }
 }
 
-export async function saveCredentials(creds: FeishuCredentials): Promise<void> {
-  await fs.mkdir(credDir(), { recursive: true });
-  const key = await loadOrCreateKey();
+export async function saveCredentials(creds: FeishuCredentials, projectRoot?: string): Promise<void> {
+  await fs.mkdir(credDir(projectRoot), { recursive: true });
+  const key = await loadOrCreateKey(projectRoot);
   const json = JSON.stringify(creds);
   const encrypted = encrypt(json, key);
-  await fs.writeFile(credPath(), encrypted, { mode: 0o600 });
+  await fs.writeFile(credPath(projectRoot), encrypted, { mode: 0o600 });
 }
 
-export async function clearCredentials(): Promise<void> {
+export async function clearCredentials(projectRoot?: string): Promise<void> {
   try {
-    await fs.unlink(credPath());
+    await fs.unlink(credPath(projectRoot));
   } catch {
     // ignore
   }
