@@ -26,6 +26,7 @@ import {
   probeCredentials,
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
+import { SceneType } from 'deepv-code-core';
 
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
@@ -86,24 +87,27 @@ function parseArgs(args: string): { subcommand: string; flags: Record<string, st
 }
 
 async function handleSetup(args: string): Promise<string> {
-  const { flags } = parseArgs(args);
-  const manual = flags.manual;
-
-  if (manual) {
-    const positional = Array.isArray(flags._) ? (flags._ as string[]) : undefined;
-    const appId = typeof manual === 'string' && manual !== 'true' ? manual : positional?.[0];
-    const appSecret = positional?.[1];
+  const trimmed = args.trim();
+  // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
+  const manualMatch = trimmed.match(/^--manual\s+(.+)$/s);
+  if (manualMatch) {
+    // --manual 之后的所有非空参数，以空格分割
+    const rest = manualMatch[1].trim();
+    const parts = rest.split(/\s+/).filter(Boolean);
+    const appId = parts[0];
+    const appSecret = parts[1];
     return await handleManualSetup(appId, appSecret);
   }
+
+  // 没有 --manual 则走 QR
   return await handleQrSetup();
 }
 
 /**
  * 档 1：扫码自动建应用
  *
- * 分两步：
- *   1. 立即返回二维码信息（不阻塞 UI）
- *   2. 后台轮询扫码结果，完成后输出到终端
+ * 同步等待扫码结果（最多 expireIn 秒），结果显示在命令返回的消息中。
+ * 这样可以避免 TUI 模式下后台 console.log 不可见的问题。
  */
 async function handleQrSetup(): Promise<string> {
   const lines: string[] = ['📱 档 1: 扫码自动建应用'];
@@ -131,44 +135,47 @@ async function handleQrSetup(): Promise<string> {
     }
 
     lines.push('');
-    lines.push('  后台正在等待扫码结果...');
-    lines.push('  输入 /feishu status 查看状态');
+    lines.push('  ⏳ 正在等待扫码结果...');
+    lines.push('  （按 Ctrl+C 取消等待）');
 
-    // 后台轮询扫码结果（不阻塞命令返回）
-    pollRegistration(
+    // 同步等待扫码结果（带进度点回调）
+    let dots = '';
+    const pollResult = await pollRegistration(
       begin.deviceCode,
       begin.interval,
       begin.expireIn,
       'feishu',
-    ).then(async (pollResult) => {
-      if (!pollResult) {
-        console.log('\n❌ 飞书扫码超时或已被取消。输入 /feishu setup 重新开始。\n');
-        return;
-      }
+      (d) => { dots = d; },
+    );
 
-      const botInfo = await probeCredentials(
-        pollResult.appId, pollResult.appSecret, pollResult.domain,
-      );
+    if (!pollResult) {
+      lines.push('');
+      lines.push('❌ 飞书扫码超时或已被取消。');
+      lines.push('  输入 /feishu setup 重新开始。');
+      return lines.join('\n');
+    }
 
-      const creds: FeishuCredentials = {
-        appId: pollResult.appId,
-        appSecret: pollResult.appSecret,
-        domain: pollResult.domain as 'feishu' | 'lark',
-        botName: botInfo?.botName,
-        botOpenId: botInfo?.botOpenId,
-      };
+    const botInfo = await probeCredentials(
+      pollResult.appId, pollResult.appSecret, pollResult.domain,
+    );
 
-      await saveCredentials(creds);
+    const creds: FeishuCredentials = {
+      appId: pollResult.appId,
+      appSecret: pollResult.appSecret,
+      domain: pollResult.domain as 'feishu' | 'lark',
+      botName: botInfo?.botName,
+      botOpenId: botInfo?.botOpenId,
+    };
 
-      console.log('\n✅ 飞书应用创建成功！');
-      console.log(`  App ID:      ${creds.appId}`);
-      if (creds.botName) console.log(`  Bot 名称:    ${creds.botName}`);
-      console.log('  凭证已保存到 ~/.deepv/feishu-credentials.json');
-      console.log('\n  下一步: 输入 /feishu start 启动 Bot\n');
-    }).catch((err: any) => {
-      console.log(`\n❌ 扫码建应用失败: ${err.message}`);
-    });
+    await saveCredentials(creds);
 
+    lines.push('');
+    lines.push('✅ 飞书应用创建成功！');
+    lines.push(`  App ID:      ${creds.appId}`);
+    if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
+    lines.push('  凭证已保存到 ~/.deepv/feishu-credentials.json');
+    lines.push('');
+    lines.push('  下一步: 输入 /feishu start 启动 Bot');
     return lines.join('\n');
   } catch (err: any) {
     return [
@@ -224,7 +231,7 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
 /**
  * 启动网关（从已保存的凭证）
  */
-async function handleStart(): Promise<string> {
+async function handleStart(context?: any): Promise<string> {
   const creds = await loadCredentials();
   if (!creds) {
     return [
@@ -243,13 +250,43 @@ async function handleStart(): Promise<string> {
 
   const gateway = new FeishuGateway(creds.appId, creds.appSecret, creds.domain);
 
+  // 获取 GeminiClient
+  const config = context?.services?.config;
+  const geminiClient = config?.getGeminiClient?.();
+
   // 设置消息处理
   gateway.onMessage = async (msg: FeishuMessage): Promise<string | null> => {
     console.log(`📩 飞书消息来自 ${msg.senderOpenId}: ${msg.text.slice(0, 60)}`);
 
-    // 简单模式：直接 echo
-    // TODO: 后续可以集成 dvcode 的 LLM 能力
-    return `收到你的消息: "${msg.text}"\n\n(消息 ID: ${msg.messageId.slice(0, 8)}...)`;
+    if (!geminiClient) {
+      return `收到你的消息: "${msg.text}"\n\n(消息 ID: ${msg.messageId.slice(0, 8)}...)\n\n⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。`;
+    }
+
+    try {
+      // 用 createTemporaryChat，禁用 system prompt 以避免继承 agent 工具
+      const chat = await geminiClient.createTemporaryChat(
+        SceneType.SUB_AGENT,
+        undefined,
+        undefined,
+        { disableSystemPrompt: true },
+      );
+      // 移除工具声明，确保 LLM 只做纯文本回复
+      chat.setTools([]);
+      const response = await chat.sendMessage(
+        { message: msg.text },
+        `feishu-${Date.now()}`,
+        SceneType.SUB_AGENT,
+      );
+      // 提取回复文本（过滤掉 functionCall）
+      const textParts = response.candidates?.[0]?.content?.parts
+        ?.filter((p: any) => p.text)
+        .map((p: any) => p.text) || [];
+      const replyText = textParts.join('') || '（无回复）';
+      return replyText;
+    } catch (err: any) {
+      console.error('❌ 飞书 LLM 回答错误:', err.message);
+      return `❌ 处理消息时出错: ${err.message}`;
+    }
   };
 
   gateway.onReady = () => {
@@ -376,7 +413,7 @@ async function feishuAction(_context: any, args: string): Promise<SlashCommandAc
       output = await handleSetup(args.replace(/^setup\s*/i, ''));
       break;
     case 'start':
-      output = await handleStart();
+      output = await handleStart(_context);
       break;
     case 'stop':
       output = await handleStop();
@@ -412,36 +449,6 @@ export const feishuCommand: SlashCommand = {
   description: '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
   kind: CommandKind.BUILT_IN,
   action: feishuAction,
-  subCommands: [
-    {
-      name: 'setup',
-      description: '配置飞书凭证（扫码建应用或手动输入）',
-      kind: CommandKind.BUILT_IN,
-      action: feishuAction,
-    },
-    {
-      name: 'start',
-      description: '启动飞书 Bot 长连接',
-      kind: CommandKind.BUILT_IN,
-      action: feishuAction,
-    },
-    {
-      name: 'stop',
-      description: '停止飞书 Bot',
-      kind: CommandKind.BUILT_IN,
-      action: feishuAction,
-    },
-    {
-      name: 'status',
-      description: '查看飞书 Bot 连接状态',
-      kind: CommandKind.BUILT_IN,
-      action: feishuAction,
-    },
-    {
-      name: 'logout',
-      description: '清除飞书凭证并断开',
-      kind: CommandKind.BUILT_IN,
-      action: feishuAction,
-    },
-  ],
+  // ⚠ 不设置 subCommands：框架的 subCommand 匹配会吃掉子命令名，导致 args 不完整。
+  // feishuAction 内部的 parseArgs 自己处理子命令解析。
 };

@@ -6,18 +6,17 @@
  */
 
 /**
- * 飞书消息网关 — WebSocket 长连接收发消息
+ * 飞书消息网关 — 基于 @larksuiteoapi/node-sdk WSClient 的长连接收发消息
  *
- * 连飞书开放平台的标准 WebSocket 事件订阅端点：
- *   wss://open.feishu.cn/ws/v1/events?app_id=xxx&app_secret=xxx
+ * SDK 内部处理：
+ *   - 两步握手：POST /callback/ws/endpoint 获取动态 WS URL → 建立 WebSocket
+ *   - Protobuf 帧编码/解码 + 分片合并（seq/sum）
+ *   - 控制帧（ping/pong）与数据帧（事件）分离
+ *   - 自动重连（指数退避）
+ *   - EventDispatcher 事件分发
  *
- * 收消息 → 调 onMessage 回调 → 发回复走 REST API
+ * 收到消息 → 调 onMessage 回调 → 发回复走 REST API
  */
-
-const WS_BASE_URLS: Record<string, string> = {
-  feishu: 'wss://open.feishu.cn',
-  lark: 'wss://open.larksuite.com',
-};
 
 const API_BASE_URLS: Record<string, string> = {
   feishu: 'https://open.feishu.cn',
@@ -37,7 +36,7 @@ export interface FeishuMessage {
 export type OnMessageCallback = (msg: FeishuMessage) => Promise<string | null>;
 
 /**
- * 飞书 WS 网关
+ * 飞书 WS 网关（基于 @larksuiteoapi/node-sdk）
  *
  * 用法：
  *   const gw = new FeishuGateway(appId, appSecret);
@@ -50,27 +49,26 @@ export class FeishuGateway {
   private appId: string;
   private appSecret: string;
   private domain: string;
-  private ws: import('ws').WebSocket | null = null;
   private tenantToken: string = '';
   private tokenExpiresAt: number = 0;
-  private shouldReconnect = true;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private wsClient: any = null;
+  private _onReady: (() => void) | null = null;
+  private _onDisconnect: ((error?: Error) => void) | null = null;
 
   /** 外部注入的消息处理回调 */
   onMessage: OnMessageCallback | null = null;
 
   /** 连接状态回调 */
-  onReady: (() => void) | null = null;
-  onDisconnect: ((error?: Error) => void) | null = null;
+  get onReady(): (() => void) | null { return this._onReady; }
+  set onReady(fn: (() => void) | null) { this._onReady = fn; }
+
+  get onDisconnect(): ((error?: Error) => void) | null { return this._onDisconnect; }
+  set onDisconnect(fn: ((error?: Error) => void) | null) { this._onDisconnect = fn; }
 
   constructor(appId: string, appSecret: string, domain: 'feishu' | 'lark' = 'feishu') {
     this.appId = appId;
     this.appSecret = appSecret;
     this.domain = domain;
-  }
-
-  private get wsBaseUrl(): string {
-    return WS_BASE_URLS[this.domain] || WS_BASE_URLS.feishu;
   }
 
   private get apiBaseUrl(): string {
@@ -102,139 +100,121 @@ export class FeishuGateway {
   }
 
   /**
-   * 连接飞书 WS 事件订阅
+   * 连接飞书 WS 事件订阅（通过 SDK WSClient）
+   *
+   * SDK 自动：
+   *   - pullConnectConfig (POST /callback/ws/endpoint)
+   *   - 建立 WebSocket（Protobuf 帧）
+   *   - ping/pong 保活
+   *   - 自动重连
    */
   async connect(): Promise<void> {
-    // 动态 import ws（它是 core 的依赖，cli 通过 workspace 可访问）
-    const { default: WebSocket } = await import('ws');
+    const { WSClient, EventDispatcher } = await import('@larksuiteoapi/node-sdk');
 
-    const token = await this.getTenantToken();
-    const wsUrl = `${this.wsBaseUrl}/ws/v1/events?app_id=${this.appId}&app_secret=${this.appSecret}`;
+    const domainUrl = this.domain === 'lark'
+      ? 'https://open.larksuite.com'
+      : 'https://open.feishu.cn';
 
-    console.log(`🔌 连接飞书 WebSocket: ${this.wsBaseUrl}/ws/v1/events`);
+    // 事件分发器：只处理 im.message.receive_v1
+    const dispatcher = new EventDispatcher({
+      encryptKey: '',
+      verificationToken: '',
+      loggerLevel: 3,
+    });
 
-    this.shouldReconnect = true;
+    dispatcher.register({
+      'im.message.receive_v1': async (data: any) => {
+      try {
+        const event = data.event || data;
+        const message = event.message || {};
+        const sender = event.sender || {};
 
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(wsUrl);
-
-      ws.on('open', () => {
-        console.log('✅ 飞书 WebSocket 已连接');
-        this.ws = ws;
-        this.onReady?.();
-        resolve();
-      });
-
-      ws.on('message', async (rawData: Buffer) => {
+        // 解析文本内容
+        let text = '';
         try {
-          const data = JSON.parse(rawData.toString());
-          await this.handleWsMessage(data);
-        } catch (err) {
-          console.error('❌ 飞书消息解析失败:', err);
+          const content = JSON.parse(message.content || '{}');
+          text = content.text || '';
+        } catch {
+          text = message.content || '';
         }
+
+        // 去掉 @bot 占位符
+        if (event.mentions) {
+          for (const m of event.mentions) {
+            if (m.key) {
+              text = text.replace(m.key, '').trim();
+            }
+          }
+        }
+
+        const chatType = message.chat_type === 'p2p' ? 'p2p' :
+                         message.chat_type === 'group' ? 'group' : 'topic';
+
+        const feishuMsg: FeishuMessage = {
+          text,
+          messageId: message.message_id,
+          chatId: message.chat_id || event.conversation?.chat_id || '',
+          chatType,
+          senderOpenId: sender.sender_id?.open_id || sender.open_id || '',
+          mentions: (event.mentions || []).map((m: any) => ({
+            key: m.key,
+            openId: m.open_id || '',
+          })),
+          messageType: message.message_type || 'text',
+        };
+
+        if (this.onMessage) {
+          try {
+            const reply = await this.onMessage(feishuMsg);
+            if (reply) {
+              await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
+            }
+          } catch (err) {
+            console.error('❌ feishu onMessage 处理器错误:', err);
+          }
+        }
+
+        return { code: 0 };
+      } catch (err) {
+        console.error('❌ feishu 事件处理错误:', err);
+        return { code: 0 };
+      }
+      }
+    });
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      const client = new WSClient({
+        appId: this.appId,
+        appSecret: this.appSecret,
+        domain: domainUrl,
+        loggerLevel: 3, // error only
+        onReady: () => {
+          console.log('✅ 飞书 Bot 已就绪，可以开始聊天了！');
+          this._onReady?.();
+          if (!settled) { settled = true; resolve(); }
+        },
+        onError: (err: Error) => {
+          console.error('❌ 飞书 WSClient 错误:', err.message);
+          this._onDisconnect?.(err);
+          if (!settled) { settled = true; reject(err); }
+        },
+        onReconnecting: () => {
+          console.log('🔄 飞书正在重连...');
+        },
+        onReconnected: () => {
+          console.log('✅ 飞书重连成功');
+        },
       });
 
-      ws.on('error', (err: Error) => {
-        console.error('❌ 飞书 WebSocket 错误:', err.message);
-        if (!this.ws) {
-          reject(err);
-        }
-      });
+      this.wsClient = client;
 
-      ws.on('close', (code: number, reason: Buffer) => {
-        console.log(`🔌 飞书 WebSocket 断开 (code=${code}): ${reason?.toString() || '无原因'}`);
-        this.ws = null;
-        this.onDisconnect?.(undefined);
-
-        if (this.shouldReconnect) {
-          this.scheduleReconnect();
-        }
+      // start() 返回 Promise<void>，成功时 resolve
+      client.start({ eventDispatcher: dispatcher }).catch((err: any) => {
+        if (!settled) { settled = true; reject(err); }
       });
     });
-  }
-
-  /**
-   * 处理 WS 消息
-   */
-  private async handleWsMessage(data: any): Promise<void> {
-    // 飞书 WS 协议：需要回复 ack
-    if (data.type === 'url_verification') {
-      // 首次连接挑战
-      if (this.ws) {
-        this.ws.send(JSON.stringify({ challenge: data.challenge }));
-      }
-      return;
-    }
-
-    // 事件消息
-    if (data.type === 'event_callback' || data.type === 'im.message.receive_v1') {
-      // 飞书 WS 协议需要返回 ack
-      if (this.ws && data.header?.event_id) {
-        this.ws.send(JSON.stringify({
-          event_id: data.header.event_id,
-          type: 'ack',
-        }));
-      }
-
-      // 只处理消息接收事件
-      const eventType = data.header?.event_type || data.type;
-      if (eventType !== 'im.message.receive_v1') {
-        return;
-      }
-
-      const event = data.event || data;
-      const message = event.message || {};
-
-      // 忽略自己发的消息
-      const sender = event.sender || {};
-      // 不需要过滤，飞书 WS 不会把 bot 自己发的推回来
-
-      // 构建标准化消息
-      const chatType = message.chat_type === 'p2p' ? 'p2p' :
-                       message.chat_type === 'group' ? 'group' : 'topic';
-
-      // 解析文本内容
-      let text = '';
-      try {
-        const content = JSON.parse(message.content || '{}');
-        text = content.text || '';
-      } catch {
-        text = message.content || '';
-      }
-
-      // 去掉 @bot 占位符
-      if (event.mentions) {
-        for (const m of event.mentions) {
-          if (m.key) {
-            text = text.replace(m.key, '').trim();
-          }
-        }
-      }
-
-      const feishuMsg: FeishuMessage = {
-        text,
-        messageId: message.message_id,
-        chatId: message.chat_id || event.conversation?.chat_id || '',
-        chatType,
-        senderOpenId: sender.sender_id?.open_id || sender.open_id || '',
-        mentions: (event.mentions || []).map((m: any) => ({
-          key: m.key,
-          openId: m.open_id || '',
-        })),
-        messageType: message.message_type || 'text',
-      };
-
-      if (this.onMessage) {
-        try {
-          const reply = await this.onMessage(feishuMsg);
-          if (reply) {
-            await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
-          }
-        } catch (err) {
-          console.error('❌ feishu onMessage 处理器错误:', err);
-        }
-      }
-    }
   }
 
   /**
@@ -266,9 +246,7 @@ export class FeishuGateway {
 
     const data: any = await res.json();
     if (data.code !== 0) {
-      // 如果 chat_id 类型不对，重试用 open_id
       if (data.code === 10003 && replyToMessageId) {
-        // 参数错误，可能是 reply 接口用 chat_id 有问题，直接发消息
         const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
         const directRes = await fetch(directUrl, {
           method: 'POST',
@@ -298,7 +276,6 @@ export class FeishuGateway {
   async sendMarkdown(chatId: string, markdown: string, replyToMessageId?: string): Promise<void> {
     const token = await this.getTenantToken();
 
-    // 简单转换：将 markdown 转为飞书 post 格式
     const postContent = {
       zh_cn: {
         title: '',
@@ -350,7 +327,6 @@ export class FeishuGateway {
         continue;
       }
 
-      // 标题
       const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
       if (headingMatch) {
         if (currentPara.length > 0) {
@@ -358,16 +334,11 @@ export class FeishuGateway {
           currentPara = [];
         }
         paragraphs.push([
-          {
-            tag: 'text',
-            text: headingMatch[2],
-            style: ['bold'],
-          },
+          { tag: 'text', text: headingMatch[2], style: ['bold'] },
         ]);
         continue;
       }
 
-      // 粗体
       const boldParts = line.split(/\*\*(.+?)\*\*/g);
       for (let i = 0; i < boldParts.length; i++) {
         if (boldParts[i]) {
@@ -392,36 +363,16 @@ export class FeishuGateway {
   }
 
   /**
-   * 定时重连
-   */
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer) return;
-    console.log('🔄 5 秒后尝试重连飞书...');
-    this.reconnectTimer = setTimeout(async () => {
-      this.reconnectTimer = null;
-      // 重新拿 token
-      this.tenantToken = '';
-      try {
-        await this.connect();
-      } catch (err) {
-        console.error('❌ 飞书重连失败，5 秒后重试:', err);
-        this.scheduleReconnect();
-      }
-    }, 5000);
-  }
-
-  /**
    * 断开连接
    */
   async disconnect(): Promise<void> {
-    this.shouldReconnect = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.wsClient) {
+      try {
+        this.wsClient.stop?.();
+      } catch {
+        // ignore
+      }
+      this.wsClient = null;
     }
   }
 }
