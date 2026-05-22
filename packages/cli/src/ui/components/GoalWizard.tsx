@@ -65,14 +65,20 @@ const STEPS_ORDER: Step[] = [
   Step.CONFIRM,
 ];
 
-const INTENSITY_OPTIONS: Array<{
+/**
+ * Build the intensity options at render time so language switches reflect
+ * immediately. Module-level `t()` calls would freeze labels at module load.
+ */
+function getIntensityOptions(): Array<{
   label: string;
   value: GoalIntensity;
-}> = [
-  { label: t('goalWizard.intensity.steady'), value: 'steady' },
-  { label: t('goalWizard.intensity.standard'), value: 'standard' },
-  { label: t('goalWizard.intensity.intense'), value: 'intense' },
-];
+}> {
+  return [
+    { label: t('goalWizard.intensity.steady'), value: 'steady' },
+    { label: t('goalWizard.intensity.standard'), value: 'standard' },
+    { label: t('goalWizard.intensity.intense'), value: 'intense' },
+  ];
+}
 
 function stepTitle(s: Step): string {
   switch (s) {
@@ -88,6 +94,12 @@ function stepTitle(s: Step): string {
       return t('goalWizard.step.intensity.title');
     case Step.CONFIRM:
       return t('goalWizard.step.confirm.title');
+    default: {
+      // Exhaustive check — if a new Step value is added but not handled,
+      // TypeScript will flag this assignment.
+      const _exhaustive: never = s;
+      return String(_exhaustive);
+    }
   }
 }
 
@@ -105,6 +117,10 @@ function stepHelp(s: Step): string {
       return t('goalWizard.step.intensity.help');
     case Step.CONFIRM:
       return t('goalWizard.step.confirm.help');
+    default: {
+      const _exhaustive: never = s;
+      return String(_exhaustive);
+    }
   }
 }
 
@@ -395,21 +411,24 @@ export function GoalWizard({
           </Box>
         )}
 
-        {step === Step.INTENSITY && (
-          <RadioButtonSelect
-            items={INTENSITY_OPTIONS.map((o) => ({
-              label: o.label,
-              value: o.value,
-            }))}
-            initialIndex={INTENSITY_OPTIONS.findIndex((o) => o.value === intensity)}
-            onSelect={(v) => {
-              setIntensity(v);
-              goNext();
-            }}
-            onHighlight={() => {}}
-            isFocused
-          />
-        )}
+        {step === Step.INTENSITY && (() => {
+          const intensityOptions = getIntensityOptions();
+          return (
+            <RadioButtonSelect
+              items={intensityOptions.map((o) => ({
+                label: o.label,
+                value: o.value,
+              }))}
+              initialIndex={intensityOptions.findIndex((o) => o.value === intensity)}
+              onSelect={(v) => {
+                setIntensity(v);
+                goNext();
+              }}
+              onHighlight={() => {}}
+              isFocused
+            />
+          );
+        })()}
 
         {step === Step.CONFIRM && (
           <Box flexDirection="column">
@@ -465,7 +484,7 @@ export function GoalWizard({
               <Text color={Colors.AccentCyan}>
                 {t('goalWizard.confirm.summary.intensity')}{' '}
                 <Text color={Colors.Foreground}>
-                  {INTENSITY_OPTIONS.find((o) => o.value === intensity)?.label ?? intensity}
+                  {getIntensityOptions().find((o) => o.value === intensity)?.label ?? intensity}
                 </Text>
               </Text>
             </Box>

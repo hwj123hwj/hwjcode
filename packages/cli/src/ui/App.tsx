@@ -887,7 +887,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
           addItem(
             {
               type: MessageType.ERROR,
-              text: '❌ 目标模式启动失败：submitQuery 未就绪（超时 1s）。请再次执行 /goal。',
+              text: t('goalWizard.submit_not_ready'),
             },
             Date.now(),
           );

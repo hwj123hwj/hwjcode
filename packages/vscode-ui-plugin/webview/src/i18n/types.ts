@@ -663,6 +663,74 @@ export interface Translations {
     jitter: string;
     resuming: string;
   };
+
+  goalWizard: {
+    buttonTooltip: string;
+    title: string;
+    closeTooltip: string;
+    stepLabel: string;
+    step: {
+      task: string;
+      forbidden: string;
+      criteria: string;
+      hours: string;
+      intensity: string;
+      confirm: string;
+    };
+    field: {
+      taskLabel: string;
+      taskHint: string;
+      taskPlaceholder: string;
+      forbiddenLabel: string;
+      forbiddenHint: string;
+      forbiddenPlaceholder: string;
+      criteriaLabel: string;
+      criteriaHint: string;
+      criteriaPlaceholder: string;
+      hoursLabel: string;
+      hoursHint: string;
+      intensityLabel: string;
+      intensityHint: string;
+      confirmLabel: string;
+      confirmHint: string;
+    };
+    intensity: {
+      steadyTitle: string;
+      steadyDesc: string;
+      standardTitle: string;
+      standardDesc: string;
+      intenseTitle: string;
+      intenseDesc: string;
+    };
+    confirm: {
+      yoloKeep: string;
+      yoloEnable: string;
+      summary: {
+        task: string;
+        forbidden: string;
+        criteria: string;
+        hours: string;
+        intensity: string;
+        none: string;
+        empty: string;
+      };
+    };
+    error: {
+      taskRequired: string;
+      criteriaRequired: string;
+      hoursInvalid: string;
+    };
+    button: {
+      cancel: string;
+      back: string;
+      next: string;
+      starting: string;
+      start: string;
+    };
+    units: {
+      hours: string;
+    };
+  };
 }
 
 export type SupportedLocale = 'zh-CN' | 'en-US';

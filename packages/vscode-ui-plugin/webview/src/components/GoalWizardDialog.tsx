@@ -21,6 +21,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { X, ArrowLeft, ArrowRight, Target, Rocket } from 'lucide-react';
 import { useYoloMode } from '../hooks/useProjectSettings';
+import { useTranslation } from '../hooks/useTranslation';
 import type { MessageContent } from '../types';
 import './GoalWizardDialog.css';
 
@@ -41,27 +42,9 @@ interface GoalWizardDialogProps {
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
 
-const INTENSITY_OPTIONS: Array<{
-  value: GoalIntensity;
-  title: string;
-  desc: string;
-}> = [
-  {
-    value: 'steady',
-    title: '平稳模式',
-    desc: '稳健节奏，每完成 1 项调用 local_time 自检；允许等待长任务。',
-  },
-  {
-    value: 'standard',
-    title: '标准模式（推荐）',
-    desc: '主动规划，每 3 项 / 里程碑自检；必要时重新规划任务清单。',
-  },
-  {
-    value: 'intense',
-    title: '高强度模式',
-    desc: '禁止等用户、遇阻立即换路线、不停摆；每个里程碑都要汇报 elapsed。',
-  },
-];
+// 强度档位的 i18n key 表（只引用 key，由 useTranslation().t 渲染时解析，
+// 这样语言切换时 label 会即时更新；module-load 时调 t() 会冻结当前语言）。
+const INTENSITY_VALUES: GoalIntensity[] = ['steady', 'standard', 'intense'];
 
 const INTENSITY_DISCIPLINE: Record<GoalIntensity, string> = {
   steady:
@@ -161,6 +144,42 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
   onSubmit,
 }) => {
   const { yoloMode, updateYoloMode } = useYoloMode();
+  const { t } = useTranslation();
+
+  const stepTitle = useCallback(
+    (s: Step): string => {
+      switch (s) {
+        case 1:
+          return t('goalWizard.step.task');
+        case 2:
+          return t('goalWizard.step.forbidden');
+        case 3:
+          return t('goalWizard.step.criteria');
+        case 4:
+          return t('goalWizard.step.hours');
+        case 5:
+          return t('goalWizard.step.intensity');
+        case 6:
+          return t('goalWizard.step.confirm');
+        default: {
+          // Exhaustive check; TS will flag if a new Step value is added.
+          const _exhaustive: never = s;
+          return String(_exhaustive);
+        }
+      }
+    },
+    [t],
+  );
+
+  const intensityOptions: Array<{
+    value: GoalIntensity;
+    title: string;
+    desc: string;
+  }> = INTENSITY_VALUES.map((value) => ({
+    value,
+    title: t(`goalWizard.intensity.${value}Title`),
+    desc: t(`goalWizard.intensity.${value}Desc`),
+  }));
 
   const [step, setStep] = useState<Step>(1);
   const [task, setTask] = useState('');
@@ -198,21 +217,21 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
   const next = useCallback(() => {
     setError(null);
     if (step === 1 && !task.trim()) {
-      setError('请填写任务描述。');
+      setError(t('goalWizard.error.taskRequired'));
       return;
     }
     if (step === 3 && !criteria.trim()) {
-      setError('请填写达标特征。');
+      setError(t('goalWizard.error.criteriaRequired'));
       return;
     }
     if (step === 4) {
       if (!Number.isFinite(hours) || hours < 0.5 || hours > 24) {
-        setError('请输入 0.5–24 之间的数字。');
+        setError(t('goalWizard.error.hoursInvalid'));
         return;
       }
     }
     setStep((s) => Math.min(6, s + 1) as Step);
-  }, [step, task, criteria, hours]);
+  }, [step, task, criteria, hours, t]);
 
   const back = useCallback(() => {
     setError(null);
@@ -261,13 +280,13 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
         <header className="goal-wizard__header">
           <div className="goal-wizard__title">
             <Target size={20} />
-            <span>目标驱动模式 / Goal-Driven Mode</span>
+            <span>{t('goalWizard.title')}</span>
           </div>
           <button
             className="goal-wizard__close-btn"
             onClick={onClose}
             disabled={submitting}
-            title="关闭 (Esc)"
+            title={t('goalWizard.closeTooltip')}
           >
             <X size={18} />
           </button>
@@ -288,7 +307,7 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
             </div>
           ))}
           <span className="goal-wizard__step-label">
-            Step {step}/6 — {stepTitle(step)}
+            {t('goalWizard.stepLabel', { step, title: stepTitle(step) })}
           </span>
         </div>
 
@@ -296,8 +315,8 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
         <div className="goal-wizard__body">
           {step === 1 && (
             <Field
-              label="📝 任务描述"
-              hint="描述要让 AI 自主完成的目标，可多行。"
+              label={t('goalWizard.field.taskLabel')}
+              hint={t('goalWizard.field.taskHint')}
               required
             >
               <textarea
@@ -306,30 +325,30 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
                 rows={6}
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
-                placeholder="例：实现一个完整的多语言 i18n 系统，包含中文、英文、日语..."
+                placeholder={t('goalWizard.field.taskPlaceholder')}
               />
             </Field>
           )}
 
           {step === 2 && (
             <Field
-              label="🚫 禁止事项"
-              hint="列出 AI 不可触碰的红线（可空），多行。"
+              label={t('goalWizard.field.forbiddenLabel')}
+              hint={t('goalWizard.field.forbiddenHint')}
             >
               <textarea
                 className="goal-wizard__textarea"
                 rows={6}
                 value={forbidden}
                 onChange={(e) => setForbidden(e.target.value)}
-                placeholder={'例：\n不能修改 packages/core 之外的代码\n不能引入新的运行时依赖'}
+                placeholder={t('goalWizard.field.forbiddenPlaceholder')}
               />
             </Field>
           )}
 
           {step === 3 && (
             <Field
-              label="✅ 达标特征"
-              hint='列出"算作完成"的客观判据（如：通过测试、文件存在、行为正确）。'
+              label={t('goalWizard.field.criteriaLabel')}
+              hint={t('goalWizard.field.criteriaHint')}
               required
             >
               <textarea
@@ -337,15 +356,15 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
                 rows={6}
                 value={criteria}
                 onChange={(e) => setCriteria(e.target.value)}
-                placeholder={'例：\nnpm test 全部通过\n打开 demo 页面能看到三种语言切换\n不出现 console.error'}
+                placeholder={t('goalWizard.field.criteriaPlaceholder')}
               />
             </Field>
           )}
 
           {step === 4 && (
             <Field
-              label="⏱️ 最低持续工作时间"
-              hint="一个正数（小时），AI 必须持续工作的下限（推荐 2，范围 0.5–24）。"
+              label={t('goalWizard.field.hoursLabel')}
+              hint={t('goalWizard.field.hoursHint')}
               required
             >
               <input
@@ -361,9 +380,12 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
           )}
 
           {step === 5 && (
-            <Field label="🔥 强度档位" hint="选择 AI 的工作纪律风格。">
+            <Field
+              label={t('goalWizard.field.intensityLabel')}
+              hint={t('goalWizard.field.intensityHint')}
+            >
               <div className="goal-wizard__radio-group">
-                {INTENSITY_OPTIONS.map((opt) => (
+                {intensityOptions.map((opt) => (
                   <label
                     key={opt.value}
                     className={
@@ -392,33 +414,35 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
 
           {step === 6 && (
             <Field
-              label="🚀 启动确认"
-              hint="检查下方填写的内容，确认无误后启动。"
+              label={t('goalWizard.field.confirmLabel')}
+              hint={t('goalWizard.field.confirmHint')}
             >
               <div className="goal-wizard__warning">
-                ⚠️ 启动后将{yoloMode ? '保持' : '自动开启'} YOLO 模式（无需逐次确认工具调用）。
+                {yoloMode
+                  ? t('goalWizard.confirm.yoloKeep')
+                  : t('goalWizard.confirm.yoloEnable')}
               </div>
               <div className="goal-wizard__summary">
                 <div className="goal-wizard__summary-row">
-                  <div className="goal-wizard__summary-label">📝 任务描述</div>
-                  <pre className="goal-wizard__summary-value">{task.trim() || '-'}</pre>
+                  <div className="goal-wizard__summary-label">{t('goalWizard.confirm.summary.task')}</div>
+                  <pre className="goal-wizard__summary-value">{task.trim() || t('goalWizard.confirm.summary.empty')}</pre>
                 </div>
                 <div className="goal-wizard__summary-row">
-                  <div className="goal-wizard__summary-label">🚫 禁止事项</div>
-                  <pre className="goal-wizard__summary-value">{forbidden.trim() || '（无）'}</pre>
+                  <div className="goal-wizard__summary-label">{t('goalWizard.confirm.summary.forbidden')}</div>
+                  <pre className="goal-wizard__summary-value">{forbidden.trim() || t('goalWizard.confirm.summary.none')}</pre>
                 </div>
                 <div className="goal-wizard__summary-row">
-                  <div className="goal-wizard__summary-label">✅ 达标特征</div>
-                  <pre className="goal-wizard__summary-value">{criteria.trim() || '-'}</pre>
+                  <div className="goal-wizard__summary-label">{t('goalWizard.confirm.summary.criteria')}</div>
+                  <pre className="goal-wizard__summary-value">{criteria.trim() || t('goalWizard.confirm.summary.empty')}</pre>
                 </div>
                 <div className="goal-wizard__summary-row">
-                  <div className="goal-wizard__summary-label">⏱️ 持续工作下限</div>
-                  <div className="goal-wizard__summary-value goal-wizard__summary-value--inline">{hours} 小时</div>
+                  <div className="goal-wizard__summary-label">{t('goalWizard.confirm.summary.hours')}</div>
+                  <div className="goal-wizard__summary-value goal-wizard__summary-value--inline">{t('goalWizard.units.hours', { hours })}</div>
                 </div>
                 <div className="goal-wizard__summary-row">
-                  <div className="goal-wizard__summary-label">🔥 强度档位</div>
+                  <div className="goal-wizard__summary-label">{t('goalWizard.confirm.summary.intensity')}</div>
                   <div className="goal-wizard__summary-value goal-wizard__summary-value--inline">
-                    {INTENSITY_OPTIONS.find((o) => o.value === intensity)?.title ?? intensity}
+                    {intensityOptions.find((o) => o.value === intensity)?.title ?? intensity}
                   </div>
                 </div>
               </div>
@@ -436,7 +460,7 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
             disabled={submitting}
           >
             <ArrowLeft size={14} />
-            {step === 1 ? '取消' : '上一步'}
+            {step === 1 ? t('goalWizard.button.cancel') : t('goalWizard.button.back')}
           </button>
 
           {step < 6 ? (
@@ -445,7 +469,7 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
               onClick={next}
               disabled={submitting}
             >
-              下一步
+              {t('goalWizard.button.next')}
               <ArrowRight size={14} />
             </button>
           ) : (
@@ -455,7 +479,7 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
               disabled={submitting}
             >
               <Rocket size={14} />
-              {submitting ? '启动中...' : '启动目标驱动模式'}
+              {submitting ? t('goalWizard.button.starting') : t('goalWizard.button.start')}
             </button>
           )}
         </footer>
@@ -465,23 +489,6 @@ export const GoalWizardDialog: React.FC<GoalWizardDialogProps> = ({
 };
 
 // ----------------------- Helpers -----------------------
-
-function stepTitle(s: Step): string {
-  switch (s) {
-    case 1:
-      return '任务描述';
-    case 2:
-      return '禁止事项';
-    case 3:
-      return '达标特征';
-    case 4:
-      return '持续时间';
-    case 5:
-      return '强度档位';
-    case 6:
-      return '确认并启动';
-  }
-}
 
 const Field: React.FC<{
   label: string;
