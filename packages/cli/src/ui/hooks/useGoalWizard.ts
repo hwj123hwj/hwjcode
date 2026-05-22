@@ -112,6 +112,41 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
       //    discipline framing is internal). The "info" line above is the
       //    only visible artifact of this turn from the user's perspective.
       const prompt = buildGoalPrompt(result);
+
+      // 3a) Persist goal context in core so it survives auto-compression.
+      //     Without this, the LLM-generated summary will likely strip away
+      //     the contract clauses (min-hours floor, no-stop discipline, T0,
+      //     safety rails), causing the agent to drift into "let me continue"
+      //     stalls after compression. tryCompressChat re-injects this
+      //     context after every compression cycle.
+      //
+      //     T0 is captured here (server-side wallclock) rather than relying
+      //     on the model's first local_time call — that way it survives
+      //     even if compression fires before the model gets a chance to
+      //     record T0 itself.
+      if (config) {
+        try {
+          const client = config.getGeminiClient();
+          // getGeminiClient() may throw if the client is not yet initialized
+          // (shouldn't happen by the time the wizard is reachable, but guard
+          // anyway — failure here must not block goal launch).
+          if (client) {
+            client.setGoalContext({
+              originalPrompt: prompt,
+              startedAt: Date.now(),
+              hours: result.hours,
+              task: result.task,
+            });
+          }
+        } catch (err) {
+          // Log but don't abort: the goal still launches, just without
+          // post-compression resilience.
+          console.warn(
+            `[useGoalWizard] Failed to register goal context for compression resilience: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       setTimeout(() => {
         submitQuery(prompt, { silent: true });
       }, 50);

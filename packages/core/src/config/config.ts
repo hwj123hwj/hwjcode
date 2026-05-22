@@ -49,6 +49,7 @@ import { PatchTool } from '../tools/patch.js';
 import { BatchTool } from '../tools/batch.js';
 import { AskUserQuestionTool } from '../tools/ask-user-question.js';
 import { LocalTimeTool } from '../tools/local-time.js';
+import { GoalAchievedTool } from '../tools/goal-achieved.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
@@ -1084,6 +1085,7 @@ export class Config {
     registerCoreTool(BatchTool, this);
     registerCoreTool(AskUserQuestionTool, this);
     registerCoreTool(LocalTimeTool, this);
+    registerCoreTool(GoalAchievedTool, this);
 
     // TaskTool (SubAgent) is disabled in VSCode plugin mode
     // but remains available in CLI mode and other IDE environments

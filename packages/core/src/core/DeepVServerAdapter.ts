@@ -449,6 +449,24 @@ export class DeepVServerAdapter implements ContentGenerator {
         model: requestBody.model
       });
 
+      // 🔍 [STOP-DEBUG][adapter] Outgoing tool manifest — non-stream path.
+      // 用途：诊断"模型说要调 local_time 但工具调用却空了"这类问题。如果
+      // 这里打印的工具名列表不含 local_time / goal_achieved，那就是
+      // toolRegistry 那边出了问题；如果列表是齐的但 server 仍然没工具，
+      // 那就是 server 端的过滤/转换 bug。详见 client.ts:~500 (toolRegistry.
+      // getFunctionDeclarations())。
+      try {
+        const tools = (requestBody as any)?.config?.tools;
+        const names = Array.isArray(tools)
+          ? tools.flatMap((t: any) => (t?.functionDeclarations ?? []).map((d: any) => d?.name))
+          : [];
+        console.log(
+          `[STOP-DEBUG][adapter] → ${endpoint} model=${requestBody.model} tools(${names.length})=[${names.join(', ')}]`,
+        );
+      } catch {
+        // 日志不能障碍请求
+      }
+
       const response = await fetch(proxyUrl, {
         method: 'POST',
         headers: {
@@ -884,6 +902,20 @@ export class DeepVServerAdapter implements ContentGenerator {
         model: requestBody.model
       });
 
+      // 🔍 [STOP-DEBUG][adapter] Outgoing tool manifest — stream path.
+      // 与 non-stream 路径同义，只是走的是 /v1/chat/stream。
+      try {
+        const tools = (requestBody as any)?.config?.tools;
+        const names = Array.isArray(tools)
+          ? tools.flatMap((t: any) => (t?.functionDeclarations ?? []).map((d: any) => d?.name))
+          : [];
+        console.log(
+          `[STOP-DEBUG][adapter] → ${endpoint} (stream) model=${requestBody.model} tools(${names.length})=[${names.join(', ')}]`,
+        );
+      } catch {
+        // 日志不能障碍请求
+      }
+
       const response = await fetch(proxyUrl, {
         method: 'POST',
         headers: {
@@ -1103,9 +1135,19 @@ export class DeepVServerAdapter implements ContentGenerator {
         if (done) {
           // 🛡️ 流自然结束：flush 累积的工具调用 chunk
           if (accumulatedToolChunk) {
+            // 🔍 [STOP-DEBUG][adapter] 诊断日志 #3a：done flush
+            const fcs = accumulatedToolChunk.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall) ?? [];
+            console.log(
+              `[STOP-DEBUG][adapter] FLUSH on reader.done: functionCallCount=${fcs.length}, names=[${fcs.map((p: any) => p.functionCall?.name ?? '').join(',')}]`,
+            );
             this.finalizeAccumulatedToolChunk(accumulatedToolChunk);
             yield accumulatedToolChunk;
             accumulatedToolChunk = null;
+          } else {
+            // 🔍 [STOP-DEBUG][adapter] 诊断日志：done 但累加器空
+            console.log(
+              '[STOP-DEBUG][adapter] reader.done with NO accumulator (no tool calls were accumulated)',
+            );
           }
           break;
         }
@@ -1121,15 +1163,41 @@ export class DeepVServerAdapter implements ContentGenerator {
             if (data === '[DONE]') {
               // 🛡️ 收到 [DONE]：flush 累积的工具调用 chunk
               if (accumulatedToolChunk) {
+                // 🔍 [STOP-DEBUG][adapter] 诊断日志 #3b：[DONE] flush
+                const fcs = accumulatedToolChunk.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall) ?? [];
+                console.log(
+                  `[STOP-DEBUG][adapter] FLUSH on [DONE]: functionCallCount=${fcs.length}, names=[${fcs.map((p: any) => p.functionCall?.name ?? '').join(',')}]`,
+                );
                 this.finalizeAccumulatedToolChunk(accumulatedToolChunk);
                 yield accumulatedToolChunk;
                 accumulatedToolChunk = null;
+              } else {
+                // 🔍 [STOP-DEBUG][adapter] 诊断日志：[DONE] 但累加器空
+                console.log(
+                  '[STOP-DEBUG][adapter] [DONE] with NO accumulator (no tool calls were accumulated)',
+                );
               }
               return; // 流结束
             }
 
             try {
               const chunk = JSON.parse(data);
+
+              // 🔍 [STOP-DEBUG][adapter] 诊断日志 #1：原始服务器 chunk
+              // 用途：定位 function_call 在哪一层丢失。如果服务器根本没发送
+              // parts[i].functionCall（而是发了 tool_use / tool_call 之类的
+              // 其它 schema），下面的 hasFunctionCall 判断就会 false，整个
+              // 工具调用就在客户端被静默跳过。
+              // 这条日志可以告诉我们 server 真正在发什么。仅打印前 800 字符
+              // 防止巨型 chunk 把日志刷屏。
+              try {
+                const dump = JSON.stringify(chunk);
+                console.log(
+                  `[STOP-DEBUG][adapter] RAW chunk (${dump.length}B): ${dump.length > 800 ? dump.substring(0, 800) + '…[truncated]' : dump}`,
+                );
+              } catch {
+                // 忽略 stringify 失败（含循环引用等极少数情况）
+              }
 
               // 跳过连接确认消息
               if (chunk.type === 'connection_established') {
@@ -1149,12 +1217,32 @@ export class DeepVServerAdapter implements ContentGenerator {
               // 🚀 立即转换 - 但是否立即 yield 取决于 chunk 是否含 functionCall
               const genaiResponse = this.convertStreamChunkToGenAI(chunk);
               if (!genaiResponse) {
+                // 🔍 [STOP-DEBUG][adapter] 诊断日志：转换失败丢弃
+                console.log(
+                  '[STOP-DEBUG][adapter] convertStreamChunkToGenAI returned null; chunk skipped',
+                );
                 continue;
               }
 
               // 🛡️ 区分工具调用 chunk 与纯文本 chunk
               const parts = genaiResponse.candidates?.[0]?.content?.parts ?? [];
               const hasFunctionCall = parts.some((p: any) => p.functionCall);
+
+              // 🔍 [STOP-DEBUG][adapter] 诊断日志 #2：累加器决策
+              // 用途：判断 chunk 进入了三个分支中的哪一个：
+              //   (A) hasFunctionCall=true → 累积合并
+              //   (B) accumulator 已存在 → 把后续 finishReason/usage 合并进去
+              //   (C) 纯文本 → 立即 yield
+              // 如果服务器发了 functionCall 但 partsKeys 里看不到 'functionCall'
+              // 字段（比如显示 ['toolUse'] / ['name','input']），那就是 schema
+              // 不匹配——server 端没把 claude tool_use 翻译成 gemini functionCall。
+              const partsKeys = parts.map((p: any) =>
+                p && typeof p === 'object' ? Object.keys(p) : typeof p,
+              );
+              const finishReason = genaiResponse.candidates?.[0]?.finishReason;
+              console.log(
+                `[STOP-DEBUG][adapter] chunk decision: hasFunctionCall=${hasFunctionCall}, hasAccumulator=${!!accumulatedToolChunk}, finishReason=${finishReason || 'none'}, partsKeys=${JSON.stringify(partsKeys)}`,
+              );
 
               if (hasFunctionCall) {
                 // 含 functionCall 的 chunk —— 不立即 yield，先累积合并

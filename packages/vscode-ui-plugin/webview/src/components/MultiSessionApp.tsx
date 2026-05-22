@@ -1434,12 +1434,28 @@ export const MultiSessionApp: React.FC = () => {
   const handleSendMessage = React.useCallback((
     content: MessageContent,
     targetSessionId?: string,
-    opts?: { silent?: boolean },
+    opts?: {
+      silent?: boolean;
+      /**
+       * 🎯 /goal 模式启动元数据。
+       *
+       * 仅由 GoalWizardDialog 的 onSubmit 路径传入。该字段会随同 chat_message
+       * 一起送到 extension 端，extension 在 onChatMessage 入口看到该字段后会
+       * 先调用 GeminiClient.setGoalContext(...) 再处理消息——保证后续自动/
+       * 手动压缩能触发 goal prompt 重新注入，避免 agent 在压缩后停摆。
+       *
+       * 设计上把 goal-context 注册和 prompt 发送绑定在同一条消息里，
+       * 而不是独立发 register/chat 两条 —— 这样不需要 round-trip 等待
+       * 也不存在到达顺序竞态。
+       */
+      goalContext?: { startedAt: number; hours: number; task: string };
+    },
   ) => {
     // silent=true：消息照样发到后端触发一轮 AI 回复，但不在前端 UI 上
     // 添加用户消息气泡。用于 /goal 之类把内部 prompt 发给模型、又不希望
     // prompt 内容（含契约 / 系统硬红线等内部资产）泄漏到聊天历史的场景。
     const silent = opts?.silent === true;
+    const goalContext = opts?.goalContext;
     // 优先使用目标 Session ID，否则使用当前 Session ID
     const sessionId = targetSessionId || state.currentSessionId;
     if (!sessionId) return;
@@ -1525,7 +1541,7 @@ User question: ${contentStr}`;
     }
 
     // 发送到Extension
-    getGlobalMessageService().sendChatMessage(sessionId, messageContentToSend, userMessage.id);
+    getGlobalMessageService().sendChatMessage(sessionId, messageContentToSend, userMessage.id, goalContext);
   }, [state.currentSessionId, state.sessions, addMessage, setSessionLoading]);
 
   // 🎯 全局队列处理器：监控所有 Session 的队列并自动发送
@@ -2426,7 +2442,9 @@ User question: ${contentStr}`;
       <GoalWizardDialog
         isOpen={isGoalWizardOpen}
         onClose={() => setIsGoalWizardOpen(false)}
-        onSubmit={(content) => handleSendMessage(content, undefined, { silent: true })}
+        onSubmit={(content, goalContext) =>
+          handleSendMessage(content, undefined, { silent: true, goalContext })
+        }
       />
 
       {/* 🎯 压缩确认弹窗（模型切换时上下文超限） */}
