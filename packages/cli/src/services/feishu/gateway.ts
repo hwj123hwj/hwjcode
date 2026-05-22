@@ -204,6 +204,8 @@ export class FeishuGateway {
         }
 
         if (this.onMessage) {
+          // 添加"思考中"表情，让用户知道 Bot 正在处理
+          const reactionId = await this.addReaction(feishuMsg.messageId, 'THINKING');
           try {
             const reply = await this.onMessage(feishuMsg);
             if (reply) {
@@ -211,6 +213,9 @@ export class FeishuGateway {
             }
           } catch (err) {
             console.error('❌ feishu onMessage 处理器错误:', err);
+          } finally {
+            // 处理完成，移除"思考中"表情
+            await this.removeReaction(feishuMsg.messageId, reactionId);
           }
         }
 
@@ -400,6 +405,63 @@ export class FeishuGateway {
     }
 
     return paragraphs;
+  }
+
+  /**
+   * 给消息添加 emoji 反应
+   * @returns reaction_id（用于后续删除），失败返回空字符串
+   */
+  async addReaction(messageId: string, emojiType: string): Promise<string> {
+    try {
+      const token = await this.getTenantToken();
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/reactions`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reaction_type: { emoji_type: emojiType } }),
+        },
+      );
+      const data: any = await res.json();
+      if (data.code === 0 && data.data?.reaction_id) {
+        return data.data.reaction_id;
+      }
+      if (data.code !== 0) {
+        console.warn(`⚠️ 添加 reaction 失败: ${JSON.stringify(data)}`);
+      }
+    } catch (err) {
+      console.warn('⚠️ 添加 reaction 异常:', err);
+    }
+    return '';
+  }
+
+  /**
+   * 删除消息的 emoji 反应
+   */
+  async removeReaction(messageId: string, reactionId: string): Promise<void> {
+    if (!reactionId) return;
+    try {
+      const token = await this.getTenantToken();
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/reactions/${reactionId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      const data: any = await res.json();
+      if (data.code !== 0) {
+        console.warn(`⚠️ 删除 reaction 失败: ${JSON.stringify(data)}`);
+      }
+    } catch (err) {
+      console.warn('⚠️ 删除 reaction 异常:', err);
+    }
   }
 
   /**
