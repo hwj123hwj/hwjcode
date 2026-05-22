@@ -385,8 +385,25 @@ export class Turn {
           // 🔍 STOP-DEBUG: 记录 finishReason 详情
           console.log(`[STOP-DEBUG] Turn.run(): finishReason=${finishReason}, functionCalls=${(resp.functionCalls ?? []).length}, hasText=${!!getResponseText(resp)}, candidateIndex=${resp.candidates?.[0]?.index}`);
 
-          // 🔍 STOP-DEBUG: 当 finishReason=STOP 且无工具调用时，dump 原始响应以排查模型是否返回了非标准工具调用
-          if (finishReason === 'STOP' && (resp.functionCalls ?? []).length === 0) {
+          // 🔍 STOP-DEBUG: dump 原始响应。两种值得排查的场景：
+          //   1. finishReason=STOP 且无工具调用 —— 模型是否返回了非标准工具调用？
+          //   2. finishReason=FUNCTION_CALL 且无工具调用 —— ⚠ server 端 bug：
+          //      Claude 模型返回了 tool_use，但 DeepV proxy 在翻译成 Gemini
+          //      schema 时丢失了 functionCall part（candidates[0].content.parts
+          //      变成了空数组 []），只剩 finishReason 这个壳。已知发生在
+          //      claude-opus-4-7 上。需要后端修复；客户端这里只能尽量观察并报警。
+          //
+          // 注：FinishReason 这个 enum 来自 @google/genai，里面没有 'FUNCTION_CALL'
+          // 字面量（Gemini 原生用 'STOP'/'MAX_TOKENS' 等）。但 DeepV proxy 在
+          // 翻译 Claude 响应时会把 stop_reason='tool_use' 映射成 'FUNCTION_CALL'
+          // 这个非标值，所以这里要按字符串比较，不能依赖 enum 类型。
+          const isEmptyFunctionCallChunk =
+            (finishReason as unknown as string) === 'FUNCTION_CALL' &&
+            (resp.functionCalls ?? []).length === 0;
+          if (
+            (finishReason === 'STOP' && (resp.functionCalls ?? []).length === 0) ||
+            isEmptyFunctionCallChunk
+          ) {
             try {
               const candidate = resp.candidates?.[0];
               const parts = candidate?.content?.parts ?? [];
@@ -400,7 +417,32 @@ export class Turn {
                 if ('reasoning' in p) desc += ` reasoning=present`;
                 return desc;
               });
-              console.log(`[STOP-DEBUG] 🔍 RAW RESPONSE DUMP (finishReason=STOP, no functionCalls):`);
+              console.log(`[STOP-DEBUG] 🔍 RAW RESPONSE DUMP (finishReason=${finishReason}, no functionCalls):`);
+              if (isEmptyFunctionCallChunk) {
+                // ❌ 这是确凿的 server 端 bug：finishReason 表明模型决定调用工具了
+                // （而且消耗了 candidatesToken），但 parts 数组是空的，工具调用
+                // payload 没被翻译/序列化出来。
+                //
+                // 已知触发场景：claude-opus-4-7 走 DeepV proxy 时，Claude 原生
+                // tool_use block 应被翻译成 Gemini functionCall part，但 proxy
+                // 在 SSE 最后一个 chunk 里漏写了这个 part，只保留了 finishReason。
+                //
+                // 客户端无法兜底——调用名/参数全都丢了，根本不知道模型想调什么。
+                // 只在日志里大声报警，留给后端排查。用户层面表现：模型说一句话就停。
+                console.error(
+                  `[Turn] ❌ SERVER BUG — empty FUNCTION_CALL chunk detected.\n` +
+                  `  Symptom: finishReason="FUNCTION_CALL" but candidates[0].content.parts=[].\n` +
+                  `  Meaning: the proxy server told the client the model wanted to call a tool,\n` +
+                  `           but did NOT deliver the tool-call payload (name + args). The model's\n` +
+                  `           intended tool call was lost in translation between the upstream model\n` +
+                  `           response and the Gemini-shaped SSE stream.\n` +
+                  `  Likely cause: Claude tool_use → Gemini functionCall translation drop in the\n` +
+                  `                DeepV proxy /v1/chat/stream handler. Especially seen on claude-opus-4-7.\n` +
+                  `  Effect: the agent appears to "say one sentence and stop". No recovery is possible\n` +
+                  `          client-side — the tool name and arguments are gone. This needs a server fix.\n` +
+                  `  Context: model=${this.modelName}, candidatesTokenCount=${resp.usageMetadata?.candidatesTokenCount ?? 'unknown'}, role=${candidate?.content?.role ?? 'unknown'}`,
+                );
+              }
               console.log(`[STOP-DEBUG]   candidate.finishReason: ${candidate?.finishReason}`);
               console.log(`[STOP-DEBUG]   candidate.content.role: ${candidate?.content?.role}`);
               console.log(`[STOP-DEBUG]   candidate.content.parts count: ${parts.length}`);

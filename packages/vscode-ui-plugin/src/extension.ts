@@ -463,6 +463,56 @@ function setupBasicMessageHandlers() {
       // 🎯 使用延迟初始化的AIService，只在真正需要AI功能时才初始化
       const aiService = await sessionManager.getInitializedAIService(message.sessionId);
 
+      // 🎯 /goal 模式启动检测
+      //
+      // 当 GoalWizardDialog 提交时，webview 会在 chat_message 上附带
+      // goalContext 元数据。在把消息送给 AI 之前，先把 goal context 写到
+      // GeminiClient 的内存里（和 CLI 端 useGoalWizard 同等效果）。
+      //
+      // 这一步是 VSCode 端 /goal 模式抗压缩续命的关键：core 的
+      // tryCompressChat 在每次自动/手动压缩后会检查 activeGoalContext，
+      // 若非空则把原始 prompt + T0 + 立即行动指令重新注入历史，防止
+      // summarizer 把契约（最低工时、no-stop 纪律、安全栏等）压没了。
+      //
+      // 时序保证：postMessage 是 FIFO，goalContext 与 prompt 在同一条
+      // chat_message 里到达，setGoalContext 在 processChatMessage 之前
+      // 同步完成 —— 不存在压缩先于注册触发的可能。
+      if (message.goalContext) {
+        try {
+          const geminiClient = aiService.getGeminiClient();
+          if (geminiClient) {
+            // originalPrompt 直接从 message.content 第一条 text part 提取，
+            // 避免 webview 重复传 prompt 字段造成不一致风险。goal 启动消息
+            // 在 GoalWizardDialog.handleStart 里只 push 了一条 text part。
+            const textPart = message.content?.find(
+              (p): p is { type: 'text'; value: string } => p?.type === 'text',
+            );
+            const originalPrompt = textPart?.value ?? '';
+            if (originalPrompt) {
+              geminiClient.setGoalContext({
+                originalPrompt,
+                startedAt: message.goalContext.startedAt,
+                hours: message.goalContext.hours,
+                task: message.goalContext.task,
+              });
+              logger.info(
+                `[Goal] Activated goal context for session ${message.sessionId}: T0=${new Date(message.goalContext.startedAt).toISOString()}, hours=${message.goalContext.hours}`,
+              );
+            } else {
+              logger.warn('[Goal] goalContext present but no text part found in content; skipping setGoalContext');
+            }
+          } else {
+            logger.warn('[Goal] goalContext present but GeminiClient not yet available; goal-mode compression resilience disabled for this session');
+          }
+        } catch (err) {
+          // 不阻断 goal 启动 —— 注册失败只是失去压缩续命能力，
+          // 单次任务依然能跑。与 CLI 端 useGoalWizard 的容错策略一致。
+          logger.warn(
+            `[Goal] Failed to register goal context: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       // 获取当前上下文
       const currentContext = contextService.getCurrentContext();
 
