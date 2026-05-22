@@ -74,6 +74,8 @@ interface MultiSessionMessageFromExtension {
        'rules_list_response' |
        'rules_save_response' |
        'rules_delete_response' |
+       // 🎯 目标驱动模式向导
+       'open_goal_wizard' |
        // 🎯 文本优化命令（/refine）
        'refine_result' |
        'refine_error' |
@@ -932,6 +934,13 @@ export class MultiSessionMessageService {
    */
   onOpenRulesManagement(callback: () => void) {
     return this.addMessageHandler('open_rules_management', callback);
+  }
+
+  /**
+   * 🎯 监听打开目标驱动模式向导
+   */
+  onOpenGoalWizard(callback: () => void) {
+    return this.addMessageHandler('open_goal_wizard', callback);
   }
 
   /**
