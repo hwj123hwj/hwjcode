@@ -17,7 +17,7 @@
  *   /feishu logout    — 清除凭证
  */
 
-import { CommandKind, SlashCommand, SlashCommandActionReturn } from './types.js';
+import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
 import { loadCredentials, saveCredentials, clearCredentials, FeishuCredentials } from '../../services/feishu/credentials.js';
 import {
   initRegistration,
@@ -27,9 +27,13 @@ import {
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
 import { SceneType } from 'deepv-code-core';
+import { HistoryItemWithoutId } from '../types.js';
 
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
+
+/** TUI 上下文引用（用于同步显示飞书消息到 UI） */
+let tuiContext: CommandContext['ui'] | null = null;
 
 /**
  * 构建帮助文本
@@ -231,7 +235,7 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
 /**
  * 启动网关（从已保存的凭证）
  */
-async function handleStart(context?: any): Promise<string> {
+async function handleStart(context?: CommandContext): Promise<string> {
   const creds = await loadCredentials();
   if (!creds) {
     return [
@@ -250,16 +254,44 @@ async function handleStart(context?: any): Promise<string> {
 
   const gateway = new FeishuGateway(creds.appId, creds.appSecret, creds.domain);
 
+  // 保存 TUI 上下文（用于同步消息到 UI）
+  if (context?.ui) {
+    tuiContext = context.ui;
+  }
+
   // 获取 GeminiClient
   const config = context?.services?.config;
   const geminiClient = config?.getGeminiClient?.();
 
   // 设置消息处理
   gateway.onMessage = async (msg: FeishuMessage): Promise<string | null> => {
-    console.log(`📩 飞书消息来自 ${msg.senderOpenId}: ${msg.text.slice(0, 60)}`);
+    // 调试：直接返回调试信息
+    const debugInfo = [
+      `[DEBUG] msg.text type: ${typeof msg.text}`,
+      `[DEBUG] msg.text value: ${JSON.stringify(msg.text)}`,
+      `[DEBUG] msg.text constructor: ${(msg.text as any)?.constructor?.name}`,
+    ].join('\n');
+    console.log(debugInfo);
+
+    // 防御性检查：确保消息文本是有效字符串
+    const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
+    if (!messageText) {
+      console.log('⏭️ 跳过空消息');
+      return null;
+    }
+
+    // 同步显示飞书消息到 TUI
+    const feishuUserMsg: HistoryItemWithoutId = {
+      type: 'user',
+      text: `[飞书] ${messageText}`,
+    };
+    tuiContext?.addItem(feishuUserMsg, Date.now());
 
     if (!geminiClient) {
-      return `收到你的消息: "${msg.text}"\n\n(消息 ID: ${msg.messageId.slice(0, 8)}...)\n\n⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。`;
+      const noLlmReply = `收到你的消息: "${messageText}"\n\n(消息 ID: ${msg.messageId.slice(0, 8)}...)\n\n⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。`;
+      // 同步显示错误到 TUI
+      tuiContext?.addItem({ type: 'info', text: noLlmReply }, Date.now());
+      return noLlmReply;
     }
 
     try {
@@ -270,10 +302,15 @@ async function handleStart(context?: any): Promise<string> {
         undefined,
         { disableSystemPrompt: true },
       );
+
       // 移除工具声明，确保 LLM 只做纯文本回复
       chat.setTools([]);
+
+      // 确保是纯字符串
+      const safeMessage = String(messageText);
+
       const response = await chat.sendMessage(
-        { message: msg.text },
+        { message: safeMessage },
         `feishu-${Date.now()}`,
         SceneType.SUB_AGENT,
       );
@@ -282,10 +319,19 @@ async function handleStart(context?: any): Promise<string> {
         ?.filter((p: any) => p.text)
         .map((p: any) => p.text) || [];
       const replyText = textParts.join('') || '（无回复）';
+
+      // 同步显示 LLM 回复到 TUI
+      tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
+
       return replyText;
     } catch (err: any) {
       console.error('❌ 飞书 LLM 回答错误:', err.message);
-      return `❌ 处理消息时出错: ${err.message}`;
+      console.error('❌ 错误堆栈:', err.stack);
+
+      // 把完整错误信息显示在 TUI 和返回给飞书
+      const errorReply = `❌ 处理消息时出错: ${err.message}\n\n堆栈:\n${err.stack?.slice(0, 500) || '无'}`;
+      tuiContext?.addItem({ type: 'error', text: errorReply }, Date.now());
+      return errorReply;
     }
   };
 
@@ -323,6 +369,7 @@ async function handleStop(): Promise<string> {
 
   await activeGateway.disconnect();
   activeGateway = null;
+  tuiContext = null; // 清除 TUI 上下文
   return '🛑 飞书 Bot 已停止。';
 }
 
@@ -362,6 +409,7 @@ async function handleLogout(): Promise<string> {
     await activeGateway.disconnect();
     activeGateway = null;
   }
+  tuiContext = null; // 清除 TUI 上下文
   await clearCredentials();
   return '🗑️ 飞书凭证已清除，Bot 已断开。';
 }
