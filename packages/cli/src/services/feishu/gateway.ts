@@ -59,6 +59,10 @@ export class FeishuGateway {
   private processedMessages: Set<string> = new Set();
   private readonly maxProcessedMessages = 1000;
 
+  /** 内容去重：key 为 "chatId:text"，value 为首次处理时间戳（5 秒窗口内相同内容视为重复） */
+  private recentContents: Map<string, number> = new Map();
+  private readonly dedupWindowMs = 5000;
+
   /** 外部注入的消息处理回调 */
   onMessage: OnMessageCallback | null = null;
 
@@ -113,6 +117,9 @@ export class FeishuGateway {
    *   - 自动重连
    */
   async connect(): Promise<void> {
+    // 先清理旧连接，避免事件处理器重复触发
+    await this.disconnect();
+
     const { WSClient, EventDispatcher } = await import('@larksuiteoapi/node-sdk');
 
     const domainUrl = this.domain === 'lark'
@@ -169,18 +176,31 @@ export class FeishuGateway {
           messageType: message.message_type || 'text',
         };
 
-        // 消息去重：跳过已处理的消息
+        // 消息去重：先按 messageId，再按内容+时间窗口兜底
         if (this.processedMessages.has(feishuMsg.messageId)) {
-          console.log(`⏭️ 跳过重复消息: ${feishuMsg.messageId}`);
+          console.log(`⏭️ 跳过重复消息 (messageId): ${feishuMsg.messageId}`);
           return { code: 0 };
         }
 
-        // 记录已处理的消息（LRU 淘汰）
+        const contentKey = `${feishuMsg.chatId}:${feishuMsg.text}`;
+        const now = Date.now();
+        const firstSeen = this.recentContents.get(contentKey);
+        if (firstSeen !== undefined && now - firstSeen < this.dedupWindowMs) {
+          console.log(`⏭️ 跳过重复消息 (内容去重): "${feishuMsg.text.slice(0, 30)}" (${now - firstSeen}ms 内重复)`);
+          return { code: 0 };
+        }
+
+        // 记录已处理的消息
         this.processedMessages.add(feishuMsg.messageId);
+        this.recentContents.set(contentKey, now);
         if (this.processedMessages.size > this.maxProcessedMessages) {
           const iterator = this.processedMessages.values();
           const oldest = iterator.next().value;
           if (oldest) this.processedMessages.delete(oldest);
+        }
+        // 清理过期的内容去重记录
+        for (const [key, ts] of this.recentContents) {
+          if (now - ts > this.dedupWindowMs * 2) this.recentContents.delete(key);
         }
 
         if (this.onMessage) {
