@@ -1203,7 +1203,7 @@ export const translations = {
     'mcp.status.help.templates': 'Predefined template list',
     'mcp.status.help.examples': 'Configuration examples',
     'mcp.status.tip': '💡 Tip: Configuration will be saved in',
-    'mcp.status.config.file': '.deepv/settings.json',
+    'mcp.status.config.file': '.deepvcode/settings.json',
     'mcp.status.run.after.config': 'After configuration, run',
     'mcp.status.view.status': 'to view server status',
 
@@ -2681,7 +2681,7 @@ export const translations = {
     'mcp.status.help.templates': '预定义模板列表',
     'mcp.status.help.examples': '配置示例',
     'mcp.status.tip': '💡 提示: 配置将保存在',
-    'mcp.status.config.file': '.deepv/settings.json',
+    'mcp.status.config.file': '.deepvcode/settings.json',
     'mcp.status.run.after.config': '文件中\n\n配置完成后再次运行',
     'mcp.status.view.status': '查看服务器状态',
 
