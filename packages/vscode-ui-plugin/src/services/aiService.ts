@@ -215,6 +215,24 @@ export class AIService {
         this.logger.info(`Using custom proxy server from VSCode extension settings: ${customProxyServerUrl}`);
       }
 
+      // 🟢 从 ~/.deepv/custom-models.json 加载用户配置的自定义模型
+      // 这与 CLI 完全等价；webview 端添加/删除走 IPC 后会调
+      // config.setCustomModels() 做热重载，新会话则在这里读到最新值。
+      let customModels: Array<import('deepv-code-core').CustomModelConfig> | undefined;
+      try {
+        const { CustomModelsStorageService } = await import('./customModelsStorageService.js');
+        customModels = CustomModelsStorageService.getInstance(this.logger).loadCustomModels();
+        if (customModels.length > 0) {
+          this.logger.info(`📦 Loaded ${customModels.length} custom model(s) from ~/.deepv/custom-models.json`);
+        }
+      } catch (cmErr) {
+        this.logger.warn(
+          '⚠️ Failed to load custom models, continuing without them',
+          cmErr instanceof Error ? cmErr : undefined,
+        );
+        customModels = undefined;
+      }
+
       this.config = new Config({
         sessionId: this.sessionId,
         targetDir: targetDir,
@@ -231,6 +249,7 @@ export class AIService {
         userRules: userRules,                // 🎯 传入用户规则
         mcpServers: mcpServers,              // 🎯 传入 MCP 服务器配置
         customProxyServerUrl: customProxyServerUrl, // 🎯 传入自定义代理服务器URL
+        customModels: customModels,          // 🟢 自定义模型 — 与 CLI 共享存储
         fileFiltering: {
           respectGitIgnore: true,
           respectGeminiIgnore: true,

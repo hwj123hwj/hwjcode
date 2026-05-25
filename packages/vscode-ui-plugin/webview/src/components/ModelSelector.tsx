@@ -4,13 +4,15 @@
  * 从服务端API获取模型数据，支持缓存和配置持久化
  */
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ChevronDown, Check, Loader2, BarChart2, Brain } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { ChevronDown, Check, Loader2, BarChart2, Brain, Plus } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import { webviewModelService } from '../services/webViewModelService';
 import { getGlobalMessageService } from '../services/globalMessageService';
+import { customModelsService } from '../services/customModelsService';
 import { getProviderIcon } from './ModelProviderIcons';
 import { SessionStatisticsDialog } from './SessionStatisticsDialog';
+import { CustomModelWizard } from './CustomModelWizard';
 import { ChatMessage } from '../types';
 import { useYoloMode } from '../hooks/useProjectSettings';
 import './ModelSelector.css';
@@ -32,7 +34,7 @@ interface ModelOption {
   id: string;
   name: string;
   displayName: string;
-  category: 'claude' | 'gemini' | 'kimi' | 'gpt' | 'qwen' | 'grok' | 'auto' | 'minimax';
+  category: 'claude' | 'gemini' | 'kimi' | 'gpt' | 'qwen' | 'grok' | 'auto' | 'minimax' | 'custom';
   creditsPerRequest: number | undefined;
   maxToken: number;
   description?: string;
@@ -44,6 +46,9 @@ interface ModelOption {
 // 根据模型名称推断类别
 const inferCategory = (modelName: string): ModelOption['category'] => {
   if (modelName === 'auto') return 'auto';
+  // 🟢 自定义模型一律以 `custom:` 前缀识别，
+  // 与 core 侧 isCustomModel() 判定一致。
+  if (modelName.startsWith('custom:')) return 'custom';
   if (modelName.includes('claude')) return 'claude';
   if (modelName.includes('gemini')) return 'gemini';
   if (modelName.includes('kimi')) return 'kimi';
@@ -191,6 +196,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   const [selectedModel, setSelectedModel] = useState<ModelOption | null>(null);
   const [isSwitchingLocal, setIsSwitchingLocal] = useState(false); // 🎯 本地切换状态
 
+  // 🟢 自定义模型向导：webview 直接 mount，不依赖登录状态
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  // 🟢 用于在 wizard 完成 / extension 广播 custom_models_changed 时强制刷新模型列表
+  const [modelListRefreshTick, setModelListRefreshTick] = useState(0);
+
   // 🎯 最终切换状态：本地或父组件
   const isSwitching = isSwitchingLocal || isSwitchingFromParent;
 
@@ -280,7 +290,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     fetchModelsWithRetry();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, t]); // 🎯 移除 selectedModelId 依赖，避免循环获取
+  }, [sessionId, t, modelListRefreshTick]); // 🟢 当向导保存或 extension 广播变化时，重新拉一次列表
 
   // 🎯 响应外部 selectedModelId 变化（如压缩后模型切换）
   useEffect(() => {
@@ -307,6 +317,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     return () => {
       if (typeof cleanup === 'function') cleanup();
     };
+  }, []);
+
+  // 🟢 监听 extension 广播的 custom_models_changed —— 任何 webview 添加/删除自定义
+  // 模型后所有打开的 ModelSelector 都即时刷新一次。
+  useEffect(() => {
+    const unsubscribe = customModelsService.onModelsChanged(() => {
+      setModelListRefreshTick((prev) => prev + 1);
+    });
+    return unsubscribe;
   }, []);
 
   // 点击外部关闭下拉菜单
@@ -416,6 +435,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           icon: getProviderIcon('minimax', 16),
           color: 'var(--vscode-terminal-ansiMagenta)',
           name: 'Minimax'
+        };
+      case 'custom':
+        // 🟢 自定义模型 — 用 default provider 图标 + 强调色，让用户一眼就能区分。
+        return {
+          icon: getProviderIcon('default', 16),
+          color: 'var(--vscode-textLink-foreground)',
+          name: 'Custom'
         };
       default:
         return {
@@ -836,6 +862,32 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                   ))}
                 </div>
               ))}
+              {/* 🟢 + Add Custom Model — 始终位于列表末尾，
+                  即便用户尚未登录、ModelSelector 已经能渲染（云模型走 fallback）
+                  也能通过这里打开向导。 */}
+              <div
+                className="model-option model-option-add-custom"
+                onClick={() => {
+                  setIsOpen(false);
+                  setIsWizardOpen(true);
+                }}
+                role="button"
+                aria-label="Add custom model"
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="model-option-content">
+                  <div className="model-icon">
+                    <Plus size={16} />
+                  </div>
+                  <div className="model-details">
+                    <div className="model-main">
+                      <span className="model-name">
+                        {t('model.selector.addCustom', undefined, '+ Add Custom Model')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -861,6 +913,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         onClose={() => setIsStatsOpen(false)}
         messages={messages}
         modelNameMap={modelNameMap}
+      />
+
+      {/* 🟢 自定义模型向导 — 直接 mount，不依赖登录态。 */}
+      <CustomModelWizard
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        onSaved={() => {
+          // 保存成功后立刻刷新一次列表，避免要等下一轮 broadcast。
+          setModelListRefreshTick((prev) => prev + 1);
+        }}
       />
     </div>
   );

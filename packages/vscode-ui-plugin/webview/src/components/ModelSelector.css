@@ -511,3 +511,25 @@
 .pill-label {
   font-size: 11px;
 }
+
+/* 🟢 + Add Custom Model entry — sits at the bottom of the list with a subtle
+   accent so users can find it without it competing with real model rows. */
+.model-option.model-option-add-custom {
+  border-top: 1px dashed var(--vscode-panel-border);
+  margin-top: 4px;
+  padding-top: 12px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.model-option.model-option-add-custom:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.model-option.model-option-add-custom .model-icon {
+  color: var(--vscode-textLink-foreground);
+}
+
+.model-option.model-option-add-custom .model-name {
+  font-weight: 600;
+}

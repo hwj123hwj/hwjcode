@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
+import { CustomModelWizard } from './CustomModelWizard';
 import './LoginPage.css';
 
 interface LoginPageProps {
@@ -34,6 +35,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const { t } = useTranslation();
   const [showCancelButton, setShowCancelButton] = useState(false);
   const [loginStartTime, setLoginStartTime] = useState<number | null>(null);
+  // 🟢 未登录也能添加自定义模型 — 本地开关，不拽住全局状态。
+  const [isCustomModelWizardOpen, setIsCustomModelWizardOpen] = useState(false);
 
   // 监听登录状态变化，记录开始时间和设置超时检测
   useEffect(() => {
@@ -182,9 +185,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <p className="login-page__footer-subtext">
               Your authentication information will be securely stored locally
             </p>
+
+            {/* 🟢 未登录入口 — 用户可直接配置 EasyRouter / 第三方自定义模型，
+                免去 OAuth 流程。已登录用户仍可在主界面 ModelSelector 末尾使用同一个向导。 */}
+            <div className="login-page__custom-model-section">
+              <p className="login-page__custom-model-hint">
+                Or use your own API key (no DeepV login required):
+              </p>
+              <button
+                type="button"
+                className="login-page__custom-model-btn"
+                onClick={() => setIsCustomModelWizardOpen(true)}
+                disabled={isLoggingIn}
+              >
+                + Add Custom Model
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* 🟢 自定义模型向导 — 直接 mount 在 LoginPage 内，无需登录态。 */}
+      <CustomModelWizard
+        isOpen={isCustomModelWizardOpen}
+        onClose={() => setIsCustomModelWizardOpen(false)}
+      />
     </div>
   );
 };

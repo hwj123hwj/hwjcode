@@ -177,12 +177,45 @@ export class ModelService {
   }
 
   /**
+   * 把 ~/.deepv/custom-models.json 里的自定义模型转成与云模型同形状的
+   * ModelInfo，以便和 cloudModels 合并后塞给 webview。displayName 直接
+   * 透传，name 走 `custom:{displayName}` 协议（与 core 的 isCustomModel
+   * + DeepVServerAdapter 派发完全对齐）。
+   */
+  private getCustomModelsAsModelInfo(): ModelInfo[] {
+    try {
+      const { CustomModelsStorageService } = require('./customModelsStorageService');
+      const cms: any[] = CustomModelsStorageService.getInstance(this.logger).loadCustomModels();
+      if (!Array.isArray(cms) || cms.length === 0) return [];
+      return cms
+        .filter((m) => m && m.enabled !== false && typeof m.displayName === 'string')
+        .map((m) => ({
+          name: `custom:${m.displayName}`,
+          displayName: m.displayName,
+          creditsPerRequest: undefined,
+          available: true,
+          maxToken: typeof m.maxTokens === 'number' && m.maxTokens > 0 ? m.maxTokens : 200_000,
+          highVolumeThreshold: undefined,
+          highVolumeCredits: undefined,
+        }));
+    } catch (e) {
+      this.logger.warn('[ModelService] Failed to load custom models for merge', e instanceof Error ? e : undefined);
+      return [];
+    }
+  }
+
+  /**
    * 获取可用模型列表（优先本地缓存，异步刷新）
+   *
+   * 返回顺序：Auto → Cloud(sorted) → Custom(sorted)
+   * 自定义模型作为独立分组排在云模型之后，避免被 emoji 排序规则插队。
    */
   async getAvailableModels(): Promise<{
     models: ModelInfo[];
     source: 'local' | 'server' | 'fallback'
   }> {
+    const customs = this.getCustomModelsAsModelInfo();
+
     // 优先从本地VSCode设置读取缓存的模型信息
     const localModels = this.getLocalCachedModels();
 
@@ -193,7 +226,7 @@ export class ModelService {
       });
 
       return {
-        models: [AUTO_MODE_CONFIG, ...sortModelsByDisplayName(localModels)],
+        models: [AUTO_MODE_CONFIG, ...sortModelsByDisplayName(localModels), ...sortModelsByDisplayName(customs)],
         source: 'local'
       };
     }
@@ -205,15 +238,16 @@ export class ModelService {
         this.saveCloudModelsToSettings(models);
       }
       return {
-        models: [AUTO_MODE_CONFIG, ...sortModelsByDisplayName(models)],
+        models: [AUTO_MODE_CONFIG, ...sortModelsByDisplayName(models), ...sortModelsByDisplayName(customs)],
         source: 'server'
       };
     } catch (error) {
       // 降级到'auto'模式让服务端决定
       this.logger.warn('Failed to fetch models from server, falling back to auto mode');
       this.logger.warn('Fallback reason:', error instanceof Error ? error.message : String(error));
+      // 即使云端不可用，仍要把自定义模型展示出来 — 这是未登录用户用 EasyRouter 的关键场景。
       return {
-        models: [AUTO_MODE_CONFIG, ...FALLBACK_MODELS],
+        models: [AUTO_MODE_CONFIG, ...FALLBACK_MODELS, ...sortModelsByDisplayName(customs)],
         source: 'fallback'
       };
     }
