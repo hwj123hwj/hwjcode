@@ -61,6 +61,7 @@ export const thinkingCommand: SlashCommand = {
         case 'medium': return t('thinking.effort.medium');
         case 'high': return t('thinking.effort.high');
         case 'max': return t('thinking.effort.max');
+        case 'xhigh': return t('thinking.effort.xhigh');
         case 'auto':
         default: return t('thinking.effort.auto');
       }
@@ -90,7 +91,7 @@ export const thinkingCommand: SlashCommand = {
 ${t('thinking.usage.title')}
   /thinking off            - ${t('thinking.usage.off')}
   /thinking auto           - ${t('thinking.usage.auto')}
-  /thinking low|medium|high|max - ${t('thinking.usage.effort')}
+  /thinking low|medium|high|xhigh|max - ${t('thinking.usage.effort')}
   /thinking status         - ${t('thinking.usage.status')}`,
       };
     }
@@ -141,7 +142,7 @@ ${t('thinking.usage.title')}
     }
 
     // 2. 处理强度指令
-    const efforts: Array<ThinkingConfig['effort']> = ['low', 'medium', 'high', 'max', 'auto'];
+    const efforts: Array<ThinkingConfig['effort']> = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
     if (efforts.includes(trimmedArgs as any)) {
       // 切换强度时，自动把模式设定为 "on" (除非原来是 auto 保持 auto)
       const targetMode = currentConfig.mode === 'auto' ? 'auto' : 'on';
@@ -158,7 +159,7 @@ ${t('thinking.usage.title')}
 
   completion: async (_context, partialArg) => {
     // 🆕 极简高级设计：Tab 补全中隐藏单纯的 'on'，引导用户选择具体强度级别
-    const commands = ['off', 'auto', 'low', 'medium', 'high', 'max', 'status'];
+    const commands = ['off', 'auto', 'low', 'medium', 'high', 'xhigh', 'max', 'status'];
     return commands.filter((cmd) => cmd.startsWith(partialArg.toLowerCase()));
   },
 };
