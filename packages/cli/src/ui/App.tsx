@@ -2401,7 +2401,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
          * ensure that it's statically rendered.
          *
          * Background on the Static Item: Anything in the Static component is written a single time
-         * to the console. Think of it like doing a console.log and then never using ANSI codes to
+         * to the console. Think of it like doing a logger.debug and then never using ANSI codes to
          * clear that content ever again. Effectively it has a moving frame that every time new static
          * content is set it'll flush content to the terminal and move the area which it's "clearing"
          * down a notch. Without Static the area which gets erased and redrawn continuously grows.
@@ -2433,8 +2433,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
         {showHelp ? <Help commands={slashCommands} /> : null}
 
-        {/* 🆕 显示思考过程框（在pending内容后，一旦开始内容就隐藏） */}
-        {reasoning && !hasContentStarted ? (
+        {/* 显示思考过程框：reasoning 存在就显示。
+            正文开始 / 流式结束 / 用户取消 / 新一轮提问 时由
+            useGeminiStream 立即置 null 隐藏。 */}
+
+        {reasoning ? (
           <ReasoningDisplay
             reasoning={reasoning}
             terminalHeight={terminalHeight}
