@@ -444,6 +444,22 @@ export class Config {
       setSilentMode(true);
     }
 
+    // 🧹 异步清理 ~/.deepv/last-requests/ 内超过 3 天的旧 dump 文件。
+    // 进程内只跑一次，不阻塞 initialize；失败不影响启动。
+    void (async () => {
+      try {
+        const { cleanupLastRequestsDir } = await import('../utils/lastRequestsCleanup.js');
+        const removed = await cleanupLastRequestsDir();
+        if (removed > 0) {
+          // 用 console.log 而不是 logger，避免与 silentMode 互锁。
+          // 信息量很小，启动期带一行无害。
+          console.log(`[deepv] last-requests cleanup: removed ${removed} stale dump file(s)`);
+        }
+      } catch {
+        // 清理失败永远不能阻塞或抛错。
+      }
+    })();
+
     // Initialize centralized FileDiscoveryService
     this.getFileService();
     if (this.getCheckpointingEnabled()) {

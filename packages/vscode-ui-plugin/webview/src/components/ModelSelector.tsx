@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, Check, Loader2, BarChart2, Brain, Plus } from 'lucide-react';
+import { ChevronDown, Check, Loader2, BarChart2, Brain, Plus, X } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import { webviewModelService } from '../services/webViewModelService';
 import { getGlobalMessageService } from '../services/globalMessageService';
@@ -58,6 +58,27 @@ const inferCategory = (modelName: string): ModelOption['category'] => {
   if (modelName.includes('minimax')) return 'minimax';
   return 'gemini'; // 默认
 };
+
+/**
+ * 自定义模型 [Provider] 徽章描述。
+ * - label: 显示在模型名前面的方括号短标签（与 CLI Wizard 的 PROTO_LABEL 对齐）
+ * - cssVar: 用 VSCode 主题变量给徽章配色，方便明暗主题自适应
+ *
+ * Provider 字符串来自 ~/.deepv/custom-models.json，可能取值：
+ *   'openai' | 'openai-responses' | 'anthropic' | 'gemini'
+ * 任何未知值落到 'Custom' / fg 默认色（最大鲁棒性）。
+ */
+const CUSTOM_PROVIDER_BADGES: Record<string, { label: string; cssVar: string }> = {
+  openai: { label: 'OpenAI Chat', cssVar: 'var(--vscode-terminal-ansiGreen)' },
+  'openai-responses': { label: 'OpenAI Responses', cssVar: 'var(--vscode-terminal-ansiBrightGreen, var(--vscode-terminal-ansiGreen))' },
+  anthropic: { label: 'Anthropic', cssVar: 'var(--vscode-terminal-ansiYellow)' },
+  gemini: { label: 'Gemini', cssVar: 'var(--vscode-terminal-ansiBlue)' },
+};
+
+function getCustomBadge(provider?: string): { label: string; cssVar: string } {
+  if (!provider) return { label: 'Custom', cssVar: 'var(--vscode-textLink-foreground)' };
+  return CUSTOM_PROVIDER_BADGES[provider] || { label: 'Custom', cssVar: 'var(--vscode-textLink-foreground)' };
+}
 
 // 将ModelInfo转换为ModelOption
 const convertToModelOption = (model: ModelInfo, t: any): ModelOption => ({
@@ -201,6 +222,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // 🟢 用于在 wizard 完成 / extension 广播 custom_models_changed 时强制刷新模型列表
   const [modelListRefreshTick, setModelListRefreshTick] = useState(0);
 
+  // 🟢 Provider 信息缓存：modelService 透传给 ModelSelector 的 ModelInfo 不带
+  // provider 字段（保持向后兼容），所以单独从 storage 拉一份用于渲染前缀。
+  // listCustomModels 通过 IPC 一次拿全，每次刷新 tick 时也同步刷新一次。
+  const [customProviderMap, setCustomProviderMap] = useState<Record<string, string>>({});
+
   // 🎯 最终切换状态：本地或父组件
   const isSwitching = isSwitchingLocal || isSwitchingFromParent;
 
@@ -322,11 +348,73 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // 🟢 监听 extension 广播的 custom_models_changed —— 任何 webview 添加/删除自定义
   // 模型后所有打开的 ModelSelector 都即时刷新一次。
   useEffect(() => {
-    const unsubscribe = customModelsService.onModelsChanged(() => {
+    const unsubscribe = customModelsService.onModelsChanged((models) => {
+      // 同时更新本地 provider 映射，避免 ModelInfo 丢失 provider 信息后
+      // 选项渲染时取不到 [Provider] 前缀。
+      const map: Record<string, string> = {};
+      for (const m of models || []) {
+        if (m && m.displayName && m.provider) {
+          map[`custom:${m.displayName}`] = m.provider;
+        }
+      }
+      setCustomProviderMap(map);
       setModelListRefreshTick((prev) => prev + 1);
     });
     return unsubscribe;
   }, []);
+
+  // 🟢 Provider 信息缓存初始化 + 跟随 tick 刷新。
+  // 主要处理初载场景；extension 广播路径中的同步在上一个 useEffect 里。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const models = await customModelsService.listCustomModels();
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const m of models) {
+          if (m?.displayName && m?.provider) {
+            map[`custom:${m.displayName}`] = m.provider;
+          }
+        }
+        setCustomProviderMap(map);
+      } catch {
+        // best-effort — 没拿到就不显示前缀
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [modelListRefreshTick]);
+
+  /**
+   * 删除自定义模型。点 X → 原生 confirm → IPC 删除。
+   * 删除后 extension 端会广播 custom_models_changed，列表自动刷新。
+   * 如果当前选中的就是被删的模型，由 extension 端的 setCustomModels 热重载会
+   * 把 session 模型回退到默认；这里只关心 UI 刷新，不主动切换。
+   */
+  const handleDeleteCustomModel = useCallback(
+    async (e: React.MouseEvent, modelId: string, displayName: string) => {
+      e.stopPropagation();
+      e.preventDefault();
+      // 用 window.confirm 是 webview 里最简单可靠的确认方式，
+      // 不需要再做一个 dialog 组件。
+      const ok = window.confirm(
+        `Delete custom model "${displayName}"?\n\nThis removes it from ~/.deepv/custom-models.json. The change is shared with the CLI.`,
+      );
+      if (!ok) return;
+      try {
+        await customModelsService.deleteCustomModel(modelId);
+        // 广播会自动触发刷新，无需手动 setModelListRefreshTick。
+      } catch (err) {
+        console.error('[ModelSelector] Failed to delete custom model:', err);
+        window.alert(
+          `Failed to delete model: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
+    [],
+  );
 
   // 点击外部关闭下拉菜单
   useEffect(() => {
@@ -807,7 +895,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 .sort(([categoryA], [categoryB]) => categoryA.localeCompare(categoryB))
                 .map(([category, models]) => (
                 <div key={category} className="model-group">
-                  {models.map((model) => (
+                  {models.map((model) => {
+                    // 🟢 自定义模型：附带 [Provider] 徽章 + 删除按钮。
+                    const isCustom = model.category === 'custom';
+                    const customProvider = isCustom ? customProviderMap[model.id] : undefined;
+                    const badge = isCustom ? getCustomBadge(customProvider) : null;
+                    return (
                     <div
                       key={model.id}
                       className={`model-option ${selectedModel?.id === model.id ? 'selected' : ''} ${!model.isAvailable ? 'disabled' : ''}`}
@@ -830,6 +923,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 className="model-name"
                                 ref={el => modelNameRefs.current[`option-${model.id}`] = el}
                               >
+                                {/* 🟢 [Provider] 前缀 — 只对自定义模型显示，
+                                     用主题色让用户一眼区分协议族。 */}
+                                {badge && (
+                                  <span
+                                    className="model-custom-badge"
+                                    style={{ color: badge.cssVar }}
+                                  >
+                                    [{badge.label}]
+                                  </span>
+                                )}
                                 {model.displayName}
                               </span>
                               {showTooltip[`option-${model.id}`] && tooltipPosition[`option-${model.id}`] && (
@@ -841,7 +944,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                     transform: 'translateX(-50%)'
                                   }}
                                 >
-                                  {model.displayName}
+                                  {badge ? `[${badge.label}] ` : ''}{model.displayName}
                                 </div>
                               )}
                             </div>
@@ -853,13 +956,29 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                           </div>
                         </div>
                       </div>
-                      {selectedModel?.id === model.id && (
-                        <div className="check-icon">
-                          <Check size={16} />
-                        </div>
+                      {/* 🟢 自定义模型展示 X 删除；其他模型保持原有 ✓ 选中标记。
+                           即使是被选中的自定义模型，外层 .selected 类的样式
+                           已经能区分选中态，所以这里优先展示 X，便于点删。 */}
+                      {model.category === 'custom' ? (
+                        <button
+                          type="button"
+                          className="model-delete-btn"
+                          aria-label={`Delete custom model ${model.displayName}`}
+                          title="Delete this custom model"
+                          onClick={(e) => handleDeleteCustomModel(e, model.id, model.displayName)}
+                        >
+                          <X size={14} />
+                        </button>
+                      ) : (
+                        selectedModel?.id === model.id && (
+                          <div className="check-icon">
+                            <Check size={16} />
+                          </div>
+                        )
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ))}
               {/* 🟢 + Add Custom Model — 始终位于列表末尾，

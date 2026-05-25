@@ -533,3 +533,43 @@
 .model-option.model-option-add-custom .model-name {
   font-weight: 600;
 }
+
+/* 🟢 [Provider] badge for custom-model rows — color is set inline from
+   CUSTOM_PROVIDER_BADGES (theme-aware). Uses the editor's mono font so the
+   bracketed prefix lines up with the displayName. */
+.model-custom-badge {
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 6px;
+  letter-spacing: 0.01em;
+}
+
+/* 🟢 X delete button shown on every custom-model row. Subdued by default,
+   turns red on hover so it's clearly destructive without being noisy. */
+.model-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.model-delete-btn:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.model-delete-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
