@@ -88,7 +88,6 @@ export const thinkingCommand: SlashCommand = {
         content: `💭 ${tp('thinking.status.current', { mode: modeLabel, effort: effortLabel })}${providerNote}
 
 ${t('thinking.usage.title')}
-  /thinking on             - ${t('thinking.usage.on')}
   /thinking off            - ${t('thinking.usage.off')}
   /thinking auto           - ${t('thinking.usage.auto')}
   /thinking low|medium|high|max - ${t('thinking.usage.effort')}
@@ -129,9 +128,10 @@ ${t('thinking.usage.title')}
       }
     };
 
-    // 1. 处理开关指令
+    // 1. 处理开关和强度指令
     if (trimmedArgs === 'on') {
-      return updateConfig('on');
+      // 🆕 极简高级设计：/thinking on 默认重定向为高深度开启（effort: 'high'）
+      return updateConfig('on', 'high');
     }
     if (trimmedArgs === 'off') {
       return updateConfig('off');
@@ -157,7 +157,8 @@ ${t('thinking.usage.title')}
   },
 
   completion: async (_context, partialArg) => {
-    const commands = ['on', 'off', 'auto', 'low', 'medium', 'high', 'max', 'status'];
+    // 🆕 极简高级设计：Tab 补全中隐藏单纯的 'on'，引导用户选择具体强度级别
+    const commands = ['off', 'auto', 'low', 'medium', 'high', 'max', 'status'];
     return commands.filter((cmd) => cmd.startsWith(partialArg.toLowerCase()));
   },
 };

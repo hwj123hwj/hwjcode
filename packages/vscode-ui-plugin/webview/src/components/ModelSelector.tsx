@@ -537,7 +537,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // 🆕 构建思考模式备选项列表
   const thinkingOptionsList = useMemo(() => [
     { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: '🧠', desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
-    { id: 'on', label: t('thinking.mode.on', undefined, 'On'), icon: '💡', desc: t('thinking.usage.on', undefined, 'Force-enable thinking'), mode: 'on', effort: 'auto' },
     { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: '💤', desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
     { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
     { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
@@ -549,13 +548,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   const currentThinkingOption = useMemo(() => {
     const config = thinkingConfig || { mode: 'auto', effort: 'auto' };
     if (config.mode === 'off') {
-      return thinkingOptionsList.find(opt => opt.id === 'off') || thinkingOptionsList[2];
+      return thinkingOptionsList.find(opt => opt.id === 'off') || thinkingOptionsList[1];
     }
     if (config.mode === 'auto') {
       return thinkingOptionsList.find(opt => opt.id === 'auto') || thinkingOptionsList[0];
     }
-    const matchingEffort = thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === config.effort);
-    return matchingEffort || thinkingOptionsList.find(opt => opt.id === 'on') || thinkingOptionsList[1];
+    // 默认为 high 如果只设置了 mode: 'on' 但没有指定具体的 effort
+    const effort = config.effort && config.effort !== 'auto' ? config.effort : 'high';
+    return thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === effort) || thinkingOptionsList[4]; // 默认为 High
   }, [thinkingConfig, thinkingOptionsList]);
 
   return (
