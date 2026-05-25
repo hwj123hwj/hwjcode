@@ -173,18 +173,40 @@ function formatToolCallsForSummary(toolCalls: TrackedToolCall[]): string {
 }
 
 /**
- * 生成 Checkpoint 摘要
- * 如果当前模型为自定义模型，则使用自定义模型；否则使用 Flash Lite 模型生成 10 字摘要
+ * 生成 Checkpoint / 会话摘要。
+ *
+ * 设计原则（决定写死 deepseek-v4-flash）：
+ * - 摘要是非关键、纯文本到短文本的映射，无需上下文、无需系统提示词、无需思考。
+ * - deepseek-v4-flash 单价远低于 gemini-2.5-flash-lite，且本身就是非思考版本。
+ * - 走 DeepVServerAdapter，所有模型都被统一代理，不依赖客户端任何额外路由。
+ *
+ * 实施：
+ * - emptySystemPrompt: 完全不带 system，避免任何风格污染。
+ * - 历史为空，单轮请求。
+ * - 短超时 fail-open，失败返回 ''，调用方自行决定是否回退到原文。
+ *
  * @param geminiClient GeminiClient 实例
- * @param summarySource AI 文本回复或工具调用信息
- * @param currentModel 当前用户选择的模型（可选）
- * @returns 10字内的摘要，失败返回空字符串
+ * @param summarySource AI 文本回复或用户原文
+ * @param _currentModel 已废弃；保留参数以兼容旧调用点
+ * @param abortSignal 可选取消信号；用户开始新一轮 query 时取消上一个未完成的摘要请求，避免浪费配额与产生 race 条件
+ * @returns 摘要文本，失败时返回空字符串
  */
 async function generateCheckpointSummary(
   geminiClient: GeminiClient,
   summarySource: string,
-  currentModel?: string
+  _currentModel?: string,
+  abortSignal?: AbortSignal
 ): Promise<string> {
+  const SUMMARY_MODEL = 'deepseek-v4-flash';
+  // 10s timeout：标题生成是 fire-and-forget 的后台任务，
+  // 不阻塞主 AI 请求；回来多晚都行，回来才设标题，回不来就维持原标题。
+  const SUMMARY_TIMEOUT_MS = 10000;
+
+  // 已被取消，直接返回，不发起请求
+  if (abortSignal?.aborted) {
+    return '';
+  }
+
   const targetLanguage = isChineseLocale() ? 'Chinese' : 'English';
   const lengthLimit = isChineseLocale() ? '8 Chinese characters' : '3 English words';
 
@@ -206,78 +228,57 @@ Now summarize:
 Output must be in ${targetLanguage}.
 Return only the summary text.`;
 
-  // 如果当前模型是自定义模型，则使用自定义模型；否则使用 Flash Lite 模型
-  const usingCustomModel = currentModel && isCustomModel(currentModel);
-  const models = usingCustomModel
-    ? [currentModel]
-    : ['gemini-2.5-flash-lite'];
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('Summary generation timeout')), SUMMARY_TIMEOUT_MS);
+      // 被外部取消时立刻清掉定时器并 reject，让上层尽早走 catch
+      abortSignal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('Summary generation aborted'));
+      }, { once: true });
+    });
 
-  for (const model of models) {
-    try {
-      console.log(`[Checkpoint] Trying model: ${model}`);
+    const summaryPromise = (async () => {
+      const chat = await geminiClient.createTemporaryChat(
+        SceneType.CONTENT_SUMMARY,
+        SUMMARY_MODEL,
+        { type: 'sub', agentId: 'CheckpointSummarizer' },
+        { emptySystemPrompt: true }
+      );
 
-      // 自定义模型使用更长的超时时间（15秒），官方模型使用5秒
-      const timeoutMs = usingCustomModel ? 15000 : 5000;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Summary generation timeout')), timeoutMs);
-      });
+      const response = await chat.sendMessage(
+        {
+          message: summaryPrompt,
+          // 透传给 DeepVServerAdapter.generateContent → executeUnifiedChatAPICall，
+          // 由后者监听 abort 事件中止 fetch
+          config: { abortSignal } as never,
+        },
+        `checkpoint-summary-${Date.now()}`,
+        SceneType.CONTENT_SUMMARY
+      );
 
-      const summaryPromise = (async () => {
-        const chat = await geminiClient.createTemporaryChat(
-          SceneType.CONTENT_SUMMARY,
-          model,
-          { type: 'sub', agentId: 'CheckpointSummarizer' },
-          { disableSystemPrompt: true }
-        );
-
-        const response = await chat.sendMessage(
-          { message: summaryPrompt },
-          `checkpoint-summary-${Date.now()}`,
-          SceneType.CONTENT_SUMMARY
-        );
-
-        // 从 response 中提取文本
-        // response.text 可能不存在，需要从 candidates 中获取
-        let summaryText = '';
-        if (response.text) {
-          summaryText = response.text;
-        } else if (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {
-          summaryText = response.candidates[0].content.parts[0].text;
-        }
-
-        let summary = summaryText.trim();
-
-        // 不再进行强制截断，完全信任 AI 的输出
-        return summary;
-      })();
-
-      // 等待摘要或超时
-      const summary = await Promise.race([summaryPromise, timeoutPromise]);
-
-      if (summary && summary.length > 0) {
-        console.log(`[Checkpoint] Summary successfully generated: "${summary}"`);
-        return summary;
+      // 从 response 中提取文本（兼容 .text 与 candidates 两种返回形态）
+      let summaryText = '';
+      if (response.text) {
+        summaryText = response.text;
+      } else if (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {
+        summaryText = response.candidates[0].content.parts[0].text;
       }
+      return summaryText.trim();
+    })();
 
-    } catch (error) {
-      // 对于自定义模型，summary 生成失败是可接受的，使用 warn 级别
-      if (usingCustomModel) {
-        console.warn(`[Checkpoint] Custom model summary generation skipped (non-critical):`,
-          error instanceof Error ? error.message : error);
-      } else {
-        console.error(`[Checkpoint] Model ${model} failed for summary generation:`, error);
-      }
-      // 继续尝试下一个模型
+    const summary = await Promise.race([summaryPromise, timeoutPromise]);
+
+    if (summary && summary.length > 0) {
+      return summary;
     }
+    return '';
+  } catch (error) {
+    // Best-effort. warn 级别，避免红色 ✖ 面板。
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[Summary] ${SUMMARY_MODEL} skipped (non-critical):`, msg);
+    return '';
   }
-
-  // 所有模型都失败 - 对于自定义模型这是预期行为
-  if (usingCustomModel) {
-    console.log('[Checkpoint] Custom model: summary not available, continuing without summary');
-  } else {
-    console.warn('[Checkpoint] All models failed, returning empty summary');
-  }
-  return '';
 }
 
 export function mergePartListUnions(list: PartListUnion[]): PartListUnion {
@@ -358,6 +359,11 @@ export const useGeminiStream = (
   const aiTextBeforeToolsRef = useRef<string>('');
   // 🎯 用于保存当前会话的摘要，避免重复生成
   const currentSessionSummaryRef = useRef<string | null>(null);
+  // 🎯 用于取消上一次未完成的标题摘要请求。
+  // 与 abortControllerRef（主请求）独立，因为：
+  // 1. 主请求可能因用户 Esc 中断，但摘要仍需完成（用户其实没换话题）；
+  // 2. 用户连发新 query 时，旧 summary 必须被取消，否则会出现 race（旧的晚到覆盖新的）。
+  const summaryAbortControllerRef = useRef<AbortController | null>(null);
   const { startNewPrompt, getPromptCount } = useSessionStats();
   const logger = useLogger();
   const [gitService, setGitService] = useState<GitService | undefined>();
@@ -558,50 +564,38 @@ export const useGeminiStream = (
     if (!sessionManager || !currentCheckpointIdRef.current) return;
 
     try {
+      // 设计：摘要现在仅在用户提交 query 时生成一次（见 submitQuery 内的 immediate
+      // summary 块），结果存在 currentSessionSummaryRef 里。这里只复用这个 ref，
+      // 不再触发任何额外的 LLM 调用。
+      // 如果 ref 为空（例如：纯指令式短输入根本没走 summarize 分支，或者上次
+      // immediate summary 失败），则使用本地工具调用降级文本作为兜底，仍然不调用 LLM。
       let summary = currentSessionSummaryRef.current;
 
       if (!summary) {
-        // Fallback: 从 AI 文本回复生成摘要（优先），如果没有则从工具调用生成
-        let summarySource = aiTextBeforeToolsRef.current.trim();
-
-        // 如果 AI 没有文本回复，降级到工具调用信息
-        if (!summarySource || summarySource.length < 5) {
-          summarySource = formatToolCallsForSummary(completedToolCalls);
-        } else {
-          // 限制 AI 文本长度（前 200 字符）
-          summarySource = summarySource.substring(0, 200);
-        }
-
-        console.log('[Checkpoint] Starting summary generation from:', summarySource.substring(0, 50));
-        summary = await generateCheckpointSummary(geminiClient, summarySource, config.getModel());
+        // 本地降级：从工具调用生成可读摘要（纯字符串拼接，0 LLM 调用）
+        summary = formatToolCallsForSummary(completedToolCalls);
       }
-
-      console.log('[Checkpoint] Summary generated/used:', summary);
 
       if (summary) {
         // 更新 SessionManager 中的摘要
         await sessionManager.updateSessionCheckpoint(config.getSessionId(), currentCheckpointIdRef.current, { summary });
 
-        // 🎯 新增：更新窗口标题（包含工作目录名）
+        // 🎯 同步更新窗口标题（包含工作目录名）
         if (settings) {
           const workspaceName = path.basename(config.getProjectRoot());
           updateWindowTitleWithSummary(summary, settings, workspaceName);
         }
 
-        onDebugMessage(
-          `✅ Checkpoint 摘要已更新: "${summary}"`,
-        );
+        onDebugMessage(`✅ Checkpoint 摘要已更新: "${summary}"`);
       }
     } catch (error) {
-      // 对于自定义模型，summary 更新失败是可接受的
-      const currentModel = config.getModel();
-      if (currentModel && isCustomModel(currentModel)) {
-        console.warn('[Checkpoint] Custom model: summary update skipped (non-critical)');
-      } else {
-        console.error('[Checkpoint] Failed to update summary:', error);
-      }
+      // Checkpoint summary is non-critical (best-effort). Use warn so it doesn't
+      // surface as a red ✖ panel — the user's checkpoint itself was already saved
+      // upstream; only the summary label failed to update.
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn('[Checkpoint] Summary update skipped (non-critical):', msg);
     }
-  }, [sessionManager, config, geminiClient, settings, onDebugMessage]);
+  }, [sessionManager, config, settings, onDebugMessage]);
 
   /**
    * 🎯 工具执行前的预处理 (用于 Git Checkpoint)
@@ -1047,7 +1041,7 @@ export const useGeminiStream = (
         return '';
       }
 
-      // 🆕 标记内容已开始，清空思考过程
+      // 🆕 标记内容已开始；思考框随之立即消失
       if (!hasContentStarted) {
         setHasContentStarted(true);
         setReasoning(null);
@@ -1149,6 +1143,8 @@ export const useGeminiStream = (
       // 🛡️ 重置同步标志位
       processingRef.current = false;
       setIsResponding(false);
+      // 用户取消：隐藏思考框
+      setReasoning(null);
       clearEstimatedTokens(); // 清除预估token
 
       // Linus fix: 用户取消时也要执行内存清理，防止内存泄漏
@@ -1447,6 +1443,9 @@ export const useGeminiStream = (
           case ServerGeminiEventType.Reasoning:
             // 🆕 累积 reasoning 内容
             reasoningBuffer += event.value.text;
+            console.log(
+              `[REASONING-TRACE][useGeminiStream] +${event.value.text.length}B → bufferLen=${reasoningBuffer.length}`,
+            );
             setReasoning({ text: reasoningBuffer });
             break;
           case ServerGeminiEventType.Content:
@@ -1505,7 +1504,7 @@ export const useGeminiStream = (
           }
         }
       }
-      // 清空 reasoning 状态（思考过程仅在流式传输中显示）
+      // 流式传输完成：清空 reasoning 状态（思考过程仅在流式传输中显示）
       setReasoning(null);
       if (toolCallRequests.length > 0) {
         await scheduleToolCalls(toolCallRequests, signal);
@@ -1575,6 +1574,8 @@ User question: ${queryStr}`;
       setIsResponding(true);
       // 🆕 重置内容开始标志
       setHasContentStarted(false);
+      // 新一轮请求开始：清掉上一轮残留的思考框
+      setReasoning(null);
 
       const userMessageTimestamp = Date.now();
       setShowHelp(false);
@@ -1616,6 +1617,16 @@ User question: ${queryStr}`;
         currentUserQueryRef.current = query.trim();
 
         // 🎯 立即生成会话摘要并更新窗口标题（基于用户消息）
+        // 取消上一次未完成的摘要请求：
+        // - 节省后端配额（旧的 LLM 调用没必要再跑完）
+        // - 防止 race：旧 summary 晚到时不应再覆盖新标题
+        if (summaryAbortControllerRef.current) {
+          summaryAbortControllerRef.current.abort();
+        }
+        const summaryController = new AbortController();
+        summaryAbortControllerRef.current = summaryController;
+        const summarySignal = summaryController.signal;
+
         (async () => {
            try {
              const trimmedQuery = query.trim();
@@ -1640,7 +1651,14 @@ User question: ${queryStr}`;
                    // 直接使用原文，但去除换行符以适应标题显示
                    summary = summarySource.replace(/[\r\n]+/g, ' ');
                 } else {
-                   summary = await generateCheckpointSummary(geminiClient, summarySource, config.getModel());
+                   summary = await generateCheckpointSummary(geminiClient, summarySource, config.getModel(), summarySignal);
+                }
+
+                // race 防护：如果在此期间用户已经发起新一轮 query，
+                // 当前 controller 已经不是最新的（或已被 abort），
+                // 那么本次摘要的结果作废，不写 ref 也不更新标题。
+                if (summarySignal.aborted || summaryAbortControllerRef.current !== summaryController) {
+                  return;
                 }
 
                 if (summary) {
@@ -1652,7 +1670,13 @@ User question: ${queryStr}`;
                 }
              }
            } catch (e) {
-             console.error('[Summary] Failed to generate immediate summary:', e);
+             // Non-critical: summary is just used for the window title.
+             // 用户连发新 query 导致主动 abort 是预期行为，不打 warn。
+             if (summarySignal.aborted) {
+               return;
+             }
+             const msg = e instanceof Error ? e.message : String(e);
+             console.warn('[Summary] Immediate summary skipped (non-critical):', msg);
            }
         })();
       }

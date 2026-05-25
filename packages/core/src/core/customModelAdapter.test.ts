@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, callOpenAIResponsesModel, callOpenAIResponsesModelStream, parseJSONSafeExport } from './customModelAdapter.js';
+import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, callOpenAIResponsesModel, callOpenAIResponsesModelStream, callGeminiNativeModel, callGeminiNativeModelStream, parseJSONSafeExport } from './customModelAdapter.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 
 // 为了测试内部函数，需要导出它（见下方的导出添加）
@@ -221,6 +221,161 @@ describe('customModelAdapter - Image Content Support', () => {
       expect(capturedBody.messages[0].content).toHaveLength(3);
       expect(capturedBody.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,base64data1');
       expect(capturedBody.messages[0].content[2].image_url.url).toBe('data:image/png;base64,base64data2');
+    });
+
+    it('should parse reasoning_content from OpenAI compatible model unary response', async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                reasoning_content: 'Let me analyze the request...',
+                content: 'Here is the final result.',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello' }],
+          },
+        ],
+      };
+
+      const response = await callOpenAICompatibleModel(modelConfig as any, request);
+      const parts = response.candidates?.[0]?.content?.parts;
+      expect(parts).toHaveLength(2);
+      expect(parts?.[0]).toEqual({ reasoning: 'Let me analyze the request...' });
+      expect(parts?.[1]).toEqual({ text: 'Here is the final result.' });
+    });
+
+    it('should attach reasoning_content in contentsToMessages when tool calls are present', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: { role: 'assistant', content: 'Result' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      // Construct a history containing pure reasoning part followed by a tool call part
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Execute tool' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ reasoning: 'I need to use a tool to fetch info.' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ functionCall: { name: 'get_info', args: { query: 'test' }, id: 'call_1' } }],
+          },
+        ],
+      };
+
+      await callOpenAICompatibleModel(modelConfig as any, request);
+
+      // Verify that pure reasoning message is filtered, and attached to the tool_calls message as reasoning_content
+      expect(capturedBody.messages).toHaveLength(2); // user message, followed by assistant tool call message
+      expect(capturedBody.messages[0].role).toBe('user');
+      expect(capturedBody.messages[1].role).toBe('assistant');
+      expect(capturedBody.messages[1].tool_calls).toBeDefined();
+      expect(capturedBody.messages[1].reasoning_content).toBe('I need to use a tool to fetch info.');
+    });
+
+    it('should NOT attach reasoning_content in contentsToMessages when no tool calls are present', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: { role: 'assistant', content: 'Result' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      // Construct a history containing pure reasoning part followed by a normal text assistant response (no tool calls)
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ reasoning: 'I should just say hello.' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ text: 'Hello there!' }],
+          },
+        ],
+      };
+
+      await callOpenAICompatibleModel(modelConfig as any, request);
+
+      // Verify that pure reasoning message is filtered, and NOT attached to the text message (saving tokens per DeepSeek doc)
+      expect(capturedBody.messages).toHaveLength(2); // user message, followed by assistant text message
+      expect(capturedBody.messages[1].role).toBe('assistant');
+      expect(capturedBody.messages[1].content).toBe('Hello there!');
+      expect(capturedBody.messages[1].reasoning_content).toBeUndefined();
     });
   });
 
@@ -539,6 +694,116 @@ describe('customModelAdapter - Anthropic API Compatibility', () => {
   });
 
   describe('Extended thinking support', () => {
+    it('should use Bedrock adaptive thinking schema for Claude Opus 4.7 with xhigh effort in streaming calls', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        body: {
+          getReader: () => {
+            let index = 0;
+            const chunks = [
+              'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":1}}}\n',
+              'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n',
+            ];
+
+            return {
+              read: vi.fn(async () => {
+                if (index < chunks.length) {
+                  const value = new TextEncoder().encode(chunks[index]);
+                  index++;
+                  return { done: false, value };
+                }
+                return { done: true, value: undefined };
+              }),
+              releaseLock: vi.fn(),
+            };
+          },
+        },
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body as string);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'anthropic' as const,
+        modelId: 'claude-opus-4-7',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-ant-test',
+        displayName: 'Claude Opus 4.7',
+        thinking: { mode: 'on' as const, effort: 'xhigh' as const },
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Solve this' }],
+          },
+        ],
+      };
+
+      const responses: any[] = [];
+      for await (const response of callAnthropicModelStream(modelConfig as any, request)) {
+        responses.push(response);
+      }
+
+      expect(capturedBody.thinking).toEqual({
+        type: 'adaptive',
+        display: 'summarized',
+      });
+      expect(capturedBody.output_config).toEqual({ effort: 'xhigh' });
+      expect(capturedBody.thinking.effort).toBeUndefined();
+      expect(capturedBody.thinking.budget_tokens).toBeUndefined();
+      expect(responses.length).toBeGreaterThan(0);
+    });
+
+    it('should use adaptive thinking schema for hyphenated Claude Opus 4.7 in auto mode', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          content: [{ type: 'text', text: 'Response' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 100, output_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body as string);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'anthropic' as const,
+        modelId: 'claude-opus-4-7',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-ant-test',
+        displayName: 'Claude Opus 4.7',
+        thinking: { mode: 'auto' as const },
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Solve this' }],
+          },
+        ],
+      };
+
+      await callAnthropicModel(modelConfig as any, request);
+
+      expect(capturedBody.thinking).toEqual({
+        type: 'adaptive',
+        display: 'summarized',
+      });
+      expect(capturedBody.output_config).toEqual({ effort: 'high' });
+      expect(capturedBody.thinking.effort).toBeUndefined();
+      expect(capturedBody.thinking.budget_tokens).toBeUndefined();
+    });
+
     it('should use budget_tokens capped at 10000 when enableThinking is true', async () => {
       let capturedBody: any;
       const mockResponse = {
@@ -1839,5 +2104,626 @@ describe('customModelAdapter - OpenAI Responses API', () => {
       expect(toolCallResponse?.functionCalls).toBeDefined();
       expect(toolCallResponse?.functionCalls?.[0]?.name).toBe('search');
     });
+
+    it('should request reasoning.summary="detailed" for gpt-5.x to actually emit thinking', async () => {
+      // Probe-confirmed (2026-05-26): EasyRouter gateway silently drops
+      // reasoning summary chunks unless summary='detailed' is explicit.
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        body: {
+          getReader: () => {
+            let i = 0;
+            const chunks = [
+              'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n',
+              'data: [DONE]\n',
+            ];
+            return {
+              read: vi.fn(async () => {
+                if (i < chunks.length) {
+                  const value = new TextEncoder().encode(chunks[i]);
+                  i++;
+                  return { done: false, value };
+                }
+                return { done: true, value: undefined };
+              }),
+              releaseLock: vi.fn(),
+            };
+          },
+        },
+      };
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-5.5',
+        baseUrl: 'https://llm-endpoint.net/v1',
+        apiKey: 'sk-test',
+        displayName: 'gpt-5.5',
+      };
+      const request = { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] };
+
+      // Drain stream
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of callOpenAIResponsesModelStream(modelConfig as any, request)) {
+        // no-op
+      }
+
+      expect(capturedBody.reasoning).toBeDefined();
+      expect(capturedBody.reasoning.summary).toBe('detailed');
+      // auto + auto → effort defaults to 'medium' (so the model actually thinks).
+      expect(capturedBody.reasoning.effort).toBe('medium');
+    });
+
+    it('should yield reasoning chunks from response.reasoning_summary_text.delta', async () => {
+      const mockResponse = {
+        ok: true,
+        body: {
+          getReader: () => {
+            let i = 0;
+            const chunks = [
+              'data: {"type":"response.reasoning_summary_text.delta","delta":"Let me think… "}\n',
+              'data: {"type":"response.reasoning_summary_text.delta","delta":"the answer is 9."}\n',
+              'data: {"type":"response.output_text.delta","delta":"9 sheep."}\n',
+              'data: {"type":"response.completed","response":{"usage":{"input_tokens":5,"output_tokens":3}}}\n',
+              'data: [DONE]\n',
+            ];
+            return {
+              read: vi.fn(async () => {
+                if (i < chunks.length) {
+                  const value = new TextEncoder().encode(chunks[i]);
+                  i++;
+                  return { done: false, value };
+                }
+                return { done: true, value: undefined };
+              }),
+              releaseLock: vi.fn(),
+            };
+          },
+        },
+      };
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-5.5',
+        baseUrl: 'https://llm-endpoint.net/v1',
+        apiKey: 'sk-test',
+        displayName: 'gpt-5.5',
+      };
+      const request = { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] };
+
+      const responses: any[] = [];
+      for await (const r of callOpenAIResponsesModelStream(modelConfig as any, request)) {
+        responses.push(r);
+      }
+
+      const reasoningParts = responses.flatMap(r =>
+        (r.candidates?.[0]?.content?.parts || []).filter((p: any) => 'reasoning' in p)
+      );
+      expect(reasoningParts).toHaveLength(2);
+      expect(reasoningParts[0].reasoning).toBe('Let me think… ');
+      expect(reasoningParts[1].reasoning).toBe('the answer is 9.');
+
+      const textParts = responses.flatMap(r =>
+        (r.candidates?.[0]?.content?.parts || []).filter((p: any) => 'text' in p)
+      );
+      expect(textParts).toHaveLength(1);
+      expect(textParts[0].text).toBe('9 sheep.');
+    });
+
+    it('non-stream path: outputToParts maps reasoning items to { reasoning } parts', async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          status: 'completed',
+          output: [
+            {
+              type: 'reasoning',
+              summary: [
+                { type: 'summary_text', text: 'First I count the surviving sheep.' },
+                { type: 'summary_text', text: 'Answer: 9.' },
+              ],
+            },
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: '9 sheep.' }],
+            },
+          ],
+          usage: { input_tokens: 5, output_tokens: 3 },
+        }),
+      };
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai-responses' as const,
+        modelId: 'gpt-5.5',
+        baseUrl: 'https://llm-endpoint.net/v1',
+        apiKey: 'sk-test',
+        displayName: 'gpt-5.5',
+      };
+      const request = { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] };
+
+      const result = await callOpenAIResponsesModel(modelConfig as any, request);
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      const reasoning = parts.filter((p: any) => 'reasoning' in p);
+      const text = parts.filter((p: any) => 'text' in p);
+      expect(reasoning).toHaveLength(2);
+      expect((reasoning[0] as any).reasoning).toBe('First I count the surviving sheep.');
+      expect((reasoning[1] as any).reasoning).toBe('Answer: 9.');
+      expect(text).toHaveLength(1);
+      expect((text[0] as any).text).toBe('9 sheep.');
+    });
+  });
+});
+
+// ============================================================================
+// Gemini native (GenAI v1beta) — provider 'gemini'
+// ============================================================================
+
+describe('callGeminiNativeModel', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('builds /v1beta/models/{id}:generateContent URL with ?key= and forwards thinkingConfig for Gemini 2.5', async () => {
+    let capturedUrl: string | undefined;
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (url, options) => {
+      capturedUrl = String(url);
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{
+            content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: '9' }] },
+            finishReason: 'STOP',
+          }],
+          usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 1, totalTokenCount: 6 },
+        }),
+      };
+    });
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-pro',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-pro',
+    };
+    const request = { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] };
+
+    const result = await callGeminiNativeModel(modelConfig as any, request);
+
+    // URL: /v1 → /v1beta normalisation, then :generateContent + ?key=
+    expect(capturedUrl).toBe('https://llm-endpoint.net/v1beta/models/gemini-2.5-pro:generateContent?key=sk-test');
+    // Gemini 2.5 family → thinkingBudget (number), not thinkingLevel.
+    expect(capturedBody.generationConfig.thinkingConfig).toBeDefined();
+    expect(typeof capturedBody.generationConfig.thinkingConfig.thinkingBudget).toBe('number');
+    expect(capturedBody.generationConfig.thinkingConfig.includeThoughts).toBe(true);
+    // Output is unwrapped to GenerateContentResponse parts.
+    const parts = result.candidates?.[0]?.content?.parts;
+    expect(parts?.[0]).toEqual({ text: '9' });
+    expect(result.usageMetadata?.promptTokenCount).toBe(5);
+  });
+
+  it('uses thinkingLevel for Gemini 3 / 3.5 family', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }],
+        }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-3.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-3.5-flash',
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    );
+    const tc = capturedBody.generationConfig.thinkingConfig;
+    expect(typeof tc.thinkingLevel).toBe('string');
+    expect(tc.thinkingBudget).toBeUndefined();
+    expect(tc.includeThoughts).toBe(true);
+  });
+
+  it('disables thinking when modelConfig.thinking.mode === "off"', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }],
+        }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-pro',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-pro',
+      thinking: { mode: 'off' as const },
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    );
+    expect(capturedBody.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('normalises a string systemInstruction to canonical { parts: [{ text }] }', async () => {
+    // The /v1beta endpoint rejects raw strings with HTTP 500
+    //   "json: cannot unmarshal string into Go struct field .systemInstruction
+    //    of type GeminiChatContent"
+    // — so we must convert any non-canonical shape on the client side.
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }],
+        }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: 'You are helpful.' },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual({ parts: [{ text: 'You are helpful.' }] });
+  });
+
+  it('normalises a { text } shorthand systemInstruction to canonical form', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: { text: 'Be concise.' } },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual({ parts: [{ text: 'Be concise.' }] });
+  });
+
+  it('passes through a canonical systemInstruction unchanged', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    const canonical = { parts: [{ text: 'Already shaped.' }] };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: canonical },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual(canonical);
+  });
+
+  it('sanitises contents: folds { reasoning } / { thought:true } back to thought parts and preserves thoughtSignature', async () => {
+    // Gemini 3.x with thinking requires thoughtSignature to round-trip.
+    // Stripping the marker would cause HTTP 400:
+    //   "Function call is missing a thought_signature in functionCall parts"
+    // — see scripts/replay-gemini-dump.mjs for the reproduction.
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-3.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-3.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '前50个质数' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [
+            // adapter's projection from a streamed run (with signature)
+            { reasoning: 'Let me compute…', thoughtSignature: 'sig-abc' },
+            // raw Gemini thought part
+            { thought: true, text: 'Internal monologue.', thoughtSignature: 'sig-def' },
+            // canonical text part — no signature
+            { text: 'Sum is 5117.' },
+            // functionCall WITH signature — must round-trip on the same part
+            { functionCall: { name: 'run_sh', args: { c: 'echo' } }, thoughtSignature: 'sig-fc' },
+          ],
+        },
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' }] },
+      ],
+    });
+
+    const modelTurn = capturedBody.contents[1];
+    expect(modelTurn.role).toBe(MESSAGE_ROLES.MODEL);
+    expect(modelTurn.parts).toEqual([
+      { thought: true, text: 'Let me compute…', thoughtSignature: 'sig-abc' },
+      { thought: true, text: 'Internal monologue.', thoughtSignature: 'sig-def' },
+      { text: 'Sum is 5117.' },
+      { functionCall: { name: 'run_sh', args: { c: 'echo' } }, thoughtSignature: 'sig-fc' },
+    ]);
+    // No `reasoning` key remains — adapters projected fields are folded back.
+    expect(JSON.stringify(capturedBody.contents)).not.toContain('"reasoning"');
+  });
+
+  it('drops empty / unknown parts so Gemini never sees an empty Content (HTTP 400)', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] },
+        // turn that would only contain UI-only parts → must be dropped entirely
+        { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning: '' }, { someUnknownShape: 1 } as any] },
+      ],
+    });
+
+    expect(capturedBody.contents).toHaveLength(1);
+    expect(capturedBody.contents[0].parts).toEqual([{ text: 'hi' }]);
+  });
+
+  it('passes through canonical functionCall / functionResponse parts unchanged', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: 'use a tool' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [{ functionCall: { name: 'search', args: { q: 'x' } } }],
+        },
+        {
+          role: 'function',
+          parts: [{ functionResponse: { name: 'search', response: { ok: true } } }],
+        },
+      ],
+    });
+    expect(capturedBody.contents[1].parts[0]).toEqual({
+      functionCall: { name: 'search', args: { q: 'x' } },
+    });
+    expect(capturedBody.contents[2].parts[0]).toEqual({
+      functionResponse: { name: 'search', response: { ok: true } },
+    });
+  });
+
+  it('maps a thought:true part to { reasoning } on the unary response', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          content: {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [
+              { thought: true, text: 'Let me think about this step by step.' },
+              { text: 'Final answer is 9.' },
+            ],
+          },
+          finishReason: 'STOP',
+        }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 10 },
+      }),
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-pro',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-pro',
+    };
+    const result = await callGeminiNativeModel(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    );
+    const parts = result.candidates?.[0]?.content?.parts || [];
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toEqual({ reasoning: 'Let me think about this step by step.' });
+    expect(parts[1]).toEqual({ text: 'Final answer is 9.' });
+  });
+});
+
+describe('callGeminiNativeModelStream', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  function mockSseResponse(chunks: string[]) {
+    return {
+      ok: true,
+      body: {
+        getReader: () => {
+          let i = 0;
+          return {
+            read: vi.fn(async () => {
+              if (i < chunks.length) {
+                const value = new TextEncoder().encode(chunks[i]);
+                i++;
+                return { done: false, value };
+              }
+              return { done: true, value: undefined };
+            }),
+            releaseLock: vi.fn(),
+          };
+        },
+      },
+    };
+  }
+
+  it('parses thought + text + functionCall parts from SSE and exposes functionCalls', async () => {
+    const sse = [
+      'data: ' + JSON.stringify({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ thought: true, text: 'Thinking…' }] } }],
+      }) + '\n\n',
+      'data: ' + JSON.stringify({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'Hello' }] } }],
+      }) + '\n\n',
+      'data: ' + JSON.stringify({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'list_directory', args: { path: '/' } } }] }, finishReason: 'STOP' }],
+      }) + '\n\n',
+      'data: ' + JSON.stringify({
+        usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 13, totalTokenCount: 20 },
+      }) + '\n\n',
+    ];
+    global.fetch = vi.fn().mockResolvedValue(mockSseResponse(sse));
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-pro',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-pro',
+    };
+    const responses: any[] = [];
+    for await (const r of callGeminiNativeModelStream(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    )) {
+      responses.push(r);
+    }
+
+    const reasoning = responses.flatMap((r: any) => (r.candidates?.[0]?.content?.parts || []).filter((p: any) => 'reasoning' in p));
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0].reasoning).toBe('Thinking…');
+
+    const text = responses.flatMap((r: any) => (r.candidates?.[0]?.content?.parts || []).filter((p: any) => 'text' in p));
+    expect(text).toHaveLength(1);
+    expect(text[0].text).toBe('Hello');
+
+    const fnResp = responses.find((r: any) => (r.candidates?.[0]?.content?.parts || []).some((p: any) => p.functionCall));
+    expect(fnResp).toBeDefined();
+    expect(fnResp!.functionCalls).toBeDefined();
+    expect(fnResp!.functionCalls![0].name).toBe('list_directory');
+    expect(fnResp!.functionCalls![0].args).toEqual({ path: '/' });
+
+    const usage = responses.find((r: any) => r.usageMetadata);
+    expect(usage).toBeDefined();
+    expect(usage.usageMetadata.totalTokenCount).toBe(20);
+  });
+
+  it('builds streaming URL with ?alt=sse&key= and rewrites /v1 → /v1beta', async () => {
+    let capturedUrl: string | undefined;
+    global.fetch = vi.fn().mockImplementation(async (url) => {
+      capturedUrl = String(url);
+      return mockSseResponse([]);
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-3.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'k',
+      displayName: 'gemini-3.5-flash',
+    };
+    for await (const _ of callGeminiNativeModelStream(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    )) {
+      void _;
+    }
+    expect(capturedUrl).toBe(
+      'https://llm-endpoint.net/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&key=k',
+    );
+  });
+
+  it('preserves a /v1beta-style baseUrl without rewriting it', async () => {
+    let capturedUrl: string | undefined;
+    global.fetch = vi.fn().mockImplementation(async (url) => {
+      capturedUrl = String(url);
+      return mockSseResponse([]);
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-pro',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      apiKey: 'k',
+      displayName: 'gemini-2.5-pro',
+    };
+    for await (const _ of callGeminiNativeModelStream(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    )) {
+      void _;
+    }
+    expect(capturedUrl).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse&key=k',
+    );
   });
 });

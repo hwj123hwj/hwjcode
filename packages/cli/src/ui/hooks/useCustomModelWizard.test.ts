@@ -156,4 +156,77 @@ describe('useCustomModelWizard', () => {
       expect.any(Number)
     );
   });
+
+  it('persists every config when handleWizardComplete is given an array (EasyRouter batch)', () => {
+    const { result } = renderHook(() =>
+      useCustomModelWizard(mockLoadedSettings, mockAddItem, mockConfig),
+    );
+
+    const batch: CustomModelConfig[] = [
+      {
+        displayName: 'gpt-5.4',
+        provider: 'openai-responses',
+        baseUrl: 'https://llm-endpoint.net/v1',
+        apiKey: 'sk-xxx',
+        modelId: 'gpt-5.4',
+        enabled: true,
+      },
+      {
+        displayName: 'claude-opus-4-7',
+        provider: 'anthropic',
+        baseUrl: 'https://llm-endpoint.net/v1',
+        apiKey: 'sk-xxx',
+        modelId: 'claude-opus-4-7',
+        enabled: true,
+      },
+    ];
+
+    act(() => {
+      result.current.openCustomModelWizard();
+    });
+    act(() => {
+      result.current.handleWizardComplete(batch);
+    });
+
+    expect(addOrUpdateCustomModel).toHaveBeenCalledTimes(batch.length);
+    expect(addOrUpdateCustomModel).toHaveBeenNthCalledWith(1, batch[0]);
+    expect(addOrUpdateCustomModel).toHaveBeenNthCalledWith(2, batch[1]);
+
+    // Hot-reload pulled once after the batch.
+    expect(loadCustomModels).toHaveBeenCalled();
+    expect(mockConfig.setCustomModels).toHaveBeenCalled();
+
+    // Wizard closed.
+    expect(result.current.isCustomModelWizardOpen).toBe(false);
+
+    // Success message references the batch count and includes both names.
+    expect(mockAddItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'info',
+        text: expect.stringMatching(/2 custom models saved/),
+      }),
+      expect.any(Number),
+    );
+    const messageCalls = (mockAddItem as any).mock.calls;
+    const lastInfo = messageCalls[messageCalls.length - 1][0].text as string;
+    expect(lastInfo).toContain('gpt-5.4');
+    expect(lastInfo).toContain('claude-opus-4-7');
+  });
+
+  it('does nothing when handleWizardComplete is called with an empty array', () => {
+    const { result } = renderHook(() =>
+      useCustomModelWizard(mockLoadedSettings, mockAddItem, mockConfig),
+    );
+
+    act(() => {
+      result.current.openCustomModelWizard();
+    });
+    act(() => {
+      result.current.handleWizardComplete([]);
+    });
+
+    expect(addOrUpdateCustomModel).not.toHaveBeenCalled();
+    expect(mockConfig.setCustomModels).not.toHaveBeenCalled();
+    expect(result.current.isCustomModelWizardOpen).toBe(false);
+  });
 });

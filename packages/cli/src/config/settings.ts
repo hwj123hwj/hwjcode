@@ -19,6 +19,7 @@ import {
   HookEventName,
   HookDefinition,
   CustomModelConfig,
+  ThinkingConfig,
 } from 'deepv-code-core';
 import stripJsonComments from 'strip-json-comments';
 import { DefaultLight } from '../ui/themes/default-light.js';
@@ -136,6 +137,9 @@ export interface Settings {
 
   // Custom model settings
   customModels?: CustomModelConfig[];
+
+  // 标准的思考配置
+  thinking?: ThinkingConfig;
 
   // Add other settings here.
   ideMode?: boolean;

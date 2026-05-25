@@ -72,6 +72,11 @@ export class RemoteSession {
   private currentAIResponse: UIDisplayRecord | null = null; // 当前正在进行的AI响应
   private lastPromptTokenCount = 0; // 最近一次 API 调用的 prompt token 数
 
+  // 思考流跟踪：每轮对话生成一个 thoughtId，所有 Thought/Reasoning chunk 共享
+  // null 表示当前轮次还没出现过思考事件；一旦发出过 Thought/Reasoning，
+  // 必须在轮次结束（status=idle、错误、中断）前发送一条 isComplete=true 收尾。
+  private currentThoughtId: string | null = null;
+
   constructor(
     private ws: WebSocket,
     private config: Config,
@@ -303,6 +308,9 @@ export class RemoteSession {
       this.currentProcessingPromise = null;
       this.currentAIResponse = null;
       this.currentAbortController = null;
+      // 兜底：command 处理结束时确保任何挂起的思考段被收尾。
+      // 正常路径下 finalizeThought 已在 idle/error 之前调用，这里是防御性的。
+      this.finalizeThought();
     }
   }
 
@@ -448,6 +456,9 @@ export class RemoteSession {
       status: 'completed'
     });
 
+    // 中断前先收尾思考段
+    this.finalizeThought();
+
     // 发送中断状态消息
     this.sendMessage(MessageFactory.createStatus('idle', '✅ 指令已中断'));
 
@@ -468,6 +479,8 @@ export class RemoteSession {
 
     // 初始化当前AI响应为null，在每轮开始时创建新的响应记录
     this.currentAIResponse = null;
+    // 新一次 processCommand 开始：确保上一轮残留的思考段被收尾
+    this.finalizeThought();
 
 
 
@@ -503,6 +516,9 @@ export class RemoteSession {
 
         // 🔧 修复: 为每轮AI响应创建新的记录，避免多轮响应被合并
         this.currentAIResponse = null;
+        // 每轮（含工具调用回合）开始时收尾上一轮的思考段。
+        // 这样工具→新一轮 reasoning 会获得新的 thoughtId，客户端能正确分段。
+        this.finalizeThought();
 
 
         // 发送当前轮次的消息给AI（可能是初始用户输入或工具执行结果）
@@ -553,6 +569,8 @@ export class RemoteSession {
 
         // 如果没有工具调用，对话结束
         if (toolCallRequests.length === 0) {
+          // idle 前先收尾思考段，确保客户端结束当前折叠区
+          this.finalizeThought();
           this.sendMessage(MessageFactory.createStatus('idle', '指令执行完成'));
           return;
         }
@@ -635,6 +653,8 @@ export class RemoteSession {
     }
 
     remoteLogger.error('RemoteSession', `发送错误消息: ${this.sessionId}`, { error });
+    // 错误前先收尾思考段，避免客户端永远等不到 isComplete
+    this.finalizeThought();
     this.sendMessage(MessageFactory.createError(error));
     // 确保发送idle状态
     this.sendMessage(MessageFactory.createStatus('idle', '操作完成'));
@@ -649,6 +669,8 @@ export class RemoteSession {
     // 清空UI显示记录
     this.uiDisplayRecords = [];
     this.currentAIResponse = null;
+    // 清理思考段，避免下一轮误把它当延续
+    this.finalizeThought();
 
     // 🆕 清理待确认状态
     this.pendingConfirmation = null;
@@ -829,13 +851,32 @@ export class RemoteSession {
         }
 
         remoteLogger.warn('RemoteSession', `检测到对话循环: ${this.sessionId} (type: ${loopType || 'unknown'})`);
+        this.finalizeThought();
         this.sendMessage(MessageFactory.createStatus('idle', loopMessage));
         break;
 
-      case GeminiEventType.Thought:
-        // AI思考过程 - 可以选择是否显示
-
+      case GeminiEventType.Thought: {
+        // Gemini 风格的离散 Thought 事件 (subject + description)
+        // 与本地 useGeminiStream 一致：本机端会在 LoadingIndicator 显示 subject。
+        // 远程端转发为 THOUGHT 消息，便于 Web/飞书展示思考标题与进展。
+        const thoughtId = this.ensureThoughtId();
+        const subject = (event.value as { subject?: string })?.subject ?? '';
+        const description = (event.value as { description?: string })?.description ?? '';
+        this.sendMessage(MessageFactory.createThought(thoughtId, subject, description));
         break;
+      }
+
+      case GeminiEventType.Reasoning: {
+        // OpenAI/Claude/DeepSeek 风格的流式 reasoning chunk
+        // 远程端按 thoughtId 聚合：所有 chunk 累加成完整 reasoning，
+        // 客户端可折叠展示。该轮结束时必须发一条 isComplete=true 收尾。
+        const thoughtId = this.ensureThoughtId();
+        const text = (event.value as { text?: string })?.text ?? '';
+        if (text) {
+          this.sendMessage(MessageFactory.createReasoningChunk(thoughtId, text, false));
+        }
+        break;
+      }
 
       case GeminiEventType.UserCancelled:
         // 用户取消
@@ -1119,6 +1160,10 @@ export class RemoteSession {
   private async handleContentEvent(content: string, turnCount?: number): Promise<void> {
     if (!content) return;
 
+    // 内容已经开始，对应的思考段落必须收尾。
+    // 这里保持本地 CLI useGeminiStream 的行为：reasoning 在 content 出现时被清空。
+    this.finalizeThought();
+
 
 
     // 🔧 修复: 为每轮AI响应创建独立的记录，避免多轮响应被合并
@@ -1143,6 +1188,32 @@ export class RemoteSession {
 
     // 发送实时响应到前端
     this.sendMessage(MessageFactory.createOutput(content, false, 'stdout'));
+  }
+
+  /**
+   * 获取或创建本轮 thoughtId。
+   * 同一个对话轮次内的所有 Thought / Reasoning 事件共享一个 id，
+   * 客户端用它聚合渲染 / 节流刷新。
+   */
+  private ensureThoughtId(): string {
+    if (!this.currentThoughtId) {
+      this.currentThoughtId = `t_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    }
+    return this.currentThoughtId;
+  }
+
+  /**
+   * 收尾当前思考段：发送一条 isComplete=true 的空 chunk，并清空 thoughtId。
+   * 调用时机：内容开始、轮次结束（idle/error/中断）、新轮次开始。
+   * 幂等：未发出过思考事件时无任何动作。
+   */
+  private finalizeThought(): void {
+    if (this.currentThoughtId) {
+      this.sendMessage(
+        MessageFactory.createReasoningChunk(this.currentThoughtId, '', true),
+      );
+      this.currentThoughtId = null;
+    }
   }
 
 

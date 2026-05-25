@@ -338,7 +338,7 @@ export type WebViewToExtensionMessage =
   // 🎯 Undo 模块
   | { type: 'undo_file_change'; payload: { sessionId: string; fileName: string; filePath?: string; originalContent: string; isNewFile: boolean; isDeletedFile: boolean } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_update'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_update'; payload: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any; healthyUse?: boolean } }
   | { type: 'project_settings_request'; payload: {} }
   // 🎯 Diff编辑器相关
   | { type: 'openDiffInEditor'; payload: { fileDiff: string; fileName: string; originalContent: string; newContent: string; filePath?: string } }
@@ -383,7 +383,20 @@ export type WebViewToExtensionMessage =
   | { type: 'request_user_stats'; payload: {} }
   // 🎯 后台任务管理
   | { type: 'background_task_request'; payload: { action: 'list' | 'kill'; taskId?: string } }
-  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } };
+  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } }
+  // 🎯 自定义模型管理（与 CLI 端共享 ~/.deepv/custom-models.json）
+  // ----------------------------------------------------------------
+  // EasyRouter / EasyClaw 元数据请求是从 webview 发起的（webview 直接拿到 API key
+  // 并发起 fetch，避免 key 跨进程多跳）。如果 webview 沙箱因 CSP 拒绝外部 fetch,
+  // extension 端也提供同名 IPC 作为后备路径——见 extension.ts 的 onFetchEasyRouter*。
+  | { type: 'list_custom_models'; payload: { requestId: string } }
+  | {
+      type: 'add_custom_models';
+      payload: { requestId: string; models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | { type: 'delete_custom_model'; payload: { requestId: string; modelId: string } }
+  | { type: 'fetch_easy_router_models'; payload: { requestId: string; apiKey: string } }
+  | { type: 'fetch_easy_claw_metadata'; payload: { requestId: string } };
 
 // Message types from Extension to WebView
 export type ExtensionToWebViewMessage =
@@ -440,7 +453,7 @@ export type ExtensionToWebViewMessage =
   // 🎯 文件路径解析结果
   | { type: 'file_paths_resolved'; payload: { resolvedFiles: string[] } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_response'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_response'; payload: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any } }
   // 🎯 服务初始化状态
   | { type: 'service_initialization_status'; payload: { status: 'starting' | 'progress' | 'ready' | 'failed'; message: string; timestamp: number } }
   | { type: 'service_initialization_done'; payload: {} }
@@ -502,7 +515,45 @@ export type ExtensionToWebViewMessage =
   // 🎯 后台任务完成通知（用于触发 AI 继续）
   | { type: 'background_task_completed_notification'; payload: BackgroundTaskCompletedPayload }
   // 🎯 后台任务结果显示（在聊天界面显示任务输出）
-  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload };
+  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload }
+  // 🎯 自定义模型管理响应（与上行 IPC 一一对应）
+  // 所有请求都携带 requestId，webview 用同一 requestId 匹配响应——和 model_response
+  // 的模式一致，避免上下行混合在同一通道时跨请求误投递。
+  | {
+      type: 'custom_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: import('deepv-code-core').CustomModelConfig[];
+        error?: string;
+      };
+    }
+  // 任意 webview 触发自定义模型变更（add/delete）后，extension 主动广播这条
+  // 给所有 webview，让 ModelSelector 不必主动轮询就能拿到最新列表。
+  | {
+      type: 'custom_models_changed';
+      payload: { models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | {
+      type: 'fetch_easy_router_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: Array<{ id: string; owned_by?: string; supported_endpoint_types?: string[] }>;
+        error?: string;
+        status?: number;
+      };
+    }
+  | {
+      type: 'fetch_easy_claw_metadata_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        // map.entries() 序列化为 [key, value][]，避免 Map 不能跨 IPC clone。
+        entries?: Array<[string, import('deepv-code-core').EasyClawModelMetadata]>;
+        error?: string;
+      };
+    };
 
 /**
  * 🔌 MCP 状态消息负载
