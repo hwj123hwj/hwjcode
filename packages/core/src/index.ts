@@ -124,6 +124,7 @@ export * from './tools/web-fetch.js';
 export * from './tools/memoryTool.js';
 export * from './tools/shell.js';
 export * from './tools/web-search.js';
+export * from './tools/image-reader.js';
 export * from './tools/read-many-files.js';
 export * from './tools/read-lints.js';
 export * from './tools/lint-fix.js';

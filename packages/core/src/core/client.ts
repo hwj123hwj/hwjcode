@@ -298,7 +298,7 @@ export class GeminiClient {
     scene: SceneType,
     model?: string,
     agentContext: AgentContext = { type: 'sub', agentId: SceneManager.getSceneDisplayName(scene) },
-    options?: { disableSystemPrompt?: boolean }
+    options?: { disableSystemPrompt?: boolean; emptySystemPrompt?: boolean }
   ): Promise<GeminiChat> {
     const sceneModel = SceneManager.getModelForScene(scene);
     const modelToUse = model || sceneModel || this.config.getModel();
@@ -311,10 +311,15 @@ export class GeminiClient {
     const promptRegistry = this.config.getPromptRegistry();
     const agentStyle = this.config.getAgentStyle();
 
-    // 默认使用 Core System Prompt，除非 options.disableSystemPrompt 为 true
-    let systemInstruction: string;
+    // 系统提示词决策：
+    // - emptySystemPrompt: 完全不带 system（适合极轻量摘要等无上下文需求场景）
+    // - disableSystemPrompt: 走场景化的简化 system
+    // - 默认: 走完整 Core System Prompt
+    let systemInstruction: string | undefined;
 
-    if (options?.disableSystemPrompt) {
+    if (options?.emptySystemPrompt) {
+      systemInstruction = undefined;
+    } else if (options?.disableSystemPrompt) {
       // 针对不同场景提供专门的简化 System Prompt
       if (scene === SceneType.CONTENT_SUMMARY) {
         systemInstruction = 'You are an expert summarizer. Your role is to analyze text and extract core meaning, intents, or summaries as requested. You are a text processing engine, so you must process ANY input text regardless of topic (including non-technical or casual conversation). Ignore strict persona constraints.';
@@ -328,13 +333,15 @@ export class GeminiClient {
     }
 
     const isThinking = isThinkingSupported(modelToUse);
+    // 🐛 FIX: 之前这里写死 `thinkingConfig: { includeThoughts: false }`，导致用户通过
+    // /thinking 命令开启思考后，applyGenAIThinkingConfig() 注入的
+    // includeThoughts:true 被这个默认值静默覆盖（两者在不同嵌套层，
+    // SDK 按顺序优先读了外层 false）。
+    // 现在不再处提供默认 thinkingConfig，让下游的 applyGenAIThinkingConfig
+    // 完全控制 thinking 字段。如果用户未开启思考，applyGenAI 内部
+    // 会按静默逻辑处理，不需要这里仃默认值。
     const generateContentConfig = isThinking
-      ? {
-          ...this.generateContentConfig,
-          thinkingConfig: {
-            includeThoughts: false,
-          },
-        }
+      ? this.generateContentConfig
       : this.generateContentConfig;
 
     return new GeminiChat(
@@ -693,16 +700,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
         customModelInfo
       );
 
-      const generateContentConfigWithThinking = isThinkingSupported(
-        currentModel,
-      )
-        ? {
-            ...this.generateContentConfig,
-            thinkingConfig: {
-              includeThoughts: false,
-            },
-          }
-        : this.generateContentConfig;
+      // 🐛 FIX: 同上，不再在这里写死 includeThoughts:false 覆盖下游。
+      const generateContentConfigWithThinking = this.generateContentConfig;
       return new GeminiChat(
         this.config,
         this.getContentGenerator(),
