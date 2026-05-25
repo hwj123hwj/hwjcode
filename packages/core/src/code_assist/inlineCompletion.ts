@@ -10,6 +10,14 @@ import { getSessionId } from '../utils/session.js';
 import { getGitBranch, getGitCommitSha, getGitProjectPath, getGitRemotes } from '../utils/gitUtils.js';
 
 /**
+ * 过滤 HTTP header 值中的非 Latin-1 字符（如中文分支名）。
+ * HTTP/1.1 header 值只允许 Latin-1 字符集（\x00-\xFF）。
+ */
+function toSafeHeaderValue(value: string): string {
+  return value.replace(/[^\x00-\xFF]/g, '');
+}
+
+/**
  * FIM 补全专用模型 - 固定使用 Codestral 2
  * 🔒 不允许用户更换模型
  */
@@ -107,8 +115,11 @@ export class InlineCompletionService {
   // 补全缓存（避免重复请求）
   private cache = new Map<string, InlineCompletionResponse>();
   private readonly MAX_CACHE_SIZE = 100;
+  /** 项目工作目录，用于采集 git 信息。VSCode 插件模式下应传入打开的项目路径 */
+  private readonly workingDir: string;
 
-  constructor() {
+  constructor(workingDir?: string) {
+    this.workingDir = workingDir ?? process.cwd();
     // 🆕 不再需要 Config 和 ContentGenerator
     // Codestral FIM 使用独立的 API 调用
   }
@@ -284,7 +295,7 @@ export class InlineCompletionService {
           // 协议 v1.4.2 新增 header
           'X-DVCode-Scene': 'inline_complete',
           'X-Session-ID': getSessionId(),
-          ...getInlineGitHeaders(),
+          ...getInlineGitHeaders(this.workingDir),
         },
         body: requestBody,
         signal: controller.signal,
@@ -401,13 +412,12 @@ export class InlineCompletionService {
  */
 const INTERNAL_EMAIL_DOMAINS = ['@cmcm.com', '@orionstar.com', '@aicfcf.com'];
 
-function getInlineGitHeaders(): Record<string, string> {
+function getInlineGitHeaders(cwd: string): Record<string, string> {
   try {
     const email = proxyAuthManager.getUserInfo()?.email?.toLowerCase() ?? '';
     const isInternal = INTERNAL_EMAIL_DOMAINS.some((d) => email.endsWith(d));
     if (!isInternal) return {};
 
-    const cwd = process.cwd();
     const headers: Record<string, string> = {};
 
     const remotes = getGitRemotes(cwd);
@@ -416,13 +426,13 @@ function getInlineGitHeaders(): Record<string, string> {
     }
 
     const branch = getGitBranch(cwd);
-    if (branch) headers['X-Git-Branch'] = branch;
+    if (branch) headers['X-Git-Branch'] = toSafeHeaderValue(branch);
 
     const commitSha = getGitCommitSha(cwd);
-    if (commitSha) headers['X-Git-Commit'] = commitSha;
+    if (commitSha) headers['X-Git-Commit'] = commitSha; // sha 只含 [0-9a-f]，无需过滤
 
     const projectPath = getGitProjectPath(cwd);
-    if (projectPath) headers['X-Git-Project-Path'] = projectPath;
+    if (projectPath) headers['X-Git-Project-Path'] = toSafeHeaderValue(projectPath);
 
     return headers;
   } catch {
