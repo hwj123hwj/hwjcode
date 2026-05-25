@@ -717,7 +717,7 @@ export async function callOpenAICompatibleModel(
         : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
     };
   } else if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning_effort = 'low'; // 强制降低思考强度以节省 token
+    requestBody.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
   } else {
     // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
     const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
@@ -1461,7 +1461,7 @@ export async function* callOpenAICompatibleModelStream(
         : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
     };
   } else if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning_effort = 'low'; // 强制降低思考强度以节省 token
+    requestBody.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
   } else {
     // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
     const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);

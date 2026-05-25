@@ -89,13 +89,19 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
 
   if (modelLower.includes('gemini')) {
     // 1. Gemini 系列自适应适配
+    const isGemini3 = modelLower.includes('gemini-3') || modelLower.includes('gemini-3.5');
     if (thinkingConfig.mode === 'off') {
-      config.generationConfig.thinkingConfig = {
-        thinkingBudget: 0
-      };
+      if (isGemini3) {
+        config.generationConfig.thinkingConfig = {
+          thinkingLevel: 'minimal' // 🌟 Gemini 3/3.5 官方推荐的 "no thinking" 最小延迟档位
+        };
+      } else {
+        config.generationConfig.thinkingConfig = {
+          thinkingBudget: 0 // 🌟 Gemini 2.5 官方标准的 "disable thinking" 档位
+        };
+      }
     } else {
       // 检查是否为 Gemini 3 / 3.5 系列 (未来/现代模型)
-      const isGemini3 = modelLower.includes('gemini-3') || modelLower.includes('gemini-3.5');
       if (isGemini3) {
         const thinkingLevel = effortToGeminiLevel(thinkingConfig.effort) || 'medium';
         config.generationConfig.thinkingConfig = {
@@ -106,7 +112,7 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
         // Gemini 2.5 系列
         const thinkingBudget = thinkingConfig.budgetTokens !== undefined
           ? thinkingConfig.budgetTokens
-          : (effortToGeminiBudget(thinkingConfig.effort) || 2048); // 默认使用 2048
+          : (effortToGeminiBudget(thinkingConfig.effort) || 2048); // 默认使用 2048 (或 -1 启用自适应)
         config.generationConfig.thinkingConfig = {
           thinkingBudget,
           includeThoughts: true
@@ -150,7 +156,7 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
   } else if (modelLower.includes('o1') || modelLower.includes('o3') || modelLower.includes('gpt-')) {
     // 4. OpenAI 系列
     if (thinkingConfig.mode === 'off') {
-      config.generationConfig.reasoning_effort = 'low';
+      config.generationConfig.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
     } else {
       const effort = effortToOpenAIEffort(thinkingConfig.effort);
       if (effort) {
