@@ -583,12 +583,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   // 🆕 构建思考模式备选项列表
   const thinkingOptionsList = useMemo(() => [
-    { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: <BrainIcon level="auto" size={14} />, desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
-    { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: <BrainIcon level="off" size={14} />, desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
-    { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: <BrainIcon level="low" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
-    { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: <BrainIcon level="medium" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
-    { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: <BrainIcon level="high" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
-    { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: <BrainIcon level="max" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
+    { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: <BrainIcon level="auto" size={16} />, desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
+    { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: <BrainIcon level="off" size={16} />, desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
+    { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: <BrainIcon level="low" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
+    { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: <BrainIcon level="medium" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
+    { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: <BrainIcon level="high" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
+    { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: <BrainIcon level="max" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
   ], [t]);
 
   // 🆕 当前选中的思考配置项
@@ -662,7 +662,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
                       {thinkingConfig?.mode !== 'off' && (
-                        <BrainIcon level={currentThinkingOption.id} size={14} />
+                        <BrainIcon level={currentThinkingOption.id} size={18} />
                       )}
                       {selectedModel.displayName}
                     </span>
