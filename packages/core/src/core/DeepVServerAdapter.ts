@@ -31,9 +31,81 @@ import { isDeepXQuotaError } from '../utils/quotaErrorDetection.js';
 import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
-import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig, isAdaptiveThinkingClaude } from '../types/customModel.js';
+import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
 import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos } from '../utils/gitUtils.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+/**
+ * 把出站请求体落盘到 ~/.deepv/last-N-requests/ 用于事后诊断。
+ *
+ * 用途：当用户报告"X 模型 Y 现象不对"时，用 scripts/probe-replay-cli-request.mjs
+ * 直接读取这个文件做字节级对账，避免依赖协议层猜测。
+ *
+ * - 滚动保留最近 5 次（按调用时间命名）
+ * - 同时维护 last-stream-request.json 软链等价文件指向最新一次（兼容旧 probe 脚本）
+ * - 异步写入，失败只 warn 不阻塞主流程
+ * - 不阻塞 fetch：调用方"fire and forget"
+ *
+ * @param kind  'stream' | 'unified'  区分流式 / 非流式路径
+ * @param body  即将作为 JSON.stringify 出站的请求体对象
+ */
+const REQUEST_DUMP_DIR = path.join(os.homedir(), '.deepv', 'last-requests');
+const REQUEST_DUMP_LATEST = path.join(os.homedir(), '.deepv', 'last-stream-request.json');
+const REQUEST_DUMP_RING_SIZE = 5;
+function dumpOutboundRequest(kind: 'stream' | 'unified', body: unknown): void {
+  // 同步部分尽量短；真正落盘走 promise 异步
+  let serialized: string;
+  let size: number;
+  try {
+    serialized = JSON.stringify(body, null, 2);
+    size = serialized.length;
+  } catch {
+    return; // 含循环引用等极端情况，直接放弃
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const ringFile = path.join(REQUEST_DUMP_DIR, `${ts}_${kind}.json`);
+
+  // 异步执行，错误吞掉避免污染主流程
+  void (async () => {
+    try {
+      await fs.promises.mkdir(REQUEST_DUMP_DIR, { recursive: true });
+      await fs.promises.writeFile(ringFile, serialized, 'utf8');
+
+      // 维护 ring：保留最近 N 个，删掉更老的
+      const entries = await fs.promises.readdir(REQUEST_DUMP_DIR);
+      const sorted = entries
+        .filter((f) => f.endsWith('.json'))
+        .sort()
+        .reverse(); // 最新在前
+      const toDelete = sorted.slice(REQUEST_DUMP_RING_SIZE);
+      await Promise.all(
+        toDelete.map((f) =>
+          fs.promises.unlink(path.join(REQUEST_DUMP_DIR, f)).catch(() => {}),
+        ),
+      );
+
+      // 兼容旧 probe 脚本：写一份 last-stream-request.json 指向最新
+      // （仅 stream 路径写，避免 unified 请求覆盖掉 stream 路径的诊断价值）
+      if (kind === 'stream') {
+        await fs.promises.writeFile(REQUEST_DUMP_LATEST, serialized, 'utf8');
+      }
+    } catch (err) {
+      // 落盘失败不影响主流程，记一条 warn 即可
+      logger.warn?.('[DeepV Server] request dump failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })();
+
+  // 同步打一行简短日志，便于在 export-debug 里看到落盘行为发生过
+  console.log(
+    `[request-dump] ${kind} body dumped (${size}B) → ~/.deepv/last-requests/${path.basename(ringFile)}`,
+  );
+}
 
 /**
  * Check if a model supports Server-Sent Events (SSE) streaming.
@@ -79,24 +151,42 @@ function supportsSSEStreaming(modelName: string): boolean {
  * 按模型关键词适配走 GenAI 格式（DeepV 服务端代理）的思考模式配置
  */
 function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig: ThinkingConfig | undefined): any {
+  // 🐛 [thinking-debug] 入口处先把"用户/项目配置中的 thinkingConfig"打印出来
+  // 这是用户在 CLI 里通过 /thinking 设置或项目 settings 注入的原始值
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m model=\x1b[36m${model}\x1b[0m  userThinkingConfig=${
+      thinkingConfig === undefined ? 'undefined (走默认 auto)' : JSON.stringify(thinkingConfig)
+    }`
+  );
+
   if (!thinkingConfig) return reqConfig;
 
   const modelLower = model.toLowerCase();
   const config = { ...reqConfig };
 
-  // 确保 generationConfig 存在
-  config.generationConfig = { ...config.generationConfig };
+  // 🐛 FIX: thinkingConfig 应该写到 config.thinkingConfig（@google/genai SDK
+  // GenerateContentConfig 标准位置），不是嵌套在 config.generationConfig 里。
+  // 之前嵌套到 generationConfig 后，上游在请求复杂时（带 system+tools+长 history）
+  // 不再做容错读取，直接当 thinkingConfig 缺失处理 → 不下发 reasoning。
+  // 实证：byte-level diff probe 验证移到顶层后 reasoning chunks 从 0 → 9。
+  //
+  // 注意：Gemini 走 config.thinkingConfig（顶层），其他模型（Claude / GLM /
+  // OpenAI）目前仍然走 config.generationConfig.thinking / .reasoning_effort，
+  // 所以非 Gemini 路径需要先确保 generationConfig 是个对象再写字段，
+  // 否则 reqConfig.generationConfig 为 undefined 时会抛
+  // "Cannot set properties of undefined (setting 'reasoning_effort')"。
 
   if (modelLower.includes('gemini')) {
     // 1. Gemini 系列自适应适配
     const isGemini3 = modelLower.includes('gemini-3') || modelLower.includes('gemini-3.5');
     if (thinkingConfig.mode === 'off') {
       if (isGemini3) {
-        config.generationConfig.thinkingConfig = {
+        config.thinkingConfig = {
           thinkingLevel: 'minimal' // 🌟 Gemini 3/3.5 官方推荐的 "no thinking" 最小延迟档位
         };
       } else {
-        config.generationConfig.thinkingConfig = {
+        config.thinkingConfig = {
           thinkingBudget: 0 // 🌟 Gemini 2.5 官方标准的 "disable thinking" 档位
         };
       }
@@ -104,7 +194,7 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
       // 检查是否为 Gemini 3 / 3.5 系列 (未来/现代模型)
       if (isGemini3) {
         const thinkingLevel = effortToGeminiLevel(thinkingConfig.effort) || 'medium';
-        config.generationConfig.thinkingConfig = {
+        config.thinkingConfig = {
           thinkingLevel,
           includeThoughts: true
         };
@@ -113,14 +203,25 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
         const thinkingBudget = thinkingConfig.budgetTokens !== undefined
           ? thinkingConfig.budgetTokens
           : (effortToGeminiBudget(thinkingConfig.effort) || 2048); // 默认使用 2048 (或 -1 启用自适应)
-        config.generationConfig.thinkingConfig = {
+        config.thinkingConfig = {
           thinkingBudget,
           includeThoughts: true
         };
       }
     }
+    // 同时清理掉旧的错位字段（避免老代码或下游误读到嵌套的旧值）
+    if (config.generationConfig?.thinkingConfig) {
+      const cleaned = { ...config.generationConfig };
+      delete cleaned.thinkingConfig;
+      config.generationConfig = Object.keys(cleaned).length > 0 ? cleaned : undefined;
+    }
   } else if (modelLower.includes('claude') || modelLower.includes('anthropic')) {
     // 2. Claude (Anthropic) 代理配置
+    // 🐛 FIX: 之前依赖上面 `config.generationConfig = { ...config.generationConfig }`
+    // 给 generationConfig 兜底，那行随 Gemini 改动被移除后，这里如果传进来的
+    // generationConfig 是 undefined，下面 `config.generationConfig.thinking = ...`
+    // 会抛 "Cannot set properties of undefined"。所以先确保它是个对象。
+    config.generationConfig = { ...(config.generationConfig || {}) };
     const isHaiku = modelLower.includes('haiku');
     if (isHaiku || thinkingConfig.mode === 'off') {
       config.generationConfig.thinking = { type: 'disabled' };
@@ -128,11 +229,8 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
       // 现代 Claude 4.6+ / Sonnet 4.6/4.7+ 适配，彻底防范 400 报错
       const isAdaptiveModel = isAdaptiveThinkingClaude(modelLower) || (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
       if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
-        config.generationConfig.thinking = {
-          type: 'adaptive',
-          effort: effortToAnthropicEffort(thinkingConfig.effort) || 'high',
-          display: 'summarized' // 🆕 显式指定汇总并输出思考内容（防止 Opus 4.7 默认 display: "omitted" 阻断客户端渲染）
-        };
+        const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high';
+        applyAnthropicAdaptiveThinking(config.generationConfig, effort);
       } else {
         const budgetTokens = thinkingConfig.budgetTokens !== undefined
           ? thinkingConfig.budgetTokens
@@ -145,6 +243,8 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
     }
   } else if (modelLower.includes('glm')) {
     // 3. 智谱 GLM 代理配置
+    // 🐛 FIX: 同 Claude 路径，确保 generationConfig 是个对象再写字段。
+    config.generationConfig = { ...(config.generationConfig || {}) };
     if (thinkingConfig.mode === 'off') {
       config.generationConfig.thinking = { type: 'disabled' };
     } else {
@@ -155,6 +255,8 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
     }
   } else if (modelLower.includes('o1') || modelLower.includes('o3') || modelLower.includes('gpt-')) {
     // 4. OpenAI 系列
+    // 🐛 FIX: 同 Claude 路径，确保 generationConfig 是个对象再写字段。
+    config.generationConfig = { ...(config.generationConfig || {}) };
     if (thinkingConfig.mode === 'off') {
       config.generationConfig.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
     } else {
@@ -163,7 +265,34 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
         config.generationConfig.reasoning_effort = effort;
       }
     }
+  } else if (modelLower.includes('qwen')) {
+    // 5. Qwen (阿里) 系列
+    // Qwen 官方 DashScope OpenAI 兼容接口用 `enable_thinking` (boolean) 控制思考模式，
+    // 通过 extra_body 传递（详见 https://help.aliyun.com/zh/model-studio/use-qwen3）。
+    // 注意：Qwen3-Instruct-2507 仅支持非思考模式；Qwen3-Thinking-2507 仅支持思考模式；
+    //   Qwen3.6 系列默认开启思考。客户端这里只负责按用户开关注入字段，
+    //   不与上游模型默认值博弈——上游会根据自身能力做容错。
+    // FIX: 之前完全没有 qwen 分支，所有 Qwen 模型的 /thinking 设置静默丢失。
+    config.generationConfig = { ...(config.generationConfig || {}) };
+    config.generationConfig.extra_body = {
+      ...(config.generationConfig.extra_body || {}),
+      enable_thinking: thinkingConfig.mode !== 'off',
+    };
   }
+
+  // 🐛 [thinking-debug] 出口处打印"实际写入 generationConfig 的思考字段"
+  // 这是真正会随请求体发到 DeepV 后端的形态
+  const gc = config.generationConfig || {};
+  const injected: Record<string, unknown> = {};
+  if (gc.thinkingConfig !== undefined) injected.thinkingConfig = gc.thinkingConfig; // Gemini
+  if (gc.thinking !== undefined) injected.thinking = gc.thinking;                   // Claude / GLM
+  if (gc.reasoning_effort !== undefined) injected.reasoning_effort = gc.reasoning_effort; // OpenAI
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m \u2192 injected to generationConfig: ${
+      Object.keys(injected).length === 0 ? '(none, model not matched)' : JSON.stringify(injected)
+    }`
+  );
 
   return config;
 }
@@ -491,7 +620,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         console.log(`[DeepV Server] Model called ${response.functionCalls.length} tool(s): ${response.functionCalls.map(fc => fc.name).join(', ')}`);
       }
 
-      logger.debug('[DeepV Server] Response received successfully', { model: modelToUse });
+      console.log('[DeepV Server] Response received successfully', { model: modelToUse });
       return response;
 
     } catch (error) {
@@ -613,7 +742,7 @@ export class DeepVServerAdapter implements ContentGenerator {
     const startTime = Date.now();
 
     try {
-      logger.debug('[DeepV Server] Making unified API call', {
+      console.log('[DeepV Server] Making unified API call', {
         endpoint,
         url: proxyUrl,
         model: requestBody.model
@@ -636,6 +765,9 @@ export class DeepVServerAdapter implements ContentGenerator {
       } catch {
         // 日志不能障碍请求
       }
+
+      // 落盘出站请求体（异步，不阻塞 fetch）。non-stream 路径也保留诊断价值。
+      dumpOutboundRequest('unified', requestBody);
 
       const response = await fetch(proxyUrl, {
         method: 'POST',
@@ -728,7 +860,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
 
       const duration = Date.now() - startTime;
-      logger.debug('[DeepV Server] API call completed', {
+      console.log('[DeepV Server] API call completed', {
         endpoint,
         duration: `${duration}ms`,
         status: response.status
@@ -1075,7 +1207,7 @@ export class DeepVServerAdapter implements ContentGenerator {
     const startTime = Date.now();
 
     try {
-      logger.debug('[DeepV Server] Making stream API call', {
+      console.log('[DeepV Server] Making stream API call', {
         endpoint,
         url: proxyUrl,
         model: requestBody.model
@@ -1094,6 +1226,10 @@ export class DeepVServerAdapter implements ContentGenerator {
       } catch {
         // 日志不能障碍请求
       }
+
+      // 落盘出站请求体（异步，不阻塞 fetch）。
+      // 用户报告问题时让他们把 ~/.deepv/last-requests/ 给我们做字节级对账。
+      dumpOutboundRequest('stream', requestBody);
 
       const response = await fetch(proxyUrl, {
         method: 'POST',
@@ -1135,7 +1271,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
 
       const duration = Date.now() - startTime;
-      logger.debug('[DeepV Server] Stream API call initiated', {
+      console.log('[DeepV Server] Stream API call initiated', {
         endpoint,
         duration: `${duration}ms`,
         status: response.status
@@ -1360,6 +1496,16 @@ export class DeepVServerAdapter implements ContentGenerator {
             }
 
             try {
+              // 🆕 无条件先打 RAW SSE line（在 JSON.parse 之前），
+              // 这样即便 chunk 被 SSE 边界切坏导致 parse 失败，也能看出
+              // 客户端到底从网络上读到了什么字节。这是「服务端说下发了
+              // 但客户端日志里没看到」类问题的关键诊断点。
+              if (data.includes('"reasoning"') || data.includes('"thought"')) {
+                console.log(
+                  `[REASONING-TRACE][adapter] PRE-PARSE SSE line (${data.length}B contains reasoning/thought): ${data.length > 600 ? data.substring(0, 600) + '…[truncated]' : data}`,
+                );
+              }
+
               const chunk = JSON.parse(data);
 
               // 🔍 [STOP-DEBUG][adapter] 诊断日志 #1：原始服务器 chunk
@@ -1374,6 +1520,22 @@ export class DeepVServerAdapter implements ContentGenerator {
                 console.log(
                   `[STOP-DEBUG][adapter] RAW chunk (${dump.length}B): ${dump.length > 800 ? dump.substring(0, 800) + '…[truncated]' : dump}`,
                 );
+                // 🆕 reasoning 专项 trace：判定网关是否真的下发了 reasoning 字段
+                const partsForTrace = chunk?.candidates?.[0]?.content?.parts ?? [];
+                for (let i = 0; i < partsForTrace.length; i++) {
+                  const p = partsForTrace[i];
+                  if (p && typeof p === 'object') {
+                    const keys = Object.keys(p);
+                    const hasReasoning = 'reasoning' in p;
+                    const hasText = typeof p.text === 'string';
+                    const hasThought = p.thought === true;
+                    if (hasReasoning || hasThought) {
+                      console.log(
+                        `[REASONING-TRACE][adapter] chunk part[${i}] keys=[${keys.join(',')}] reasoning=${hasReasoning} thought=${hasThought} text=${hasText}`,
+                      );
+                    }
+                  }
+                }
               } catch {
                 // 忽略 stringify 失败（含循环引用等极少数情况）
               }
@@ -1444,10 +1606,15 @@ export class DeepVServerAdapter implements ContentGenerator {
               }
 
             } catch (parseError) {
-              logger.warn('[DeepV Server] Stream chunk parse error', {
-                data: data.substring(0, 100) + '...',
-                error: parseError instanceof Error ? parseError.message : parseError
-              });
+              // 🆕 SSE chunk 解析失败 — 用 console.error 替代 logger.warn，
+              // 让它一定进入 ConsolePatcher → /export-debug。同时打印完整
+              // 出错的 data 字节内容（不要截断），便于排查 SSE 边界 / 转义问题。
+              console.error(
+                `[REASONING-TRACE][adapter] ⚠ SSE chunk parse FAILED: ${parseError instanceof Error ? parseError.message : parseError}`,
+              );
+              console.error(
+                `[REASONING-TRACE][adapter] failed-data length=${data.length}, full content: ${data}`,
+              );
               // 忽略解析错误，继续处理
             }
           }
@@ -1744,7 +1911,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       // 这样可以清楚地看到自定义模型不支持 token 计数
       const modelToUse = request.model || this.config?.getModel() || 'auto';
       if (isCustomModel(modelToUse)) {
-        logger.debug('[DeepV Server] Custom model detected, token counting not supported');
+        console.log('[DeepV Server] Custom model detected, token counting not supported');
         return { totalTokens: 0 };
       }
 
@@ -1786,7 +1953,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       // 对于自定义模型，token count 失败是预期行为，使用 debug 级别
       const modelToUse = request.model || this.config?.getModel() || 'auto';
       if (isCustomModel(modelToUse)) {
-        logger.debug('[DeepV Server] Token count not available for custom model, using fallback');
+        console.log('[DeepV Server] Token count not available for custom model, using fallback');
       } else {
         logger.error('[DeepV Server] Token count failed:', error);
       }
@@ -1831,7 +1998,7 @@ export class DeepVServerAdapter implements ContentGenerator {
 
       const responseData = await response.json();
 
-      logger.debug('[DeepV Server] Token count response', {
+      console.log('[DeepV Server] Token count response', {
         totalTokens: responseData.totalTokens
       });
 
