@@ -338,7 +338,7 @@ export type WebViewToExtensionMessage =
   // 🎯 Undo 模块
   | { type: 'undo_file_change'; payload: { sessionId: string; fileName: string; filePath?: string; originalContent: string; isNewFile: boolean; isDeletedFile: boolean } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_update'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_update'; payload: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any; healthyUse?: boolean } }
   | { type: 'project_settings_request'; payload: {} }
   // 🎯 Diff编辑器相关
   | { type: 'openDiffInEditor'; payload: { fileDiff: string; fileName: string; originalContent: string; newContent: string; filePath?: string } }
@@ -440,7 +440,7 @@ export type ExtensionToWebViewMessage =
   // 🎯 文件路径解析结果
   | { type: 'file_paths_resolved'; payload: { resolvedFiles: string[] } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_response'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_response'; payload: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any } }
   // 🎯 服务初始化状态
   | { type: 'service_initialization_status'; payload: { status: 'starting' | 'progress' | 'ready' | 'failed'; message: string; timestamp: number } }
   | { type: 'service_initialization_done'; payload: {} }
