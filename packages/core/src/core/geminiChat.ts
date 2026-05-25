@@ -1,3 +1,4 @@
+import { logger } from '../utils/enhancedLogger.js';
 /**
  * @license
  * Copyright 2025 Google LLC
@@ -305,7 +306,7 @@ export class GeminiChat {
    * const response = await chat.sendMessage({
    *   message: 'Why is the sky blue?'
    * });
-   * console.log(response.text);
+   * logger.debug(response.text);
    * ```
    */
   async sendMessage(
@@ -516,7 +517,7 @@ export class GeminiChat {
               const matchingCall = allFunctionCalls.find(fc => isToolMatch(fc.call, resp));
               if (matchingCall) {
                 if (matchingCall.call.id !== resp.id) {
-                  console.log(
+                  logger.debug(
                     `[fixRequestContents] 🔧 ID 对齐：将响应 ${resp.name} 的 ID 从 "${resp.id || 'unnamed'}" ` +
                     `同步为调用方的 ID "${matchingCall.call.id || 'unnamed'}"`
                   );
@@ -563,7 +564,7 @@ export class GeminiChat {
           });
 
           if (orphanedResponses.length > 0) {
-            console.log(
+            logger.debug(
               `[fixRequestContents] 检测到第${i + 1}条消息中有 ${orphanedResponses.length} 个孤立的 function response:`,
               orphanedResponses.map(r => ({
                 name: r.functionResponse!.name,
@@ -609,7 +610,7 @@ export class GeminiChat {
             // 如果 bestResponses 中存储的是真实结果（优先级 100），且不是我们当前看到的这条消息中的
             // 说明真实结果在后续消息中，不需要补全 cancel
             if (best && best.priority === 100 && best.originalIndex > i + 1) {
-              console.log(`[fixRequestContents] ⏭️ 跳过补全 cancel：${functionCall.name} (id: ${functionCall.id || 'unnamed'})，真实结果将在后续消息中到达`);
+              logger.debug(`[fixRequestContents] ⏭️ 跳过补全 cancel：${functionCall.name} (id: ${functionCall.id || 'unnamed'})，真实结果将在后续消息中到达`);
               return false;
             }
             return true;
@@ -634,7 +635,7 @@ export class GeminiChat {
               parts: cancelResponses
             });
 
-            console.log(`[fixRequestContents] 为第${i + 1}条消息补全了 ${callsNeedingCancel.length} 个未匹配的 function call`);
+            logger.debug(`[fixRequestContents] 为第${i + 1}条消息补全了 ${callsNeedingCancel.length} 个未匹配的 function call`);
           }
 
           // 如果下一条消息有混合内容，调整 parts 顺序：function-response 在前，text 在后
@@ -647,7 +648,7 @@ export class GeminiChat {
                 ...next,
                 parts: [...nextFunctionResponses, ...textParts]
               };
-              console.log(`[fixRequestContents] 调整了第${i + 2}条消息的内容顺序，function-response 在前`);
+              logger.debug(`[fixRequestContents] 调整了第${i + 2}条消息的内容顺序，function-response 在前`);
             }
           }
         }
@@ -738,7 +739,7 @@ export class GeminiChat {
    *   message: 'Why is the sky blue?'
    * });
    * for await (const chunk of response) {
-   *   console.log(chunk.text);
+   *   logger.debug(chunk.text);
    * }
    * ```
    */
@@ -1077,7 +1078,7 @@ export class GeminiChat {
       } else if (hasFunctionCalls && lastHasFunctionCalls && lastContent.role === MESSAGE_ROLES.MODEL) {
         // 🚀 KEY FIX: Merge consecutive function calls into the same message
         // This ensures multiple function calls are stored as one model message with multiple parts
-        console.log('[recordHistory] Merging consecutive function calls into single message');
+        logger.debug('[recordHistory] Merging consecutive function calls into single message');
         lastContent.parts?.push(...(content.parts || []));
       } else {
         consolidatedOutputContents.push(content);
