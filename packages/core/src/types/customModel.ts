@@ -142,6 +142,35 @@ export function effortToGeminiBudget(
 }
 
 /**
+ * 判断给定的 Anthropic 模型是否为现代模型 (Claude 4.6, 4.7 及以上或 Mythos 系列)，
+ * 这些模型使用 "adaptive" 思考模式，不再接受传统的 "enabled" + "budget_tokens"（会报 400）。
+ */
+export function isAdaptiveThinkingClaude(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+
+  // 1. Mythos 系列
+  if (lower.includes('mythos')) return true;
+
+  // 2. 正则匹配：Claude 4.6, 4.7 及 5.x 以上版本
+  // 支持格式：claude-opus-4-6, claude-sonnet-4-7, claude-3-7-sonnet 等
+  const versionMatch = lower.match(/claude(?:-[a-z0-9]+)*-(\d+)\.(\d+)/);
+  if (versionMatch) {
+    const major = parseInt(versionMatch[1], 10);
+    const minor = parseInt(versionMatch[2], 10);
+    if (major > 4 || (major === 4 && minor >= 6)) {
+      return true;
+    }
+  }
+
+  // 备选兼容（无点命名）：claude-4-6, claude-4-7, claude-5 等
+  if (lower.includes('claude-4-6') || lower.includes('claude-4-7') || lower.includes('claude-4-8') || lower.includes('claude-5-')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * 判断 provider 是否支持 thinking 强度调控
  */
 export function providerSupportsThinkingControl(

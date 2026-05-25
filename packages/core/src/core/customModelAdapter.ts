@@ -8,7 +8,7 @@ import {
   GenerateContentResponse,
   FinishReason,
 } from '@google/genai';
-import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort } from '../types/customModel.js';
+import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, isAdaptiveThinkingClaude } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
@@ -1300,13 +1300,12 @@ export async function callAnthropicModel(
     // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
     const maxTokens = modelConfig.maxTokens || 32000;
 
-    // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
-    // 我们采用现代的 "adaptive" + "effort" 模式
-    const isModernClaude46 = modelConfig.modelId.includes('claude-4-6') ||
-      modelConfig.modelId.includes('-4.6') ||
+    // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
+    // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
+    const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
       (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
 
-    if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+    if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
       requestBody.thinking = {
         type: 'adaptive',
@@ -1636,13 +1635,12 @@ export async function* callAnthropicModelStream(
     // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
     const maxTokens = modelConfig.maxTokens || 32000;
 
-    // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
-    // 我们采用现代的 "adaptive" + "effort" 模式
-    const isModernClaude46 = modelConfig.modelId.includes('claude-4-6') ||
-      modelConfig.modelId.includes('-4.6') ||
+    // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
+    // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
+    const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
       (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
 
-    if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+    if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
       requestBody.thinking = {
         type: 'adaptive',
