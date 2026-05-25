@@ -15,7 +15,12 @@ export const exportDebugCommand: SlashCommand = {
   action: async (context, args): Promise<MessageActionReturn> => {
     const { config } = context.services;
     const { debugMessages } = context.ui;
-    const includeAll = args && args.trim().toLowerCase() === 'all';
+    // 🆕 默认导出全部消息（log/warn/error/debug）。
+    // 历史上默认仅导出 error/warn，但实际排查 bug 时几乎都需要 console.log
+    // 之类的 trace 信息。可显式传 `errors` / `errors-only` 回到旧行为。
+    const argLower = (args || '').trim().toLowerCase();
+    const errorsOnly = argLower === 'errors' || argLower === 'errors-only';
+    const includeAll = !errorsOnly;
 
     if (!config) {
       return {
@@ -37,7 +42,7 @@ export const exportDebugCommand: SlashCommand = {
     const projectRoot = config.getProjectRoot() || process.cwd();
 
     try {
-      const exportPath = await exportDebugToMarkdown(debugMessages, projectRoot, sessionId, includeAll || false);
+      const exportPath = await exportDebugToMarkdown(debugMessages, projectRoot, sessionId, includeAll);
 
       return {
         type: 'message',

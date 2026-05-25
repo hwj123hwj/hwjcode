@@ -385,7 +385,7 @@ export class Turn {
 
         if (finishReason) {
           // 🔍 STOP-DEBUG: 记录 finishReason 详情
-          console.log(`[STOP-DEBUG] Turn.run(): finishReason=${finishReason}, functionCalls=${(resp.functionCalls ?? []).length}, hasText=${!!getResponseText(resp)}, candidateIndex=${resp.candidates?.[0]?.index}`);
+
 
           // 🔍 STOP-DEBUG: dump 原始响应。两种值得排查的场景：
           //   1. finishReason=STOP 且无工具调用 —— 模型是否返回了非标准工具调用？
@@ -419,7 +419,7 @@ export class Turn {
                 if ('reasoning' in p) desc += ` reasoning=present`;
                 return desc;
               });
-              console.log(`[STOP-DEBUG] 🔍 RAW RESPONSE DUMP (finishReason=${finishReason}, no functionCalls):`);
+
               if (isEmptyFunctionCallChunk) {
                 // ❌ 这是确凿的 server 端 bug：finishReason 表明模型决定调用工具了
                 // （而且消耗了 candidatesToken），但 parts 数组是空的，工具调用
@@ -445,21 +445,21 @@ export class Turn {
                   `  Context: model=${this.modelName}, candidatesTokenCount=${resp.usageMetadata?.candidatesTokenCount ?? 'unknown'}, role=${candidate?.content?.role ?? 'unknown'}`,
                 );
               }
-              console.log(`[STOP-DEBUG]   candidate.finishReason: ${candidate?.finishReason}`);
-              console.log(`[STOP-DEBUG]   candidate.content.role: ${candidate?.content?.role}`);
-              console.log(`[STOP-DEBUG]   candidate.content.parts count: ${parts.length}`);
-              partsSummary.forEach((s: string) => console.log(`[STOP-DEBUG]   ${s}`));
-              console.log(`[STOP-DEBUG]   resp.functionCalls: ${JSON.stringify(resp.functionCalls)}`);
-              console.log(`[STOP-DEBUG]   resp.text: ${JSON.stringify((resp.text || '').substring(0, 300))}`);
+
+
+
+
+
+
               // 尝试完整dump（限制大小防止日志爆炸）
               const rawJson = JSON.stringify(resp, null, 2);
               if (rawJson.length <= 5000) {
-                console.log(`[STOP-DEBUG]   FULL RAW JSON:\n${rawJson}`);
+
               } else {
-                console.log(`[STOP-DEBUG]   RAW JSON (truncated to 5000 chars):\n${rawJson.substring(0, 5000)}...`);
+
               }
             } catch (dumpError) {
-              console.log(`[STOP-DEBUG]   Failed to dump raw response: ${dumpError}`);
+
             }
           }
 
@@ -529,15 +529,15 @@ export class Turn {
         }
       }
       // 🔍 STOP-DEBUG: Turn.run() 流正常结束，记录汇总信息
-      console.log(`[STOP-DEBUG] Turn.run(): stream ended normally. pendingToolCalls=${this.pendingToolCalls.length}, toolNames=[${this.pendingToolCalls.map(tc => tc.name).join(', ')}], debugResponses=${this.debugResponses.length}, model=${this.modelName}`);
+
     } catch (e) {
       const error = toFriendlyError(e);
       if (error instanceof UnauthorizedError) {
-        console.log(`[STOP-DEBUG] Turn.run(): UnauthorizedError thrown, re-throwing`);
+
         throw error;
       }
       if (signal.aborted) {
-        console.log(`[STOP-DEBUG] Turn.run(): signal aborted during error handling, yielding UserCancelled`);
+
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
