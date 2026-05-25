@@ -833,6 +833,22 @@ export class Config {
     this.projectSettingsManager.setAgentStyle(style);
   }
 
+  /**
+   * 获取当前思考配置（来自项目设置，可被 /thinking 命令修改）
+   * 返回 undefined 表示用户未显式设置，应使用模型/provider 默认值
+   */
+  getThinkingConfig(): import('../types/customModel.js').ThinkingConfig | undefined {
+    return this.projectSettingsManager.getThinkingConfig();
+  }
+
+  /**
+   * 设置思考配置并持久化
+   * 传入 undefined 可清除项目级配置（恢复为模型默认）
+   */
+  setThinkingConfig(config: import('../types/customModel.js').ThinkingConfig | undefined): void {
+    this.projectSettingsManager.setThinkingConfig(config);
+  }
+
   getShowMemoryUsage(): boolean {
     return this.showMemoryUsage;
   }

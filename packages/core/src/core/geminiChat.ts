@@ -86,6 +86,8 @@ function validateHistory(history: Content[]) {
 
 /**
  * 检查内容是否为 reasoning（思考过程）
+ * reasoning 会保留在 history 中由 DeepV Server 决定如何转发给上游协议
+ * （DeepSeek 思考模式：带 tool_call 时必须回传，不带时服务器会忽略）
  */
 function isReasoningContent(content: Content | undefined): boolean {
   return !!(
@@ -104,7 +106,7 @@ function isReasoningContent(content: Content | undefined): boolean {
  * The model may sometimes generate invalid or empty contents(e.g., due to safety
  * filters or recitation). Extracting valid turns from the history
  * ensures that subsequent requests could be accepted by the model.
- * 同时也会过滤掉 reasoning 内容（模型思考过程）
+ * reasoning 内容保留在 history 中，由 DeepV Server 决定如何转发给上游
  */
 function extractCuratedHistory(comprehensiveHistory: Content[]): Content[] {
   if (comprehensiveHistory === undefined || comprehensiveHistory.length === 0) {
@@ -122,12 +124,11 @@ function extractCuratedHistory(comprehensiveHistory: Content[]): Content[] {
       let isValid = true;
       while (i < length && comprehensiveHistory[i].role === MESSAGE_ROLES.MODEL) {
         const currentContent = comprehensiveHistory[i];
-        // 跳过 reasoning 内容，不加入精选历史
-        if (!isReasoningContent(currentContent)) {
-          modelOutput.push(currentContent);
-          if (isValid && !isValidContent(currentContent)) {
-            isValid = false;
-          }
+        modelOutput.push(currentContent);
+        // reasoning content 在 isValidContent 下应当被视为有效
+        // （它有 parts 且 parts[0] 有 reasoning 字段）
+        if (isValid && !isValidContent(currentContent)) {
+          isValid = false;
         }
         i++;
       }
@@ -934,21 +935,29 @@ export class GeminiChat {
 
     try {
       for await (const chunk of streamResponse) {
-        // 先检查是否是 reasoning 内容，如果是就跳过不加入 chunks
+        // 先检查是否是 reasoning 内容
         const content = chunk.candidates?.[0]?.content;
         const isReasoning = content && this.isReasoningContent(content);
         const isThought = content && this.isThoughtContent(content);
 
-        // 收集所有有效的块，但排除 thought 和 reasoning
-        if ((isValidResponse(chunk) || chunk.usageMetadata) && !isReasoning && !isThought) {
+        // 收集所有有效的块，但排除 thought（thought 仅 UI 显示不入历史）
+        // reasoning 仍然入 chunks 用于 API response 日志记录与 history 保留
+        if ((isValidResponse(chunk) || chunk.usageMetadata) && !isThought) {
           chunks.push(chunk);
         }
 
         // 处理包含内容的有效响应
         if (isValidResponse(chunk)) {
           if (content !== undefined) {
-            // 跳过 thought 和 reasoning 内容，不加入历史记录
-            if (isThought || isReasoning) {
+            // thought 仅 UI 显示，不加入历史记录
+            if (isThought) {
+              yield chunk;
+              continue;
+            }
+            // 🆕 reasoning content 也要进入 outputContent 以保留在 history 中
+            // 由 DeepV Server 在转发到上游时按各家协议（如 DeepSeek）规则自行处理
+            if (isReasoning) {
+              this.appendReasoningToOutput(outputContent, content);
               yield chunk;
               continue;
             }
@@ -1007,9 +1016,10 @@ export class GeminiChat {
     modelOutput: Content[],
     automaticFunctionCallingHistory?: Content[],
   ) {
-    // 过滤掉 thought 和 reasoning 内容
+    // 过滤掉 thought 内容（thought 仅 UI 显示）
+    // reasoning 内容保留进入 history，由 DeepV Server 决定如何转发给上游
     const nonThoughtModelOutput = modelOutput.filter(
-      (content) => !this.isThoughtContent(content) && !this.isReasoningContent(content),
+      (content) => !this.isThoughtContent(content),
     );
 
     let outputContents: Content[] = [];
@@ -1046,8 +1056,8 @@ export class GeminiChat {
     // 🔧 Enhanced consolidation logic to merge function calls into single messages
     const consolidatedOutputContents: Content[] = [];
     for (const content of outputContents) {
-      // 跳过 thought 和 reasoning 内容
-      if (this.isThoughtContent(content) || this.isReasoningContent(content)) {
+      // 跳过 thought 内容（reasoning 保留入 history）
+      if (this.isThoughtContent(content)) {
         continue;
       }
       const lastContent =
@@ -1128,10 +1138,39 @@ export class GeminiChat {
 
   /**
    * 检查内容是否为模型的 reasoning（思考过程）
-   * reasoning 不应该被添加到历史记录中
+   * reasoning 仍会保留在 history 中，由 DeepV Server 决定如何转发给上游
    * 直接调用外部函数
    */
   private isReasoningContent(content: Content | undefined): boolean {
     return isReasoningContent(content);
+  }
+
+  /**
+   * 把流式 reasoning chunk 合并到 outputContent 末尾。
+   * 如果末尾已经是 reasoning content，就把文本拼接进去；
+   * 否则作为新的一条 model content 追加。
+   * 这样可以避免几十上百个 reasoning chunk 各自变成一条 history 记录。
+   */
+  private appendReasoningToOutput(
+    outputContent: Content[],
+    chunkContent: Content,
+  ): void {
+    const incomingText = (chunkContent.parts || [])
+      .map((p) => (typeof (p as any).reasoning === 'string' ? (p as any).reasoning : ''))
+      .join('');
+    if (!incomingText) return;
+
+    const last = outputContent[outputContent.length - 1];
+    if (last && this.isReasoningContent(last)) {
+      const firstPart: any = last.parts?.[0];
+      if (firstPart && typeof firstPart.reasoning === 'string') {
+        firstPart.reasoning += incomingText;
+        return;
+      }
+    }
+    outputContent.push({
+      role: MESSAGE_ROLES.MODEL,
+      parts: [{ reasoning: incomingText } as any],
+    });
   }
 }

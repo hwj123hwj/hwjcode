@@ -335,7 +335,9 @@ export class Turn {
             type: GeminiEventType.Reasoning,
             value: reasoning,
           };
-          // 重要：使用 continue 跳过后续处理，不让 reasoning 进入上下文
+          // reasoning 仅用于 UI 显示，不再走 getResponseText 等正文处理路径。
+          // 注意：reasoning 会保留在 history 中，由 GeminiChat.processStreamResponse
+          // 收集进 outputContent，再交由 DeepV Server 决定如何转发上游。
           continue;
         }
 
