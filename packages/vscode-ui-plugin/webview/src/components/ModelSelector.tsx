@@ -12,6 +12,7 @@ import { getGlobalMessageService } from '../services/globalMessageService';
 import { getProviderIcon } from './ModelProviderIcons';
 import { SessionStatisticsDialog } from './SessionStatisticsDialog';
 import { ChatMessage } from '../types';
+import { useYoloMode } from '../hooks/useProjectSettings';
 import './ModelSelector.css';
 import './ModelProviderIcons.css';
 
@@ -87,7 +88,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   messages = []
 }) => {
   const { t } = useTranslation();
+  const { thinkingConfig, updateThinkingConfig } = useYoloMode();
   const [isOpen, setIsOpen] = useState(false);
+  const [isThinkingOpen, setIsThinkingOpen] = useState(false); // 🆕 思考模式下拉状态
   const [isStatsOpen, setIsStatsOpen] = useState(false); // 🎯 统计对话框状态
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +103,19 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   const isSwitching = isSwitchingLocal || isSwitchingFromParent;
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const thinkingDropdownRef = useRef<HTMLDivElement>(null); // 🆕 思考模式下拉容器
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 🆕 监听点击外部关闭思考下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(event.target as Node)) {
+        setIsThinkingOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // 🎯 Tooltip 状态管理
   const [showTooltip, setShowTooltip] = useState<{ [key: string]: boolean }>({});
@@ -519,6 +534,30 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     return map;
   }, [modelOptions]);
 
+  // 🆕 构建思考模式备选项列表
+  const thinkingOptionsList = useMemo(() => [
+    { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: '🧠', desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
+    { id: 'on', label: t('thinking.mode.on', undefined, 'On'), icon: '💡', desc: t('thinking.usage.on', undefined, 'Force-enable thinking'), mode: 'on', effort: 'auto' },
+    { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: '💤', desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
+    { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
+    { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
+    { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
+    { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
+  ], [t]);
+
+  // 🆕 当前选中的思考配置项
+  const currentThinkingOption = useMemo(() => {
+    const config = thinkingConfig || { mode: 'auto', effort: 'auto' };
+    if (config.mode === 'off') {
+      return thinkingOptionsList.find(opt => opt.id === 'off') || thinkingOptionsList[2];
+    }
+    if (config.mode === 'auto') {
+      return thinkingOptionsList.find(opt => opt.id === 'auto') || thinkingOptionsList[0];
+    }
+    const matchingEffort = thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === config.effort);
+    return matchingEffort || thinkingOptionsList.find(opt => opt.id === 'on') || thinkingOptionsList[1];
+  }, [thinkingConfig, thinkingOptionsList]);
+
   return (
     <div
       ref={containerRef}
@@ -682,6 +721,55 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           </div>
         )}
       </div>
+
+      {/* 🆕 新增：思考模式选择器 (位于模型指示器的右侧) */}
+      {!loading && !error && (
+        <div ref={thinkingDropdownRef} className="thinking-selector-container">
+          <button
+            className={`thinking-selector-trigger ${isThinkingOpen ? 'open' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsThinkingOpen(!isThinkingOpen);
+            }}
+            title={t('command.thinking.description', undefined, 'Configure thinking mode')}
+          >
+            <span className="thinking-icon">{currentThinkingOption.icon}</span>
+            <span className="thinking-label">{currentThinkingOption.label}</span>
+            <ChevronDown size={12} className={`thinking-chevron ${isThinkingOpen ? 'rotated' : ''}`} />
+          </button>
+
+          {isThinkingOpen && (
+            <div className="thinking-dropdown">
+              <div className="dropdown-header">
+                <span className="dropdown-title">🧠 {t('command.thinking.description', undefined, 'Configure Thinking')}</span>
+              </div>
+              <div className="thinking-options-list">
+                {thinkingOptionsList.map((opt) => (
+                  <div
+                    key={opt.id}
+                    className={`thinking-option ${currentThinkingOption.id === opt.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
+                      setIsThinkingOpen(false);
+                    }}
+                  >
+                    <span className="option-icon">{opt.icon}</span>
+                    <div className="option-details">
+                      <span className="option-label">{opt.label}</span>
+                      <span className="option-desc">{opt.desc}</span>
+                    </div>
+                    {currentThinkingOption.id === opt.id && (
+                      <div className="check-icon">
+                        <Check size={14} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 🎯 新增：统计按钮 */}
       {!loading && !error && (

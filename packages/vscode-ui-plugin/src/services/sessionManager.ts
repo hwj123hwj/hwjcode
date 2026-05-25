@@ -505,6 +505,36 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * 🎯 设置项目级别的 thinking 配置并同步到所有session
+   */
+  async setProjectThinkingConfig(thinking: any): Promise<void> {
+    try {
+      this.logger.info(`[Thinking] Syncing thinking config to sessions: ${JSON.stringify(thinking)}`);
+
+      const sessionIds = Array.from(this.aiServices.keys());
+      if (sessionIds.length === 0) {
+        return;
+      }
+
+      for (const sessionId of sessionIds) {
+        try {
+          const aiService = this.aiServices.get(sessionId);
+          if (aiService) {
+            const config = aiService.getConfig();
+            if (config) {
+              config.setThinkingConfig(thinking);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`[Thinking] Failed to set thinking config for session ${sessionId}`, error instanceof Error ? error : undefined);
+        }
+      }
+    } catch (error) {
+      this.logger.error('[Thinking] Failed to sync thinking config', error instanceof Error ? error : undefined);
+    }
+  }
+
   // =============================================================================
   // Session创建和管理
   // =============================================================================

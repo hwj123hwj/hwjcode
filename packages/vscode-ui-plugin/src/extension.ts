@@ -999,6 +999,10 @@ function setupBasicMessageHandlers() {
 
           // 更新YOLO设置
           settings.yolo = data.yoloMode;
+          // 🆕 更新 thinking 设置
+          if (data.thinkingConfig !== undefined) {
+            settings.thinking = data.thinkingConfig;
+          }
           logger.debug(`[YOLO] Updated settings to: ${JSON.stringify(settings)}`);
 
           // 写入文件
@@ -1025,6 +1029,11 @@ function setupBasicMessageHandlers() {
       // 🎯 然后同步YOLO模式设置到Core配置
       await sessionManager.setProjectYoloMode(data.yoloMode);
 
+      // 🆕 同步 thinking 配置到所有活跃 session 内存中
+      if (data.thinkingConfig !== undefined) {
+        await sessionManager.setProjectThinkingConfig(data.thinkingConfig);
+      }
+
       // 🎯 更新默认模型配置
       if (data.preferredModel) {
         const config = vscode.workspace.getConfiguration('deepv');
@@ -1049,8 +1058,9 @@ function setupBasicMessageHandlers() {
     try {
       logger.info('[YOLO] Received project settings request');
 
-      // 获取 YOLO 模式
+      // 获取 YOLO 模式和 thinking 配置
       let yoloMode = false;
+      let thinkingConfig: any = undefined;
 
       // 🎯 优先从项目配置文件读取，确保准确性
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1062,6 +1072,10 @@ function setupBasicMessageHandlers() {
             if (settings.yolo !== undefined) {
               yoloMode = !!settings.yolo;
               logger.info(`[YOLO] ✅ Loaded from project config: ${yoloMode}`);
+            }
+            if (settings.thinking !== undefined) {
+              thinkingConfig = settings.thinking;
+              logger.info(`[Thinking] ✅ Loaded from project config: ${JSON.stringify(thinkingConfig)}`);
             }
           } catch (e) {
             logger.warn('[YOLO] Failed to parse project settings');
@@ -1088,7 +1102,7 @@ function setupBasicMessageHandlers() {
       const preferredModel = config.get<string>('preferredModel', 'auto');
       const healthyUse = config.get<boolean>('healthyUse', true);
 
-      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse });
+      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse, thinkingConfig });
       logger.info(`[YOLO] ✅ Response sent: YOLO=${yoloMode}, Model=${preferredModel}, HealthyUse=${healthyUse}`);
     } catch (error) {
       logger.error('[YOLO] Failed to get project settings', error instanceof Error ? error : undefined);
