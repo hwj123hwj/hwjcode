@@ -1343,6 +1343,7 @@ export async function callAnthropicModel(
       requestBody.thinking = {
         type: 'adaptive',
         effort,
+        display: 'summarized', // 🆕 显式指定汇总并输出思考内容（解决 Opus 4.7 默认 display: "omitted" 导致看不到思考过程的 Anthropic 限制）
       };
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
@@ -1678,6 +1679,7 @@ export async function* callAnthropicModelStream(
       requestBody.thinking = {
         type: 'adaptive',
         effort,
+        display: 'summarized', // 🆕 显式指定汇总并输出思考内容（解决 Opus 4.7 默认 display: "omitted" 导致看不到思考过程的 Anthropic 限制）
       };
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
