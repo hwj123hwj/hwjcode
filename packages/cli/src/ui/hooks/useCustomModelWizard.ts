@@ -14,7 +14,13 @@ import { addOrUpdateCustomModel, loadCustomModels } from '../../config/customMod
 interface UseCustomModelWizardReturn {
   isCustomModelWizardOpen: boolean;
   openCustomModelWizard: () => void;
-  handleWizardComplete: (config: CustomModelConfig) => void;
+  /**
+   * Persist the wizard result. Accepts either a single config (manual flow)
+   * or an array of configs (e.g. EasyRouter batch import).
+   */
+  handleWizardComplete: (
+    configs: CustomModelConfig | CustomModelConfig[],
+  ) => void;
   handleWizardCancel: () => void;
 }
 
@@ -30,10 +36,19 @@ export const useCustomModelWizard = (
   }, []);
 
   const handleWizardComplete = useCallback(
-    (modelConfig: CustomModelConfig) => {
+    (modelConfig: CustomModelConfig | CustomModelConfig[]) => {
+      const list = Array.isArray(modelConfig) ? modelConfig : [modelConfig];
+
+      if (list.length === 0) {
+        // Defensive: nothing to save — just close.
+        setIsCustomModelWizardOpen(false);
+        return;
+      }
+
       try {
-        // 使用独立的存储系统，避免与settings.json的并发冲突
-        addOrUpdateCustomModel(modelConfig);
+        for (const cfg of list) {
+          addOrUpdateCustomModel(cfg);
+        }
 
         // 🔥 热重载：立即更新 Config 实例，让当前会话可以使用新配置的模型
         if (config) {
@@ -45,11 +60,22 @@ export const useCustomModelWizard = (
         setIsCustomModelWizardOpen(false);
 
         // 显示成功消息
-        const successMessage = `✅ Custom model "${modelConfig.displayName}" saved successfully!`;
+        const successMessage =
+          list.length === 1
+            ? `✅ Custom model "${list[0].displayName}" saved successfully!`
+            : `✅ ${list.length} custom models saved successfully!`;
+        const detailLines =
+          list.length === 1
+            ? ''
+            : '\n' +
+              list.map((m) => `   • ${m.displayName} [${m.provider}]`).join('\n');
         addItem(
           {
             type: 'info',
-            text: successMessage + '\n\n💡 Use /model to select your custom model.\n📁 Saved to: ~/.deepv/custom-models.json',
+            text:
+              successMessage +
+              detailLines +
+              '\n\n💡 Use /model to select your custom model.\n📁 Saved to: ~/.deepv/custom-models.json',
           } as HistoryItemInfo,
           Date.now(),
         );
