@@ -282,7 +282,7 @@ Each todo object must have:
    * 获取操作描述
    */
   getDescription(params: TodoWriteParams): string {
-    const count = params.todos.length;
+    const count = params && Array.isArray(params.todos) ? params.todos.length : 0;
     return `Update todo list with ${count} item${count > 1 ? 's' : ''}`;
   }
 }
