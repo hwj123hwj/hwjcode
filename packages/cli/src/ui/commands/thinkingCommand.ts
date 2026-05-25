@@ -8,6 +8,7 @@
 import { CommandKind, CommandContext, SlashCommand, SlashCommandActionReturn } from './types.js';
 import { t, tp } from '../utils/i18n.js';
 import { extractProvider, ThinkingConfig } from 'deepv-code-core';
+import { SettingScope } from '../../config/settings.js';
 
 /**
  * 思考模式及强度调控命令
@@ -103,7 +104,13 @@ ${t('thinking.usage.title')}
           ...(currentConfig.budgetTokens !== undefined ? { budgetTokens: currentConfig.budgetTokens } : {}),
         };
 
+        const { settings } = context.services;
+
+        // 1. 运行时会话级覆盖 (内存中立即生效)
         config.setThinkingConfig(updated);
+
+        // 2. 持久化到用户全局 settings.json (~/.deepv/settings.json)
+        settings.setValue(SettingScope.User, 'thinking', updated);
 
         const modeLabel = getModeLabel(newMode);
         const effortLabel = getEffortLabel(updated.effort);
