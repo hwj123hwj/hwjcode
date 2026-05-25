@@ -92,7 +92,7 @@ export function effortToOpenAIEffort(
     return effort;
   }
   if (effort === 'max') {
-    return 'high'; // max 降级到 high
+    return 'xhigh'; // 🌟 max 映射为 OpenAI 的极致性能级别 xhigh (支持 o1/gpt-5.5)
   }
   // 'auto' 或 undefined：交给 OpenAI 默认值
   return undefined;
@@ -136,6 +136,7 @@ export function effortToGeminiBudget(
     case 'xhigh':
       return 16384;
     case 'auto':
+      return -1; // 🌟 setting thinkingBudget to -1 turns on dynamic thinking (Gemini 2.5 官方推荐默认值)
     default:
       return undefined;
   }
