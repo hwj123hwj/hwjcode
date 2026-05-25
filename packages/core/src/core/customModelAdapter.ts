@@ -1297,7 +1297,8 @@ export async function callAnthropicModel(
     (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
 
   if (isThinkingEnabled) {
-    const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
+    // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
+    const maxTokens = modelConfig.maxTokens || 32000;
 
     // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
     // 我们采用现代的 "adaptive" + "effort" 模式
@@ -1322,8 +1323,8 @@ export async function callAnthropicModel(
         budget_tokens: Math.min(maxTokens - 1, budgetTokens),
       };
     }
-    // 确保 max_tokens 足够大以容纳 thinking + 回复
-    requestBody.max_tokens = Math.max(maxTokens, 32000);
+    // 写入请求体中，尊重用户配置文件，仅在空缺时用 maxTokens
+    requestBody.max_tokens = modelConfig.maxTokens || maxTokens;
   }
 
   // 使用指数退避重试包装 API 调用
@@ -1632,7 +1633,8 @@ export async function* callAnthropicModelStream(
     (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
 
   if (isThinkingEnabled) {
-    const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
+    // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
+    const maxTokens = modelConfig.maxTokens || 32000;
 
     // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
     // 我们采用现代的 "adaptive" + "effort" 模式
@@ -1657,8 +1659,8 @@ export async function* callAnthropicModelStream(
         budget_tokens: Math.min(maxTokens - 1, budgetTokens),
       };
     }
-    // 确保 max_tokens 足够大以容纳 thinking + 回复
-    requestBody.max_tokens = Math.max(maxTokens, 32000);
+    // 写入请求体中，尊重用户配置文件，仅在空缺时用 maxTokens
+    requestBody.max_tokens = modelConfig.maxTokens || maxTokens;
   }
 
   // 使用指数退避重试包装初始连接
