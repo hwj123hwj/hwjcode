@@ -363,6 +363,21 @@ export class DeepVServerAdapter implements ContentGenerator {
       });
     }
 
+    // 🆕 调试日志：输出整理后的历史结构，帮助诊断多轮对话中的思维块合并情况
+    if (process.env.DEBUG || process.env.NODE_ENV === 'development' || true) { // 🌟 暂时强制开启以便在用户的终端中显示，极其利于排除故障
+      console.log(`[cleanContents] 整理后的历史记录列表 (共 ${cleaned.length} 条):`);
+      cleaned.forEach((c, idx) => {
+        const partTypes = (c.parts || []).map((p: any) => {
+          if (p.text !== undefined) return `text(${p.text.length})`;
+          if (p.functionCall) return `functionCall(${p.functionCall.name})`;
+          if (p.functionResponse) return `functionResponse(${p.functionResponse.name})`;
+          if (p.reasoning) return `reasoning(${p.reasoning.length})`;
+          return 'unknown';
+        });
+        console.log(`  [${idx}] role=${c.role} parts=[${partTypes.join(', ')}]`);
+      });
+    }
+
     return cleaned;
   }
 
