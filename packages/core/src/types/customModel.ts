@@ -13,6 +13,144 @@
 export type CustomModelProvider = 'openai' | 'openai-responses' | 'anthropic';
 
 /**
+ * 标准化的"思考"配置，跨 provider 统一抽象
+ *
+ * - mode: on=强制启用 / off=强制禁用 / auto=遵从 provider 默认
+ * - effort: 思考力度 low/medium/high；auto 表示由 provider 自定
+ * - budgetTokens: 高级用户直接指定 budget tokens（仅 Anthropic 生效）
+ *
+ * Provider 映射关系：
+ * | Provider          | 字段映射                                              |
+ * |-------------------|-------------------------------------------------------|
+ * | anthropic         | thinking.budget_tokens（low=4000/medium=16000/high=31999）|
+ * | openai-responses  | reasoning.effort（low/medium/high 直传）              |
+ * | openai (chat)     | 无控制字段，思考由模型自身决定（如 deepseek-reasoner）|
+ */
+export interface ThinkingConfig {
+  /** 启用模式 */
+  mode: 'on' | 'off' | 'auto';
+  /** 思考力度，可选 */
+  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'auto';
+  /**
+   * 直接指定 budget tokens（覆盖 effort）
+   * 仅 Anthropic 3.7 / Gemini 2.5 生效
+   */
+  budgetTokens?: number;
+}
+
+/**
+ * 默认 ThinkingConfig
+ */
+export const DEFAULT_THINKING_CONFIG: ThinkingConfig = {
+  mode: 'auto',
+  effort: 'auto',
+};
+
+/**
+ * 把 effort 映射为 Anthropic budget_tokens (对于不支持 effort 的老模型/老接口兼容)
+ * 参考：https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking
+ */
+export function effortToAnthropicBudget(
+  effort: ThinkingConfig['effort'] | undefined,
+): number {
+  switch (effort) {
+    case 'low':
+      return 4000;
+    case 'medium':
+      return 16000;
+    case 'high':
+    case 'max':
+    case 'xhigh':
+      return 31999;
+    case 'auto':
+    default:
+      return 31999; // 默认采用官方推荐的最大预算
+  }
+}
+
+/**
+ * 把 effort 映射为 Anthropic Adaptive Thinking 的 effort 值
+ * Sonnet 4.6 / Opus 4.6 / Opus 4.7 引入，结合 adaptive 模式
+ */
+export function effortToAnthropicEffort(
+  effort: ThinkingConfig['effort'] | undefined,
+): 'low' | 'medium' | 'high' | 'max' | 'xhigh' | undefined {
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max' || effort === 'xhigh') {
+    return effort;
+  }
+  return undefined;
+}
+
+/**
+ * 把 effort 映射为 OpenAI Responses / Chat Completions 的 reasoning_effort/reasoning.effort 值
+ * @see https://platform.openai.com/docs/api-reference/responses/create#responses-create-reasoning
+ */
+export function effortToOpenAIEffort(
+  effort: ThinkingConfig['effort'] | undefined,
+): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
+    return effort;
+  }
+  if (effort === 'max') {
+    return 'high'; // max 降级到 high
+  }
+  // 'auto' 或 undefined：交给 OpenAI 默认值
+  return undefined;
+}
+
+/**
+ * 把 effort 映射为 Gemini 3 / 3.5 系列的 thinkingLevel
+ * @see https://ai.google.dev/gemini-api/docs/thinking
+ */
+export function effortToGeminiLevel(
+  effort: ThinkingConfig['effort'] | undefined,
+): 'minimal' | 'low' | 'medium' | 'high' | undefined {
+  switch (effort) {
+    case 'low':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'max':
+    case 'xhigh':
+      return 'high';
+    case 'auto':
+    default:
+      return undefined; // 让 Gemini 默认决定 (一般 3.5 Flash 默认 medium, 3.1 Pro 默认 high)
+  }
+}
+
+/**
+ * 把 effort 映射为 Gemini 2.5 系列的 thinkingBudget token 数量
+ */
+export function effortToGeminiBudget(
+  effort: ThinkingConfig['effort'] | undefined,
+): number | undefined {
+  switch (effort) {
+    case 'low':
+      return 1024;
+    case 'medium':
+      return 4096;
+    case 'high':
+    case 'max':
+    case 'xhigh':
+      return 16384;
+    case 'auto':
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * 判断 provider 是否支持 thinking 强度调控
+ */
+export function providerSupportsThinkingControl(
+  provider: CustomModelProvider,
+): boolean {
+  return provider === 'anthropic' || provider === 'openai-responses' || provider === 'openai';
+}
+
+/**
  * 自定义模型配置接口
  * 支持用户配置标准OpenAI兼容格式和Claude API格式的自定义模型
  */
@@ -45,6 +183,8 @@ export interface CustomModelConfig {
   timeout?: number;
 
   /**
+   * @deprecated 使用 thinking 字段代替。保留此字段仅用于向后兼容旧配置文件。
+   *
    * Enable Anthropic extended thinking (only for anthropic provider)
    * - true: Force enable thinking with budget_tokens = min(maxTokens - 1, 31999)
    * - false: Force disable thinking
@@ -56,6 +196,46 @@ export interface CustomModelConfig {
    * @see https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking
    */
   enableThinking?: boolean;
+
+  /**
+   * 标准化的思考配置，跨 provider 统一抽象。
+   * 当 thinking 字段存在时优先使用；否则回退到 enableThinking 字段（向后兼容）。
+   *
+   * 通过 /thinking 命令可以在运行时覆盖此配置。
+   */
+  thinking?: ThinkingConfig;
+}
+
+/**
+ * 解析模型有效的 ThinkingConfig
+ *
+ * 优先级（高到低）：
+ * 1. runtimeOverride（来自 /thinking 命令的会话级覆盖）
+ * 2. modelConfig.thinking（模型级配置）
+ * 3. modelConfig.enableThinking（向后兼容字段）
+ * 4. provider 默认（auto）
+ *
+ * @param modelConfig 模型配置
+ * @param runtimeOverride 运行时覆盖（来自 /thinking 命令）
+ */
+export function resolveThinkingConfig(
+  modelConfig: CustomModelConfig,
+  runtimeOverride?: ThinkingConfig,
+): ThinkingConfig {
+  if (runtimeOverride) {
+    return runtimeOverride;
+  }
+  if (modelConfig.thinking) {
+    return modelConfig.thinking;
+  }
+  // 向后兼容：旧的 enableThinking 字段
+  if (modelConfig.enableThinking === true) {
+    return { mode: 'on', effort: 'auto' };
+  }
+  if (modelConfig.enableThinking === false) {
+    return { mode: 'off' };
+  }
+  return { ...DEFAULT_THINKING_CONFIG };
 }
 
 /**

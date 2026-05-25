@@ -222,6 +222,161 @@ describe('customModelAdapter - Image Content Support', () => {
       expect(capturedBody.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,base64data1');
       expect(capturedBody.messages[0].content[2].image_url.url).toBe('data:image/png;base64,base64data2');
     });
+
+    it('should parse reasoning_content from OpenAI compatible model unary response', async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                reasoning_content: 'Let me analyze the request...',
+                content: 'Here is the final result.',
+              },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello' }],
+          },
+        ],
+      };
+
+      const response = await callOpenAICompatibleModel(modelConfig as any, request);
+      const parts = response.candidates?.[0]?.content?.parts;
+      expect(parts).toHaveLength(2);
+      expect(parts?.[0]).toEqual({ reasoning: 'Let me analyze the request...' });
+      expect(parts?.[1]).toEqual({ text: 'Here is the final result.' });
+    });
+
+    it('should attach reasoning_content in contentsToMessages when tool calls are present', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: { role: 'assistant', content: 'Result' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      // Construct a history containing pure reasoning part followed by a tool call part
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Execute tool' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ reasoning: 'I need to use a tool to fetch info.' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ functionCall: { name: 'get_info', args: { query: 'test' }, id: 'call_1' } }],
+          },
+        ],
+      };
+
+      await callOpenAICompatibleModel(modelConfig as any, request);
+
+      // Verify that pure reasoning message is filtered, and attached to the tool_calls message as reasoning_content
+      expect(capturedBody.messages).toHaveLength(2); // user message, followed by assistant tool call message
+      expect(capturedBody.messages[0].role).toBe('user');
+      expect(capturedBody.messages[1].role).toBe('assistant');
+      expect(capturedBody.messages[1].tool_calls).toBeDefined();
+      expect(capturedBody.messages[1].reasoning_content).toBe('I need to use a tool to fetch info.');
+    });
+
+    it('should NOT attach reasoning_content in contentsToMessages when no tool calls are present', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: { role: 'assistant', content: 'Result' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'openai' as const,
+        modelId: 'deepseek-reasoner',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-ds-test',
+        displayName: 'DeepSeek Reasoner',
+      };
+
+      // Construct a history containing pure reasoning part followed by a normal text assistant response (no tool calls)
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [{ text: 'Hello' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ reasoning: 'I should just say hello.' }],
+          },
+          {
+            role: MESSAGE_ROLES.MODEL,
+            parts: [{ text: 'Hello there!' }],
+          },
+        ],
+      };
+
+      await callOpenAICompatibleModel(modelConfig as any, request);
+
+      // Verify that pure reasoning message is filtered, and NOT attached to the text message (saving tokens per DeepSeek doc)
+      expect(capturedBody.messages).toHaveLength(2); // user message, followed by assistant text message
+      expect(capturedBody.messages[1].role).toBe('assistant');
+      expect(capturedBody.messages[1].content).toBe('Hello there!');
+      expect(capturedBody.messages[1].reasoning_content).toBeUndefined();
+    });
   });
 
   describe('Anthropic image format conversion', () => {

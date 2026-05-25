@@ -31,7 +31,7 @@ import { isDeepXQuotaError } from '../utils/quotaErrorDetection.js';
 import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
-import { isCustomModel } from '../types/customModel.js';
+import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
 import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos } from '../utils/gitUtils.js';
 
@@ -73,6 +73,91 @@ function supportsSSEStreaming(modelName: string): boolean {
   if (name.startsWith('minimax')) return true;
 
   return false;
+}
+
+/**
+ * 按模型关键词适配走 GenAI 格式（DeepV 服务端代理）的思考模式配置
+ */
+function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig: ThinkingConfig | undefined): any {
+  if (!thinkingConfig) return reqConfig;
+
+  const modelLower = model.toLowerCase();
+  const config = { ...reqConfig };
+
+  // 确保 generationConfig 存在
+  config.generationConfig = { ...config.generationConfig };
+
+  if (modelLower.includes('gemini')) {
+    // 1. Gemini 系列自适应适配
+    if (thinkingConfig.mode === 'off') {
+      config.generationConfig.thinkingConfig = {
+        thinkingBudget: 0
+      };
+    } else {
+      // 检查是否为 Gemini 3 / 3.5 系列 (未来/现代模型)
+      const isGemini3 = modelLower.includes('gemini-3') || modelLower.includes('gemini-3.5');
+      if (isGemini3) {
+        const thinkingLevel = effortToGeminiLevel(thinkingConfig.effort) || 'medium';
+        config.generationConfig.thinkingConfig = {
+          thinkingLevel,
+          includeThoughts: true
+        };
+      } else {
+        // Gemini 2.5 系列
+        const thinkingBudget = thinkingConfig.budgetTokens !== undefined
+          ? thinkingConfig.budgetTokens
+          : (effortToGeminiBudget(thinkingConfig.effort) || 2048); // 默认使用 2048
+        config.generationConfig.thinkingConfig = {
+          thinkingBudget,
+          includeThoughts: true
+        };
+      }
+    }
+  } else if (modelLower.includes('claude') || modelLower.includes('anthropic')) {
+    // 2. Claude (Anthropic) 代理配置
+    if (thinkingConfig.mode === 'off') {
+      config.generationConfig.thinking = { type: 'disabled' };
+    } else {
+      // 现代 Claude 4.6+ / Sonnet 4.6 适配
+      const isModernClaude46 = modelLower.includes('claude-4-6') || modelLower.includes('-4.6') || (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+      if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+        config.generationConfig.thinking = {
+          type: 'adaptive',
+          effort: effortToAnthropicEffort(thinkingConfig.effort) || 'high'
+        };
+      } else {
+        const budgetTokens = thinkingConfig.budgetTokens !== undefined
+          ? thinkingConfig.budgetTokens
+          : effortToAnthropicBudget(thinkingConfig.effort);
+        config.generationConfig.thinking = {
+          type: 'enabled',
+          budget_tokens: budgetTokens
+        };
+      }
+    }
+  } else if (modelLower.includes('glm')) {
+    // 3. 智谱 GLM 代理配置
+    if (thinkingConfig.mode === 'off') {
+      config.generationConfig.thinking = { type: 'disabled' };
+    } else {
+      config.generationConfig.thinking = {
+        type: 'enabled',
+        clear_thinking: false // 保留式思考
+      };
+    }
+  } else if (modelLower.includes('o1') || modelLower.includes('o3') || modelLower.includes('gpt-')) {
+    // 4. OpenAI 系列
+    if (thinkingConfig.mode === 'off') {
+      config.generationConfig.reasoning_effort = 'low';
+    } else {
+      const effort = effortToOpenAIEffort(thinkingConfig.effort);
+      if (effort) {
+        config.generationConfig.reasoning_effort = effort;
+      }
+    }
+  }
+
+  return config;
 }
 
 /**
@@ -283,7 +368,13 @@ export class DeepVServerAdapter implements ContentGenerator {
         const customModelConfig = this.config.getCustomModelConfig(modelToUse);
         if (customModelConfig) {
           console.log(`[DeepV Server] Using custom model: ${customModelConfig.displayName}`);
-          return await callCustomModel(customModelConfig, request, request.config?.abortSignal);
+          // 🆕 注入会话级/项目级 thinking 配置
+          const thinkingOverride = this.config.getThinkingConfig();
+          const resolvedConfig = {
+            ...customModelConfig,
+            ...(thinkingOverride && { thinking: thinkingOverride }),
+          };
+          return await callCustomModel(resolvedConfig, request, request.config?.abortSignal);
         } else {
           throw new Error(`Custom model configuration not found for: ${modelToUse}`);
         }
@@ -294,16 +385,19 @@ export class DeepVServerAdapter implements ContentGenerator {
         console.log(`[🎯 Model Resolution] Using model: ${modelToUse} for scene: ${scene}`);
       }
 
+      // 🆕 注入走 GenAI 格式 (DeepV 服务端代理) 的思考模式适配
+      const resolvedConfig = applyGenAIThinkingConfig(modelToUse, request.config || {}, this.config?.getThinkingConfig());
+
       const unifiedRequest = {
         model: modelToUse,
         contents: this.cleanContents(stripUIFieldsFromArray(request.contents)),
         config: {
-          ...request.config,
+          ...resolvedConfig,
           // 添加场景信息到headers，供服务端参考
           httpOptions: {
-            ...request.config?.httpOptions,
+            ...resolvedConfig.httpOptions,
             headers: {
-              ...request.config?.httpOptions?.headers,
+              ...resolvedConfig.httpOptions?.headers,
               'X-Scene-Type': scene,
               'X-Scene-Display': SceneManager.getSceneDisplayName(scene),
             }
@@ -676,7 +770,13 @@ export class DeepVServerAdapter implements ContentGenerator {
       const customModelConfig = this.config.getCustomModelConfig(modelToUse);
       if (customModelConfig) {
         console.log(`[DeepV Server] Custom model detected, using streaming mode`);
-        return callCustomModelStream(customModelConfig, request, request.config?.abortSignal);
+        // 🆕 注入会话级/项目级 thinking 配置
+        const thinkingOverride = this.config.getThinkingConfig();
+        const resolvedConfig = {
+          ...customModelConfig,
+          ...(thinkingOverride && { thinking: thinkingOverride }),
+        };
+        return callCustomModelStream(resolvedConfig, request, request.config?.abortSignal);
       }
     }
 
@@ -738,17 +838,20 @@ export class DeepVServerAdapter implements ContentGenerator {
         console.log(`[🎯 Model Resolution (Stream)] Using model: ${modelToUse} for scene: ${scene}`);
       }
 
+      // 🆕 注入走 GenAI 格式 (DeepV 服务端代理) 的思考模式适配 (流式)
+      const resolvedConfig = applyGenAIThinkingConfig(modelToUse, request.config || {}, this.config?.getThinkingConfig());
+
       const streamRequest = {
         model: modelToUse,
         contents: this.cleanContents(stripUIFieldsFromArray(request.contents)),
         config: {
-          ...request.config,
+          ...resolvedConfig,
           stream: true,  // 启用流式输出
           // 添加场景信息到headers
           httpOptions: {
-            ...request.config?.httpOptions,
+            ...resolvedConfig.httpOptions,
             headers: {
-              ...request.config?.httpOptions?.headers,
+              ...resolvedConfig.httpOptions?.headers,
               'X-Scene-Type': scene,
               'X-Scene-Display': SceneManager.getSceneDisplayName(scene),
             }
