@@ -69,6 +69,9 @@ export const Footer: React.FC<FooterProps> = ({
   // 获取 Agent Style
   const agentStyle = config?.getAgentStyle() ?? 'default';
 
+  // 获取 Thinking Config
+  const thinkingConfig = config?.getThinkingConfig();
+
   return (
     <Box justifyContent="space-between" width="100%" marginTop={1}>
       <Box>
@@ -149,9 +152,15 @@ export const Footer: React.FC<FooterProps> = ({
           <Box>
             {contextDisplay ? <Text color={Colors.Gray}> | </Text> : null}
             {displayConfig.simplifyModel ? (
-              <Text color={Colors.Gray}>{modelShortDisplay}</Text>
+              <Text color={Colors.Gray}>
+                {thinkingConfig?.mode !== 'off' ? '🧠 ' : ''}
+                {modelShortDisplay}
+              </Text>
             ) : (
-              <Text color={Colors.Gray}>{t('footer.current.model')}: {modelDisplay}</Text>
+              <Text color={Colors.Gray}>
+                {thinkingConfig?.mode !== 'off' ? '🧠 ' : ''}
+                {t('footer.current.model')}: {modelDisplay}
+              </Text>
             )}
           </Box>
         ) : null}
