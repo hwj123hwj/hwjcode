@@ -35,6 +35,7 @@ import {
   type EasyClawModelMetadata,
 } from '../types/customModel';
 import { customModelsService } from '../services/customModelsService';
+import { getGlobalMessageService } from '../services/globalMessageService';
 import './CustomModelWizard.css';
 
 interface CustomModelWizardProps {
@@ -61,7 +62,7 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     value: EASY_ROUTER_PROVIDER_VALUE,
     label: 'EasyRouter (Recommended)',
     description:
-      'DeepV Code\'s own router. Just paste your API key and pick which models to add — base URL and protocol are auto-detected. Website: https://ezr.sh/',
+      "DeepV Code's own router. Just paste your API key and pick which models to add — no base URL or protocol setup required.",
   },
   {
     value: 'openai',
@@ -168,7 +169,7 @@ function getStepDescription(step: Step, selectedCount?: number): string {
     case 'confirm':
       return 'Review your configuration and confirm.';
     case 'er_apiKey':
-      return `Paste your EasyRouter key. Base URL is fixed at ${EASY_ROUTER_BASE_URL}.`;
+      return 'Paste your EasyRouter API key. The router endpoint is auto-configured.';
     case 'er_fetching':
       return 'Fetching the live model catalogue from EasyRouter and filtering out image / embedding / video models.';
     case 'er_select':
@@ -463,38 +464,70 @@ export const CustomModelWizard: React.FC<CustomModelWizardProps> = ({
   if (!isOpen) return null;
 
   // ---- Renders -------------------------------------------------------------
-  const renderProvider = () => (
-    <div className="cmw-step-body">
-      <div className="cmw-provider-list" role="radiogroup">
-        {PROVIDER_OPTIONS.map((opt, idx) => (
-          <label
-            key={opt.value}
-            className={`cmw-provider-item ${idx === providerIndex ? 'selected' : ''}`}
-            onClick={() => setProviderIndex(idx)}
-          >
-            <input
-              type="radio"
-              name="provider"
-              checked={idx === providerIndex}
-              onChange={() => setProviderIndex(idx)}
-            />
-            <div className="cmw-provider-text">
-              <div className="cmw-provider-label">{opt.label}</div>
-              <div className="cmw-provider-desc">{opt.description}</div>
-            </div>
-          </label>
-        ))}
+  const renderProvider = () => {
+    /**
+     * Open EasyRouter's homepage in the user's external browser via the
+     * extension host. We can't use a plain <a target="_blank"> because the
+     * webview iframe blocks unrecognised navigations — this matches what
+     * PPTGeneratorDialog / NanoBananaDialog already do for outbound links.
+     */
+    const openEasyRouterSite = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        (getGlobalMessageService() as any).openExternalUrl?.('https://ezr.sh/');
+      } catch {
+        // best-effort — no-op if openExternalUrl isn't wired in this build.
+      }
+    };
+
+    return (
+      <div className="cmw-step-body">
+        <div className="cmw-provider-list" role="radiogroup">
+          {PROVIDER_OPTIONS.map((opt, idx) => (
+            <label
+              key={opt.value}
+              className={`cmw-provider-item ${idx === providerIndex ? 'selected' : ''}`}
+              onClick={() => setProviderIndex(idx)}
+            >
+              <input
+                type="radio"
+                name="provider"
+                checked={idx === providerIndex}
+                onChange={() => setProviderIndex(idx)}
+              />
+              <div className="cmw-provider-text">
+                <div className="cmw-provider-label">{opt.label}</div>
+                <div className="cmw-provider-desc">
+                  {opt.description}
+                  {opt.value === EASY_ROUTER_PROVIDER_VALUE && (
+                    <>
+                      {' '}
+                      <a
+                        href="https://ezr.sh/"
+                        className="cmw-link"
+                        onClick={openEasyRouterSite}
+                      >
+                        Get an API key →
+                      </a>
+                    </>
+                  )}
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+        <div className="cmw-actions">
+          <button className="cmw-btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="cmw-btn-primary" onClick={handleProviderConfirm}>
+            Continue
+          </button>
+        </div>
       </div>
-      <div className="cmw-actions">
-        <button className="cmw-btn-secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="cmw-btn-primary" onClick={handleProviderConfirm}>
-          Continue
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderTextInput = () => {
     const example = getStepExample(step, config.provider);
@@ -586,7 +619,7 @@ export const CustomModelWizard: React.FC<CustomModelWizardProps> = ({
       {!erFetchError ? (
         <div className="cmw-loading">
           <div className="cmw-spinner" />
-          <span>Talking to {EASY_ROUTER_BASE_URL}/models …</span>
+          <span>Loading available models from EasyRouter…</span>
         </div>
       ) : (
         <>
@@ -729,8 +762,8 @@ export const CustomModelWizard: React.FC<CustomModelWizardProps> = ({
       <div className="cmw-step-body">
         <div className="cmw-summary">
           <div className="cmw-summary-row">
-            <span className="cmw-summary-label">Base URL</span>
-            <span>{EASY_ROUTER_BASE_URL}</span>
+            <span className="cmw-summary-label">Provider</span>
+            <span>EasyRouter</span>
           </div>
           <div className="cmw-summary-row">
             <span className="cmw-summary-label">API Key</span>

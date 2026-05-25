@@ -1961,11 +1961,167 @@ function buildGeminiNativeRequestBody(
   const thinkingConfig = resolveThinkingConfig(modelConfig);
   applyGeminiNativeThinking(generationConfig, modelConfig.modelId, thinkingConfig);
 
+  /**
+   * Sanitise `contents[].parts[]` for the GenAI v1beta endpoint.
+   *
+   * The chat history we accumulate contains UI-only / cross-protocol shapes
+   * that Gemini's strict schema rejects with HTTP 400:
+   *   * .parts[i].data: required oneof field 'data' must have one initialized field
+   *   * Function call is missing a thought_signature in functionCall parts
+   *
+   * Specifically:
+   *   - { reasoning } (our adapter's projection of Gemini `thought:true` parts) →
+   *     converted back to `{ thought:true, text, thoughtSignature? }` so any
+   *     thoughtSignature attached to the reasoning chunk survives the round
+   *     trip. Gemini 3.x with thinking REQUIRES the matching thoughtSignature
+   *     to be sent back, otherwise the next functionCall is rejected.
+   *   - { thought:true, text, thoughtSignature? } (raw) — kept as-is.
+   *   - functionCall / functionResponse — pass through after non-empty check;
+   *     thoughtSignature is preserved.
+   *   - text / inlineData / fileData — pass through canonically.
+   * Empty / unknown parts are dropped (oneof validator fails on `{}`).
+   */
+  const sanitiseContentsForGemini = (raw: any[] | undefined): any[] => {
+    if (!Array.isArray(raw)) return [];
+    const out: any[] = [];
+    for (const c of raw) {
+      if (!c || typeof c !== 'object') continue;
+      const role = c.role;
+      const parts = Array.isArray(c.parts) ? c.parts : [];
+      const cleanParts: any[] = [];
+      for (const p of parts) {
+        if (!p || typeof p !== 'object') continue;
+        // 1) UI-only `reasoning` projection → fold back to a thought part so
+        //    the attached thoughtSignature (if any) is preserved.
+        if (typeof p.reasoning === 'string') {
+          if (p.reasoning.length === 0) continue;
+          const part: any = { thought: true, text: p.reasoning };
+          if (typeof p.thoughtSignature === 'string') part.thoughtSignature = p.thoughtSignature;
+          cleanParts.push(part);
+          continue;
+        }
+        // 2) Raw Gemini `thought:true` part — pass through with signature.
+        if (p.thought === true) {
+          if (typeof p.text !== 'string' || p.text.length === 0) continue;
+          const part: any = { thought: true, text: p.text };
+          if (typeof p.thoughtSignature === 'string') part.thoughtSignature = p.thoughtSignature;
+          cleanParts.push(part);
+          continue;
+        }
+        // 3) Canonical GenAI shapes — pass through, but verify the inner
+        // shape is non-empty. The error
+        //   * parts[i].data: required oneof field 'data' must have one initialized field
+        // is also raised for shapes like `{ inlineData: {} }` or
+        // `{ functionResponse: { name:'…' } }` (missing `response`).
+        if (typeof p.text === 'string') {
+          // GenAI rejects '' for some models; keep only meaningful text.
+          if (p.text.length > 0) cleanParts.push({ text: p.text });
+          continue;
+        }
+        if (p.inlineData && typeof p.inlineData === 'object') {
+          const inline = p.inlineData as Record<string, unknown>;
+          if (typeof inline.mimeType === 'string' && typeof inline.data === 'string' && inline.data.length > 0) {
+            cleanParts.push({ inlineData: { mimeType: inline.mimeType, data: inline.data } });
+          }
+          continue;
+        }
+        if (p.functionCall && typeof p.functionCall === 'object') {
+          const fc = p.functionCall as Record<string, unknown>;
+          if (typeof fc.name === 'string' && fc.name.length > 0) {
+            const part: any = {
+              functionCall: {
+                name: fc.name,
+                args: (fc.args && typeof fc.args === 'object') ? fc.args : {},
+                ...(typeof fc.id === 'string' ? { id: fc.id } : {}),
+              },
+            };
+            // Preserve thoughtSignature on the part (Gemini 3.x with thinking
+            // requires this to round-trip; missing it ⇒ HTTP 400).
+            if (typeof p.thoughtSignature === 'string') {
+              part.thoughtSignature = p.thoughtSignature;
+            }
+            cleanParts.push(part);
+          }
+          continue;
+        }
+        if (p.functionResponse && typeof p.functionResponse === 'object') {
+          const fr = p.functionResponse as Record<string, unknown>;
+          // GenAI requires both `name` and `response` to be present and non-empty.
+          // If the response payload is missing/empty we synthesise an empty
+          // object so the part stays valid; dropping it would unbalance the
+          // tool-call/response pairing and cause subsequent 400s.
+          if (typeof fr.name === 'string' && fr.name.length > 0) {
+            const responseValue =
+              fr.response && typeof fr.response === 'object'
+                ? fr.response
+                : { result: typeof fr.response === 'string' ? fr.response : '' };
+            cleanParts.push({
+              functionResponse: {
+                name: fr.name,
+                response: responseValue,
+                ...(typeof fr.id === 'string' ? { id: fr.id } : {}),
+              },
+            });
+          }
+          continue;
+        }
+        if (p.fileData && typeof p.fileData === 'object') {
+          const fd = p.fileData as Record<string, unknown>;
+          if (typeof fd.fileUri === 'string' && fd.fileUri.length > 0) {
+            cleanParts.push({
+              fileData: {
+                fileUri: fd.fileUri,
+                ...(typeof fd.mimeType === 'string' ? { mimeType: fd.mimeType } : {}),
+              },
+            });
+          }
+          continue;
+        }
+        // Unknown shapes silently dropped — better than a 400 from Gemini.
+      }
+      // A Content with zero valid parts also fails validation; skip it.
+      if (cleanParts.length === 0) continue;
+      out.push(role ? { role, parts: cleanParts } : { parts: cleanParts });
+    }
+    return out;
+  };
+
   const body: Record<string, unknown> = {
-    contents: request.contents,
+    contents: sanitiseContentsForGemini(request.contents),
     generationConfig,
   };
-  if (reqConfig.systemInstruction) body.systemInstruction = reqConfig.systemInstruction;
+  /**
+   * Normalise `systemInstruction` to the GenAI wire shape `{ parts: [{ text }] }`.
+   *
+   * Callers historically passed it as either:
+   *   - a plain string (legacy convenience)
+   *   - `{ parts: [{ text }] }` (canonical GenAI)
+   *   - `{ text: '...' }` (intermediate form some adapters used)
+   * EasyRouter / Google's actual `/v1beta` endpoint only accepts the canonical
+   * form — passing a string yields HTTP 500 "json: cannot unmarshal string
+   * into Go struct field .systemInstruction of type GeminiChatContent".
+   */
+  const normaliseSystemInstruction = (raw: unknown): unknown => {
+    if (raw == null) return undefined;
+    if (typeof raw === 'string') {
+      return { parts: [{ text: raw }] };
+    }
+    if (typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      // already canonical
+      if (Array.isArray(obj.parts)) return obj;
+      // {text:'…'} short form
+      if (typeof obj.text === 'string') return { parts: [{ text: obj.text }] };
+    }
+    // Anything weirder — let it through verbatim; the upstream error message
+    // will still be informative if the structure is unrecognised.
+    return raw;
+  };
+
+  if (reqConfig.systemInstruction) {
+    const normalised = normaliseSystemInstruction(reqConfig.systemInstruction);
+    if (normalised !== undefined) body.systemInstruction = normalised;
+  }
   if (reqConfig.tools) body.tools = reqConfig.tools;
   if (reqConfig.toolConfig) body.toolConfig = reqConfig.toolConfig;
   if (reqConfig.safetySettings) body.safetySettings = reqConfig.safetySettings;
@@ -2009,18 +2165,28 @@ function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentRespon
   if (Array.isArray(parts) && parts.length > 0) {
     const mappedParts: any[] = [];
     for (const p of parts) {
+      // Gemini 3.x with thinking emits a `thoughtSignature` on functionCall
+      // parts. We must propagate it back on the next request, otherwise
+      // Gemini rejects with HTTP 400 "Function call is missing a thought_signature".
+      // Carry the field as-is — opaque to us, validated by Gemini.
       if (p?.thought === true && typeof p.text === 'string') {
-        mappedParts.push({ reasoning: p.text });
+        const out: any = { reasoning: p.text };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
       } else if (typeof p?.text === 'string') {
-        mappedParts.push({ text: p.text });
+        const out: any = { text: p.text };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
       } else if (p?.functionCall) {
-        mappedParts.push({
+        const out: any = {
           functionCall: {
             name: p.functionCall.name?.trim() || p.functionCall.name,
             args: p.functionCall.args || {},
             id: p.functionCall.id,
           },
-        });
+        };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
       } else if (p?.inlineData) {
         // Pass through inline image/audio data unchanged.
         mappedParts.push({ inlineData: p.inlineData });
@@ -2052,6 +2218,98 @@ function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentRespon
 }
 
 /**
+ * Drop the most recent Gemini native request body to
+ * `~/.deepv/last-requests/{ts}_gemini-{kind}_{modelId}.json` so when EasyRouter
+ * / Google returns a schema-validation HTTP 400 we can inspect the *exact*
+ * contents we sent at byte level. Cheap (≤20KB usually), fire-and-forget,
+ * never blocks the request.
+ *
+ * Mirrors DeepVServerAdapter.dumpOutboundRequest():
+ *   - Same dir: `~/.deepv/last-requests/`
+ *   - Same ring buffer: keep the latest N entries
+ *
+ * Safety:
+ *   - Skipped under `vitest` so unit tests don't pollute the ring with
+ *     synthetic dumps. The runner sets `VITEST` automatically.
+ *   - Atomic via `.tmp` + rename so an in-flight crash never leaves
+ *     half-written / mixed-with-old-content bytes.
+ */
+const GEMINI_DUMP_DIR_SEGMENTS = ['.deepv', 'last-requests'] as const;
+const GEMINI_DUMP_RING_SIZE = 5;
+
+/**
+ * Sanitise a model id for use as a filesystem name segment.
+ *
+ * Strategy:
+ *   - Lowercase
+ *   - Replace any non `[a-z0-9._-]` character with `-`
+ *   - Collapse repeats and trim leading/trailing dashes
+ *   - Cap length to keep total path short on Windows (MAX_PATH = 260)
+ *   - Fall back to `unknown-model` if the result is empty
+ */
+function sanitiseModelIdForFilename(raw: string | undefined): string {
+  const id = (raw ?? '').toLowerCase().trim();
+  const cleaned = id
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60);
+  return cleaned || 'unknown-model';
+}
+
+function dumpGeminiRequest(kind: 'unary' | 'stream', modelId: string, body: unknown): void {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  void (async () => {
+    try {
+      const os = await import('os');
+      const path = await import('path');
+      const fs = await import('fs');
+
+      const home = os.homedir();
+      const dumpDir = path.join(home, ...GEMINI_DUMP_DIR_SEGMENTS);
+      await fs.promises.mkdir(dumpDir, { recursive: true });
+
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const safeModel = sanitiseModelIdForFilename(modelId);
+      const ringFile = path.join(
+        dumpDir,
+        `${ts}_gemini-${kind}_${safeModel}.json`,
+      );
+
+      const payload = JSON.stringify(
+        { kind, modelId, ts: new Date().toISOString(), body },
+        null,
+        2,
+      );
+
+      // Atomic write to ring entry.
+      const tmp = ringFile + '.tmp';
+      await fs.promises.writeFile(tmp, payload, 'utf8');
+      await fs.promises.rename(tmp, ringFile);
+
+      // Trim ring to the last GEMINI_DUMP_RING_SIZE Gemini entries
+      // (DeepVServerAdapter writes its own kinds in the same dir; we only
+      // touch our own files identified by the `_gemini-` infix).
+      try {
+        const entries = await fs.promises.readdir(dumpDir);
+        const stale = entries
+          .filter((f) => /_gemini-(stream|unary)_/.test(f) && f.endsWith('.json'))
+          .sort()
+          .reverse() // newest first
+          .slice(GEMINI_DUMP_RING_SIZE);
+        await Promise.all(
+          stale.map((f) => fs.promises.unlink(path.join(dumpDir, f)).catch(() => undefined)),
+        );
+      } catch {
+        // ring trim is best-effort
+      }
+    } catch {
+      // Diagnostic dump must never break the call.
+    }
+  })();
+}
+
+/**
  * Gemini native single-shot call (GenAI generateContent).
  */
 export async function callGeminiNativeModel(
@@ -2061,6 +2319,7 @@ export async function callGeminiNativeModel(
 ): Promise<GenerateContentResponse> {
   const url = buildGeminiNativeUrl(modelConfig, 'generateContent');
   const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+  dumpGeminiRequest('unary', modelConfig.modelId, requestBody);
 
   return retryWithBackoff(
     async () => {
@@ -2082,18 +2341,26 @@ export async function callGeminiNativeModel(
       const rawParts = cand?.content?.parts || [];
       const parts: any[] = [];
       for (const p of rawParts) {
+        // See mapGeminiChunkToResponses() for why thoughtSignature must
+        // be carried through to all part shapes that may emit it.
         if (p?.thought === true && typeof p.text === 'string') {
-          parts.push({ reasoning: p.text });
+          const out: any = { reasoning: p.text };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
         } else if (typeof p?.text === 'string') {
-          parts.push({ text: p.text });
+          const out: any = { text: p.text };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
         } else if (p?.functionCall) {
-          parts.push({
+          const out: any = {
             functionCall: {
               name: p.functionCall.name?.trim() || p.functionCall.name,
               args: p.functionCall.args || {},
               id: p.functionCall.id,
             },
-          });
+          };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
         } else if (p?.inlineData) {
           parts.push({ inlineData: p.inlineData });
         }
@@ -2133,6 +2400,7 @@ export async function* callGeminiNativeModelStream(
 ): AsyncGenerator<GenerateContentResponse> {
   const url = buildGeminiNativeUrl(modelConfig, 'streamGenerateContent');
   const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+  dumpGeminiRequest('stream', modelConfig.modelId, requestBody);
 
   const response = await retryWithBackoff(
     async () => {

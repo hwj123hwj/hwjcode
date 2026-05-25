@@ -2364,6 +2364,208 @@ describe('callGeminiNativeModel', () => {
     expect(capturedBody.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
   });
 
+  it('normalises a string systemInstruction to canonical { parts: [{ text }] }', async () => {
+    // The /v1beta endpoint rejects raw strings with HTTP 500
+    //   "json: cannot unmarshal string into Go struct field .systemInstruction
+    //    of type GeminiChatContent"
+    // — so we must convert any non-canonical shape on the client side.
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }],
+        }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: 'You are helpful.' },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual({ parts: [{ text: 'You are helpful.' }] });
+  });
+
+  it('normalises a { text } shorthand systemInstruction to canonical form', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: { text: 'Be concise.' } },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual({ parts: [{ text: 'Be concise.' }] });
+  });
+
+  it('passes through a canonical systemInstruction unchanged', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    const canonical = { parts: [{ text: 'Already shaped.' }] };
+    await callGeminiNativeModel(
+      modelConfig as any,
+      {
+        contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+        config: { systemInstruction: canonical },
+      },
+    );
+    expect(capturedBody.systemInstruction).toEqual(canonical);
+  });
+
+  it('sanitises contents: folds { reasoning } / { thought:true } back to thought parts and preserves thoughtSignature', async () => {
+    // Gemini 3.x with thinking requires thoughtSignature to round-trip.
+    // Stripping the marker would cause HTTP 400:
+    //   "Function call is missing a thought_signature in functionCall parts"
+    // — see scripts/replay-gemini-dump.mjs for the reproduction.
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-3.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-3.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '前50个质数' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [
+            // adapter's projection from a streamed run (with signature)
+            { reasoning: 'Let me compute…', thoughtSignature: 'sig-abc' },
+            // raw Gemini thought part
+            { thought: true, text: 'Internal monologue.', thoughtSignature: 'sig-def' },
+            // canonical text part — no signature
+            { text: 'Sum is 5117.' },
+            // functionCall WITH signature — must round-trip on the same part
+            { functionCall: { name: 'run_sh', args: { c: 'echo' } }, thoughtSignature: 'sig-fc' },
+          ],
+        },
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' }] },
+      ],
+    });
+
+    const modelTurn = capturedBody.contents[1];
+    expect(modelTurn.role).toBe(MESSAGE_ROLES.MODEL);
+    expect(modelTurn.parts).toEqual([
+      { thought: true, text: 'Let me compute…', thoughtSignature: 'sig-abc' },
+      { thought: true, text: 'Internal monologue.', thoughtSignature: 'sig-def' },
+      { text: 'Sum is 5117.' },
+      { functionCall: { name: 'run_sh', args: { c: 'echo' } }, thoughtSignature: 'sig-fc' },
+    ]);
+    // No `reasoning` key remains — adapters projected fields are folded back.
+    expect(JSON.stringify(capturedBody.contents)).not.toContain('"reasoning"');
+  });
+
+  it('drops empty / unknown parts so Gemini never sees an empty Content (HTTP 400)', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] },
+        // turn that would only contain UI-only parts → must be dropped entirely
+        { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning: '' }, { someUnknownShape: 1 } as any] },
+      ],
+    });
+
+    expect(capturedBody.contents).toHaveLength(1);
+    expect(capturedBody.contents[0].parts).toEqual([{ text: 'hi' }]);
+  });
+
+  it('passes through canonical functionCall / functionResponse parts unchanged', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }] }),
+      };
+    });
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    await callGeminiNativeModel(modelConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: 'use a tool' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [{ functionCall: { name: 'search', args: { q: 'x' } } }],
+        },
+        {
+          role: 'function',
+          parts: [{ functionResponse: { name: 'search', response: { ok: true } } }],
+        },
+      ],
+    });
+    expect(capturedBody.contents[1].parts[0]).toEqual({
+      functionCall: { name: 'search', args: { q: 'x' } },
+    });
+    expect(capturedBody.contents[2].parts[0]).toEqual({
+      functionResponse: { name: 'search', response: { ok: true } },
+    });
+  });
+
   it('maps a thought:true part to { reasoning } on the unary response', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

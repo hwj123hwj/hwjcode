@@ -61,7 +61,7 @@ export function getShortModelName(modelName: string, simplified: boolean = false
 
 /**
  * 智能缩短上下文显示文本
- * 完整: (92% context left)
+ * 完整: 92% ctx left
  * 简化: 92%
  * 100%时: 隐藏（返回空字符串）
  *
@@ -81,7 +81,52 @@ export function getContextDisplay(percentage: number | string, simplified: boole
     return percentText;
   }
 
-  return `(${percentText} context left)`;
+  return `${percentText} ctx left`;
+}
+
+/**
+ * Compose the short thinking-mode label rendered in the footer.
+ *
+ * Examples:
+ *   mode='off'                  → '' (caller hides the whole prefix)
+ *   mode='on',  effort='max'    → 'max'
+ *   mode='on',  effort='high'   → 'high'
+ *   mode='on',  effort='medium' → 'med'
+ *   mode='on',  effort='low'    → 'low'
+ *   mode='on',  effort='xhigh'  → 'xhi'
+ *   mode='on',  effort='auto'   → 'on'
+ *   mode='auto'                 → 'auto'
+ *
+ * Goal: stay in 4 chars or less so the footer "<model> 🧠 <label>" stays
+ * narrow even on a 80-col terminal. The full-name "medium" and "xhigh" get
+ * trimmed to 3-letter compact forms; everything else is already short.
+ *
+ * @param thinkingConfig  config snapshot from `config.getThinkingConfig()`
+ * @returns short string ('' when thinking is disabled)
+ */
+export function getThinkingEffortLabel(thinkingConfig?: {
+  mode?: 'on' | 'off' | 'auto';
+  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'auto';
+}): string {
+  if (!thinkingConfig || thinkingConfig.mode === 'off') return '';
+  if (thinkingConfig.mode === 'auto') return 'auto';
+  // mode === 'on'
+  switch (thinkingConfig.effort) {
+    case 'max':
+      return 'max';
+    case 'xhigh':
+      return 'xhi';
+    case 'high':
+      return 'high';
+    case 'medium':
+      return 'med';
+    case 'low':
+      return 'low';
+    case 'auto':
+    case undefined:
+    default:
+      return 'on';
+  }
 }
 
 /**
