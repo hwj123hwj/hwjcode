@@ -633,6 +633,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: <BrainIcon level="low" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
     { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: <BrainIcon level="medium" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
     { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: <BrainIcon level="high" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
+    { id: 'xhigh', label: t('thinking.effort.xhigh', undefined, 'Extended'), icon: <BrainIcon level="max" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'xhigh' },
     { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: <BrainIcon level="max" size={16} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
   ], [t]);
 

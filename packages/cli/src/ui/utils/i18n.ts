@@ -1433,6 +1433,7 @@ export const translations = {
     'thinking.effort.medium': 'Medium',
     'thinking.effort.high': 'High',
     'thinking.effort.max': 'Max',
+    'thinking.effort.xhigh': 'Extended High',
     'thinking.effort.auto': 'Auto',
 
     // Error messages
@@ -2912,6 +2913,7 @@ export const translations = {
     'thinking.effort.medium': '中强度',
     'thinking.effort.high': '高强度',
     'thinking.effort.max': '最大强度',
+    'thinking.effort.xhigh': '超高强度',
     'thinking.effort.auto': '自动',
 
     // Error messages
