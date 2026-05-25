@@ -12,7 +12,9 @@
 .model-selector {
   position: relative;
   display: inline-block;
-  width: 200px; /* 🎯 增加宽度，避免模型名称被截断 */
+  min-width: 180px; /* 🎯 设立自适应的最小宽度，保证基础美观 */
+  max-width: 260px; /* 🎯 扩大最大宽度限制，容纳长名称+脑部图标 */
+  width: auto;     /* 🎯 启用宽度自适应 */
   z-index: 100;
 }
 

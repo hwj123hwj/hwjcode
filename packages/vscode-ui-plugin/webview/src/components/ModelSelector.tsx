@@ -70,30 +70,75 @@ const convertToModelOption = (model: ModelInfo, t: any): ModelOption => ({
 
 // 🧠 动态高保真科技感 SVG 脑部图标，根据思考深度（effort / mode）改变色彩和饱和度
 const BrainIcon: React.FC<{ level: string; size?: number }> = ({ level, size = 14 }) => {
-  let color = 'rgba(128, 128, 128, 0.4)';
+  const isDark = document.body.classList.contains('vscode-dark') ||
+                 document.body.classList.contains('vscode-high-contrast');
 
-  switch (level) {
-    case 'off':
-      color = 'var(--vscode-disabledForeground, rgba(128, 128, 128, 0.35))';
-      break;
-    case 'auto':
-      color = 'rgba(154, 85, 255, 0.85)'; // 自适应智慧紫
-      break;
-    case 'low':
-      color = 'rgba(255, 105, 180, 0.75)'; // 浅透粉色
-      break;
-    case 'medium':
-      color = 'rgba(255, 60, 150, 0.9)';  // 中饱粉色
-      break;
-    case 'high':
-    case 'on':
-      color = 'rgba(255, 0, 120, 1.0)';   // 鲜红高饱粉
-      break;
-    case 'max':
-      color = 'rgba(218, 0, 150, 1.0)';   // 极限洋红色
-      break;
-    default:
-      color = 'rgba(154, 85, 255, 0.85)';
+  let color = 'gray';
+  let opacity = 0.8;
+
+  if (isDark) {
+    switch (level) {
+      case 'off':
+        color = 'var(--vscode-disabledForeground, #444444)';
+        opacity = 0.35;
+        break;
+      case 'auto':
+        color = '#cccccc';
+        opacity = 0.85;
+        break;
+      case 'low':
+        color = '#888888';
+        opacity = 0.65;
+        break;
+      case 'medium':
+        color = '#bbbbbb';
+        opacity = 0.8;
+        break;
+      case 'high':
+      case 'on':
+        color = '#eeeeee';
+        opacity = 0.95;
+        break;
+      case 'max':
+        color = '#ffffff';
+        opacity = 1.0;
+        break;
+      default:
+        color = '#cccccc';
+        opacity = 0.85;
+    }
+  } else {
+    // Light Theme
+    switch (level) {
+      case 'off':
+        color = 'var(--vscode-disabledForeground, #cccccc)';
+        opacity = 0.35;
+        break;
+      case 'auto':
+        color = '#444444';
+        opacity = 0.85;
+        break;
+      case 'low':
+        color = '#999999';
+        opacity = 0.65;
+        break;
+      case 'medium':
+        color = '#666666';
+        opacity = 0.8;
+        break;
+      case 'high':
+      case 'on':
+        color = '#333333';
+        opacity = 0.95;
+        break;
+      case 'max':
+        color = '#000000';
+        opacity = 1.0;
+        break;
+      default:
+        color = '#444444';
+        opacity = 0.85;
+    }
   }
 
   return (
@@ -662,7 +707,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
                       {thinkingConfig?.mode !== 'off' && (
-                        <BrainIcon level={currentThinkingOption.id} size={18} />
+                        <BrainIcon level={currentThinkingOption.id} size={15} />
                       )}
                       {selectedModel.displayName}
                     </span>
