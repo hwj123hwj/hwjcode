@@ -988,18 +988,14 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
     }
 
-    // 🆕 云模式下禁用SSE流式传输，直接使用非流式API避免消息被打断
-    // 通过检查环境变量判断是否为云模式
-    const isCloudMode = process.env.DEEPV_CLOUD_MODE === 'true';
-
-    if (isCloudMode) {
-      return this._generateContent(request, scene);
-    }
-
     // 🔍 Model-specific SSE streaming support check (not model selection)
     // This detects which API features are available for the requested model
     // Actual model selection is done by the server based on 'auto' requests
     // Uses broad pattern matching to automatically support new model versions
+    //
+    // 注：早期版本曾因 cloud-mode (DEEPV_CLOUD_MODE=true) 强制走非流式以避免
+    // "消息被打断"，但该限制在远程协议加入 thoughtId 聚合 + Thought/Reasoning
+    // chunk 转发后已不再需要。流式体验对 thinking mode 至关重要，恢复默认行为。
     if (supportsSSEStreaming(request.model)) {
       return this._generateContentStream(request, scene);
     } else {
