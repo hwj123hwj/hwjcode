@@ -31,7 +31,7 @@ import { isDeepXQuotaError } from '../utils/quotaErrorDetection.js';
 import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
-import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig } from '../types/customModel.js';
+import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig, isAdaptiveThinkingClaude } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
 import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos } from '../utils/gitUtils.js';
 
@@ -118,9 +118,9 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
     if (thinkingConfig.mode === 'off') {
       config.generationConfig.thinking = { type: 'disabled' };
     } else {
-      // 现代 Claude 4.6+ / Sonnet 4.6 适配
-      const isModernClaude46 = modelLower.includes('claude-4-6') || modelLower.includes('-4.6') || (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
-      if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+      // 现代 Claude 4.6+ / Sonnet 4.6/4.7+ 适配，彻底防范 400 报错
+      const isAdaptiveModel = isAdaptiveThinkingClaude(modelLower) || (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+      if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
         config.generationConfig.thinking = {
           type: 'adaptive',
           effort: effortToAnthropicEffort(thinkingConfig.effort) || 'high'
