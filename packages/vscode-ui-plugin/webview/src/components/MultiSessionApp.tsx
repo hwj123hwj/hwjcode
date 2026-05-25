@@ -172,6 +172,12 @@ export const MultiSessionApp: React.FC = () => {
   const [isPPTGeneratorOpen, setIsPPTGeneratorOpen] = useState(false);
   const [isGoalWizardOpen, setIsGoalWizardOpen] = useState(false);
 
+  // 🎯 Goal 模式看门狗状态
+  const GOAL_IDLE_TIMEOUT_MS = 60_000;
+  const [goalActiveSessions, setGoalActiveSessions] = useState<Record<string, boolean>>({});
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const goalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // 🎯 压缩确认弹窗状态（模型切换时上下文超限）
   const [compressionConfirmation, setCompressionConfirmation] = useState<CompressionConfirmationRequest | null>(null);
   // 🎯 压缩进行中状态
@@ -1460,8 +1466,18 @@ export const MultiSessionApp: React.FC = () => {
     const sessionId = targetSessionId || state.currentSessionId;
     if (!sessionId) return;
 
-    // 🎯 拦截 /plan off 命令
+    // 🎯 更新用户最后活动时间（看门狗用）
+    lastUserInteractionRef.current = Date.now();
+
+    // 🎯 拦截 /goal clear 或者目标驱动启动，用于更新看门狗状态
     const textContent = messageContentToString(content).trim();
+    if (textContent.trim() === '/goal clear') {
+      setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+    } else if (opts?.goalContext) {
+      setGoalActiveSessions(prev => ({ ...prev, [sessionId]: true }));
+    }
+
+    // 🎯 拦截 /plan off 命令
     if (textContent.toLowerCase() === '/plan off') {
       console.log('🎯 [PLAN-MODE] Intercepted /plan off command');
 
@@ -1588,6 +1604,92 @@ User question: ${contentStr}`;
       }
     });
   }, [state.sessions, handleSendMessage, removeMessageFromQueue]);
+
+  // ──── Goal 模式看门狗自动校准 ────
+  // 如果收到含有 goal_achieved 成功状态的 AI 工具调用返回，自动在前端释放看门狗状态
+  useEffect(() => {
+    const currentSession = state.currentSessionId ? state.sessions.get(state.currentSessionId) || null : null;
+    if (!currentSession) return;
+    const sessionId = currentSession.info.id;
+    const messages = currentSession.messages || [];
+
+    if (messages.length === 0) {
+      if (goalActiveSessions[sessionId]) {
+        setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+      }
+      return;
+    }
+
+    // 检查最新一条 AI 消息（在 VS Code 端类型为 assistant）中是否有 goal_achieved 标识
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.type === 'assistant') {
+      const hasGoalAchieved = lastMessage.associatedToolCalls?.some(t => t.toolName === 'goal_achieved');
+      if (hasGoalAchieved && goalActiveSessions[sessionId]) {
+        setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+      }
+    }
+  }, [state.currentSessionId, state.sessions, goalActiveSessions]);
+
+  // ──── Goal 模式 Idle 看门狗 ────
+  // 问题：某些 AI 模型在 /goal 模式下会"发呆"——既不继续工作，也不调用
+  // goal_achieved。表现为 AI 响应进入 Idle 但 goal 契约未释放。
+  // 解决：跟踪上次用户交互时间；如果 goal active + idle + 60s 无交互，
+  // 自动 silent-submit 一条提示消息让 AI 继续。
+  useEffect(() => {
+    const currentSession = state.currentSessionId ? state.sessions.get(state.currentSessionId) || null : null;
+    if (!currentSession) return;
+    const sessionId = currentSession.info.id;
+    const isGoalActive = !!goalActiveSessions[sessionId];
+    const isIdle = !currentSession.isProcessing && !currentSession.isLoading;
+
+    // 卫语句：只有在 goal 活跃、当前空闲时，才需要开启看门狗
+    if (!isGoalActive || !isIdle) {
+      return;
+    }
+
+    const elapsed = Date.now() - lastUserInteractionRef.current;
+    const remainingTime = Math.max(0, GOAL_IDLE_TIMEOUT_MS - elapsed);
+
+    goalIdleTimerRef.current = setTimeout(() => {
+      goalIdleTimerRef.current = null;
+
+      // 触发时二次确认条件仍然满足
+      const session = state.sessions.get(sessionId);
+      const isStillEligible =
+        session &&
+        goalActiveSessions[sessionId] &&
+        !session.isProcessing &&
+        !session.isLoading;
+
+      if (!isStillEligible) {
+        return;
+      }
+
+      // 发送前更新时间戳，避免消息发出后立即又触发（防抖）
+      lastUserInteractionRef.current = Date.now();
+
+      const goalContinuePrompt =
+        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
+        '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
+        '请立即执行以下检查：\n' +
+        '1. 调用 local_time 确认当前时间和你的工作时长\n' +
+        '2. 对照目标契约检查完成情况——哪些达标、哪些还差\n' +
+        '3. 如果全部达标 → 调用 goal_achieved 声明完成\n' +
+        '4. 如果未达标 → 继续执行剩余工作（调用工具、写代码、运行测试等）\n\n' +
+        '目标契约仍在生效中，请继续工作。';
+
+      handleSendMessage([{ type: 'text', value: goalContinuePrompt }], sessionId, { silent: true });
+    }, remainingTime);
+
+    return () => {
+      if (goalIdleTimerRef.current) {
+        clearTimeout(goalIdleTimerRef.current);
+        goalIdleTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentSessionId, state.sessions, goalActiveSessions, handleSendMessage]);
 
 
   /**
