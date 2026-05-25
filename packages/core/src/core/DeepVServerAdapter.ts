@@ -306,7 +306,7 @@ export class DeepVServerAdapter implements ContentGenerator {
     if (!Array.isArray(contents)) return contents;
 
     const consolidated: any[] = [];
-    let pendingReasoningParts: any[] = [];
+    let accumulatedReasoning: any[] = [];
 
     for (const content of contents) {
       // 深度拷贝消息以防修改原始历史
@@ -317,24 +317,34 @@ export class DeepVServerAdapter implements ContentGenerator {
 
       if (clonedContent.role === MESSAGE_ROLES.MODEL) {
         const parts = clonedContent.parts || [];
-        const isPureReasoning = parts.length > 0 && parts.every((p: any) => p.reasoning !== undefined);
 
-        if (isPureReasoning) {
-          pendingReasoningParts.push(...parts);
-          continue; // 跳过纯思维块消息，暂存其内容
+        // 分离思维部分与非思维部分（如文本、工具调用等）
+        const reasoningParts = parts.filter((p: any) => p && p.reasoning !== undefined);
+        const nonReasoningParts = parts.filter((p: any) => p && p.reasoning === undefined);
+
+        // 如果包含思维链，则累积暂存
+        if (reasoningParts.length > 0) {
+          accumulatedReasoning.push(...reasoningParts);
         }
 
-        // 如果这是一条有实质内容的助手消息（文本或工具调用），且有积压的思维部分，将其合并到头部
-        if (pendingReasoningParts.length > 0) {
-          clonedContent.parts = [...pendingReasoningParts, ...parts];
-          pendingReasoningParts = []; // 清空暂存
+        // 如果含有非思维的实质部分（文本、工具调用等），则保留该消息，并合并已暂存的思维链
+        if (nonReasoningParts.length > 0) {
+          if (accumulatedReasoning.length > 0) {
+            clonedContent.parts = [...accumulatedReasoning, ...nonReasoningParts];
+            accumulatedReasoning = []; // 消费后清除暂存
+          } else {
+            clonedContent.parts = nonReasoningParts;
+          }
+          consolidated.push(clonedContent);
+        } else {
+          // 如果是纯思维链消息（无任何实质正文/工具调用），且已经累积，则安全跳过此独立消息，避免发送连续的助手消息
+          continue;
         }
-      } else if (clonedContent.role === MESSAGE_ROLES.USER) {
-        // 用户消息说明上一个助手回合结束，如有未合并的思维块则丢弃
-        pendingReasoningParts = [];
+      } else {
+        // 遇到非 model 消息（user 或 tool），说明当前助手回合结束。清空暂存，防止跨回合污染
+        accumulatedReasoning = [];
+        consolidated.push(clonedContent);
       }
-
-      consolidated.push(clonedContent);
     }
 
     const cleaned = consolidated.filter(content => {
