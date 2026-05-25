@@ -37,6 +37,9 @@ export enum SceneType {
 
   /** 编辑校正场景 */
   EDIT_CORRECTION = 'edit_correction',
+
+  /** 图片辅助识别场景（用于不支持图片的纯文本模型） */
+  IMAGE_READER = 'image_reader',
 }
 
 /**
@@ -57,6 +60,7 @@ export const SCENE_MODEL_MAPPING: Record<SceneType, string> = {
   [SceneType.JSON_GENERATION]: 'gemini-2.5-flash', // 保持不变
   [SceneType.COMPRESSION]: 'gemini-2.5-flash',    // 保持不变
   [SceneType.SUB_AGENT]: 'auto',                  // 原: claude-sonnet-4@20250514 → 现: auto
+  [SceneType.IMAGE_READER]: 'gemini-2.5-flash',   // 图片识别：使用最便宜的 flash 模型
 };
 
 /**
@@ -102,6 +106,7 @@ export class SceneManager {
       [SceneType.JSON_GENERATION]: 'JSON生成',
       [SceneType.COMPRESSION]: '对话压缩',
       [SceneType.SUB_AGENT]: 'SubAgent子代理',
+      [SceneType.IMAGE_READER]: '图片识别',
     };
 
     return displayNames[scene] || scene;
