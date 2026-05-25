@@ -1555,6 +1555,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     async (submittedValue: string) => {
       const trimmedValue = submittedValue.trim();
       if (trimmedValue.length > 0) {
+        // 更新最后用户交互时间（goal 看门狗用）
+        lastUserInteractionRef.current = Date.now();
         // Clear screen once when user first submits message after logo is shown
         if (logoShows) {
           clearScreenWithScrollBuffer(stdout);
@@ -1719,6 +1721,69 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     }
   }, [elapsedTime, streamingState]);
 
+  // 🎯 /goal 模式心跳：每秒探测 GeminiClient.activeGoalContext，让底部状态栏
+  // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
+  const isGoalActive = useGoalActive(config);
+
+  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
+
+  // ──── Goal 模式 Idle 看门狗 ────
+  // 问题：某些 AI 模型在 /goal 模式下会"发呆"——既不继续工作，也不调用
+  // goal_achieved。表现为 streamingState=Idle 但 goal 契约未释放。
+  // 解决：跟踪上次用户交互时间；如果 goal active + idle + 60s 无交互，
+  // 自动 silent-submit 一条提示消息让 AI 继续。
+  const GOAL_IDLE_TIMEOUT_MS = 60_000;
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const goalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 追踪用户交互：任何提交输入、slash命令等都会更新此时间戳
+  // 我们在 handleFinalSubmit 中手动更新，避免闭包依赖问题
+
+  useEffect(() => {
+    // 卫语句：只有在 goal 活跃、当前空闲、且非退出状态时，才需要开启看门狗
+    const isWatchdogNeeded = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+    if (!isWatchdogNeeded) {
+      return;
+    }
+
+    const elapsed = Date.now() - lastUserInteractionRef.current;
+    const remainingTime = Math.max(0, GOAL_IDLE_TIMEOUT_MS - elapsed);
+
+    goalIdleTimerRef.current = setTimeout(() => {
+      goalIdleTimerRef.current = null;
+
+      // 触发时二次确认条件仍然满足
+      const isStillEligible = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+      if (!isStillEligible) {
+        return;
+      }
+
+      // 发送前更新时间戳，避免消息发出后立即又触发（防抖）
+      lastUserInteractionRef.current = Date.now();
+
+      const goalContinuePrompt =
+        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
+        '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
+        '请立即执行以下检查：\n' +
+        '1. 调用 local_time 确认当前时间和你的工作时长\n' +
+        '2. 对照目标契约检查完成情况——哪些达标、哪些还差\n' +
+        '3. 如果全部达标 → 调用 goal_achieved 声明完成\n' +
+        '4. 如果未达标 → 继续执行剩余工作（调用工具、写代码、运行测试等）\n\n' +
+        '目标契约仍在生效中，请继续工作。';
+
+      submitQuery(goalContinuePrompt, { silent: true });
+    }, remainingTime);
+
+    return () => {
+      if (goalIdleTimerRef.current) {
+        clearTimeout(goalIdleTimerRef.current);
+        goalIdleTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGoalActive, streamingState, getIsQuitting]);
+
   const { shouldShowSummary, completionElapsedTime } = useTaskCompletionSummary(
     streamingState,
     lastElapsedTimeBeforeIdleRef.current
@@ -1730,12 +1795,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       completionSummaryCounterRef.current += 1;
     }
   }, [shouldShowSummary]);
-
-  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
-
-  // 🎯 /goal 模式心跳：每秒探测 GeminiClient.activeGoalContext，让底部状态栏
-  // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
-  const isGoalActive = useGoalActive(config);
 
   const handleExit = useCallback(
     (
