@@ -95,7 +95,12 @@ interface MultiSessionMessageFromExtension {
        'stream_recovery_countdown' |
        'stream_recovery_end' |
        // 🔐 认证过期通知
-       'auth_expired';
+       'auth_expired' |
+       // 🟢 自定义模型管理响应
+       'custom_models_response' |
+       'custom_models_changed' |
+       'fetch_easy_router_models_response' |
+       'fetch_easy_claw_metadata_response';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -160,7 +165,13 @@ export interface MultiSessionMessageToExtension {
        'background_task_request' |
        'background_task_move_to_background' |
        // 🎯 注入系统消息到 AI 历史（不显示在 UI）
-       'inject_system_message';
+       'inject_system_message' |
+       // 🟢 自定义模型管理请求
+       'list_custom_models' |
+       'add_custom_models' |
+       'delete_custom_model' |
+       'fetch_easy_router_models' |
+       'fetch_easy_claw_metadata';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };

@@ -804,6 +804,87 @@ export class MultiSessionCommunicationService {
   }
 
   // =============================================================================
+  // 🟢 自定义模型管理（与 CLI 共享 ~/.deepv/custom-models.json）
+  //
+  // 所有请求都带 requestId，extension 把响应原样回写到 webview。
+  // 与 onGetAvailableModels 的协议一致，避免 webview 端混用监听器。
+  // =============================================================================
+
+  onListCustomModels(handler: (data: { requestId: string }) => void): vscode.Disposable {
+    return this.addMessageHandler('list_custom_models', handler);
+  }
+
+  onAddCustomModels(
+    handler: (data: { requestId: string; models: any[] }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('add_custom_models', handler);
+  }
+
+  onDeleteCustomModel(
+    handler: (data: { requestId: string; modelId: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('delete_custom_model', handler);
+  }
+
+  onFetchEasyRouterModels(
+    handler: (data: { requestId: string; apiKey: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('fetch_easy_router_models', handler);
+  }
+
+  onFetchEasyClawMetadata(
+    handler: (data: { requestId: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('fetch_easy_claw_metadata', handler);
+  }
+
+  /**
+   * Reply to a custom-model request (list / add / delete) using the same
+   * `requestId` the webview sent. The webview's customModelsService matches
+   * pending promises by id.
+   */
+  async sendCustomModelsResponse(
+    requestId: string,
+    response: { success: boolean; models?: any[]; error?: string },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'custom_models_response',
+      payload: { requestId, ...response },
+    });
+  }
+
+  /**
+   * Broadcast that the persisted custom-model list changed. Sent without
+   * requestId so all webviews / model selectors can refresh themselves.
+   */
+  async sendCustomModelsChanged(models: any[]): Promise<void> {
+    await this.sendMessage({
+      type: 'custom_models_changed',
+      payload: { models },
+    });
+  }
+
+  async sendFetchEasyRouterModelsResponse(
+    requestId: string,
+    response: { success: boolean; models?: any[]; error?: string; status?: number },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'fetch_easy_router_models_response',
+      payload: { requestId, ...response },
+    });
+  }
+
+  async sendFetchEasyClawMetadataResponse(
+    requestId: string,
+    response: { success: boolean; entries?: Array<[string, any]>; error?: string },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'fetch_easy_claw_metadata_response',
+      payload: { requestId, ...response },
+    });
+  }
+
+  // =============================================================================
   // 🎯 增强的 Lint 智能通知功能
   // =============================================================================
 
