@@ -450,3 +450,118 @@
     opacity: 1;
   }
 }
+
+/* 🧠 思考模式选择器样式 */
+.thinking-selector-container {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.thinking-selector-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 6px;
+  color: var(--vscode-dropdown-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.thinking-selector-trigger:hover {
+  background: var(--vscode-dropdown-listBackground);
+  border-color: var(--vscode-focusBorder);
+}
+
+.thinking-selector-trigger.open {
+  border-color: var(--vscode-focusBorder);
+}
+
+.thinking-icon {
+  font-size: 14px;
+}
+
+.thinking-label {
+  font-weight: 500;
+}
+
+.thinking-chevron {
+  opacity: 0.6;
+  transition: transform 0.2s;
+}
+
+.thinking-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+/* 思考模式下拉面板 */
+.thinking-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  width: 250px;
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.thinking-options-list {
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.thinking-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.thinking-option:hover {
+  background: var(--vscode-dropdown-listBackground);
+}
+
+.thinking-option.selected {
+  background: var(--vscode-dropdown-listBackground);
+  color: var(--vscode-focusBorder);
+}
+
+.option-icon {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.option-details {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.option-label {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.option-desc {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
