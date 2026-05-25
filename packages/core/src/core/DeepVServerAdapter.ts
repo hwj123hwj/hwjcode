@@ -115,7 +115,8 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
     }
   } else if (modelLower.includes('claude') || modelLower.includes('anthropic')) {
     // 2. Claude (Anthropic) 代理配置
-    if (thinkingConfig.mode === 'off') {
+    const isHaiku = modelLower.includes('haiku');
+    if (isHaiku || thinkingConfig.mode === 'off') {
       config.generationConfig.thinking = { type: 'disabled' };
     } else {
       // 现代 Claude 4.6+ / Sonnet 4.6/4.7+ 适配，彻底防范 400 报错

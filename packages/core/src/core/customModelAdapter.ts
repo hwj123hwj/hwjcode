@@ -1326,8 +1326,9 @@ export async function callAnthropicModel(
 
   // 🆕 Extended Thinking 智能启用与力度调控策略：
   const thinkingConfig = resolveThinkingConfig(modelConfig);
-  const isThinkingEnabled = thinkingConfig.mode === 'on' ||
-    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
+  const isHaiku = modelConfig.modelId.toLowerCase().includes('haiku');
+  const isThinkingEnabled = !isHaiku && (thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
   if (isThinkingEnabled) {
     // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
@@ -1662,8 +1663,9 @@ export async function* callAnthropicModelStream(
 
   // 🆕 Extended Thinking 智能启用与力度调控策略（流式调用）：
   const thinkingConfig = resolveThinkingConfig(modelConfig);
-  const isThinkingEnabled = thinkingConfig.mode === 'on' ||
-    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
+  const isHaiku = modelConfig.modelId.toLowerCase().includes('haiku');
+  const isThinkingEnabled = !isHaiku && (thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
   if (isThinkingEnabled) {
     // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
