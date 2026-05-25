@@ -299,13 +299,45 @@ export class DeepVServerAdapter implements ContentGenerator {
   }
 
   /**
-   * 清理内容，移除空消息和无效部分
-   * 针对 Claude 等对消息格式要求严格的模型
+   * 清理内容，移除空消息和无效部分，同时合并流式历史中的思维部分到主消息中
+   * 针对 Claude、Kimi、GLM 等对消息格式要求严格的模型
    */
   private cleanContents(contents: any[]): any[] {
     if (!Array.isArray(contents)) return contents;
 
-    const cleaned = contents.filter(content => {
+    const consolidated: any[] = [];
+    let pendingReasoningParts: any[] = [];
+
+    for (const content of contents) {
+      // 深度拷贝消息以防修改原始历史
+      const clonedContent = {
+        role: content.role,
+        parts: content.parts ? [...content.parts] : []
+      };
+
+      if (clonedContent.role === MESSAGE_ROLES.MODEL) {
+        const parts = clonedContent.parts || [];
+        const isPureReasoning = parts.length > 0 && parts.every((p: any) => p.reasoning !== undefined);
+
+        if (isPureReasoning) {
+          pendingReasoningParts.push(...parts);
+          continue; // 跳过纯思维块消息，暂存其内容
+        }
+
+        // 如果这是一条有实质内容的助手消息（文本或工具调用），且有积压的思维部分，将其合并到头部
+        if (pendingReasoningParts.length > 0) {
+          clonedContent.parts = [...pendingReasoningParts, ...parts];
+          pendingReasoningParts = []; // 清空暂存
+        }
+      } else if (clonedContent.role === MESSAGE_ROLES.USER) {
+        // 用户消息说明上一个助手回合结束，如有未合并的思维块则丢弃
+        pendingReasoningParts = [];
+      }
+
+      consolidated.push(clonedContent);
+    }
+
+    const cleaned = consolidated.filter(content => {
       // 1. 移除没有 parts 的消息
       if (!content.parts || content.parts.length === 0) return false;
 
@@ -313,7 +345,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       const hasValidPart = content.parts.some((part: any) => {
         // 如果是文本，必须非空
         if (part.text !== undefined) return part.text.trim() !== '';
-        // 其他类型（functionCall, functionResponse, etc.）视为有效
+        // 其他类型（functionCall, functionResponse, reasoning, etc.）视为有效
         return true;
       });
 
