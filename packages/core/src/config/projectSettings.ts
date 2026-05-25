@@ -228,7 +228,7 @@ export class ProjectSettingsManager {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
     const validModes = new Set(['on', 'off', 'auto']);
-    const validEfforts = new Set(['low', 'medium', 'high', 'max', 'auto']);
+    const validEfforts = new Set(['low', 'medium', 'high', 'max', 'xhigh', 'auto']);
 
     const mode = typeof obj.mode === 'string' && validModes.has(obj.mode)
       ? (obj.mode as ThinkingConfig['mode'])

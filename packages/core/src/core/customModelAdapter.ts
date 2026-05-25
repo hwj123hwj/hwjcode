@@ -8,7 +8,7 @@ import {
   GenerateContentResponse,
   FinishReason,
 } from '@google/genai';
-import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, isAdaptiveThinkingClaude } from '../types/customModel.js';
+import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToGeminiLevel, effortToGeminiBudget, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking, applyOpenAIChatThinking } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
@@ -480,7 +480,11 @@ const OpenAIConverter = {
           function: {
             name: fd.name,
             description: fd.description,
-            parameters: fd.parameters,
+            // 🔧 与 Responses API 共用：把 Google GenAI 的大写 type
+            // ("STRING" / "BOOLEAN" / ...) 转小写，并强转 integer 关键字。
+            // 严格的 OpenAI 兼容网关（DeepSeek 等）会按 JSON Schema 校验，
+            // 收到 "BOOLEAN" 直接 400 报错。
+            parameters: OpenAIResponsesConverter.cleanSchema(fd.parameters),
           },
         }));
       }
@@ -489,7 +493,7 @@ const OpenAIConverter = {
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: tool.parameters,
+          parameters: OpenAIResponsesConverter.cleanSchema(tool.parameters),
         },
       }];
     });
@@ -706,25 +710,11 @@ export async function callOpenAICompatibleModel(
     stream: false,
   };
 
-  const modelIdLower = modelConfig.modelId.toLowerCase();
-  const isGLM = modelIdLower.includes('glm');
-
-  if (isGLM) {
-    // 智谱 GLM 系列思维模式适配
-    requestBody.extra_body = {
-      thinking: thinkingConfig.mode === 'off'
-        ? { type: 'disabled' }
-        : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
-    };
-  } else if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
-  } else {
-    // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
-    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
-    if (openaiEffort) {
-      requestBody.reasoning_effort = openaiEffort;
-    }
-  }
+  // Vendor-aware thinking dispatch — mirrors DeepVServerAdapter so direct &
+  // proxied paths produce identical upstream requests.
+  // Unknown vendors (DeepSeek / Kimi / Grok / MiniMax / MiMo) intentionally
+  // emit no thinking field to avoid HTTP 400 from strict OpenAI-compat layers.
+  applyOpenAIChatThinking(requestBody, modelConfig.modelId, thinkingConfig);
 
   // 使用指数退避重试包装 API 调用
   return retryWithBackoff(
@@ -968,13 +958,27 @@ const OpenAIResponsesConverter = {
 
   /**
    * 从 Responses API 的 output items 中提取 parts
+   *
+   * 项目类型对照：
+   * - reasoning  → 含 summary[] 数组（gpt-5.x 思考摘要），映射为 { reasoning } parts
+   * - message    → 内含 content[] 含 output_text，映射为 { text } parts
+   * - function_call → 直接映射为 { functionCall } part
    */
   outputToParts(output: any[]): any[] {
     const parts: any[] = [];
     if (!output || !Array.isArray(output)) return parts;
 
     for (const item of output) {
-      if (item.type === 'message') {
+      if (item.type === 'reasoning') {
+        // Reasoning items hold one or more summary blocks: { type:'summary_text', text:'…' }
+        if (Array.isArray(item.summary)) {
+          for (const s of item.summary) {
+            if (s?.type === 'summary_text' && typeof s.text === 'string' && s.text) {
+              parts.push({ reasoning: s.text });
+            }
+          }
+        }
+      } else if (item.type === 'message') {
         // message item contains content array
         if (item.content && Array.isArray(item.content)) {
           for (const c of item.content) {
@@ -1028,13 +1032,22 @@ export async function callOpenAIResponsesModel(
     store: false, // Don't store responses on the server
   };
 
+  // OpenAI Responses API expects `reasoning.effort`; the value mirrors what
+  // we'd send as Chat Completions' `reasoning_effort`.
+  // - mode='off'  → effort='low' to keep tokens minimal (Responses API rejects 'none' for some models).
+  // - mode!='off' → effort from user (auto → 'medium' so gpt-5.x actually thinks).
+  //
+  // 🚨 EasyRouter gateway quirk (probe-confirmed 2026-05-26):
+  //   The default `summary='auto'` does NOT actually emit reasoning summary
+  //   chunks for gpt-5.x via llm-endpoint.net. Only `summary='detailed'`
+  //   produces `response.reasoning_summary_text.delta` events. Without this,
+  //   the client receives 0 reasoning bytes even with effort='high'.
+  //   See scripts/probe-gpt55-thinking.mjs.
   if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning = { effort: 'low' }; // 最低限度思考以省 token
+    requestBody.reasoning = { effort: 'low', summary: 'detailed' };
   } else {
-    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
-    if (openaiEffort) {
-      requestBody.reasoning = { effort: openaiEffort };
-    }
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort) ?? 'medium';
+    requestBody.reasoning = { effort: openaiEffort, summary: 'detailed' };
   }
 
   return retryWithBackoff(
@@ -1107,13 +1120,14 @@ export async function* callOpenAIResponsesModelStream(
     store: false,
   };
 
+  // Same routing as the non-stream Responses path — see callOpenAIResponsesModel.
+  // EasyRouter gateway requires summary='detailed' to actually emit reasoning
+  // chunks; 'auto' silently drops them.
   if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning = { effort: 'low' }; // 最低限度思考以省 token
+    requestBody.reasoning = { effort: 'low', summary: 'detailed' };
   } else {
-    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
-    if (openaiEffort) {
-      requestBody.reasoning = { effort: openaiEffort };
-    }
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort) ?? 'medium';
+    requestBody.reasoning = { effort: openaiEffort, summary: 'detailed' };
   }
 
   const response = await retryWithBackoff(
@@ -1201,6 +1215,22 @@ export async function* callOpenAIResponsesModelStream(
 
         try {
           const event = JSON.parse(dataStr);
+
+          // response.reasoning_summary_text.delta - reasoning summary streaming
+          // gpt-5.x emits these only when reasoning.summary='detailed' is set
+          // (EasyRouter gateway never honors 'auto'). The delta string is
+          // a chunk of natural-language summary; map it to a `reasoning` part
+          // so the UI thinking-block renderer picks it up.
+          if (event.type === 'response.reasoning_summary_text.delta') {
+            const reasoning = event.delta || '';
+            if (reasoning) {
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as any as GenerateContentResponse;
+            }
+          }
 
           // response.output_text.delta - text content streaming
           if (event.type === 'response.output_text.delta') {
@@ -1341,11 +1371,7 @@ export async function callAnthropicModel(
 
     if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
-      requestBody.thinking = {
-        type: 'adaptive',
-        effort,
-        display: 'summarized', // 🆕 显式指定汇总并输出思考内容（解决 Opus 4.7 默认 display: "omitted" 导致看不到思考过程的 Anthropic 限制）
-      };
+      applyAnthropicAdaptiveThinking(requestBody, effort);
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
       const budgetTokens = thinkingConfig.budgetTokens !== undefined
@@ -1450,25 +1476,8 @@ export async function* callOpenAICompatibleModelStream(
     stream_options: { include_usage: true } // 请求包含 usage 信息
   };
 
-  const modelIdLower = modelConfig.modelId.toLowerCase();
-  const isGLM = modelIdLower.includes('glm');
-
-  if (isGLM) {
-    // 智谱 GLM 系列思维模式适配
-    requestBody.extra_body = {
-      thinking: thinkingConfig.mode === 'off'
-        ? { type: 'disabled' }
-        : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
-    };
-  } else if (thinkingConfig.mode === 'off') {
-    requestBody.reasoning_effort = 'none'; // 🌟 强制关闭思考 (gpt-5.5 / o-series 官方标准 none 档位)
-  } else {
-    // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
-    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
-    if (openaiEffort) {
-      requestBody.reasoning_effort = openaiEffort;
-    }
-  }
+  // Vendor-aware thinking dispatch (see callOpenAICompatibleModel for details).
+  applyOpenAIChatThinking(requestBody, modelConfig.modelId, thinkingConfig);
 
   // 使用指数退避重试包装初始连接
   const response = await retryWithBackoff(
@@ -1678,11 +1687,7 @@ export async function* callAnthropicModelStream(
 
     if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
-      requestBody.thinking = {
-        type: 'adaptive',
-        effort,
-        display: 'summarized', // 🆕 显式指定汇总并输出思考内容（解决 Opus 4.7 默认 display: "omitted" 导致看不到思考过程的 Anthropic 限制）
-      };
+      applyAnthropicAdaptiveThinking(requestBody, effort);
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
       const budgetTokens = thinkingConfig.budgetTokens !== undefined
@@ -1883,18 +1888,330 @@ export async function* callAnthropicModelStream(
   }
 }
 
+// ============================================================================
+// Gemini native (GenAI v1beta) — POST /v1beta/models/{id}:streamGenerateContent
+// ----------------------------------------------------------------------------
+// Mirrors what DeepVServerAdapter sends for Gemini through its proxy: the
+// request body is a real Google GenAI payload (not OpenAI-shimmed), so we
+// keep `thinkingConfig`, `thoughts`, `parts.functionCall`, and other native
+// features instead of round-tripping through OpenAI's reduced schema.
+//
+// Probe-confirmed (2026-05-26) on EasyRouter:
+//   • /v1beta/models/{id}:streamGenerateContent?key=…&alt=sse  → 200 OK
+//   • thinkingConfig: { thinkingBudget: -1, includeThoughts: true } actually
+//     emits parts with `thought: true` and reasoning text.
+// See scripts/probe-gemini-thinking.mjs for the verification harness.
+// ============================================================================
+
 /**
- * 统一入口
+ * Apply user's resolved {@link ThinkingConfig} to a Gemini GenAI request body.
+ * Branches on Gemini family the same way DeepVServerAdapter does:
+ *   - Gemini 3 / 3.5  →  thinkingConfig.thinkingLevel ('minimal'|'low'|'medium'|'high')
+ *   - Gemini 2.5 (default) →  thinkingConfig.thinkingBudget (number; -1=dynamic, 0=disable)
+ * Always sets `includeThoughts: true` when thinking is on so the model emits
+ * `parts[].thought = true` chunks the UI renders as the thinking block.
  */
+function applyGeminiNativeThinking(
+  generationConfig: Record<string, unknown>,
+  modelId: string,
+  thinking: ReturnType<typeof resolveThinkingConfig>,
+): void {
+  const lower = modelId.toLowerCase();
+  const isGemini3 = lower.includes('gemini-3') || lower.includes('gemini-3.5');
+  if (thinking.mode === 'off') {
+    generationConfig.thinkingConfig = isGemini3
+      ? { thinkingLevel: 'minimal' }
+      : { thinkingBudget: 0 };
+    return;
+  }
+  if (isGemini3) {
+    const level = effortToGeminiLevel(thinking.effort) || 'medium';
+    generationConfig.thinkingConfig = { thinkingLevel: level, includeThoughts: true };
+  } else {
+    const budget =
+      thinking.budgetTokens !== undefined
+        ? thinking.budgetTokens
+        : effortToGeminiBudget(thinking.effort) ?? -1; // -1 = dynamic thinking (Gemini 2.5 default)
+    generationConfig.thinkingConfig = { thinkingBudget: budget, includeThoughts: true };
+  }
+}
+
+/**
+ * Build the GenAI native request body. Forwards `request.contents` /
+ * `request.config.tools` / `request.config.systemInstruction` etc. directly —
+ * the server-side proxy has been doing this same passthrough already.
+ */
+function buildGeminiNativeRequestBody(
+  modelConfig: CustomModelConfig,
+  request: any,
+): Record<string, unknown> {
+  const reqConfig = request?.config || {};
+  const generationConfig: Record<string, unknown> = {
+    ...(reqConfig.generationConfig || {}),
+  };
+  // Pull selected top-level GenAI config knobs into generationConfig
+  // (the Google SDK lets users specify either at top-level config.* or under
+  // generationConfig.*; we normalise into generationConfig for the wire body).
+  for (const k of ['temperature', 'topP', 'topK', 'maxOutputTokens', 'stopSequences', 'candidateCount', 'responseMimeType', 'responseSchema'] as const) {
+    if (reqConfig[k] !== undefined && generationConfig[k] === undefined) {
+      generationConfig[k] = reqConfig[k];
+    }
+  }
+
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  applyGeminiNativeThinking(generationConfig, modelConfig.modelId, thinkingConfig);
+
+  const body: Record<string, unknown> = {
+    contents: request.contents,
+    generationConfig,
+  };
+  if (reqConfig.systemInstruction) body.systemInstruction = reqConfig.systemInstruction;
+  if (reqConfig.tools) body.tools = reqConfig.tools;
+  if (reqConfig.toolConfig) body.toolConfig = reqConfig.toolConfig;
+  if (reqConfig.safetySettings) body.safetySettings = reqConfig.safetySettings;
+  return body;
+}
+
+/**
+ * Build the EasyRouter / GenAI endpoint URL. Uses Google's documented
+ * `?key=...` form (works on both google.googleapis.com and the EasyRouter
+ * gateway, no Authorization header required).
+ */
+function buildGeminiNativeUrl(
+  modelConfig: CustomModelConfig,
+  method: 'streamGenerateContent' | 'generateContent',
+): string {
+  const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
+  const apiKey = resolveEnvVar(modelConfig.apiKey);
+  // Normalise base: callers configure `https://llm-endpoint.net/v1` from
+  // EasyRouter, but the GenAI mount is /v1beta. If the configured base is
+  // already a /v1beta-style endpoint, leave it alone.
+  const root = baseUrl.endsWith('/v1beta')
+    ? baseUrl
+    : baseUrl.replace(/\/v1$/, '') + '/v1beta';
+  const sep = method === 'streamGenerateContent' ? '?alt=sse&key=' : '?key=';
+  return `${root}/models/${encodeURIComponent(modelConfig.modelId)}:${method}${sep}${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Map a single GenAI streaming JSON chunk to one or more
+ * GenerateContentResponse-shaped objects ready to yield. Specifically, splits
+ * `parts[]` into:
+ *   • `{ thought: true, text }` → `{ reasoning: text }` (UI thinking block)
+ *   • `{ text }`                → `{ text }`            (regular output)
+ *   • `{ functionCall }`        → `{ functionCall }`
+ * so downstream chat consumers see the same shape they expect from any other
+ * provider.
+ */
+function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentResponse> {
+  const cand = chunk?.candidates?.[0];
+  const parts = cand?.content?.parts;
+  if (Array.isArray(parts) && parts.length > 0) {
+    const mappedParts: any[] = [];
+    for (const p of parts) {
+      if (p?.thought === true && typeof p.text === 'string') {
+        mappedParts.push({ reasoning: p.text });
+      } else if (typeof p?.text === 'string') {
+        mappedParts.push({ text: p.text });
+      } else if (p?.functionCall) {
+        mappedParts.push({
+          functionCall: {
+            name: p.functionCall.name?.trim() || p.functionCall.name,
+            args: p.functionCall.args || {},
+            id: p.functionCall.id,
+          },
+        });
+      } else if (p?.inlineData) {
+        // Pass through inline image/audio data unchanged.
+        mappedParts.push({ inlineData: p.inlineData });
+      }
+    }
+    if (mappedParts.length > 0) {
+      const content = { role: MESSAGE_ROLES.MODEL, parts: mappedParts };
+      const resp = {
+        candidates: [
+          {
+            content,
+            ...(cand.finishReason ? { finishReason: cand.finishReason } : {}),
+            index: 0,
+          },
+        ],
+      };
+      addFunctionCallsGetter(resp);
+      addFunctionCallsGetter(content);
+      yield resp as any as GenerateContentResponse;
+    }
+  }
+  // Usage metadata may arrive on any chunk (often the last one) — forward it.
+  if (chunk?.usageMetadata) {
+    yield {
+      candidates: [],
+      usageMetadata: chunk.usageMetadata,
+    } as any;
+  }
+}
+
+/**
+ * Gemini native single-shot call (GenAI generateContent).
+ */
+export async function callGeminiNativeModel(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal,
+): Promise<GenerateContentResponse> {
+  const url = buildGeminiNativeUrl(modelConfig, 'generateContent');
+  const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+
+  return retryWithBackoff(
+    async () => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw createHttpError(response.status, `Gemini native error (${response.status}): ${errorText}`, response);
+      }
+      const data = await response.json();
+      const cand = data.candidates?.[0];
+      const rawParts = cand?.content?.parts || [];
+      const parts: any[] = [];
+      for (const p of rawParts) {
+        if (p?.thought === true && typeof p.text === 'string') {
+          parts.push({ reasoning: p.text });
+        } else if (typeof p?.text === 'string') {
+          parts.push({ text: p.text });
+        } else if (p?.functionCall) {
+          parts.push({
+            functionCall: {
+              name: p.functionCall.name?.trim() || p.functionCall.name,
+              args: p.functionCall.args || {},
+              id: p.functionCall.id,
+            },
+          });
+        } else if (p?.inlineData) {
+          parts.push({ inlineData: p.inlineData });
+        }
+      }
+
+      const result = {
+        candidates: [
+          {
+            content: { role: MESSAGE_ROLES.MODEL, parts: parts.length ? parts : [{ text: '' }] },
+            ...(cand?.finishReason ? { finishReason: cand.finishReason } : { finishReason: FinishReason.STOP }),
+            index: 0,
+          },
+        ],
+        usageMetadata: data.usageMetadata,
+      };
+      addFunctionCallsGetter(result);
+      return result as any as GenerateContentResponse;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    },
+  );
+}
+
+/**
+ * Gemini native streaming call (GenAI streamGenerateContent + alt=sse).
+ *
+ * EasyRouter follows Google's wire format: lines look like
+ *   data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"…"}]}}]}
+ * separated by blank lines. We tolerate both `\n` and `\r\n` framings and
+ * a trailing partial chunk on the buffer between reads.
+ */
+export async function* callGeminiNativeModelStream(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal,
+): AsyncGenerator<GenerateContentResponse> {
+  const url = buildGeminiNativeUrl(modelConfig, 'streamGenerateContent');
+  const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw createHttpError(res.status, `Gemini native stream error (${res.status}): ${errorText}`, res);
+      }
+      return res;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    },
+  );
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        buffer += decoder.decode(undefined, { stream: false });
+      } else {
+        buffer += decoder.decode(value, { stream: true });
+      }
+
+      // SSE events are separated by blank lines. Tolerate both \n\n and \r\n\r\n.
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || '';
+      for (const ev of events) {
+        // Only interested in `data:` lines; concatenate them per-event.
+        let data = '';
+        for (const line of ev.split(/\r?\n/)) {
+          const trimmed = line.replace(/^\s+/, '');
+          if (trimmed.startsWith('data:')) data += trimmed.slice(5).trim();
+        }
+        if (!data || data === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(data);
+          yield* mapGeminiChunkToResponses(chunk);
+        } catch {
+          // Tolerate malformed chunks — Gemini streaming occasionally
+          // sends framing artefacts; swallow and continue.
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+
 export async function* callCustomModelStream(
   modelConfig: CustomModelConfig,
   request: any,
   abortSignal?: AbortSignal
 ): AsyncGenerator<GenerateContentResponse> {
   console.log(`[CustomModel] Stream call: ${modelConfig.displayName} (${modelConfig.provider})`);
+  // 🐛 [thinking-debug] 直连自定义模型路径 - 打印解析后的 thinking 配置
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/stream) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
+  );
   if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') yield* callAnthropicModelStream(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'gemini') yield* callGeminiNativeModelStream(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider for streaming: ${modelConfig.provider}`);
 }
 
@@ -1904,9 +2221,15 @@ export async function callCustomModel(
   abortSignal?: AbortSignal
 ): Promise<GenerateContentResponse> {
   console.log(`[CustomModel] Unary call: ${modelConfig.displayName} (${modelConfig.provider})`);
+  // 🐛 [thinking-debug] 直连自定义模型路径 - 打印解析后的 thinking 配置
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/unary) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
+  );
   if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') return callAnthropicModel(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'gemini') return callGeminiNativeModel(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider: ${modelConfig.provider}`);
 }
 
