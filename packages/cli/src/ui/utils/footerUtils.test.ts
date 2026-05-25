@@ -12,6 +12,7 @@ import {
   getShortModelName,
   getContextDisplay,
   getFooterDisplayConfig,
+  getThinkingEffortLabel,
 } from './footerUtils.js';
 
 describe('footerUtils', () => {
@@ -89,8 +90,8 @@ describe('footerUtils', () => {
 
   describe('getContextDisplay', () => {
     it('should return full text when simplified is false', () => {
-      expect(getContextDisplay(92, false)).toBe('(92% context left)');
-      expect(getContextDisplay(50, false)).toBe('(50% context left)');
+      expect(getContextDisplay(92, false)).toBe('92% ctx left');
+      expect(getContextDisplay(50, false)).toBe('50% ctx left');
     });
 
     it('should return percentage only when simplified is true', () => {
@@ -99,7 +100,7 @@ describe('footerUtils', () => {
     });
 
     it('should handle edge cases', () => {
-      expect(getContextDisplay(0, false)).toBe('(0% context left)');
+      expect(getContextDisplay(0, false)).toBe('0% ctx left');
       expect(getContextDisplay(100, false)).toBe(''); // 100% 时隐藏
       expect(getContextDisplay(0, true)).toBe('0%');
       expect(getContextDisplay(100, true)).toBe(''); // 100% 时隐藏
@@ -167,7 +168,7 @@ describe('footerUtils', () => {
       const model = getShortModelName('Claude-3.5-Sonnet', config.simplifyModel);
 
       expect(version).toBe('v1.0.161');
-      expect(context).toBe('(92% context left)');
+      expect(context).toBe('92% ctx left');
       expect(model).toBe('Claude-3.5-Sonnet');
     });
 
@@ -192,5 +193,50 @@ describe('footerUtils', () => {
       expect(context).toBe('92%');
       expect(model).toBe('Flash');
     });
+  });
+});
+
+describe('getThinkingEffortLabel', () => {
+  it('returns empty string when thinkingConfig is missing', () => {
+    expect(getThinkingEffortLabel(undefined)).toBe('');
+  });
+
+  it('returns empty string when thinking is off', () => {
+    expect(getThinkingEffortLabel({ mode: 'off' })).toBe('');
+    expect(getThinkingEffortLabel({ mode: 'off', effort: 'high' })).toBe('');
+  });
+
+  it('returns "auto" for auto mode', () => {
+    expect(getThinkingEffortLabel({ mode: 'auto' })).toBe('auto');
+    expect(getThinkingEffortLabel({ mode: 'auto', effort: 'auto' })).toBe('auto');
+  });
+
+  it('maps explicit effort values to short labels (≤4 chars)', () => {
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'max' })).toBe('max');
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'xhigh' })).toBe('xhi');
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'high' })).toBe('high');
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'medium' })).toBe('med');
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'low' })).toBe('low');
+  });
+
+  it('falls back to "on" when mode=on but no specific effort is set', () => {
+    expect(getThinkingEffortLabel({ mode: 'on' })).toBe('on');
+    expect(getThinkingEffortLabel({ mode: 'on', effort: 'auto' })).toBe('on');
+  });
+
+  it('every label is at most 4 chars (so footer stays narrow)', () => {
+    const labels = [
+      getThinkingEffortLabel({ mode: 'on', effort: 'max' }),
+      getThinkingEffortLabel({ mode: 'on', effort: 'xhigh' }),
+      getThinkingEffortLabel({ mode: 'on', effort: 'high' }),
+      getThinkingEffortLabel({ mode: 'on', effort: 'medium' }),
+      getThinkingEffortLabel({ mode: 'on', effort: 'low' }),
+      getThinkingEffortLabel({ mode: 'on' }),
+      getThinkingEffortLabel({ mode: 'auto' }),
+    ];
+    for (const label of labels) {
+      expect(label.length).toBeGreaterThan(0);
+      expect(label.length).toBeLessThanOrEqual(4);
+    }
   });
 });
