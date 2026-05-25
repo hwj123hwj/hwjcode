@@ -491,8 +491,8 @@ export function validateCustomModelConfig(config: CustomModelConfig): string[] {
     errors.push('displayName is required and must be a string');
   }
 
-  if (!['openai', 'openai-responses', 'anthropic'].includes(config.provider)) {
-    errors.push('provider must be one of: openai, openai-responses, anthropic');
+  if (!['openai', 'openai-responses', 'anthropic', 'gemini'].includes(config.provider)) {
+    errors.push('provider must be one of: openai, openai-responses, anthropic, gemini');
   }
 
   if (!config.baseUrl || typeof config.baseUrl !== 'string') {

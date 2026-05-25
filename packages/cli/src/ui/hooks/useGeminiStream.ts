@@ -188,15 +188,24 @@ function formatToolCallsForSummary(toolCalls: TrackedToolCall[]): string {
  * @param geminiClient GeminiClient 实例
  * @param summarySource AI 文本回复或用户原文
  * @param _currentModel 已废弃；保留参数以兼容旧调用点
+ * @param abortSignal 可选取消信号；用户开始新一轮 query 时取消上一个未完成的摘要请求，避免浪费配额与产生 race 条件
  * @returns 摘要文本，失败时返回空字符串
  */
 async function generateCheckpointSummary(
   geminiClient: GeminiClient,
   summarySource: string,
-  _currentModel?: string
+  _currentModel?: string,
+  abortSignal?: AbortSignal
 ): Promise<string> {
   const SUMMARY_MODEL = 'deepseek-v4-flash';
-  const SUMMARY_TIMEOUT_MS = 3000;
+  // 10s timeout：标题生成是 fire-and-forget 的后台任务，
+  // 不阻塞主 AI 请求；回来多晚都行，回来才设标题，回不来就维持原标题。
+  const SUMMARY_TIMEOUT_MS = 10000;
+
+  // 已被取消，直接返回，不发起请求
+  if (abortSignal?.aborted) {
+    return '';
+  }
 
   const targetLanguage = isChineseLocale() ? 'Chinese' : 'English';
   const lengthLimit = isChineseLocale() ? '8 Chinese characters' : '3 English words';
@@ -221,7 +230,12 @@ Return only the summary text.`;
 
   try {
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Summary generation timeout')), SUMMARY_TIMEOUT_MS);
+      const timer = setTimeout(() => reject(new Error('Summary generation timeout')), SUMMARY_TIMEOUT_MS);
+      // 被外部取消时立刻清掉定时器并 reject，让上层尽早走 catch
+      abortSignal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('Summary generation aborted'));
+      }, { once: true });
     });
 
     const summaryPromise = (async () => {
@@ -233,7 +247,12 @@ Return only the summary text.`;
       );
 
       const response = await chat.sendMessage(
-        { message: summaryPrompt },
+        {
+          message: summaryPrompt,
+          // 透传给 DeepVServerAdapter.generateContent → executeUnifiedChatAPICall，
+          // 由后者监听 abort 事件中止 fetch
+          config: { abortSignal } as never,
+        },
         `checkpoint-summary-${Date.now()}`,
         SceneType.CONTENT_SUMMARY
       );
@@ -340,6 +359,11 @@ export const useGeminiStream = (
   const aiTextBeforeToolsRef = useRef<string>('');
   // 🎯 用于保存当前会话的摘要，避免重复生成
   const currentSessionSummaryRef = useRef<string | null>(null);
+  // 🎯 用于取消上一次未完成的标题摘要请求。
+  // 与 abortControllerRef（主请求）独立，因为：
+  // 1. 主请求可能因用户 Esc 中断，但摘要仍需完成（用户其实没换话题）；
+  // 2. 用户连发新 query 时，旧 summary 必须被取消，否则会出现 race（旧的晚到覆盖新的）。
+  const summaryAbortControllerRef = useRef<AbortController | null>(null);
   const { startNewPrompt, getPromptCount } = useSessionStats();
   const logger = useLogger();
   const [gitService, setGitService] = useState<GitService | undefined>();
@@ -1593,6 +1617,16 @@ User question: ${queryStr}`;
         currentUserQueryRef.current = query.trim();
 
         // 🎯 立即生成会话摘要并更新窗口标题（基于用户消息）
+        // 取消上一次未完成的摘要请求：
+        // - 节省后端配额（旧的 LLM 调用没必要再跑完）
+        // - 防止 race：旧 summary 晚到时不应再覆盖新标题
+        if (summaryAbortControllerRef.current) {
+          summaryAbortControllerRef.current.abort();
+        }
+        const summaryController = new AbortController();
+        summaryAbortControllerRef.current = summaryController;
+        const summarySignal = summaryController.signal;
+
         (async () => {
            try {
              const trimmedQuery = query.trim();
@@ -1617,7 +1651,14 @@ User question: ${queryStr}`;
                    // 直接使用原文，但去除换行符以适应标题显示
                    summary = summarySource.replace(/[\r\n]+/g, ' ');
                 } else {
-                   summary = await generateCheckpointSummary(geminiClient, summarySource, config.getModel());
+                   summary = await generateCheckpointSummary(geminiClient, summarySource, config.getModel(), summarySignal);
+                }
+
+                // race 防护：如果在此期间用户已经发起新一轮 query，
+                // 当前 controller 已经不是最新的（或已被 abort），
+                // 那么本次摘要的结果作废，不写 ref 也不更新标题。
+                if (summarySignal.aborted || summaryAbortControllerRef.current !== summaryController) {
+                  return;
                 }
 
                 if (summary) {
@@ -1630,6 +1671,10 @@ User question: ${queryStr}`;
              }
            } catch (e) {
              // Non-critical: summary is just used for the window title.
+             // 用户连发新 query 导致主动 abort 是预期行为，不打 warn。
+             if (summarySignal.aborted) {
+               return;
+             }
              const msg = e instanceof Error ? e.message : String(e);
              console.warn('[Summary] Immediate summary skipped (non-critical):', msg);
            }

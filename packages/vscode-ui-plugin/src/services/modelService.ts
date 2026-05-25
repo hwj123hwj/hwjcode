@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { Logger } from '../utils/logger';
-import { isOurAuthError } from 'deepv-code-core';
+import { isOurAuthError, EASY_ROUTER_DEFAULT_MAX_TOKENS } from 'deepv-code-core';
 
 // 模型信息接口（匹配服务端API响应）
 export interface ModelInfo {
@@ -194,7 +194,9 @@ export class ModelService {
           displayName: m.displayName,
           creditsPerRequest: undefined,
           available: true,
-          maxToken: typeof m.maxTokens === 'number' && m.maxTokens > 0 ? m.maxTokens : 200_000,
+          // 🟢 maxToken 优先级：用户显式 maxTokens > EasyRouter 200K 默认。
+          // 与 CLI 的 wizard / buildEasyRouterModelConfig 赋值逻辑对齐。
+          maxToken: typeof m.maxTokens === 'number' && m.maxTokens > 0 ? m.maxTokens : EASY_ROUTER_DEFAULT_MAX_TOKENS,
           highVolumeThreshold: undefined,
           highVolumeCredits: undefined,
         }));
