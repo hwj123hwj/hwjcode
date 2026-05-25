@@ -68,6 +68,55 @@ const convertToModelOption = (model: ModelInfo, t: any): ModelOption => ({
   highVolumeThreshold: model.highVolumeThreshold
 });
 
+// 🧠 动态高保真科技感 SVG 脑部图标，根据思考深度（effort / mode）改变色彩和饱和度
+const BrainIcon: React.FC<{ level: string; size?: number }> = ({ level, size = 14 }) => {
+  let fill = 'rgba(128, 128, 128, 0.4)';
+
+  switch (level) {
+    case 'off':
+      fill = 'var(--vscode-disabledForeground, rgba(128, 128, 128, 0.35))';
+      break;
+    case 'auto':
+      fill = 'rgba(154, 85, 255, 0.7)'; // 自适应智慧紫
+      break;
+    case 'low':
+      fill = 'rgba(255, 105, 180, 0.45)'; // 45% 浅透粉色
+      break;
+    case 'medium':
+      fill = 'rgba(255, 60, 150, 0.7)';  // 70% 中饱粉色
+      break;
+    case 'high':
+    case 'on':
+      fill = 'rgba(255, 0, 120, 0.9)';   // 90% 鲜红高饱粉
+      break;
+    case 'max':
+      fill = 'rgba(218, 0, 150, 1.0)';   // 100% 极限洋红色
+      break;
+    default:
+      fill = 'rgba(154, 85, 255, 0.7)';
+  }
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={fill}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'inline-block', verticalAlign: 'middle', transition: 'stroke 0.3s ease, fill 0.3s ease' }}
+    >
+      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2z" fill={fill} fillOpacity="0.12" />
+      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2z" fill={fill} fillOpacity="0.12" />
+      <path d="M12 5c-1-1.5-3-1.5-4.5-.5S6 7 6.5 9s2 2 3.5 1M12 5c1-1.5 3-1.5 4.5-.5S18 7 17.5 9s-2 2-3.5 1" />
+      <path d="M9.5 10c-1.5 0-3 1.5-3 3s1.5 2.5 3 2.5M14.5 10c1.5 0 3 1.5 3 3s-1.5 2.5-3 2.5" />
+      <path d="M10 15.5c-1 1-1 2.5 0 3.5s2.5 1 3.5 0" />
+    </svg>
+  );
+};
+
 interface ModelSelectorProps {
   selectedModelId?: string;
   onModelChange?: (modelId: string, model: ModelOption) => void;
@@ -536,12 +585,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   // 🆕 构建思考模式备选项列表
   const thinkingOptionsList = useMemo(() => [
-    { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: '🧠', desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
-    { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: '💤', desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
-    { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
-    { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
-    { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
-    { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: '🧠', desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
+    { id: 'auto', label: t('thinking.mode.auto', undefined, 'Auto'), icon: <BrainIcon level="auto" size={14} />, desc: t('thinking.usage.auto', undefined, 'Let model default decide'), mode: 'auto', effort: 'auto' },
+    { id: 'off', label: t('thinking.mode.off', undefined, 'Off'), icon: <BrainIcon level="off" size={14} />, desc: t('thinking.usage.off', undefined, 'Force-disable thinking'), mode: 'off', effort: undefined },
+    { id: 'low', label: t('thinking.effort.low', undefined, 'Low'), icon: <BrainIcon level="low" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'low' },
+    { id: 'medium', label: t('thinking.effort.medium', undefined, 'Medium'), icon: <BrainIcon level="medium" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'medium' },
+    { id: 'high', label: t('thinking.effort.high', undefined, 'High'), icon: <BrainIcon level="high" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'high' },
+    { id: 'max', label: t('thinking.effort.max', undefined, 'Max'), icon: <BrainIcon level="max" size={14} />, desc: t('thinking.usage.effort', undefined, 'Set thinking effort depth'), mode: 'on', effort: 'max' }
   ], [t]);
 
   // 🆕 当前选中的思考配置项
@@ -612,8 +661,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <span
                       className="model-name"
                       ref={el => modelNameRefs.current[`selected-${selectedModel.id}`] = el}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
-                      {thinkingConfig?.mode !== 'off' ? '🧠 ' : ''}
+                      {thinkingConfig?.mode !== 'off' && (
+                        <BrainIcon level={currentThinkingOption.id} size={14} />
+                      )}
                       {selectedModel.displayName}
                     </span>
                     {showTooltip[`selected-${selectedModel.id}`] && tooltipPosition[`selected-${selectedModel.id}`] && (
