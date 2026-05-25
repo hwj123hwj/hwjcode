@@ -118,6 +118,61 @@ describe('GeminiChat', () => {
         config: {},
       }, SceneType.CHAT_CONVERSATION);
     });
+
+    it('should merge consecutive reasoning chunks and keep them in history', async () => {
+      // 模拟服务器流式下发：3 个 reasoning chunk + 1 个最终 text chunk
+      const response = (async function* () {
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'Let me ' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'think about ' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'this...' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ text: 'Final answer.' }] },
+            finishReason: 'STOP',
+            index: 0,
+          }],
+          text: () => 'Final answer.',
+        } as unknown as GenerateContentResponse;
+      })();
+      vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(
+        response,
+      );
+
+      const stream = await chat.sendMessageStream(
+        { message: 'hello' },
+        'prompt-id-2',
+        SceneType.CHAT_CONVERSATION,
+      );
+      // 消费完整个流以触发 recordHistory
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of stream) { /* drain */ }
+
+      const history = chat.getHistory();
+      // user + reasoning(合并后) + text，共 3 条
+      expect(history.length).toBe(3);
+      expect(history[0].role).toBe('user');
+      expect(history[1].role).toBe('model');
+      expect((history[1].parts?.[0] as any).reasoning).toBe(
+        'Let me think about this...',
+      );
+      expect(history[2].role).toBe('model');
+      expect(history[2].parts?.[0]?.text).toBe('Final answer.');
+    });
   });
 
   describe('recordHistory', () => {
@@ -472,6 +527,38 @@ describe('GeminiChat', () => {
       expect(history[1].parts?.[0]?.functionCall?.id).toBe('call1');
       expect(history[1].parts?.[1]?.functionCall?.id).toBe('call2');
       expect(history[1].parts?.[2]?.functionCall?.id).toBe('call3');
+    });
+
+    it('should keep reasoning content in history (not filter it out)', () => {
+      const modelOutput: Content[] = [
+        { role: 'model', parts: [{ reasoning: 'thinking step 1' } as Part] },
+        { role: 'model', parts: [{ text: 'final answer' }] },
+      ];
+      // @ts-expect-error Accessing private method for testing purposes
+      chat.recordHistory(userInput, modelOutput);
+      const history = chat.getHistory();
+      expect(history.length).toBe(3);
+      expect(history[0]).toEqual(userInput);
+      expect((history[1].parts?.[0] as any).reasoning).toBe('thinking step 1');
+      expect(history[2].parts?.[0]?.text).toBe('final answer');
+    });
+
+    it('should not merge reasoning content with subsequent text content', () => {
+      // reasoning 与紧随其后的 text 必须保持为独立的两条 model content，
+      // 否则 OpenAI/DeepSeek 协议下无法正确还原 reasoning_content 字段。
+      const modelOutput: Content[] = [
+        { role: 'model', parts: [{ reasoning: 'inner thought' } as Part] },
+        { role: 'model', parts: [{ text: 'visible answer' }] },
+      ];
+      // @ts-expect-error Accessing private method for testing purposes
+      chat.recordHistory(userInput, modelOutput);
+      const history = chat.getHistory();
+      expect(history.length).toBe(3);
+      // 第二条仍是 reasoning，没有被合并到 text 里
+      expect((history[1].parts?.[0] as any).reasoning).toBe('inner thought');
+      expect(history[1].parts?.[0]?.text).toBeUndefined();
+      // 第三条是纯 text
+      expect(history[2].parts?.[0]?.text).toBe('visible answer');
     });
   });
 

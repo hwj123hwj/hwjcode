@@ -8,7 +8,7 @@ import {
   GenerateContentResponse,
   FinishReason,
 } from '@google/genai';
-import { CustomModelConfig } from '../types/customModel.js';
+import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
@@ -346,12 +346,31 @@ const OpenAIConverter = {
   },
 
   contentsToMessages(contents: any[]): any[] {
-    return contents.map((content: any) => {
-      const parts = content.parts || [];
+    const messages: any[] = [];
+    let pendingReasoning = '';
 
+    for (const content of contents) {
+      const parts = content.parts || [];
+      const role = content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user';
+
+      // 1. 检查是否为纯思考消息：
+      // 在历史中，我们把流式输出的多个 reasoning 块通过 appendReasoningToOutput 聚合成纯 reasoning Content。
+      // 它通常只有 parts 且都是带 reasoning 字段的对象。
+      const isPureReasoning = role === 'assistant' && parts.length > 0 && parts.every((p: any) => p.reasoning !== undefined);
+      if (isPureReasoning) {
+        pendingReasoning += parts.map((p: any) => p.reasoning).join('');
+        continue; // 过滤纯思考消息，使其不作为独立对话发送（避免 API 报错）
+      }
+
+      // 如果遇到用户消息，说明当前助手回合结束。如果还没用掉 pendingReasoning，则清空（未调用工具时不拼接）
+      if (role === 'user') {
+        pendingReasoning = '';
+      }
+
+      // 2. 处理包含工具调用的消息
       if (parts.some((p: any) => p.functionCall)) {
-        return {
-          role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
+        const msg: any = {
+          role,
           content: null,
           tool_calls: parts
             .filter((p: any) => p.functionCall)
@@ -366,40 +385,57 @@ const OpenAIConverter = {
               },
             })),
         };
+
+        // DeepSeek 思考模式规则：在进行了工具调用的轮次中，reasoning_content 必须随 assistant 消息回传。
+        if (pendingReasoning) {
+          msg.reasoning_content = pendingReasoning;
+          pendingReasoning = ''; // 消费后清除
+        }
+
+        messages.push(msg);
+        continue;
       }
 
+      // 3. 处理工具执行结果消息
       if (parts.some((p: any) => p.functionResponse)) {
         const functionResponseParts = parts.filter((p: any) => p.functionResponse);
-        return functionResponseParts.map((p: any) => ({
+        const toolMessages = functionResponseParts.map((p: any) => ({
           role: 'tool',
           tool_call_id: p.functionResponse.id || `call_${p.functionResponse.name}`,
           content: typeof p.functionResponse.response === 'string'
             ? p.functionResponse.response
             : JSON.stringify(p.functionResponse.response || {}),
         }));
+        messages.push(...toolMessages);
+        continue;
       }
 
-      // 检查是否包含图片内容
+      // 4. 检查是否包含图片内容
       const hasImageContent = parts.some((p: any) => p.inlineData);
 
       if (hasImageContent) {
-        // 使用数组格式以支持混合内容（文本 + 图片）
         const contentParts = parts
           .map((part: any) => OpenAIConverter.partToOpenAIContent(part))
           .filter(Boolean);
 
-        return {
-          role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
+        const msg: any = {
+          role,
           content: contentParts,
         };
+        messages.push(msg);
+        continue;
       }
 
-      // 纯文本内容，使用简单字符串格式
-      return {
-        role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
-        content: parts.map((part: any) => part.text || '').join('\n'),
+      // 5. 纯文本内容
+      const textContent = parts.map((part: any) => part.text || '').join('\n');
+      const msg: any = {
+        role,
+        content: textContent,
       };
-    }).flat();
+      messages.push(msg);
+    }
+
+    return messages;
   },
 
   toolsToOpenAITools(tools: any[]): any[] | undefined {
@@ -629,12 +665,33 @@ export async function callOpenAICompatibleModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const url = `${baseUrl}/chat/completions`;
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     messages: OpenAIConverter.contentsToMessages(request.contents),
     tools: OpenAIConverter.toolsToOpenAITools(request.config?.tools),
     stream: false,
   };
+
+  const modelIdLower = modelConfig.modelId.toLowerCase();
+  const isGLM = modelIdLower.includes('glm');
+
+  if (isGLM) {
+    // 智谱 GLM 系列思维模式适配
+    requestBody.extra_body = {
+      thinking: thinkingConfig.mode === 'off'
+        ? { type: 'disabled' }
+        : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
+    };
+  } else if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning_effort = 'low'; // 强制降低思考强度以节省 token
+  } else {
+    // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
+    if (openaiEffort) {
+      requestBody.reasoning_effort = openaiEffort;
+    }
+  }
 
   // 使用指数退避重试包装 API 调用
   return retryWithBackoff(
@@ -660,6 +717,9 @@ export async function callOpenAICompatibleModel(
       const message = choice.message;
 
       const parts: any[] = [];
+      if (message.reasoning_content) {
+        parts.push({ reasoning: message.reasoning_content });
+      }
       if (message.content) parts.push({ text: message.content });
       if (message.tool_calls) {
         for (const tc of message.tool_calls) {
@@ -927,12 +987,22 @@ export async function callOpenAIResponsesModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const url = `${baseUrl}/responses`;
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     input: OpenAIResponsesConverter.contentsToInput(request.contents),
     tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
     store: false, // Don't store responses on the server
   };
+
+  if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning = { effort: 'low' }; // 最低限度思考以省 token
+  } else {
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
+    if (openaiEffort) {
+      requestBody.reasoning = { effort: openaiEffort };
+    }
+  }
 
   return retryWithBackoff(
     async () => {
@@ -995,6 +1065,7 @@ export async function* callOpenAIResponsesModelStream(
   const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
   const apiKey = resolveEnvVar(modelConfig.apiKey);
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     input: OpenAIResponsesConverter.contentsToInput(request.contents),
@@ -1002,6 +1073,15 @@ export async function* callOpenAIResponsesModelStream(
     stream: true,
     store: false,
   };
+
+  if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning = { effort: 'low' }; // 最低限度思考以省 token
+  } else {
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
+    if (openaiEffort) {
+      requestBody.reasoning = { effort: openaiEffort };
+    }
+  }
 
   const response = await retryWithBackoff(
     async () => {
@@ -1211,20 +1291,37 @@ export async function callAnthropicModel(
     requestBody.system = system;
   }
 
-  // 🆕 Extended Thinking 智能启用策略：
-  // 1. 如果用户明确设置了 enableThinking，遵循用户配置
-  // 2. 如果用户未设置（undefined），默认启用（所有 Anthropic 协议）
-  // 3. 不支持的模型会自动忽略 thinking 参数，因此统一启用更简单
-  const shouldEnableThinking = modelConfig.enableThinking !== undefined
-    ? modelConfig.enableThinking
-    : shouldEnableThinkingByDefault();
+  // 🆕 Extended Thinking 智能启用与力度调控策略：
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  const isThinkingEnabled = thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
 
-  if (shouldEnableThinking) {
+  if (isThinkingEnabled) {
     const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
-    requestBody.thinking = {
-      type: 'enabled',
-      budget_tokens: Math.min(maxTokens - 1, 31999), // budget_tokens 必须小于 max_tokens，默认使用官方推荐的 31999
-    };
+
+    // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
+    // 我们采用现代的 "adaptive" + "effort" 模式
+    const isModernClaude46 = modelConfig.modelId.includes('claude-4-6') ||
+      modelConfig.modelId.includes('-4.6') ||
+      (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+
+    if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+      const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
+      requestBody.thinking = {
+        type: 'adaptive',
+        effort,
+      };
+    } else {
+      // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
+      const budgetTokens = thinkingConfig.budgetTokens !== undefined
+        ? thinkingConfig.budgetTokens
+        : effortToAnthropicBudget(thinkingConfig.effort);
+
+      requestBody.thinking = {
+        type: 'enabled',
+        budget_tokens: Math.min(maxTokens - 1, budgetTokens),
+      };
+    }
     // 确保 max_tokens 足够大以容纳 thinking + 回复
     requestBody.max_tokens = Math.max(maxTokens, 32000);
   }
@@ -1309,6 +1406,7 @@ export async function* callOpenAICompatibleModelStream(
   const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
   const apiKey = resolveEnvVar(modelConfig.apiKey);
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     messages: OpenAIConverter.contentsToMessages(request.contents),
@@ -1316,6 +1414,26 @@ export async function* callOpenAICompatibleModelStream(
     stream: true,
     stream_options: { include_usage: true } // 请求包含 usage 信息
   };
+
+  const modelIdLower = modelConfig.modelId.toLowerCase();
+  const isGLM = modelIdLower.includes('glm');
+
+  if (isGLM) {
+    // 智谱 GLM 系列思维模式适配
+    requestBody.extra_body = {
+      thinking: thinkingConfig.mode === 'off'
+        ? { type: 'disabled' }
+        : { type: 'enabled', clear_thinking: false } // 保留式思考 (Preserved Thinking)
+    };
+  } else if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning_effort = 'low'; // 强制降低思考强度以节省 token
+  } else {
+    // 配置标准 OpenAI 兼容的 reasoning_effort 参数 (支持 o1/o3/gpt-5.5/qwen 等)
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort);
+    if (openaiEffort) {
+      requestBody.reasoning_effort = openaiEffort;
+    }
+  }
 
   // 使用指数退避重试包装初始连接
   const response = await retryWithBackoff(
@@ -1410,13 +1528,22 @@ export async function* callOpenAICompatibleModelStream(
           if (choice) {
             const delta = choice.delta;
 
+            // 处理思考内容 - 立即 yield
+            if (delta?.reasoning_content) {
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning: delta.reasoning_content }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as any as GenerateContentResponse;
+            }
+
             // 处理文本内容 - 立即 yield
             if (delta?.content) {
               const content = { role: MESSAGE_ROLES.MODEL, parts: [{ text: delta.content }] };
               const resp = { candidates: [{ content, index: 0 }] };
               addFunctionCallsGetter(resp);
               addFunctionCallsGetter(content);
-              yield resp as GenerateContentResponse;
+              yield resp as any as GenerateContentResponse;
             }
 
             // 聚合工具调用 - 不立即 yield，等待完全接收
@@ -1499,20 +1626,37 @@ export async function* callAnthropicModelStream(
     requestBody.system = system;
   }
 
-  // 🆕 Extended Thinking 智能启用策略（流式调用）：
-  // 1. 如果用户明确设置了 enableThinking，遵循用户配置
-  // 2. 如果用户未设置（undefined），默认启用（所有 Anthropic 协议）
-  // 3. 不支持的模型会自动忽略 thinking 参数，因此统一启用更简单
-  const shouldEnableThinking = modelConfig.enableThinking !== undefined
-    ? modelConfig.enableThinking
-    : shouldEnableThinkingByDefault();
+  // 🆕 Extended Thinking 智能启用与力度调控策略（流式调用）：
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  const isThinkingEnabled = thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault());
 
-  if (shouldEnableThinking) {
+  if (isThinkingEnabled) {
     const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
-    requestBody.thinking = {
-      type: 'enabled',
-      budget_tokens: Math.min(maxTokens - 1, 31999), // budget_tokens 必须小于 max_tokens，默认使用官方推荐的 31999
-    };
+
+    // 如果是 Claude 4.6 系列（modelId 包含 'claude-4-6' 或 '-4.6'），或者用户显式指定了特定的 effort，
+    // 我们采用现代的 "adaptive" + "effort" 模式
+    const isModernClaude46 = modelConfig.modelId.includes('claude-4-6') ||
+      modelConfig.modelId.includes('-4.6') ||
+      (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+
+    if (isModernClaude46 && thinkingConfig.budgetTokens === undefined) {
+      const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
+      requestBody.thinking = {
+        type: 'adaptive',
+        effort,
+      };
+    } else {
+      // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
+      const budgetTokens = thinkingConfig.budgetTokens !== undefined
+        ? thinkingConfig.budgetTokens
+        : effortToAnthropicBudget(thinkingConfig.effort);
+
+      requestBody.thinking = {
+        type: 'enabled',
+        budget_tokens: Math.min(maxTokens - 1, budgetTokens),
+      };
+    }
     // 确保 max_tokens 足够大以容纳 thinking + 回复
     requestBody.max_tokens = Math.max(maxTokens, 32000);
   }
