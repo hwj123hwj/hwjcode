@@ -123,7 +123,8 @@ function applyGenAIThinkingConfig(model: string, reqConfig: any, thinkingConfig:
       if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
         config.generationConfig.thinking = {
           type: 'adaptive',
-          effort: effortToAnthropicEffort(thinkingConfig.effort) || 'high'
+          effort: effortToAnthropicEffort(thinkingConfig.effort) || 'high',
+          display: 'summarized' // 🆕 显式指定汇总并输出思考内容（防止 Opus 4.7 默认 display: "omitted" 阻断客户端渲染）
         };
       } else {
         const budgetTokens = thinkingConfig.budgetTokens !== undefined
@@ -335,7 +336,18 @@ export class DeepVServerAdapter implements ContentGenerator {
           } else {
             clonedContent.parts = nonReasoningParts;
           }
-          consolidated.push(clonedContent);
+
+          // 🔧 合并同一回合内连续的 model 消息
+          // 当 reasoning + text + functionCall 被流式处理拆成多个独立 Content 时，
+          // 需要将它们合并为单个 Content（包含 reasoning、text、functionCall）。
+          // 否则 Server genaiAdapter 会将其转为多条 assistant 消息，
+          // 导致 Kimi K2.6 等模型因 tool_call 消息缺少 reasoning_content 而报错。
+          const lastConsolidated = consolidated[consolidated.length - 1];
+          if (lastConsolidated && lastConsolidated.role === MESSAGE_ROLES.MODEL) {
+            lastConsolidated.parts.push(...clonedContent.parts);
+          } else {
+            consolidated.push(clonedContent);
+          }
         } else {
           // 如果是纯思维链消息（无任何实质正文/工具调用），且已经累积，则安全跳过此独立消息，避免发送连续的助手消息
           continue;
