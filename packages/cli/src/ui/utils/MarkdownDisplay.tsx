@@ -439,9 +439,46 @@ const RenderThinkBlockInternal: React.FC<RenderThinkBlockProps> = ({
         </Text>
       </Box>
       <Box paddingX={1} flexDirection="column" width={terminalWidth}>
-        <Text color={Colors.Comment} italic wrap="wrap">
-          {displayLines.join('\n')}
-        </Text>
+        {displayLines.map((line, idx) => {
+          const ulMatch = line.match(/^(\s*)([-*+])\s+(.*)$/);
+          const olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+
+          if (ulMatch) {
+            const leadingWhitespace = ulMatch[1];
+            const marker = ulMatch[2];
+            const itemText = ulMatch[3];
+            return (
+              <Box key={idx} marginLeft={leadingWhitespace.length}>
+                <Text color={Colors.Comment} italic>
+                  {marker}{' '}
+                  <RenderInline text={itemText} />
+                </Text>
+              </Box>
+            );
+          }
+
+          if (olMatch) {
+            const leadingWhitespace = olMatch[1];
+            const num = olMatch[2];
+            const itemText = olMatch[3];
+            return (
+              <Box key={idx} marginLeft={leadingWhitespace.length}>
+                <Text color={Colors.Comment} italic>
+                  {num}.{' '}
+                  <RenderInline text={itemText} />
+                </Text>
+              </Box>
+            );
+          }
+
+          return (
+            <Box key={idx}>
+              <Text color={Colors.Comment} italic wrap="wrap">
+                <RenderInline text={line} />
+              </Text>
+            </Box>
+          );
+        })}
         {isPending ? (
           <Text color={Colors.Comment}>
             ...

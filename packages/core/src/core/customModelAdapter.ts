@@ -435,7 +435,40 @@ const OpenAIConverter = {
       messages.push(msg);
     }
 
-    return messages;
+    // 🔧 Post-merge: consolidate consecutive assistant messages into one.
+    // When reasoning, text, and tool_calls arrive as separate content entries
+    // (e.g., from OpenAI-compatible streaming), contentsToMessages produces
+    // multiple consecutive assistant messages. Models like Kimi K2.6 require
+    // a single assistant message with reasoning_content, content, and tool_calls
+    // combined for the same turn. Without this merge, tools calls may be rejected
+    // because reasoning_content is missing from the tool-call message.
+    const merged: any[] = [];
+    for (const msg of messages) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === 'assistant' && msg.role === 'assistant') {
+        // Merge reasoning_content: later message may carry it from pendingReasoning
+        if (msg.reasoning_content && !last.reasoning_content) {
+          last.reasoning_content = msg.reasoning_content;
+        }
+        // Merge text content: prefer non-null/non-empty; don't overwrite with null
+        if (msg.content && !last.content) {
+          last.content = msg.content;
+        } else if (msg.content && last.content) {
+          last.content = last.content + '\n' + msg.content;
+        }
+        // Merge tool_calls from the later message into the previous one
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          if (!last.tool_calls) {
+            last.tool_calls = msg.tool_calls;
+          } else {
+            last.tool_calls.push(...msg.tool_calls);
+          }
+        }
+      } else {
+        merged.push(msg);
+      }
+    }
+    return merged;
   },
 
   toolsToOpenAITools(tools: any[]): any[] | undefined {
