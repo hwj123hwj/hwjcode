@@ -279,6 +279,42 @@
   opacity: 0.8;
 }
 
+/* 🟢 "Add Custom Model" entry on the login screen — lets users with their own
+   API key skip OAuth entirely. Visually subordinate to the main login button. */
+.login-page__custom-model-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+}
+
+.login-page__custom-model-hint {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #999999);
+}
+
+.login-page__custom-model-btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.login-page__custom-model-btn:hover:not(:disabled) {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.1));
+  color: var(--vscode-textLink-activeForeground, #4daafc);
+}
+
+.login-page__custom-model-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* 动画 */
 @keyframes loginBounce {
   0%, 20%, 50%, 80%, 100% {
