@@ -613,6 +613,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                       className="model-name"
                       ref={el => modelNameRefs.current[`selected-${selectedModel.id}`] = el}
                     >
+                      {thinkingConfig?.mode !== 'off' ? '🧠 ' : ''}
                       {selectedModel.displayName}
                     </span>
                     {showTooltip[`selected-${selectedModel.id}`] && tooltipPosition[`selected-${selectedModel.id}`] && (
@@ -655,6 +656,28 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           <div ref={dropdownRef} className="model-dropdown">
             <div className="dropdown-header">
               <span className="dropdown-title">{t('model.selector.selectModel')}</span>
+            </div>
+
+            {/* 🆕 思考模式选择区 - 优雅嵌入模型选择器头部，释放工具栏宝贵空间 */}
+            <div className="dropdown-thinking-section">
+              <span className="thinking-section-title">🧠 {t('command.thinking.description', undefined, 'Thinking Config')}</span>
+              <div className="thinking-pills">
+                {thinkingOptionsList.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`thinking-pill ${currentThinkingOption.id === opt.id ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation(); // 阻止事件冒泡防止下拉菜单关闭
+                      updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
+                    }}
+                    title={opt.desc}
+                  >
+                    <span className="pill-icon">{opt.icon}</span>
+                    <span className="pill-label">{opt.label.replace('思考', '').replace('强度', '')}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="model-list">
@@ -721,55 +744,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           </div>
         )}
       </div>
-
-      {/* 🆕 新增：思考模式选择器 (位于模型指示器的右侧) */}
-      {!loading && !error && (
-        <div ref={thinkingDropdownRef} className="thinking-selector-container">
-          <button
-            className={`thinking-selector-trigger ${isThinkingOpen ? 'open' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsThinkingOpen(!isThinkingOpen);
-            }}
-            title={t('command.thinking.description', undefined, 'Configure thinking mode')}
-          >
-            <span className="thinking-icon">{currentThinkingOption.icon}</span>
-            <span className="thinking-label">{currentThinkingOption.label}</span>
-            <ChevronDown size={12} className={`thinking-chevron ${isThinkingOpen ? 'rotated' : ''}`} />
-          </button>
-
-          {isThinkingOpen && (
-            <div className="thinking-dropdown">
-              <div className="dropdown-header">
-                <span className="dropdown-title">🧠 {t('command.thinking.description', undefined, 'Configure Thinking')}</span>
-              </div>
-              <div className="thinking-options-list">
-                {thinkingOptionsList.map((opt) => (
-                  <div
-                    key={opt.id}
-                    className={`thinking-option ${currentThinkingOption.id === opt.id ? 'selected' : ''}`}
-                    onClick={() => {
-                      updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
-                      setIsThinkingOpen(false);
-                    }}
-                  >
-                    <span className="option-icon">{opt.icon}</span>
-                    <div className="option-details">
-                      <span className="option-label">{opt.label}</span>
-                      <span className="option-desc">{opt.desc}</span>
-                    </div>
-                    {currentThinkingOption.id === opt.id && (
-                      <div className="check-icon">
-                        <Check size={14} />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* 🎯 新增：统计按钮 */}
       {!loading && !error && (
