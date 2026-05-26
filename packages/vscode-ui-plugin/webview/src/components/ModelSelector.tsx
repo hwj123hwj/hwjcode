@@ -752,17 +752,26 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   ], [t]);
 
   // 🆕 当前选中的思考配置项
+  // 优先级：effort（具体强度）> mode 兜底
+  // 原因：在网络层 mode='auto'+effort=具体值 与 mode='on'+effort=具体值
+  // 行为完全一致（见 customModel.applyOpenAIChatThinking），所以一旦 effort
+  // 是具体值就应当显示对应的强度 pill，而不是被 mode='auto' 短路成 auto。
   const currentThinkingOption = useMemo(() => {
     const config = thinkingConfig || { mode: 'auto', effort: 'auto' };
     if (config.mode === 'off') {
       return thinkingOptionsList.find(opt => opt.id === 'off') || thinkingOptionsList[1];
     }
+    // effort 是具体强度（非 'auto'/undefined）→ 直接匹配该强度 pill
+    if (config.effort && config.effort !== 'auto') {
+      const matched = thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === config.effort);
+      if (matched) return matched;
+    }
+    // effort 为 auto/undefined → 按 mode 兜底
     if (config.mode === 'auto') {
       return thinkingOptionsList.find(opt => opt.id === 'auto') || thinkingOptionsList[0];
     }
-    // 默认为 high 如果只设置了 mode: 'on' 但没有指定具体的 effort
-    const effort = config.effort && config.effort !== 'auto' ? config.effort : 'high';
-    return thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === effort) || thinkingOptionsList[4]; // 默认为 High
+    // mode === 'on' 但没指定 effort → 默认 high
+    return thinkingOptionsList.find(opt => opt.id === 'high') || thinkingOptionsList[4];
   }, [thinkingConfig, thinkingOptionsList]);
 
   return (

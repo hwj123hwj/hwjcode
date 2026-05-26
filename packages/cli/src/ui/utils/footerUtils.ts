@@ -87,15 +87,23 @@ export function getContextDisplay(percentage: number | string, simplified: boole
 /**
  * Compose the short thinking-mode label rendered in the footer.
  *
+ * Display priority: explicit `effort` value > mode fallback.
+ *
+ * Rationale: at the wire level, `mode='auto'` and `mode='on'` send the same
+ * request body (only `mode='off'` differs — see `applyOpenAIChatThinking` in
+ * core/types/customModel.ts). So whenever a concrete effort is set, the
+ * footer should show that effort regardless of the mode label, otherwise the
+ * UI would lie about what intensity the model actually uses.
+ *
  * Examples:
- *   mode='off'                  → '' (caller hides the whole prefix)
- *   mode='on',  effort='max'    → 'max'
- *   mode='on',  effort='high'   → 'high'
- *   mode='on',  effort='medium' → 'med'
- *   mode='on',  effort='low'    → 'low'
- *   mode='on',  effort='xhigh'  → 'xhi'
- *   mode='on',  effort='auto'   → 'on'
- *   mode='auto'                 → 'auto'
+ *   mode='off'                         → '' (caller hides the whole prefix)
+ *   effort='max'   (any non-off mode)  → 'max'
+ *   effort='xhigh' (any non-off mode)  → 'xhi'
+ *   effort='high'  (any non-off mode)  → 'high'
+ *   effort='medium'(any non-off mode)  → 'med'
+ *   effort='low'   (any non-off mode)  → 'low'
+ *   mode='auto',  effort='auto'/unset  → 'auto'
+ *   mode='on',    effort='auto'/unset  → 'on'
  *
  * Goal: stay in 4 chars or less so the footer "<model> 🧠 <label>" stays
  * narrow even on a 80-col terminal. The full-name "medium" and "xhigh" get
@@ -109,8 +117,8 @@ export function getThinkingEffortLabel(thinkingConfig?: {
   effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'auto';
 }): string {
   if (!thinkingConfig || thinkingConfig.mode === 'off') return '';
-  if (thinkingConfig.mode === 'auto') return 'auto';
-  // mode === 'on'
+  // Effort takes precedence — if a concrete effort is set, that's what's
+  // actually being sent to the provider, regardless of the abstract `mode`.
   switch (thinkingConfig.effort) {
     case 'max':
       return 'max';
@@ -122,10 +130,9 @@ export function getThinkingEffortLabel(thinkingConfig?: {
       return 'med';
     case 'low':
       return 'low';
-    case 'auto':
-    case undefined:
     default:
-      return 'on';
+      // effort is 'auto' or undefined → fall back to mode label.
+      return thinkingConfig.mode === 'auto' ? 'auto' : 'on';
   }
 }
 
