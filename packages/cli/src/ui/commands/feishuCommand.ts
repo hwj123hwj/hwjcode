@@ -43,6 +43,7 @@ import {
   isWithinRoot,
 } from 'deepv-code-core';
 import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
+import { t, tp } from '../utils/i18n.js';
 import { Part, PartListUnion } from '@google/genai';
 
 /** 当前全局网关实例（进程内单例） */
@@ -81,30 +82,7 @@ async function loadCredsSafe(
  * 构建帮助文本
  */
 function helpText(): string {
-  return [
-    '飞书 Bot 接入 — 让 dvcode 在飞书里回答你的问题',
-    '',
-    '用法:',
-    '  /feishu                交互式配置并启动',
-    '  /feishu setup          档 1 扫码自动建应用（推荐）',
-    '  /feishu setup --manual <appId> <appSecret>  档 3 手动输入凭证',
-    '  /feishu start          启动飞书 Bot（需先配置凭证）',
-    '  /feishu stop           停止飞书 Bot',
-    '  /feishu status         查看当前状态',
-    '  /feishu logout         清除凭证并断开',
-    '',
-    '授权管理（重要）:',
-    '  /feishu allow <openId> 允许指定飞书用户调用 Bot',
-    '  /feishu deny  <openId> 移出授权白名单',
-    '  /feishu allowlist      查看当前 Owner 与白名单',
-    '',
-    '首次使用:',
-    '  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）',
-    '  2. /feishu start              # 启动 Bot',
-    '  3. 去飞书给 Bot 发消息        # dvcode 将在后台回答',
-    '',
-    '⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
-  ].join('\n');
+  return t('feishu.help.text');
 }
 
 async function handleSetup(args: string, projectRoot?: string): Promise<string> {
@@ -131,33 +109,33 @@ async function handleSetup(args: string, projectRoot?: string): Promise<string> 
  * 这样可以避免 TUI 模式下后台 console.log 不可见的问题。
  */
 async function handleQrSetup(projectRoot?: string): Promise<string> {
-  const lines: string[] = ['📱 档 1: 扫码自动建应用'];
-  lines.push('  正在连接飞书...');
+  const lines: string[] = [t('feishu.setup.qr.title')];
+  lines.push(t('feishu.setup.qr.connecting'));
 
   try {
     await initRegistration('feishu');
     const begin = await beginRegistration('feishu');
     const qrUrl = begin.qrUrl;
 
-    lines.push('  二维码已生成');
-    lines.push(`  URL: ${qrUrl}`);
+    lines.push(t('feishu.setup.qr.generated'));
+    lines.push(tp('feishu.setup.qr.url', { url: qrUrl }));
     lines.push('');
-    lines.push('  请用飞书手机 App 扫描上方二维码');
-    lines.push('  或在浏览器打开链接完成授权');
+    lines.push(t('feishu.setup.qr.scan_hint'));
+    lines.push(t('feishu.setup.qr.browser_hint'));
     lines.push('');
 
     // 尝试打开浏览器
     try {
       const { default: open } = await import('open');
       open(qrUrl);
-      lines.push('  → 已自动打开浏览器');
+      lines.push(t('feishu.setup.qr.browser_opened'));
     } catch {
-      lines.push('  (未能自动打开浏览器，请手动复制链接)');
+      lines.push(t('feishu.setup.qr.browser_failed'));
     }
 
     lines.push('');
-    lines.push('  ⏳ 正在等待扫码结果...');
-    lines.push('  （按 Ctrl+C 取消等待）');
+    lines.push(t('feishu.setup.qr.waiting'));
+    lines.push(t('feishu.setup.qr.cancel_hint'));
 
     // 同步等待扫码结果（带进度点回调）
     let dots = '';
@@ -171,8 +149,8 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
 
     if (!pollResult) {
       lines.push('');
-      lines.push('❌ 飞书扫码超时或已被取消。');
-      lines.push('  输入 /feishu setup 重新开始。');
+      lines.push(t('feishu.setup.qr.timeout'));
+      lines.push(t('feishu.setup.qr.retry_hint'));
       return lines.join('\n');
     }
 
@@ -194,19 +172,21 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
     await saveCredentials(creds, projectRoot);
 
     lines.push('');
-    lines.push('✅ 飞书应用创建成功！');
+    lines.push(t('feishu.setup.qr.success'));
     lines.push(`  App ID:      ${creds.appId}`);
-    if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
-    lines.push(`  凭证已保存到 ${projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/'}feishu-credentials.json`);
+    if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
+    lines.push(tp('feishu.setup.qr.creds_saved', {
+      path: projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/',
+    }));
     lines.push('');
-    lines.push('  下一步: 输入 /feishu start 启动 Bot');
+    lines.push(t('feishu.setup.qr.next_step_start'));
     return lines.join('\n');
   } catch (err: any) {
     return [
-      '❌ 扫码建应用失败:',
+      t('feishu.setup.qr.failed_title'),
       `  ${err.message}`,
       '',
-      '  可尝试 /feishu setup --manual <AppId> <AppSecret> 手动输入凭证',
+      t('feishu.setup.qr.fallback_hint'),
     ].join('\n');
   }
 }
@@ -217,20 +197,20 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
 async function handleManualSetup(appId?: string, appSecret?: string, projectRoot?: string): Promise<string> {
   if (!appId || !appSecret) {
     return [
-      '📝 档 3: 手动输入凭证',
+      t('feishu.setup.manual.title'),
       '',
-      '  用法: /feishu setup --manual <AppId> <AppSecret>',
+      t('feishu.setup.manual.usage'),
       '',
-      '  示例: /feishu setup --manual cli_xxxxx xxxxxxxxxxxxxx',
+      t('feishu.setup.manual.example'),
       '',
-      '  （获取方式：https://open.feishu.cn/app → 你的应用 → 凭证与基础信息）',
+      t('feishu.setup.manual.where_to_find'),
       '',
-      '  💡 也可以先 /feishu setup 扫码自动建应用（档 1），更简单',
+      t('feishu.setup.manual.tip_qr'),
     ].join('\n');
   }
 
   // 校验凭证
-  const lines: string[] = ['📝 档 3: 正在验证凭证...'];
+  const lines: string[] = [t('feishu.setup.manual.validating')];
   const botInfo = await probeCredentials(appId, appSecret, 'feishu');
 
   const creds: FeishuCredentials = {
@@ -243,13 +223,15 @@ async function handleManualSetup(appId?: string, appSecret?: string, projectRoot
 
   await saveCredentials(creds, projectRoot);
 
-  lines.push(botInfo ? '  ✅ 凭证有效' : '  ⚠️ 凭证已保存但验证失败（可在开放平台检查是否已启用 Bot 能力）');
-  if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
-  lines.push(`  凭证已保存到 ${projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/'}feishu-credentials.json`);
+  lines.push(botInfo ? t('feishu.setup.manual.creds_valid') : t('feishu.setup.manual.creds_invalid'));
+  if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
+  lines.push(tp('feishu.setup.qr.creds_saved', {
+    path: projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/',
+  }));
   lines.push('');
-  lines.push('  ⚠️ 手动配置模式下未自动绑定 Bot 拥有者。在 /feishu start 之后，');
-  lines.push('     首次给 Bot 发消息时会拒绝并提示你将自己加入授权白名单。');
-  lines.push('  下一步: 输入 /feishu start 启动 Bot');
+  lines.push(t('feishu.setup.manual.owner_warning'));
+  lines.push(t('feishu.setup.manual.owner_warning_2'));
+  lines.push(t('feishu.setup.qr.next_step_start'));
 
   return lines.join('\n');
 }
@@ -301,7 +283,7 @@ async function sendDetectedFiles(
 
   for (const { path: rawPath, ext } of matches) {
     if (REJECTED_EXTS.has(ext)) {
-      dwarn(`🛡️ 拒绝发送可疑扩展名 .${ext}: ${rawPath}`);
+      dwarn(`Rejected suspicious extension .${ext}: ${rawPath}`);
       continue;
     }
 
@@ -310,7 +292,7 @@ async function sendDetectedFiles(
       ? path.resolve(rawPath)
       : path.resolve(projectRoot, rawPath);
     if (!isWithinRoot(abs, projectRoot)) {
-      dwarn(`🛡️ 拒绝发送项目根目录外的文件: ${abs}`);
+      dwarn(`Rejected file outside project root: ${abs}`);
       continue;
     }
 
@@ -320,7 +302,7 @@ async function sendDetectedFiles(
       if (!stat.isFile()) continue;
       // 50 MiB cap; matches send_feishu_file tool.
       if (stat.size > 50 * 1024 * 1024) {
-        dwarn(`🛡️ 拒绝发送 > 50MiB 的文件: ${abs} (${stat.size} bytes)`);
+        dwarn(`Rejected file > 50 MiB: ${abs} (${stat.size} bytes)`);
         continue;
       }
 
@@ -328,19 +310,19 @@ async function sendDetectedFiles(
         const imageKey = await gateway.uploadImage(abs);
         await gateway.sendImage(chatId, imageKey, replyToMessageId);
         tuiContext?.addItem(
-          { type: 'info', text: `📎 已发送图片: ${abs}` },
+          { type: 'info', text: tp('feishu.send.image', { path: abs }) },
           Date.now(),
         );
       } else {
         const fileKey = await gateway.uploadFile(abs);
         await gateway.sendFile(chatId, fileKey, replyToMessageId);
         tuiContext?.addItem(
-          { type: 'info', text: `📎 已发送文件: ${abs}` },
+          { type: 'info', text: tp('feishu.send.file', { path: abs }) },
           Date.now(),
         );
       }
     } catch (err: unknown) {
-      derror(`❌ 发送文件到飞书失败 (${abs}):`, (err as Error)?.message);
+      derror(`Failed to send file to Feishu (${abs}):`, (err as Error)?.message);
       // 文件发送失败不影响主流程
     }
   }
@@ -519,22 +501,22 @@ async function handleStart(context?: CommandContext): Promise<string> {
   const projectRoot = context?.services?.config?.getProjectRoot();
   const result = await loadCredsSafe(projectRoot);
   if (!result.ok) {
-    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+    return tp('feishu.start.creds_load_failed', { error: result.error });
   }
   const creds = result.creds;
   if (!creds) {
     return [
-      '⚠️ 未找到飞书凭证',
+      t('feishu.start.no_creds_title'),
       '',
-      '请先配置:',
-      '  /feishu setup          # 扫码自动建应用',
-      '  或',
-      '  /feishu setup --manual # 手动输入凭证',
+      t('feishu.start.no_creds_setup'),
+      t('feishu.start.no_creds_qr'),
+      t('feishu.start.no_creds_or'),
+      t('feishu.start.no_creds_manual'),
     ].join('\n');
   }
 
   if (activeGateway) {
-    return '⚠️ 飞书 Bot 已在运行中。输入 /feishu stop 停止后再启动。';
+    return t('feishu.start.already_running');
   }
 
   const gateway = new FeishuGateway(creds.appId, creds.appSecret, creds.domain);
@@ -565,7 +547,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       tuiContext?.addItem(
         {
           type: 'info',
-          text: `🛡️ 拒绝未授权消息: openId=${msg.senderOpenId} text="${messageText.slice(0, 60)}"`,
+          text: tp('feishu.tui.unauthorized_log', {
+            openId: msg.senderOpenId,
+            text: messageText.slice(0, 60),
+          }),
         },
         Date.now(),
       );
@@ -577,7 +562,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
     activeReplyToMessageId = msg.messageId;
 
     // 同步显示飞书消息到 TUI
-    tuiContext?.addItem({ type: 'user', text: `[飞书] ${messageText}` }, Date.now());
+    tuiContext?.addItem(
+      { type: 'user', text: tp('feishu.tui.incoming_prefix', { text: messageText }) },
+      Date.now(),
+    );
 
     // 拦截斜杠命令（/new, /compress, /help 等），不发给 LLM
     if (messageText.startsWith('/')) {
@@ -631,10 +619,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
               toolCallRequests.push(event.value);
               break;
             case GeminiEventType.ChatCompressed:
-              tuiContext?.addItem({ type: 'info', text: '📦 上下文已自动压缩' }, Date.now());
+              tuiContext?.addItem({ type: 'info', text: t('feishu.tui.context_compressed') }, Date.now());
               break;
             case GeminiEventType.Error:
-              throw new Error(event.value?.error?.message || '未知错误');
+              throw new Error(event.value?.error?.message || 'unknown error');
           }
         }
 
@@ -663,7 +651,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 工具执行
         const toolNames = toolCallRequests.map(r => r.name || 'unknown').join(', ');
         tuiContext?.addItem(
-          { type: 'info', text: `🔧 执行工具: ${toolNames}` },
+          { type: 'info', text: tp('feishu.tui.tool_running', { names: toolNames }) },
           Date.now(),
         );
 
@@ -673,7 +661,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           const toolName = req.name || 'unknown';
           const toolArgsDesc = req.args ? JSON.stringify(req.args).slice(0, 100) : '';
           tuiContext?.addItem(
-            { type: 'info', text: `🔧 执行工具: ${toolName}${toolArgsDesc ? ' ' + toolArgsDesc : ''}` },
+            { type: 'info', text: tp('feishu.tui.tool_running_with_args', { name: toolName, args: toolArgsDesc }) },
             Date.now(),
           );
           try {
@@ -688,7 +676,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               );
               toolResponseParts.push(cardResult);
               tuiContext?.addItem(
-                { type: 'info', text: `✅ 用户已回答问题` },
+                { type: 'info', text: t('feishu.tui.tool_user_answered') },
                 Date.now(),
               );
               continue;
@@ -700,12 +688,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
               toolResponseParts.push(...(parts as Part[]));
             }
             tuiContext?.addItem(
-              { type: 'info', text: `✅ 工具完成: ${toolName}` },
+              { type: 'info', text: tp('feishu.tui.tool_done', { name: toolName }) },
               Date.now(),
             );
           } catch (toolErr: any) {
             tuiContext?.addItem(
-              { type: 'error', text: `❌ 工具失败: ${toolName} — ${toolErr.message}` },
+              { type: 'error', text: tp('feishu.tui.tool_failed', { name: toolName, error: toolErr.message }) },
               Date.now(),
             );
             throw toolErr;
@@ -720,19 +708,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
       await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
       return null;
     } catch (err: any) {
-      derror('❌ 飞书 Agent 处理错误:', err.message);
+      derror('Feishu Agent processing error:', err.message);
+      // The reply going back to the Feishu user stays in Chinese (chat-side
+      // language is independent of dvcode TUI locale). The TUI display uses
+      // the user's configured locale.
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
-      tuiContext?.addItem({ type: 'error', text: errorReply }, Date.now());
+      tuiContext?.addItem(
+        { type: 'error', text: tp('feishu.tui.processing_error', { error: err.message }) },
+        Date.now(),
+      );
       return errorReply;
     }
   };
 
   gateway.onReady = () => {
-    dlog('✅ 飞书 Bot 已就绪，可以开始聊天了！');
+    dlog('Feishu Bot ready');
   };
 
   gateway.onDisconnect = () => {
-    dlog('🔌 飞书连接已断开');
+    dlog('Feishu connection closed');
   };
 
   try {
@@ -753,22 +747,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
           () => projectRoot,
         ));
         await geminiClient.setTools();
-        dlog('✅ 已注册飞书文件发送工具 (send_feishu_file)');
+        dlog('Registered Feishu file-send tool (send_feishu_file)');
       } catch (toolErr: any) {
-        dwarn('⚠️ 注册飞书工具失败（不影响主流程）:', toolErr.message);
+        dwarn('Failed to register Feishu tool (continuing):', toolErr.message);
       }
     }
 
+    const platform = creds.domain === 'lark'
+      ? t('feishu.start.platform.lark')
+      : t('feishu.start.platform.feishu');
     return [
-      '✅ 飞书 Bot 已启动！',
-      `  Bot 名称: ${creds.botName || '(未知)'}`,
-      `  连接: ${creds.domain === 'lark' ? 'Lark' : '飞书'}`,
+      t('feishu.start.success_title'),
+      tp('feishu.start.success_bot', { name: creds.botName || t('feishu.start.bot_unknown') }),
+      tp('feishu.start.success_platform', { platform }),
       '',
-      '  现在去飞书给 Bot 发消息试试吧 👋',
-      '  输入 /feishu stop 停止',
+      t('feishu.start.success_hint_chat'),
+      t('feishu.start.success_hint_stop'),
     ].join('\n');
   } catch (err: any) {
-    return `❌ 启动飞书 Bot 失败: ${err.message}`;
+    return tp('feishu.start.failed', { error: err.message });
   }
 }
 
@@ -777,7 +774,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
  */
 async function handleStop(context?: CommandContext): Promise<string> {
   if (!activeGateway) {
-    return '⚠️ 飞书 Bot 未运行。';
+    return t('feishu.stop.not_running');
   }
 
   // 🎯 动态注销 send_feishu_file 工具
@@ -789,10 +786,10 @@ async function handleStop(context?: CommandContext): Promise<string> {
       const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
       if (removed) {
         await geminiClient.setTools();
-        dlog('✅ 已注销飞书文件发送工具 (send_feishu_file)');
+        dlog('Unregistered Feishu file-send tool (send_feishu_file)');
       }
     } catch (toolErr: any) {
-      dwarn('⚠️ 注销飞书工具失败:', toolErr.message);
+      dwarn('Failed to unregister Feishu tool:', toolErr.message);
     }
   }
 
@@ -801,7 +798,7 @@ async function handleStop(context?: CommandContext): Promise<string> {
   tuiContext = null; // 清除 TUI 上下文
   activeChatId = null;
   activeReplyToMessageId = null;
-  return '🛑 飞书 Bot 已停止。';
+  return t('feishu.stop.stopped');
 }
 
 /**
@@ -810,31 +807,40 @@ async function handleStop(context?: CommandContext): Promise<string> {
 async function handleStatus(projectRoot?: string): Promise<string> {
   const result = await loadCredsSafe(projectRoot);
   if (!result.ok) {
-    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+    return tp('feishu.start.creds_load_failed', { error: result.error });
   }
   const creds = result.creds;
-  const lines: string[] = ['📊 飞书状态:'];
+  const lines: string[] = [t('feishu.status.title')];
 
   if (creds) {
+    lines.push(t('feishu.status.creds_configured'));
     lines.push(`  App ID:      ${creds.appId}`);
-    lines.push(`  Bot 名称:    ${creds.botName || '(未知)'}`);
-    lines.push(`  平台:        ${creds.domain === 'lark' ? 'Lark' : '飞书'}`);
-    lines.push(`  Bot Owner:   ${creds.ownerOpenId || '(未绑定 — 首次扫码用户为 Owner)'}`);
+    lines.push(tp('feishu.status.bot_name', { name: creds.botName || t('feishu.start.bot_unknown') }));
+    const platform = creds.domain === 'lark'
+      ? t('feishu.start.platform.lark')
+      : t('feishu.start.platform.feishu');
+    lines.push(tp('feishu.status.platform', { platform }));
+    lines.push(tp('feishu.status.owner', {
+      owner: creds.ownerOpenId || t('feishu.status.owner_unbound'),
+    }));
     if (creds.allowlist && creds.allowlist.length > 0) {
-      lines.push(`  授权白名单:  ${creds.allowlist.length} 人 (用 /feishu allowlist 查看)`);
+      lines.push(tp('feishu.status.allowlist_count', { count: creds.allowlist.length }));
     }
   } else {
-    lines.push('  凭证:        未配置');
+    lines.push(t('feishu.status.creds_missing'));
     lines.push('');
-    lines.push('  请运行 /feishu setup 配置凭证');
+    lines.push(t('feishu.status.run_setup'));
     return lines.join('\n');
   }
 
-  lines.push(`  Bot 状态:     ${activeGateway ? '🟢 运行中' : '🔴 已停止'}`);
+  const status = activeGateway
+    ? t('feishu.status.bot_status_running')
+    : t('feishu.status.bot_status_stopped');
+  lines.push(tp('feishu.status.bot_status_label', { status }));
 
   if (!activeGateway) {
     lines.push('');
-    lines.push('  运行 /feishu start 启动 Bot');
+    lines.push(t('feishu.status.run_start'));
   }
 
   return lines.join('\n');
@@ -849,39 +855,39 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
   const openId = args.trim();
   if (!openId) {
     return [
-      '用法: /feishu allow <openId>',
+      t('feishu.allow.usage_title'),
       '',
-      '允许指定 open_id 的飞书用户向 Bot 发送消息并触发 LLM/工具调用。',
-      'open_id 可在 Bot 拒绝消息时的提示中找到，或在飞书开放平台 → 通讯录中查询。',
+      t('feishu.allow.usage_body'),
+      t('feishu.allow.usage_where'),
     ].join('\n');
   }
   let creds: FeishuCredentials | null;
   try {
     creds = await loadCredentials(projectRoot);
   } catch (e) {
-    return `❌ 读取凭证失败: ${(e as Error).message}`;
+    return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
   if (!creds) {
-    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+    return t('feishu.allow.creds_missing');
   }
   // owner 已是该 openId 时无需再加
   if (creds.ownerOpenId === openId) {
-    return `ℹ️ ${openId} 已是 Bot Owner，无需加入白名单。`;
+    return tp('feishu.allow.already_owner', { openId });
   }
   // 如果 owner 未绑定，把这个 openId 设为 owner
   if (!creds.ownerOpenId) {
     creds.ownerOpenId = openId;
     await saveCredentials(creds, projectRoot);
-    return `✅ 已将 ${openId} 设为 Bot Owner。`;
+    return tp('feishu.allow.set_as_owner', { openId });
   }
   const list = new Set(creds.allowlist ?? []);
   if (list.has(openId)) {
-    return `ℹ️ ${openId} 已在授权白名单中。`;
+    return tp('feishu.allow.already_in_list', { openId });
   }
   list.add(openId);
   creds.allowlist = [...list];
   await saveCredentials(creds, projectRoot);
-  return `✅ 已将 ${openId} 加入授权白名单 (共 ${creds.allowlist.length} 人)。`;
+  return tp('feishu.allow.added', { openId, count: creds.allowlist.length });
 }
 
 /**
@@ -892,33 +898,27 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
 async function handleDeny(args: string, projectRoot?: string): Promise<string> {
   const openId = args.trim();
   if (!openId) {
-    return '用法: /feishu deny <openId>';
+    return t('feishu.deny.usage');
   }
   let creds: FeishuCredentials | null;
   try {
     creds = await loadCredentials(projectRoot);
   } catch (e) {
-    return `❌ 读取凭证失败: ${(e as Error).message}`;
+    return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
   if (!creds) {
-    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+    return t('feishu.allow.creds_missing');
   }
   if (creds.ownerOpenId === openId) {
-    return [
-      `❌ 不能直接移除 Bot Owner (${openId})。`,
-      '',
-      '如需更换 Owner，请：',
-      '  1. /feishu allow <new-owner-openId> 先把新 Owner 加入白名单',
-      '  2. /feishu logout 清除全部凭证后重新 setup',
-    ].join('\n');
+    return tp('feishu.deny.cannot_remove_owner', { openId });
   }
   const before = creds.allowlist?.length ?? 0;
   creds.allowlist = (creds.allowlist ?? []).filter((id) => id !== openId);
   if (creds.allowlist.length === before) {
-    return `ℹ️ ${openId} 不在授权白名单中。`;
+    return tp('feishu.deny.not_in_list', { openId });
   }
   await saveCredentials(creds, projectRoot);
-  return `✅ 已将 ${openId} 移出授权白名单 (剩余 ${creds.allowlist.length} 人)。`;
+  return tp('feishu.deny.removed', { openId, count: creds.allowlist.length });
 }
 
 /**
@@ -929,23 +929,25 @@ async function handleAllowlist(projectRoot?: string): Promise<string> {
   try {
     creds = await loadCredentials(projectRoot);
   } catch (e) {
-    return `❌ 读取凭证失败: ${(e as Error).message}`;
+    return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
   if (!creds) {
-    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+    return t('feishu.allow.creds_missing');
   }
-  const lines = ['🛡️ 飞书 Bot 授权列表:'];
-  lines.push(`  Owner:       ${creds.ownerOpenId || '(未绑定)'}`);
+  const lines = [t('feishu.allowlist.title')];
+  lines.push(tp('feishu.allowlist.owner', {
+    owner: creds.ownerOpenId || t('feishu.allowlist.owner_unbound'),
+  }));
   if (creds.allowlist && creds.allowlist.length > 0) {
-    lines.push('  白名单:');
+    lines.push(t('feishu.allowlist.list_header'));
     for (const id of creds.allowlist) {
       lines.push(`    - ${id}`);
     }
   } else {
-    lines.push('  白名单:      (空)');
+    lines.push(t('feishu.allowlist.list_empty'));
   }
   lines.push('');
-  lines.push('管理: /feishu allow <openId>  /  /feishu deny <openId>');
+  lines.push(t('feishu.allowlist.manage_hint'));
   return lines.join('\n');
 }
 
@@ -973,7 +975,7 @@ async function handleLogout(projectRoot?: string, context?: CommandContext): Pro
   activeChatId = null;
   activeReplyToMessageId = null;
   await clearCredentials(projectRoot);
-  return '🗑️ 飞书凭证已清除，Bot 已断开。';
+  return t('feishu.logout.cleared');
 }
 
 /**
@@ -982,35 +984,35 @@ async function handleLogout(projectRoot?: string, context?: CommandContext): Pro
 async function handleInteractive(projectRoot?: string): Promise<string> {
   const result = await loadCredsSafe(projectRoot);
   if (!result.ok) {
-    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+    return tp('feishu.start.creds_load_failed', { error: result.error });
   }
   const creds = result.creds;
 
   if (!creds) {
     // 未配置，引导 setup
     return [
-      '👋 欢迎使用飞书 Bot！',
+      t('feishu.interactive.welcome'),
       '',
-      '  首次使用，请先配置凭证:',
-      '    /feishu setup          # 扫码自动建应用（推荐）',
-      '    /feishu setup --manual # 手动输入凭证',
+      t('feishu.interactive.first_time'),
+      t('feishu.interactive.setup_qr'),
+      t('feishu.interactive.setup_manual'),
       '',
-      '  或输入 /feishu help 查看帮助',
+      t('feishu.interactive.help_hint'),
     ].join('\n');
   }
 
   if (!activeGateway) {
     return [
-      '✅ 凭证已配置',
+      t('feishu.interactive.creds_ready'),
       `  App ID: ${creds.appId}`,
-      `  Bot:    ${creds.botName || '(未知)'}`,
+      tp('feishu.interactive.creds_bot', { name: creds.botName || t('feishu.start.bot_unknown') }),
       '',
-      '  输入 /feishu start 启动 Bot',
-      '  输入 /feishu logout 清除凭证',
+      t('feishu.interactive.start_hint'),
+      t('feishu.interactive.logout_hint'),
     ].join('\n');
   }
 
-  return '✅ 飞书 Bot 正在运行中。输入 /feishu stop 停止。';
+  return t('feishu.interactive.already_running');
 }
 
 /** 通用 MessageActionReturn 包装 */
@@ -1021,7 +1023,7 @@ function msg(content: string): SlashCommandActionReturn {
 export const feishuCommand: SlashCommand = {
   name: 'feishu',
   altNames: ['飞书'],
-  description: '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
+  description: t('feishu.command.description'),
   kind: CommandKind.BUILT_IN,
 
   // /feishu（无子命令）→ 显示帮助
@@ -1033,7 +1035,7 @@ export const feishuCommand: SlashCommand = {
   subCommands: [
     {
       name: 'setup',
-      description: '配置飞书应用凭证（扫码或手动输入）',
+      description: t('feishu.subcmd.setup.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx, args) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1042,13 +1044,13 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'start',
-      description: '启动飞书 Bot（WS 长连接）',
+      description: t('feishu.subcmd.start.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => msg(await handleStart(ctx)),
     },
     {
       name: 'stop',
-      description: '停止飞书 Bot',
+      description: t('feishu.subcmd.stop.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
         return msg(await handleStop(ctx));
@@ -1056,7 +1058,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'status',
-      description: '查看飞书 Bot 连接状态',
+      description: t('feishu.subcmd.status.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1065,7 +1067,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'logout',
-      description: '清除飞书凭证并断开连接',
+      description: t('feishu.subcmd.logout.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1074,7 +1076,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'allow',
-      description: '将飞书 open_id 加入授权白名单',
+      description: t('feishu.subcmd.allow.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx, args) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1083,7 +1085,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'deny',
-      description: '从授权白名单中移除指定 open_id',
+      description: t('feishu.subcmd.deny.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx, args) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1092,7 +1094,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'allowlist',
-      description: '列出当前 Bot 的 Owner 与授权白名单',
+      description: t('feishu.subcmd.allowlist.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
         const pr = ctx.services?.config?.getProjectRoot();
@@ -1101,7 +1103,7 @@ export const feishuCommand: SlashCommand = {
     },
     {
       name: 'help',
-      description: '显示飞书帮助',
+      description: t('feishu.subcmd.help.description'),
       kind: CommandKind.BUILT_IN,
       action: async () => msg(helpText()),
     },
