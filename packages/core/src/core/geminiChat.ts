@@ -718,7 +718,35 @@ export class GeminiChat {
       }
     }
 
-    return finalContents;
+    // 🔧 合并相邻同 role 消息（关键修复：解决"两条相邻 user 消息"导致的上游 400）
+    //
+    // 触发场景：流式响应中断后，客户端的恢复逻辑会注入一条独立的
+    // user("[System] interrupted...continue") 消息，但这一条紧贴在前一条
+    // user(functionResponse) 后面，形成 [user(fr), user(text)] 的相邻 user 序列。
+    //
+    // 当下游 OpenAI 兼容上游（如 deepseek-v4-pro 的 easyrouter）做协议规范化时，
+    // 可能错误地认为后一条 user 把前一条 user 的 tool_result 截断了 —— 触发：
+    //   "Messages with role 'tool' must be a response to a preceding message
+    //    with 'tool_calls'"
+    //
+    // 修复：在请求最终发出前，把所有相邻同 role 消息的 parts 合并到第一条上。
+    // 这对 user(fr) + user(text) 来说意味着把 text 加到 functionResponse 同一条 user 里，
+    // 让上游看到一段完整的 "tool_use → tool_result" 配对，而 text 只是配对里的附加上下文。
+    const mergedContents: Content[] = [];
+    for (const content of finalContents) {
+      const prev = mergedContents[mergedContents.length - 1];
+      if (prev && prev.role === content.role) {
+        prev.parts = [...(prev.parts || []), ...(content.parts || [])];
+      } else {
+        // 浅拷贝：避免直接修改 caller 持有的对象
+        mergedContents.push({
+          ...content,
+          parts: content.parts ? [...content.parts] : undefined,
+        });
+      }
+    }
+
+    return mergedContents;
   }
 
   /**

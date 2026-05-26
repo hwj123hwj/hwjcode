@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { ProxyAuthManager, AuthType, AuthServer, AuthTemplates } from 'deepv-code-core';
 import { Logger } from '../utils/logger';
+import { AUTH_MESSAGES } from '../i18n/messages';
 
 export interface LoginResult {
   success: boolean;
@@ -99,17 +100,17 @@ export class LoginService {
 
 
 
-      this.logger.info('❌ 未找到有效的认证信息，需要登录');
+      this.logger.info(`❌ ${AUTH_MESSAGES.NO_VALID_AUTH_INFO_NEEDS_LOGIN}`);
       return {
         isLoggedIn: false,
-        error: '未找到有效的认证信息'
+        error: AUTH_MESSAGES.NO_VALID_AUTH_INFO
       };
 
     } catch (error) {
       this.logger.error('❌ 检查登录状态失败', error instanceof Error ? error : undefined);
       return {
         isLoggedIn: false,
-        error: error instanceof Error ? error.message : '登录状态检查失败'
+        error: error instanceof Error ? error.message : AUTH_MESSAGES.AUTH_STATUS_CHECK_FAILED
       };
     }
   }

@@ -194,6 +194,52 @@ Please analyze this task and complete it using the available tools.${turnsRemind
   }
 
   /**
+   * 构建"最后一轮"指令 - 强制 sub-agent 停止调用工具并立即输出总结
+   * Build the "final turn" reminder that forces the sub-agent to stop calling
+   * tools and produce a comprehensive summary immediately.
+   *
+   * 这条提示会被注入到最后一轮的用户消息开头，确保即便子 Agent 还想继续探索，
+   * 也至少会先把已经获得的信息整理成报告返回给主 Agent。
+   */
+  static buildFinalTurnReminder(turnsUsed: number, maxTurns: number): string {
+    return `⚠️ FINAL TURN NOTICE: This is your last allowed turn (${turnsUsed}/${maxTurns}). \
+You MUST NOT call any more tools. Instead, write your final report NOW based on what you have already discovered.
+
+Your report MUST follow the standard format from the system prompt and include:
+- **Analysis Summary**: What you analyzed and the key findings so far.
+- **Key Components & Architecture**: What you have learned about the relevant code.
+- **Code Conventions Observed**: Patterns / styles you noticed.
+- **Findings & Recommendations**: Concrete, actionable insights — even if partial.
+- **Implementation Guidance**: What the main agent should do next, AND what is still uncertain or unverified.
+- **Open Questions / Not Yet Investigated**: Explicitly list anything you did NOT have time to check, so the main agent knows what remains.
+
+Do NOT call any tool. Reply with text only. If you call a tool, your work will be lost.`;
+  }
+
+  /**
+   * 构造 max_turns 触发时返回给主 Agent 的 summary 文本。
+   * Construct the summary text returned to the main agent when max_turns is hit.
+   *
+   * - 如果子 Agent 在最后一轮乖乖产出了文本总结 -> 头部加警告 + 完整保留总结正文
+   * - 如果子 Agent 仍然只调用了工具、没产出文本 -> 头部警告 + 提示无总结
+   *
+   * 通过把"达成轮数上限"的事实和"子 Agent 实际写下的内容"分层呈现，
+   * 既不丢信息也不会让主 Agent 误以为任务完美完成。
+   *
+   * i18n 文案由调用方通过 t() 注入，保持本函数为纯函数便于测试。
+   */
+  static buildPartialResultSummary(
+    finalReportText: string | undefined,
+    header: string,
+    creditsNotice: string,
+    noSummaryFallback: string,
+  ): string {
+    const trimmed = finalReportText?.trim();
+    const body = trimmed && trimmed.length > 0 ? trimmed : noSummaryFallback;
+    return `${header}\n${creditsNotice}\n\n${body}`;
+  }
+
+  /**
    * SubAgent初始确认回复 / SubAgent initial confirmation response
    */
   static readonly SUBAGENT_INITIAL_RESPONSE = 'Got it. Thanks for the context!';
