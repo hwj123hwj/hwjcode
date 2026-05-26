@@ -2230,6 +2230,46 @@ function buildGeminiNativeUrl(
 }
 
 /**
+ * Normalise Gemini's usageMetadata into the cross-provider shape downstream
+ * consumers expect.
+ *
+ * Why this exists:
+ *   geminiChat.ts:240 (the single place that emits TokenUsageEvent for the
+ *   "Token Usage" footer) reads `usageMetadata.cacheReadInputTokens` —
+ *   the cross-provider canonical name set by anthropic / openai-chat /
+ *   openai-responses paths in this same file. Gemini, however, uses
+ *   `cachedContentTokenCount` (camelCase, with `Count` suffix). Forwarding
+ *   `data.usageMetadata` verbatim therefore caused the UI to permanently
+ *   show "No cache information available" for any custom Gemini model,
+ *   even when the upstream had handed back e.g. `cachedContentTokenCount: 3059`.
+ *
+ * Verified end-to-end via scripts/probe-cache-fields.mjs (round 2 hits
+ * always populate cachedContentTokenCount on EasyRouter's
+ * /v1beta/...:generateContent, both unary and SSE).
+ *
+ * Strategy: keep all original Gemini fields (some downstream code, e.g.
+ * SessionManager, still reads `cachedContentTokenCount` directly), and
+ * additionally project `cacheReadInputTokens` as an alias. We deliberately
+ * do NOT synthesise `cacheCreationInputTokens` — Gemini's implicit cache has
+ * no "creation" phase visible to clients (the tokens are billed once at
+ * input rate; the cache is server-managed). Pretending otherwise would
+ * double-count in cost calculators.
+ */
+function normaliseGeminiUsageMetadata(usage: any): any {
+  if (!usage || typeof usage !== 'object') return usage;
+  const cached = usage.cachedContentTokenCount || 0;
+  // Already normalised (defensive — never expected from Google's API today).
+  if (typeof usage.cacheReadInputTokens === 'number') return usage;
+  return {
+    ...usage,
+    // Alias only when the upstream actually reported a hit; absent field
+    // (round 1, miss) → leave undefined so existing `|| 0` fallbacks
+    // downstream behave identically.
+    ...(cached > 0 && { cacheReadInputTokens: cached }),
+  };
+}
+
+/**
  * Map a single GenAI streaming JSON chunk to one or more
  * GenerateContentResponse-shaped objects ready to yield. Specifically, splits
  * `parts[]` into:
@@ -2288,11 +2328,13 @@ function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentRespon
       yield resp as any as GenerateContentResponse;
     }
   }
-  // Usage metadata may arrive on any chunk (often the last one) — forward it.
+  // Usage metadata may arrive on any chunk (often the last one) — forward it,
+  // normalising Gemini's cache token field name so the UI footer can pick
+  // up cache hits the same way it does for anthropic / openai-* providers.
   if (chunk?.usageMetadata) {
     yield {
       candidates: [],
-      usageMetadata: chunk.usageMetadata,
+      usageMetadata: normaliseGeminiUsageMetadata(chunk.usageMetadata),
     } as any;
   }
 }
@@ -2454,7 +2496,11 @@ export async function callGeminiNativeModel(
             index: 0,
           },
         ],
-        usageMetadata: data.usageMetadata,
+        // Normalise Gemini's cachedContentTokenCount → cacheReadInputTokens
+        // alias so the UI footer / cost calculator pick up cache hits the
+        // same way they do for anthropic / openai-* providers. Verified by
+        // scripts/probe-cache-fields.mjs.
+        usageMetadata: normaliseGeminiUsageMetadata(data.usageMetadata),
       };
       addFunctionCallsGetter(result);
       return result as any as GenerateContentResponse;
