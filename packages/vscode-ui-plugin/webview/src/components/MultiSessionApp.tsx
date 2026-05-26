@@ -11,6 +11,7 @@ import { Settings, History, Target } from 'lucide-react';
 import { useMultiSessionState } from '../hooks/useMultiSessionState';
 import { getGlobalMessageService } from '../services/globalMessageService';
 import { webviewModelService } from '../services/webViewModelService';
+import { customModelsService } from '../services/customModelsService';
 import { useTranslation } from '../hooks/useTranslation';
 import { useYoloMode } from '../hooks/useProjectSettings';
 import { SessionSwitcher } from './SessionSwitcher';
@@ -68,6 +69,11 @@ export const MultiSessionApp: React.FC = () => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>();
   const [currentUserInfo, setCurrentUserInfo] = useState<any>(null); // 当前登录用户信息
+  // 🟢 自定义模型专用模式 — 与 CLI 的 useAuthCommand.isCustomModelOnlyMode 对齐。
+  // 用户在登录页选 "Use Custom Model" 后置 true，让其绕过 OAuth 直接进入主界面。
+  // 仅影响 LoginPage 的 gating；下游（聊天/模型选择）已经原生支持自定义模型，
+  // 无需再在每条 RPC 上手动透传此标志。
+  const [isCustomModelOnlyMode, setIsCustomModelOnlyMode] = useState(false);
 
   // 🎯 启动流程状态管理
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
@@ -252,6 +258,15 @@ export const MultiSessionApp: React.FC = () => {
   // 流式聊天支持：维护正在流式接收的消息
   const streamingMessages = useRef<Map<string, { messageId: string; content: string; sessionId: string }>>(new Map());
 
+  // 🟢 isCustomModelOnlyMode 的最新值 ref —— 让 checkAuthenticationError 这种
+  // 用 useCallback([], …) 固定身份的回调，也能读到当前值。
+  // 不能直接放进 deps（会让所有订阅 checkAuthenticationError 的 effect 重连），
+  // 也不能直接读 state（闭包陷阱）—— 所以走 ref。
+  const isCustomModelOnlyModeRef = useRef(isCustomModelOnlyMode);
+  React.useEffect(() => {
+    isCustomModelOnlyModeRef.current = isCustomModelOnlyMode;
+  }, [isCustomModelOnlyMode]);
+
   // 🎯 认证错误检查助手函数
   const checkAuthenticationError = React.useCallback((error: string): boolean => {
     if (error && (
@@ -261,6 +276,15 @@ export const MultiSessionApp: React.FC = () => {
       error.includes('requireReAuth":true') ||
       error.includes('authentication session is outdated')
     )) {
+      // 🟢 自定义模型专用模式下，不要把用户踢回登录页 —— 与 CLI 的
+      // isCustomModelOnlyMode 行为对齐：用户主动绕过 OAuth，cloud 模型的
+      // 401/refresh 失败属于"预期"——应该作为聊天错误冒泡，不应改变 gating。
+      // （后端 LoginService.checkLoginStatus 永远会回 false，但前端只要不据
+      // 此踢人，主界面就能继续用。下游 RPC 已经原生支持 custom: 模型。）
+      if (isCustomModelOnlyModeRef.current) {
+        console.log('🟢 [MultiSessionApp] Auth error in custom-model-only mode, NOT switching to login:', error);
+        return false;
+      }
       console.log('🔐 [MultiSessionApp] Authentication error detected, switching to login page:', error);
       setIsLoggedIn(false);
       setLoginError('Your login session has expired. Please log in again.');
@@ -1391,6 +1415,64 @@ export const MultiSessionApp: React.FC = () => {
     // 重置任何登录相关的状态
   };
 
+  /**
+   * 🟢 处理"使用自定义模型"绕过登录
+   * 与 CLI 的 useAuthCommand.handleUseCustomModel 对齐：
+   *   - 标记 customModelOnlyMode = true，让 LoginPage 不再拦人
+   *   - 把 isLoggedIn 视为 true，进入主界面（webview 没有 OAuth token，
+   *     但聊天/RPC 路径都通过 custom: 协议直连第三方 API，无需 deepv token）
+   *   - 清掉 loginError，避免主界面顶上还挂着旧错误
+   *
+   * 注意：扩展宿主端 (extension.ts) 的 LoginService.checkLoginStatus 仍会
+   * 返回 isLoggedIn=false，但只要前端不再据此 gate UI，体验就和登录用户一样。
+   * 后续聊天若使用了 cloud 模型，DeepVServerAdapter 仍会触发认证错误，
+   * 由 checkAuthenticationError 自动把用户带回登录页 — 这是预期行为。
+   */
+  const handleUseCustomModel = React.useCallback(() => {
+    console.log('🟢 [LoginPage] User chose to use custom model — bypassing login gate');
+    setIsCustomModelOnlyMode(true);
+    setIsLoggedIn(true);
+    setLoginError(undefined);
+    setIsLoggingIn(false);
+
+    // 🟢 自动把当前模型切到第一个启用的自定义模型 —— 否则 selectedModelId
+    // 仍是默认 'auto'，下游 DeepVServerAdapter 会要求 OAuth token，
+    // 用户立刻就会看到 401，体验和"没绕过登录"几乎一样。
+    //
+    // 之所以放在这里：触发点只有"用户主动选择 Use Custom Model"，
+    // 不会误伤已登录用户的模型选择；用户进入主界面后仍可在 ModelSelector
+    // 里换回 auto / cloud（前提是他们已登录，否则会被踢回登录页）。
+    //
+    // 实现细节：
+    //   - listCustomModels() 走 IPC，可能失败（超时/扩展未就绪）—— 失败时
+    //     就维持 'auto'，让用户自己在主界面选；不要 throw，否则点 Continue
+    //     按钮就什么都不发生。
+    //   - setCurrentModel 是 best-effort —— 后端如果还没准备好接 set_current_model，
+    //     前端 setSelectedModelId 已经更新，等后端就绪后下次 setCurrentModel 也会同步。
+    void (async () => {
+      try {
+        const models = await customModelsService.listCustomModels();
+        const firstEnabled = (models || []).find((m) => m && m.enabled !== false && m.displayName);
+        if (!firstEnabled) {
+          console.warn('🟡 [LoginPage] No enabled custom model found — leaving model on default');
+          return;
+        }
+        const targetModelId = `custom:${firstEnabled.displayName}`;
+        console.log('🟢 [LoginPage] Auto-switching model to first custom:', targetModelId);
+        setSelectedModelId(targetModelId);
+        // 不传 sessionId —— 此时 state.currentSessionId 可能还没就绪；
+        // 后端 set_current_model 在 sessionId 缺省时会走全局/默认 session。
+        try {
+          await webviewModelService.setCurrentModel(targetModelId);
+        } catch (err) {
+          console.warn('🟡 [LoginPage] setCurrentModel failed (best-effort):', err);
+        }
+      } catch (err) {
+        console.warn('🟡 [LoginPage] Failed to list custom models for auto-switch:', err);
+      }
+    })();
+  }, []);
+
   // =============================================================================
   // 事件处理方法
   // =============================================================================
@@ -2175,6 +2257,7 @@ User question: ${contentStr}`;
         isCheckingAuth={true}
         loginError={loginError}
         onCancelLogin={handleCancelLogin}
+        onUseCustomModel={handleUseCustomModel}
       />
     );
   }
@@ -2188,6 +2271,7 @@ User question: ${contentStr}`;
         isCheckingAuth={false}
         loginError={loginError}
         onCancelLogin={handleCancelLogin}
+        onUseCustomModel={handleUseCustomModel}
       />
     );
   }

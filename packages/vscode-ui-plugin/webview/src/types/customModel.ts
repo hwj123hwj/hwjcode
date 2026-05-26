@@ -37,7 +37,16 @@ export interface CustomModelConfig {
   baseUrl: string;
   apiKey: string;
   modelId: string;
+  /** Context window size (input + output combined). Typically 100K–1M. */
   maxTokens?: number;
+  /**
+   * Hard cap on output tokens per response (Anthropic `max_tokens` /
+   * OpenAI Responses `max_output_tokens`). Typically 4K–64K. Distinct from
+   * the context window — Anthropic rejects requests where max_tokens
+   * exceeds the model's output cap, so blindly sending the 1M context
+   * window will 400.
+   */
+  maxOutputTokens?: number;
   enabled?: boolean;
   headers?: Record<string, string>;
   timeout?: number;
@@ -57,11 +66,18 @@ export interface EasyRouterModelEntry {
 export interface EasyClawModelMetadata {
   model_id: string;
   display_name?: string;
+  /** Maximum context window (tokens). */
   max_context_length?: number;
-  max_output_tokens?: number;
+  /**
+   * Maximum output length (tokens) — the per-response output cap.
+   * NOTE: API uses `max_output_length`, not `max_output_tokens`. Verified
+   * via curl https://easyclaw.work/api/models on 2026-05-26.
+   */
+  max_output_length?: number;
   description?: string;
   // Other fields exist on the wire (provider/pricing/etc.) but the wizard
-  // only consumes max_context_length, so we leave the rest open.
+  // only consumes max_context_length / max_output_length, so we leave
+  // the rest open.
   [extra: string]: unknown;
 }
 
@@ -113,6 +129,13 @@ export function validateCustomModelConfig(config: CustomModelConfig): string[] {
   }
 
   if (
+    config.maxOutputTokens !== undefined &&
+    (typeof config.maxOutputTokens !== 'number' || config.maxOutputTokens <= 0)
+  ) {
+    errors.push('maxOutputTokens must be a positive number if specified');
+  }
+
+  if (
     config.timeout !== undefined &&
     (typeof config.timeout !== 'number' || config.timeout <= 0)
   ) {
@@ -144,6 +167,11 @@ export function classifyEasyRouterModel(modelId: string): CustomModelProvider {
  *   - displayName defaults to modelId
  *   - baseUrl is the fixed EasyRouter endpoint
  *   - maxTokens precedence: explicit > metadata.max_context_length > 200K default
+ *   - maxOutputTokens precedence: explicit > metadata.max_output_length > undefined
+ *     (intentionally NO numeric default here — 200K context-window default
+ *     would blow past every Anthropic/OpenAI output cap and trigger 400s.
+ *     Leave it undefined so the adapter falls back to its 32K hardcoded
+ *     default; see customModelAdapter.ts DEFAULT_MAX_OUTPUT_TOKENS.)
  */
 export function buildEasyRouterModelConfig(
   modelId: string,
@@ -151,6 +179,7 @@ export function buildEasyRouterModelConfig(
   options?: {
     displayName?: string;
     maxTokens?: number;
+    maxOutputTokens?: number;
     metadata?: EasyClawModelMetadata;
   },
 ): CustomModelConfig {
@@ -166,6 +195,18 @@ export function buildEasyRouterModelConfig(
       : undefined;
   const resolvedMaxTokens =
     explicit ?? fromMetadata ?? EASY_ROUTER_DEFAULT_MAX_TOKENS;
+
+  const explicitOutput =
+    typeof options?.maxOutputTokens === 'number' && options.maxOutputTokens > 0
+      ? options.maxOutputTokens
+      : undefined;
+  const fromMetadataOutput =
+    typeof options?.metadata?.max_output_length === 'number' &&
+    (options.metadata.max_output_length as number) > 0
+      ? (options.metadata.max_output_length as number)
+      : undefined;
+  const resolvedMaxOutputTokens = explicitOutput ?? fromMetadataOutput;
+
   return {
     displayName: options?.displayName?.trim() || modelId,
     provider,
@@ -173,6 +214,7 @@ export function buildEasyRouterModelConfig(
     apiKey,
     modelId,
     maxTokens: resolvedMaxTokens,
+    ...(resolvedMaxOutputTokens !== undefined ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
     enabled: true,
   };
 }
