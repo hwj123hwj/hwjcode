@@ -293,6 +293,17 @@
   color: var(--vscode-descriptionForeground, #999999);
 }
 
+/* 🟢 容器：把 "Continue" + "Add" 两个入口竖排居中。
+   参照 CLI 的 isCustomModelOnlyMode 流程，"Continue" 是回头用户的主入口，
+   而 "Add" 是首次用户和扩展配置的入口。 */
+.login-page__custom-model-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .login-page__custom-model-btn {
   font-family: inherit;
   font-size: 12px;
@@ -313,6 +324,20 @@
 .login-page__custom-model-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* "Continue with Custom Models" — 视觉上稍强调（实色背景）以区别于次级 "Add Custom Model"。
+   仍然比主登录按钮弱，避免抢戏。 */
+.login-page__custom-model-btn--primary {
+  background-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.15));
+  border-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.4));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-foreground, #3794ff));
+  font-weight: 500;
+}
+
+.login-page__custom-model-btn--primary:hover:not(:disabled) {
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(60, 120, 200, 0.25));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-activeForeground, #4daafc));
 }
 
 /* 动画 */

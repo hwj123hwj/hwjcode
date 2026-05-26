@@ -357,6 +357,29 @@ export interface CustomModelConfig {
   /** 最大token数（上下文窗口大小） */
   maxTokens?: number;
 
+  /**
+   * 最大输出 token 数（生成响应的硬上限，对应 Anthropic `max_tokens` /
+   * OpenAI Responses `max_output_tokens`）。
+   *
+   * 与 maxTokens 的区别：
+   * - maxTokens 是上下文窗口（输入+输出之和），通常 100K~1M。
+   * - maxOutputTokens 是单次响应输出的硬上限，通常 4K~64K。
+   *   Anthropic 等 provider 会拒绝 max_tokens 超出该模型出参上限的请求，
+   *   所以拿 1M 的上下文窗口直接当 max_tokens 发出去会立刻 400。
+   *
+   * 来源优先级（高到低）：
+   * 1. EasyClaw `max_output_length` 元数据（EasyRouter 路径自动填）
+   * 2. 用户手动编辑 ~/.deepv/custom-models.json
+   * 3. 适配器内置的 32K 统一兜底（见 customModelAdapter.ts 的
+   *    DEFAULT_MAX_OUTPUT_TOKENS）
+   *
+   * 注意：向导里不暴露这一项 —— 32K 兜底对绝大多数现代模型都安全，
+   * EasyClaw 元数据填充覆盖了 EasyRouter 路径，没必要再让用户配置。
+   *
+   * undefined 表示"未配置" —— 适配器会回退到 32K 默认值。
+   */
+  maxOutputTokens?: number;
+
   /** 是否启用此模型 */
   enabled?: boolean;
 
@@ -511,6 +534,10 @@ export function validateCustomModelConfig(config: CustomModelConfig): string[] {
     errors.push('maxTokens must be a positive number if specified');
   }
 
+  if (config.maxOutputTokens !== undefined && (typeof config.maxOutputTokens !== 'number' || config.maxOutputTokens <= 0)) {
+    errors.push('maxOutputTokens must be a positive number if specified');
+  }
+
   if (config.timeout !== undefined && (typeof config.timeout !== 'number' || config.timeout <= 0)) {
     errors.push('timeout must be a positive number if specified');
   }
@@ -661,10 +688,12 @@ export function buildEasyRouterModelConfig(
   options?: {
     displayName?: string;
     maxTokens?: number;
+    maxOutputTokens?: number;
     /**
      * 命中 EasyClaw `/api/v1/public-model-list` 时拿到的元数据。
-     * 仅用于 maxTokens 的自动填充——displayName 行为保持原样（=modelId），
-     * 让 ~/.deepv/custom-models.json 中已经存在的同名条目可被原地覆盖。
+     * 用于 maxTokens / maxOutputTokens 的自动填充——displayName 行为保持原样
+     * （=modelId），让 ~/.deepv/custom-models.json 中已经存在的同名条目
+     * 可被原地覆盖。
      */
     metadata?: EasyClawModelMetadata;
   },
@@ -681,6 +710,22 @@ export function buildEasyRouterModelConfig(
       : undefined;
   const resolvedMaxTokens =
     explicit ?? fromMetadata ?? EASY_ROUTER_DEFAULT_MAX_TOKENS;
+
+  // maxOutputTokens 单独解析，不沿用 EASY_ROUTER_DEFAULT_MAX_TOKENS（200K）
+  // —— 因为 200K 对于大多数模型的 output cap 来说严重超标，会被 Anthropic 等
+  // provider 直接拒绝。这里宁可不填（undefined），交给适配器各自 provider 默认
+  // （Anthropic 8192 / OpenAI 4096 等），也不要瞎填一个会触发 400 的值。
+  const explicitOutput =
+    typeof options?.maxOutputTokens === 'number' && options.maxOutputTokens > 0
+      ? options.maxOutputTokens
+      : undefined;
+  const fromMetadataOutput =
+    typeof options?.metadata?.max_output_length === 'number' &&
+    options.metadata.max_output_length > 0
+      ? options.metadata.max_output_length
+      : undefined;
+  const resolvedMaxOutputTokens = explicitOutput ?? fromMetadataOutput;
+
   return {
     displayName: options?.displayName?.trim() || modelId,
     provider,
@@ -688,6 +733,7 @@ export function buildEasyRouterModelConfig(
     apiKey,
     modelId,
     maxTokens: resolvedMaxTokens,
+    ...(resolvedMaxOutputTokens !== undefined ? { maxOutputTokens: resolvedMaxOutputTokens } : {}),
     enabled: true,
   };
 }

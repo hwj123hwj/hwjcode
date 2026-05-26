@@ -237,6 +237,44 @@ describe('EasyRouter integration', () => {
       });
       expect(cfg.maxTokens).toBe(EASY_ROUTER_DEFAULT_MAX_TOKENS);
     });
+
+    it('does NOT set maxOutputTokens when no metadata / override is given', () => {
+      // Adapter should pick a provider-appropriate default; we must not
+      // pre-fill 200K (the context-window default), or every Anthropic
+      // request will 400 with "max_tokens too high".
+      const cfg = buildEasyRouterModelConfig('claude-opus-4-7', 'sk-test');
+      expect(cfg.maxOutputTokens).toBeUndefined();
+    });
+
+    it('auto-fills maxOutputTokens from EasyClaw metadata.max_output_length', () => {
+      const cfg = buildEasyRouterModelConfig('claude-sonnet-4-20250514', 'sk-test', {
+        metadata: {
+          model_id: 'claude-sonnet-4-20250514',
+          max_context_length: 1_000_000,
+          max_output_length: 32_000,
+        },
+      });
+      expect(cfg.maxTokens).toBe(1_000_000);     // context window
+      expect(cfg.maxOutputTokens).toBe(32_000);  // output cap
+    });
+
+    it('explicit maxOutputTokens override beats metadata', () => {
+      const cfg = buildEasyRouterModelConfig('claude-sonnet-4-20250514', 'sk-test', {
+        maxOutputTokens: 8_192,
+        metadata: {
+          model_id: 'claude-sonnet-4-20250514',
+          max_output_length: 32_000,
+        },
+      });
+      expect(cfg.maxOutputTokens).toBe(8_192);
+    });
+
+    it('omits maxOutputTokens when metadata has zero / negative output length', () => {
+      const cfg = buildEasyRouterModelConfig('gpt-5.4', 'sk-test', {
+        metadata: { model_id: 'gpt-5.4', max_output_length: 0 },
+      });
+      expect(cfg.maxOutputTokens).toBeUndefined();
+    });
   });
 
   describe('EasyClaw metadata helpers', () => {
