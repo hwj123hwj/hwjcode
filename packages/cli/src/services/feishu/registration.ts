@@ -19,8 +19,6 @@
  * 移植自 easyagent feishu_setup.py 档 1。
  */
 
-import * as crypto from 'node:crypto';
-
 const ACCOUNTS_URLS: Record<string, string> = {
   feishu: 'https://accounts.feishu.cn',
   lark: 'https://accounts.larksuite.com',
@@ -77,7 +75,7 @@ export async function initRegistration(domain: string = 'feishu'): Promise<void>
   const methods: string[] = res.supported_auth_methods || [];
   if (!methods.includes('client_secret')) {
     throw new Error(
-      `飞书注册环境不支持 client_secret 认证。支持的方法: ${methods.join(', ')}`,
+      `Feishu registration env does not support client_secret auth. Supported: ${methods.join(', ')}`,
     );
   }
 }
@@ -98,7 +96,7 @@ export async function beginRegistration(
 
   const deviceCode = res.device_code;
   if (!deviceCode) {
-    throw new Error('飞书注册未返回 device_code');
+    throw new Error('Feishu registration did not return device_code');
   }
 
   let qrUrl = res.verification_uri_complete || '';

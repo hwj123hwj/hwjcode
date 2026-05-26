@@ -1438,6 +1438,154 @@ export const translations = {
     'thinking.effort.xhigh': 'Extended High',
     'thinking.effort.auto': 'Auto',
 
+    // Feishu Bot Integration
+    'feishu.command.description': 'Integrate Feishu Bot, let dvcode answer code questions in Feishu',
+    'feishu.subcmd.setup.description': 'Configure Feishu app credentials (QR scan or manual)',
+    'feishu.subcmd.start.description': 'Start the Feishu Bot (WebSocket long connection)',
+    'feishu.subcmd.stop.description': 'Stop the Feishu Bot',
+    'feishu.subcmd.status.description': 'Show the Feishu Bot connection status',
+    'feishu.subcmd.logout.description': 'Clear Feishu credentials and disconnect',
+    'feishu.subcmd.allow.description': 'Add a Feishu open_id to the authorization allowlist',
+    'feishu.subcmd.deny.description': 'Remove an open_id from the authorization allowlist',
+    'feishu.subcmd.allowlist.description': 'List the current Bot Owner and authorization allowlist',
+    'feishu.subcmd.help.description': 'Show Feishu help',
+
+    'feishu.help.text': 'Feishu Bot Integration — let dvcode answer questions inside Feishu\n\nUsage:\n  /feishu                Interactive setup and start\n  /feishu setup          Mode 1: scan QR code to auto-create app (recommended)\n  /feishu setup --manual <appId> <appSecret>  Mode 3: manual credentials\n  /feishu start          Start the Feishu Bot (credentials required)\n  /feishu stop           Stop the Feishu Bot\n  /feishu status         Show current status\n  /feishu logout         Clear credentials and disconnect\n\nAuthorization (important):\n  /feishu allow <openId> Allow a specific Feishu user to invoke the Bot\n  /feishu deny  <openId> Remove from the authorization allowlist\n  /feishu allowlist      Show current Owner and allowlist\n\nFirst-time use:\n  1. /feishu setup              # Scan QR (the scanner becomes the Owner)\n  2. /feishu start              # Start the Bot\n  3. Send a message to the Bot in Feishu — dvcode answers in the background\n\n⚠️  By default the Bot only responds to the Owner / allowlisted users; unauthorized senders are rejected.',
+
+    // QR setup flow (Mode 1)
+    'feishu.setup.qr.title': '📱 Mode 1: Scan QR to auto-create app',
+    'feishu.setup.qr.connecting': '  Connecting to Feishu...',
+    'feishu.setup.qr.generated': '  QR code generated',
+    'feishu.setup.qr.url': '  URL: {url}',
+    'feishu.setup.qr.scan_hint': '  Scan the QR code above with the Feishu mobile app',
+    'feishu.setup.qr.browser_hint': '  Or open the link in a browser to complete authorization',
+    'feishu.setup.qr.browser_opened': '  → Browser opened automatically',
+    'feishu.setup.qr.browser_failed': '  (Could not open browser automatically — please copy the link manually)',
+    'feishu.setup.qr.waiting': '  ⏳ Waiting for QR scan...',
+    'feishu.setup.qr.cancel_hint': '  (Press Ctrl+C to cancel)',
+    'feishu.setup.qr.timeout': '❌ Feishu QR scan timed out or was cancelled.',
+    'feishu.setup.qr.retry_hint': '  Run /feishu setup to try again.',
+    'feishu.setup.qr.success': '✅ Feishu app created successfully!',
+    'feishu.setup.qr.bot_name': '  Bot name:    {name}',
+    'feishu.setup.qr.creds_saved': '  Credentials saved to {path}feishu-credentials.json',
+    'feishu.setup.qr.next_step_start': '  Next: run /feishu start to start the Bot',
+    'feishu.setup.qr.failed_title': '❌ Failed to create app via QR scan:',
+    'feishu.setup.qr.fallback_hint': '  Try /feishu setup --manual <AppId> <AppSecret> to enter credentials manually',
+
+    // Manual setup flow (Mode 3)
+    'feishu.setup.manual.title': '📝 Mode 3: Manual credentials',
+    'feishu.setup.manual.usage': '  Usage: /feishu setup --manual <AppId> <AppSecret>',
+    'feishu.setup.manual.example': '  Example: /feishu setup --manual cli_xxxxx xxxxxxxxxxxxxx',
+    'feishu.setup.manual.where_to_find': '  (Get these at https://open.feishu.cn/app → your app → Credentials & Basic Info)',
+    'feishu.setup.manual.tip_qr': '  💡 You can also use /feishu setup (Mode 1) to scan a QR — easier',
+    'feishu.setup.manual.validating': '📝 Mode 3: Validating credentials...',
+    'feishu.setup.manual.creds_valid': '  ✅ Credentials valid',
+    'feishu.setup.manual.creds_invalid': '  ⚠️ Credentials saved but validation failed (check Bot capability is enabled on the open platform)',
+    'feishu.setup.manual.owner_warning': '  ⚠️ Manual setup did not auto-bind a Bot Owner. After /feishu start,',
+    'feishu.setup.manual.owner_warning_2': '     the first message will be rejected with a hint to allowlist yourself.',
+
+    // Send detected files (LLM output → Feishu)
+    'feishu.send.image': '📎 Sent image: {path}',
+    'feishu.send.file': '📎 Sent file: {path}',
+
+    // Slash commands inside Feishu chat (help text shown to remote user — KEEP CHINESE)
+    // We do NOT translate the bot's outgoing replies; the in-Feishu help is rendered
+    // by the bot itself, not by the dvcode TUI. See feishu.handlers below for TUI side.
+
+    // Start handler
+    'feishu.start.creds_load_failed': '❌ Failed to read Feishu credentials: {error}\n\nTo reconfigure: /feishu logout then /feishu setup',
+    'feishu.start.no_creds_title': '⚠️ Feishu credentials not found',
+    'feishu.start.no_creds_setup': 'Please configure first:',
+    'feishu.start.no_creds_qr': '  /feishu setup          # Scan QR to auto-create app',
+    'feishu.start.no_creds_or': '  or',
+    'feishu.start.no_creds_manual': '  /feishu setup --manual # Manual credentials',
+    'feishu.start.already_running': '⚠️ Feishu Bot is already running. Run /feishu stop first.',
+    'feishu.start.tool_registered': '✅ Registered Feishu file-send tool (send_feishu_file)',
+    'feishu.start.tool_register_failed': '⚠️ Failed to register Feishu tool (continuing): {error}',
+    'feishu.start.success_title': '✅ Feishu Bot started!',
+    'feishu.start.success_bot': '  Bot:     {name}',
+    'feishu.start.success_platform': '  Platform: {platform}',
+    'feishu.start.success_hint_chat': '  Now send a message to the Bot in Feishu to try it 👋',
+    'feishu.start.success_hint_stop': '  Run /feishu stop to stop',
+    'feishu.start.failed': '❌ Failed to start Feishu Bot: {error}',
+    'feishu.start.bot_unknown': '(unknown)',
+    'feishu.start.platform.lark': 'Lark',
+    'feishu.start.platform.feishu': 'Feishu',
+    'feishu.start.ready': '✅ Feishu Bot ready, you can start chatting!',
+    'feishu.start.disconnected': '🔌 Feishu connection closed',
+
+    // Stop handler
+    'feishu.stop.not_running': '⚠️ Feishu Bot is not running.',
+    'feishu.stop.tool_unregistered': '✅ Unregistered Feishu file-send tool (send_feishu_file)',
+    'feishu.stop.tool_unregister_failed': '⚠️ Failed to unregister Feishu tool: {error}',
+    'feishu.stop.stopped': '🛑 Feishu Bot stopped.',
+
+    // Status handler
+    'feishu.status.title': '📊 Feishu status:',
+    'feishu.status.creds_configured': '  Credentials: ✅ Configured',
+    'feishu.status.bot_name': '  Bot name:    {name}',
+    'feishu.status.platform': '  Platform:    {platform}',
+    'feishu.status.owner': '  Bot Owner:   {owner}',
+    'feishu.status.owner_unbound': '(unbound — first QR scanner becomes Owner)',
+    'feishu.status.allowlist_count': '  Allowlist:   {count} user(s) (use /feishu allowlist to view)',
+    'feishu.status.creds_missing': '  Credentials: not configured',
+    'feishu.status.run_setup': '  Run /feishu setup to configure credentials',
+    'feishu.status.bot_status_running': '🟢 Running',
+    'feishu.status.bot_status_stopped': '🔴 Stopped',
+    'feishu.status.bot_status_label': '  Bot status:  {status}',
+    'feishu.status.run_start': '  Run /feishu start to start the Bot',
+
+    // Logout handler
+    'feishu.logout.cleared': '🗑️ Feishu credentials cleared, Bot disconnected.',
+
+    // Interactive entry
+    'feishu.interactive.welcome': '👋 Welcome to the Feishu Bot!',
+    'feishu.interactive.first_time': '  First-time setup — please configure credentials:',
+    'feishu.interactive.setup_qr': '    /feishu setup          # Scan QR to auto-create app (recommended)',
+    'feishu.interactive.setup_manual': '    /feishu setup --manual # Manual credentials',
+    'feishu.interactive.help_hint': '  Or run /feishu help for help',
+    'feishu.interactive.creds_ready': '✅ Credentials configured',
+    'feishu.interactive.creds_bot': '  Bot:    {name}',
+    'feishu.interactive.start_hint': '  Run /feishu start to start the Bot',
+    'feishu.interactive.logout_hint': '  Run /feishu logout to clear credentials',
+    'feishu.interactive.already_running': '✅ Feishu Bot is already running. Run /feishu stop to stop.',
+
+    // Allow handler
+    'feishu.allow.usage_title': 'Usage: /feishu allow <openId>',
+    'feishu.allow.usage_body': 'Allow the specified Feishu open_id to send messages to the Bot and trigger LLM/tool calls.',
+    'feishu.allow.usage_where': 'You can find an open_id in the Bot rejection hint, or via Feishu Open Platform → Contacts.',
+    'feishu.allow.creds_load_failed': '❌ Failed to read credentials: {error}',
+    'feishu.allow.creds_missing': '⚠️ Feishu credentials not found. Run /feishu setup first.',
+    'feishu.allow.already_owner': 'ℹ️ {openId} is already the Bot Owner — no allowlist entry needed.',
+    'feishu.allow.set_as_owner': '✅ Set {openId} as Bot Owner.',
+    'feishu.allow.already_in_list': 'ℹ️ {openId} is already in the authorization allowlist.',
+    'feishu.allow.added': '✅ Added {openId} to the authorization allowlist (total {count}).',
+
+    // Deny handler
+    'feishu.deny.usage': 'Usage: /feishu deny <openId>',
+    'feishu.deny.cannot_remove_owner': '❌ Cannot directly remove the Bot Owner ({openId}).\n\nTo change the Owner:\n  1. /feishu allow <new-owner-openId> first add the new owner to allowlist\n  2. /feishu logout clear all credentials and re-run setup',
+    'feishu.deny.not_in_list': 'ℹ️ {openId} is not in the authorization allowlist.',
+    'feishu.deny.removed': '✅ Removed {openId} from the authorization allowlist (remaining {count}).',
+
+    // Allowlist handler
+    'feishu.allowlist.title': '🛡️ Feishu Bot authorization list:',
+    'feishu.allowlist.owner': '  Owner:       {owner}',
+    'feishu.allowlist.owner_unbound': '(unbound)',
+    'feishu.allowlist.list_header': '  Allowlist:',
+    'feishu.allowlist.list_empty': '  Allowlist:   (empty)',
+    'feishu.allowlist.manage_hint': 'Manage: /feishu allow <openId>  /  /feishu deny <openId>',
+
+    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    'feishu.tui.incoming_prefix': '[Feishu] {text}',
+    'feishu.tui.context_compressed': '📦 Context auto-compressed',
+    'feishu.tui.tool_running': '🔧 Running tool: {names}',
+    'feishu.tui.tool_running_with_args': '🔧 Running tool: {name} {args}',
+    'feishu.tui.tool_user_answered': '✅ User answered',
+    'feishu.tui.tool_done': '✅ Tool done: {name}',
+    'feishu.tui.tool_failed': '❌ Tool failed: {name} — {error}',
+    'feishu.tui.processing_error': '❌ Error processing message: {error}',
+    'feishu.tui.unauthorized_log': '🛡️ Rejected unauthorized message: openId={openId} text="{text}"',
+
     // Error messages
     'error.config.not.loaded': 'Configuration not loaded.',
     'error.tool.registry.unavailable': 'Unable to retrieve tool registry.',
@@ -2919,6 +3067,150 @@ export const translations = {
     'thinking.effort.max': '最大强度',
     'thinking.effort.xhigh': '超高强度',
     'thinking.effort.auto': '自动',
+
+    // Feishu Bot Integration
+    'feishu.command.description': '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
+    'feishu.subcmd.setup.description': '配置飞书应用凭证（扫码或手动输入）',
+    'feishu.subcmd.start.description': '启动飞书 Bot（WS 长连接）',
+    'feishu.subcmd.stop.description': '停止飞书 Bot',
+    'feishu.subcmd.status.description': '查看飞书 Bot 连接状态',
+    'feishu.subcmd.logout.description': '清除飞书凭证并断开连接',
+    'feishu.subcmd.allow.description': '将飞书 open_id 加入授权白名单',
+    'feishu.subcmd.deny.description': '从授权白名单中移除指定 open_id',
+    'feishu.subcmd.allowlist.description': '列出当前 Bot 的 Owner 与授权白名单',
+    'feishu.subcmd.help.description': '显示飞书帮助',
+
+    'feishu.help.text': '飞书 Bot 接入 — 让 dvcode 在飞书里回答你的问题\n\n用法:\n  /feishu                交互式配置并启动\n  /feishu setup          档 1 扫码自动建应用（推荐）\n  /feishu setup --manual <appId> <appSecret>  档 3 手动输入凭证\n  /feishu start          启动飞书 Bot（需先配置凭证）\n  /feishu stop           停止飞书 Bot\n  /feishu status         查看当前状态\n  /feishu logout         清除凭证并断开\n\n授权管理（重要）:\n  /feishu allow <openId> 允许指定飞书用户调用 Bot\n  /feishu deny  <openId> 移出授权白名单\n  /feishu allowlist      查看当前 Owner 与白名单\n\n首次使用:\n  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）\n  2. /feishu start              # 启动 Bot\n  3. 去飞书给 Bot 发消息        # dvcode 将在后台回答\n\n⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
+
+    // QR setup flow (Mode 1)
+    'feishu.setup.qr.title': '📱 档 1: 扫码自动建应用',
+    'feishu.setup.qr.connecting': '  正在连接飞书...',
+    'feishu.setup.qr.generated': '  二维码已生成',
+    'feishu.setup.qr.url': '  URL: {url}',
+    'feishu.setup.qr.scan_hint': '  请用飞书手机 App 扫描上方二维码',
+    'feishu.setup.qr.browser_hint': '  或在浏览器打开链接完成授权',
+    'feishu.setup.qr.browser_opened': '  → 已自动打开浏览器',
+    'feishu.setup.qr.browser_failed': '  (未能自动打开浏览器，请手动复制链接)',
+    'feishu.setup.qr.waiting': '  ⏳ 正在等待扫码结果...',
+    'feishu.setup.qr.cancel_hint': '  （按 Ctrl+C 取消等待）',
+    'feishu.setup.qr.timeout': '❌ 飞书扫码超时或已被取消。',
+    'feishu.setup.qr.retry_hint': '  输入 /feishu setup 重新开始。',
+    'feishu.setup.qr.success': '✅ 飞书应用创建成功！',
+    'feishu.setup.qr.bot_name': '  Bot 名称:    {name}',
+    'feishu.setup.qr.creds_saved': '  凭证已保存到 {path}feishu-credentials.json',
+    'feishu.setup.qr.next_step_start': '  下一步: 输入 /feishu start 启动 Bot',
+    'feishu.setup.qr.failed_title': '❌ 扫码建应用失败:',
+    'feishu.setup.qr.fallback_hint': '  可尝试 /feishu setup --manual <AppId> <AppSecret> 手动输入凭证',
+
+    // Manual setup flow (Mode 3)
+    'feishu.setup.manual.title': '📝 档 3: 手动输入凭证',
+    'feishu.setup.manual.usage': '  用法: /feishu setup --manual <AppId> <AppSecret>',
+    'feishu.setup.manual.example': '  示例: /feishu setup --manual cli_xxxxx xxxxxxxxxxxxxx',
+    'feishu.setup.manual.where_to_find': '  （获取方式：https://open.feishu.cn/app → 你的应用 → 凭证与基础信息）',
+    'feishu.setup.manual.tip_qr': '  💡 也可以先 /feishu setup 扫码自动建应用（档 1），更简单',
+    'feishu.setup.manual.validating': '📝 档 3: 正在验证凭证...',
+    'feishu.setup.manual.creds_valid': '  ✅ 凭证有效',
+    'feishu.setup.manual.creds_invalid': '  ⚠️ 凭证已保存但验证失败（可在开放平台检查是否已启用 Bot 能力）',
+    'feishu.setup.manual.owner_warning': '  ⚠️ 手动配置模式下未自动绑定 Bot 拥有者。在 /feishu start 之后，',
+    'feishu.setup.manual.owner_warning_2': '     首次给 Bot 发消息时会拒绝并提示你将自己加入授权白名单。',
+
+    // Send detected files (LLM output → Feishu)
+    'feishu.send.image': '📎 已发送图片: {path}',
+    'feishu.send.file': '📎 已发送文件: {path}',
+
+    // Start handler
+    'feishu.start.creds_load_failed': '❌ 读取飞书凭证失败：{error}\n\n如需重新配置：/feishu logout 然后 /feishu setup',
+    'feishu.start.no_creds_title': '⚠️ 未找到飞书凭证',
+    'feishu.start.no_creds_setup': '请先配置:',
+    'feishu.start.no_creds_qr': '  /feishu setup          # 扫码自动建应用',
+    'feishu.start.no_creds_or': '  或',
+    'feishu.start.no_creds_manual': '  /feishu setup --manual # 手动输入凭证',
+    'feishu.start.already_running': '⚠️ 飞书 Bot 已在运行中。输入 /feishu stop 停止后再启动。',
+    'feishu.start.tool_registered': '✅ 已注册飞书文件发送工具 (send_feishu_file)',
+    'feishu.start.tool_register_failed': '⚠️ 注册飞书工具失败（不影响主流程）：{error}',
+    'feishu.start.success_title': '✅ 飞书 Bot 已启动！',
+    'feishu.start.success_bot': '  Bot 名称: {name}',
+    'feishu.start.success_platform': '  连接: {platform}',
+    'feishu.start.success_hint_chat': '  现在去飞书给 Bot 发消息试试吧 👋',
+    'feishu.start.success_hint_stop': '  输入 /feishu stop 停止',
+    'feishu.start.failed': '❌ 启动飞书 Bot 失败: {error}',
+    'feishu.start.bot_unknown': '(未知)',
+    'feishu.start.platform.lark': 'Lark',
+    'feishu.start.platform.feishu': '飞书',
+    'feishu.start.ready': '✅ 飞书 Bot 已就绪，可以开始聊天了！',
+    'feishu.start.disconnected': '🔌 飞书连接已断开',
+
+    // Stop handler
+    'feishu.stop.not_running': '⚠️ 飞书 Bot 未运行。',
+    'feishu.stop.tool_unregistered': '✅ 已注销飞书文件发送工具 (send_feishu_file)',
+    'feishu.stop.tool_unregister_failed': '⚠️ 注销飞书工具失败：{error}',
+    'feishu.stop.stopped': '🛑 飞书 Bot 已停止。',
+
+    // Status handler
+    'feishu.status.title': '📊 飞书状态:',
+    'feishu.status.creds_configured': '  凭证:        ✅ 已配置',
+    'feishu.status.bot_name': '  Bot 名称:    {name}',
+    'feishu.status.platform': '  平台:        {platform}',
+    'feishu.status.owner': '  Bot Owner:   {owner}',
+    'feishu.status.owner_unbound': '(未绑定 — 首次扫码用户为 Owner)',
+    'feishu.status.allowlist_count': '  授权白名单:  {count} 人 (用 /feishu allowlist 查看)',
+    'feishu.status.creds_missing': '  凭证:        未配置',
+    'feishu.status.run_setup': '  请运行 /feishu setup 配置凭证',
+    'feishu.status.bot_status_running': '🟢 运行中',
+    'feishu.status.bot_status_stopped': '🔴 已停止',
+    'feishu.status.bot_status_label': '  Bot 状态:    {status}',
+    'feishu.status.run_start': '  运行 /feishu start 启动 Bot',
+
+    // Logout handler
+    'feishu.logout.cleared': '🗑️ 飞书凭证已清除，Bot 已断开。',
+
+    // Interactive entry
+    'feishu.interactive.welcome': '👋 欢迎使用飞书 Bot！',
+    'feishu.interactive.first_time': '  首次使用，请先配置凭证:',
+    'feishu.interactive.setup_qr': '    /feishu setup          # 扫码自动建应用（推荐）',
+    'feishu.interactive.setup_manual': '    /feishu setup --manual # 手动输入凭证',
+    'feishu.interactive.help_hint': '  或输入 /feishu help 查看帮助',
+    'feishu.interactive.creds_ready': '✅ 凭证已配置',
+    'feishu.interactive.creds_bot': '  Bot:    {name}',
+    'feishu.interactive.start_hint': '  输入 /feishu start 启动 Bot',
+    'feishu.interactive.logout_hint': '  输入 /feishu logout 清除凭证',
+    'feishu.interactive.already_running': '✅ 飞书 Bot 正在运行中。输入 /feishu stop 停止。',
+
+    // Allow handler
+    'feishu.allow.usage_title': '用法: /feishu allow <openId>',
+    'feishu.allow.usage_body': '允许指定 open_id 的飞书用户向 Bot 发送消息并触发 LLM/工具调用。',
+    'feishu.allow.usage_where': 'open_id 可在 Bot 拒绝消息时的提示中找到，或在飞书开放平台 → 通讯录中查询。',
+    'feishu.allow.creds_load_failed': '❌ 读取凭证失败: {error}',
+    'feishu.allow.creds_missing': '⚠️ 未找到飞书凭证。请先运行 /feishu setup。',
+    'feishu.allow.already_owner': 'ℹ️ {openId} 已是 Bot Owner，无需加入白名单。',
+    'feishu.allow.set_as_owner': '✅ 已将 {openId} 设为 Bot Owner。',
+    'feishu.allow.already_in_list': 'ℹ️ {openId} 已在授权白名单中。',
+    'feishu.allow.added': '✅ 已将 {openId} 加入授权白名单 (共 {count} 人)。',
+
+    // Deny handler
+    'feishu.deny.usage': '用法: /feishu deny <openId>',
+    'feishu.deny.cannot_remove_owner': '❌ 不能直接移除 Bot Owner ({openId})。\n\n如需更换 Owner，请：\n  1. /feishu allow <new-owner-openId> 先把新 Owner 加入白名单\n  2. /feishu logout 清除全部凭证后重新 setup',
+    'feishu.deny.not_in_list': 'ℹ️ {openId} 不在授权白名单中。',
+    'feishu.deny.removed': '✅ 已将 {openId} 移出授权白名单 (剩余 {count} 人)。',
+
+    // Allowlist handler
+    'feishu.allowlist.title': '🛡️ 飞书 Bot 授权列表:',
+    'feishu.allowlist.owner': '  Owner:       {owner}',
+    'feishu.allowlist.owner_unbound': '(未绑定)',
+    'feishu.allowlist.list_header': '  白名单:',
+    'feishu.allowlist.list_empty': '  白名单:      (空)',
+    'feishu.allowlist.manage_hint': '管理: /feishu allow <openId>  /  /feishu deny <openId>',
+
+    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    'feishu.tui.incoming_prefix': '[飞书] {text}',
+    'feishu.tui.context_compressed': '📦 上下文已自动压缩',
+    'feishu.tui.tool_running': '🔧 执行工具: {names}',
+    'feishu.tui.tool_running_with_args': '🔧 执行工具: {name} {args}',
+    'feishu.tui.tool_user_answered': '✅ 用户已回答问题',
+    'feishu.tui.tool_done': '✅ 工具完成: {name}',
+    'feishu.tui.tool_failed': '❌ 工具失败: {name} — {error}',
+    'feishu.tui.processing_error': '❌ 处理消息时出错: {error}',
+    'feishu.tui.unauthorized_log': '🛡️ 拒绝未授权消息: openId={openId} text="{text}"',
 
     // Error messages
     'error.config.not.loaded': '配置未加载。',

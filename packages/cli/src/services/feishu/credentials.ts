@@ -6,7 +6,21 @@
  */
 
 /**
- * 飞书凭证管理 — 安全存储 App ID / App Secret / Domain 到 ~/.deepv/feishu.json
+ * 飞书凭证管理 — 持久化 App ID / App Secret / Domain / 授权策略
+ *
+ * 安全模型（重要）：
+ *   - 凭证文件以 0o600 (owner read/write only) 写入磁盘。
+ *   - 文件本身使用 AES-256-GCM 做对称加密 + 完整性校验，密钥派生自一个
+ *     一次性生成的 256-bit 随机字节，与凭证文件存放在同一目录下并同样
+ *     设为 0o600。
+ *   - **请理解此加密的真实威胁模型**：因密钥与密文同位，加密的主要价值
+ *     是抵御"路径意外泄露 / cat 输出 / 备份扫描"等被动暴露场景，
+ *     无法抵御能读取整个 ~/.deepv 目录的攻击者。要更高安全等级请走
+ *     OS keychain（macOS Keychain / Windows DPAPI / libsecret），
+ *     这个工程改动较大，目前未实现。
+ *
+ *   - 历史版本使用 AES-256-CBC（无完整性校验）。本模块保持向后兼容：
+ *     读取时自动识别两种格式，写入时统一升级为 GCM。
  */
 
 import * as fs from 'node:fs/promises';
@@ -23,6 +37,16 @@ export interface FeishuCredentials {
   botOpenId?: string;
   /** 手动输入时探测到的租户名 */
   tenantName?: string;
+  /**
+   * Bot 拥有者的飞书 open_id —— 通常是 setup 时扫码用户的 open_id。
+   * 用于授权检查：默认仅此 open_id 可以触发 Bot 的 LLM/工具调用。
+   */
+  ownerOpenId?: string;
+  /**
+   * 额外的授权 open_id 白名单（除 ownerOpenId 外）。
+   * 通过 `/feishu allow <openId>` 添加；`/feishu deny <openId>` 移除。
+   */
+  allowlist?: string[];
 }
 
 const FEISHU_CREDENTIALS_FILE = 'feishu-credentials.json';
@@ -57,15 +81,41 @@ async function loadOrCreateKey(projectRoot?: string): Promise<Buffer> {
   }
 }
 
-function encrypt(data: string, key: Buffer): string {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+// --- AES-256-GCM (current format) ---
+
+const GCM_PREFIX = 'gcm:';
+const GCM_IV_BYTES = 12; // recommended for GCM
+
+function encryptGcm(data: string, key: Buffer): string {
+  const iv = crypto.randomBytes(GCM_IV_BYTES);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(data, 'utf8'), cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
+  const tag = cipher.getAuthTag();
+  return `${GCM_PREFIX}${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 }
 
-function decrypt(data: string, key: Buffer): string {
-  const [ivHex, encHex] = data.split(':');
+function decryptGcm(payload: string, key: Buffer): string {
+  const body = payload.slice(GCM_PREFIX.length);
+  const [ivHex, tagHex, encHex] = body.split(':');
+  if (!ivHex || !tagHex || !encHex) {
+    throw new Error('Malformed GCM payload');
+  }
+  const iv = Buffer.from(ivHex, 'hex');
+  const tag = Buffer.from(tagHex, 'hex');
+  const encrypted = Buffer.from(encHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+// --- AES-256-CBC (legacy format, read-only support) ---
+
+function decryptCbcLegacy(payload: string, key: Buffer): string {
+  const [ivHex, encHex] = payload.split(':');
+  if (!ivHex || !encHex) {
+    throw new Error('Malformed CBC payload');
+  }
   const iv = Buffer.from(ivHex, 'hex');
   const encrypted = Buffer.from(encHex, 'hex');
   const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
@@ -73,22 +123,73 @@ function decrypt(data: string, key: Buffer): string {
   return decrypted.toString('utf8');
 }
 
-export async function loadCredentials(projectRoot?: string): Promise<FeishuCredentials | null> {
-  try {
-    const key = await loadOrCreateKey(projectRoot);
-    const encrypted = await fs.readFile(credPath(projectRoot), 'utf8');
-    const json = decrypt(encrypted.trim(), key);
-    return JSON.parse(json) as FeishuCredentials;
-  } catch {
-    return null;
+/**
+ * Distinguishes "credentials not yet configured" from "credentials are
+ * present but cannot be decrypted" so callers can show actionable errors.
+ */
+export class CredentialsLoadError extends Error {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'CredentialsLoadError';
   }
 }
 
-export async function saveCredentials(creds: FeishuCredentials, projectRoot?: string): Promise<void> {
+/**
+ * Returns null when the credentials file does not exist.
+ * Throws CredentialsLoadError on decryption / parse failure (so users
+ * can be told to run `/feishu logout` and re-setup).
+ */
+export async function loadCredentials(
+  projectRoot?: string,
+): Promise<FeishuCredentials | null> {
+  let encrypted: string;
+  try {
+    encrypted = (await fs.readFile(credPath(projectRoot), 'utf8')).trim();
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return null;
+    }
+    throw new CredentialsLoadError(
+      `Failed to read Feishu credentials: ${(e as Error).message}`,
+      e,
+    );
+  }
+
+  let key: Buffer;
+  try {
+    key = await loadOrCreateKey(projectRoot);
+  } catch (e: unknown) {
+    throw new CredentialsLoadError(
+      `Failed to read Feishu encryption key: ${(e as Error).message}`,
+      e,
+    );
+  }
+
+  try {
+    const json = encrypted.startsWith(GCM_PREFIX)
+      ? decryptGcm(encrypted, key)
+      : decryptCbcLegacy(encrypted, key);
+    return JSON.parse(json) as FeishuCredentials;
+  } catch (e: unknown) {
+    throw new CredentialsLoadError(
+      'Feishu credentials file is corrupted or was encrypted with a different key. ' +
+        'Run `/feishu logout` to clear and re-setup.',
+      e,
+    );
+  }
+}
+
+export async function saveCredentials(
+  creds: FeishuCredentials,
+  projectRoot?: string,
+): Promise<void> {
   await fs.mkdir(credDir(projectRoot), { recursive: true });
   const key = await loadOrCreateKey(projectRoot);
   const json = JSON.stringify(creds);
-  const encrypted = encrypt(json, key);
+  const encrypted = encryptGcm(json, key);
   await fs.writeFile(credPath(projectRoot), encrypted, { mode: 0o600 });
 }
 
@@ -98,4 +199,25 @@ export async function clearCredentials(projectRoot?: string): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+/**
+ * Authorization helper: returns true if the given Feishu open_id is allowed
+ * to invoke the Bot's LLM/agent capabilities.
+ *
+ * Allowed iff:
+ *   - openId equals creds.ownerOpenId, OR
+ *   - openId is in creds.allowlist.
+ *
+ * If neither field is set (e.g. legacy credentials), we deny by default and
+ * caller should prompt user to run `/feishu allow self` or upgrade.
+ */
+export function isSenderAuthorized(
+  creds: FeishuCredentials,
+  senderOpenId: string,
+): boolean {
+  if (!senderOpenId) return false;
+  if (creds.ownerOpenId && creds.ownerOpenId === senderOpenId) return true;
+  if (creds.allowlist?.includes(senderOpenId)) return true;
+  return false;
 }

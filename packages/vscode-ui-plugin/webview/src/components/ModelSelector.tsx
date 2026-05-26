@@ -755,13 +755,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // 优先级：effort（具体强度）> mode 兜底
   // 原因：在网络层 mode='auto'+effort=具体值 与 mode='on'+effort=具体值
   // 行为完全一致（见 customModel.applyOpenAIChatThinking），所以一旦 effort
-  // 是具体值就应当显示对应的强度 pill，而不是被 mode='auto' 短路成 auto。
+  // 是具体值就应当显示对应的强度档位，而不是被 mode='auto' 短路成 auto。
   const currentThinkingOption = useMemo(() => {
     const config = thinkingConfig || { mode: 'auto', effort: 'auto' };
     if (config.mode === 'off') {
       return thinkingOptionsList.find(opt => opt.id === 'off') || thinkingOptionsList[1];
     }
-    // effort 是具体强度（非 'auto'/undefined）→ 直接匹配该强度 pill
+    // effort 是具体强度（非 'auto'/undefined）→ 直接匹配该强度档位
     if (config.effort && config.effort !== 'auto') {
       const matched = thinkingOptionsList.find(opt => opt.mode === 'on' && opt.effort === config.effort);
       if (matched) return matched;
@@ -773,6 +773,21 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     // mode === 'on' 但没指定 effort → 默认 high
     return thinkingOptionsList.find(opt => opt.id === 'high') || thinkingOptionsList[4];
   }, [thinkingConfig, thinkingOptionsList]);
+
+  // 🎚️ 滑块索引：将当前选中的选项映射到 slider 位置
+  const sliderIndex = useMemo(() => {
+    const idx = thinkingOptionsList.findIndex(opt => opt.id === currentThinkingOption.id);
+    return idx >= 0 ? idx : 0;
+  }, [currentThinkingOption, thinkingOptionsList]);
+
+  // 🎚️ 滑块变化处理
+  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const idx = parseInt(e.target.value, 10);
+    const opt = thinkingOptionsList[idx];
+    if (opt) {
+      updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
+    }
+  }, [thinkingOptionsList, updateThinkingConfig]);
 
   return (
     <div
@@ -877,25 +892,41 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
               <span className="dropdown-title">{t('model.selector.selectModel')}</span>
             </div>
 
-            {/* 🆕 思考模式选择区 - 优雅嵌入模型选择器头部，释放工具栏宝贵空间 */}
+            {/* 🎚️ 思考级别 - 滑块档位选择 */}
             <div className="dropdown-thinking-section">
-              <span className="thinking-section-title">🧠 {t('command.thinking.description', undefined, 'Thinking Config')}</span>
-              <div className="thinking-pills">
-                {thinkingOptionsList.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    className={`thinking-pill ${currentThinkingOption.id === opt.id ? 'active' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation(); // 阻止事件冒泡防止下拉菜单关闭
-                      updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
-                    }}
-                    title={opt.desc}
-                  >
-                    <span className="pill-icon">{opt.icon}</span>
-                    <span className="pill-label">{opt.label.replace('思考', '').replace('强度', '')}</span>
-                  </button>
-                ))}
+              <div className="thinking-section-header">
+                <span className="thinking-section-title">🧠 {t('command.thinking.description', undefined, 'Thinking Level')}</span>
+                <span className="thinking-current-badge">
+                  <BrainIcon level={currentThinkingOption.id === 'xhigh' ? 'max' : currentThinkingOption.id as any} size={14} />
+                  {currentThinkingOption.label}
+                </span>
+              </div>
+              <div className="thinking-slider-container">
+                <input
+                  type="range"
+                  className="thinking-slider"
+                  min="0"
+                  max={thinkingOptionsList.length - 1}
+                  step="1"
+                  value={sliderIndex}
+                  onChange={handleSliderChange}
+                  style={{
+                    '--slider-fill-pct': `${(sliderIndex / (thinkingOptionsList.length - 1)) * 100}%`
+                  } as React.CSSProperties}
+                />
+                <div className="thinking-slider-labels">
+                  {thinkingOptionsList.map((opt, idx) => (
+                    <span
+                      key={opt.id}
+                      className={`thinking-slider-label ${idx === sliderIndex ? 'active' : ''}`}
+                      onClick={() => {
+                        updateThinkingConfig({ mode: opt.mode, effort: opt.effort });
+                      }}
+                    >
+                      {opt.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
 
