@@ -36,6 +36,23 @@ vi.mock('./SessionStatisticsDialog', () => ({
   SessionStatisticsDialog: () => <div data-testid="stats-dialog" />,
 }));
 
+// Mock useYoloMode to provide thinkingConfig
+const { mockUpdateThinkingConfig, mockThinkingConfig } = vi.hoisted(() => {
+  const mockUpdateThinkingConfig = vi.fn();
+  const mockThinkingConfig = { mode: 'auto' as const, effort: 'auto' as const };
+  return { mockUpdateThinkingConfig, mockThinkingConfig };
+});
+vi.mock('../hooks/useProjectSettings', () => ({
+  useYoloMode: () => ({
+    yoloMode: false,
+    updateYoloMode: vi.fn(),
+    healthyUse: true,
+    updateHealthyUse: vi.fn(),
+    thinkingConfig: mockThinkingConfig,
+    updateThinkingConfig: mockUpdateThinkingConfig,
+  }),
+}));
+
 describe('ModelSelector', () => {
   const mockModels = [
     {
@@ -573,6 +590,115 @@ describe('ModelSelector', () => {
       // Should handle gracefully
       await waitFor(() => {
         expect(button).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('thinking slider', () => {
+    beforeEach(() => {
+      mockThinkingConfig.mode = 'auto';
+      mockThinkingConfig.effort = 'auto';
+      mockUpdateThinkingConfig.mockClear();
+    });
+
+    it('should render thinking slider when dropdown is open', async () => {
+      await act(async () => {
+        render(<ModelSelector />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button')).toBeInTheDocument();
+      });
+
+      const button = screen.getByRole('button');
+      await act(async () => {
+        fireEvent.click(button);
+      });
+
+      // Slider should be in the dropdown
+      await waitFor(() => {
+        const slider = document.querySelector('.thinking-slider') as HTMLInputElement;
+        expect(slider).toBeInTheDocument();
+      });
+    });
+
+    it('should show current thinking level in badge', async () => {
+      mockThinkingConfig.mode = 'low';
+      mockThinkingConfig.effort = 'low';
+
+      await act(async () => {
+        render(<ModelSelector />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button')).toBeInTheDocument();
+      });
+
+      const button = screen.getByRole('button');
+      await act(async () => {
+        fireEvent.click(button);
+      });
+
+      await waitFor(() => {
+        const badge = document.querySelector('.thinking-current-badge');
+        expect(badge).toBeInTheDocument();
+        expect(badge?.textContent).toContain('Low');
+      });
+    });
+
+    it('should show all 7 label ticks below the slider', async () => {
+      await act(async () => {
+        render(<ModelSelector />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button')).toBeInTheDocument();
+      });
+
+      const button = screen.getByRole('button');
+      await act(async () => {
+        fireEvent.click(button);
+      });
+
+      await waitFor(() => {
+        const labels = document.querySelectorAll('.thinking-slider-label');
+        expect(labels.length).toBe(7);
+        const expectedLabels = ['Auto', 'Off', 'Low', 'Medium', 'High', 'Extended', 'Max'];
+        labels.forEach((label, i) => {
+          expect(label.textContent).toContain(expectedLabels[i]);
+        });
+      });
+    });
+
+    it('should call updateThinkingConfig when slider changes', async () => {
+      await act(async () => {
+        render(<ModelSelector />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button')).toBeInTheDocument();
+      });
+
+      const button = screen.getByRole('button');
+      await act(async () => {
+        fireEvent.click(button);
+      });
+
+      await waitFor(() => {
+        const slider = document.querySelector('.thinking-slider') as HTMLInputElement;
+        expect(slider).toBeInTheDocument();
+      });
+
+      const slider = document.querySelector('.thinking-slider') as HTMLInputElement;
+
+      // Change to "High" (index 4)
+      await act(async () => {
+        fireEvent.change(slider, { target: { value: '4' } });
+      });
+
+      expect(mockUpdateThinkingConfig).toHaveBeenCalledWith({
+        mode: 'on',
+        effort: 'high',
       });
     });
   });
