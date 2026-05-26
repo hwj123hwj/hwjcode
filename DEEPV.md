@@ -105,3 +105,4 @@ DeepV Code (Monorepo)
 - `docs/index.md` - 文档总索引
 - ls-dev 是用户的常驻开发分支，提 MR 时绝对不要加 --remove-source-branch。
 - DeepVCode 项目发布规则（CI）：package.json 里的版本号无所谓（CI 发布时会自动注入真实版本号），但 **package.json 的版本号必须严格低于 release tag 的版本号**，否则 CI 会失败。例如 release tag 为 cli-release-v1.0.334 时，package.json 版本必须 < 1.0.334（例如 1.0.319 就满足）。打 tag 前务必确认版本号关系。
+- DeepV Code 项目目录命名约定（极易搞错，务必记住）：全局配置目录是 `~/.deepv/`（用户家目录下），项目级配置目录是 `<projectRoot>/.deepvcode/`（项目根目录下）。两个目录名前缀不同是为了规避命名冲突，绝不能混用：项目里出现 `.deepv` 是错误，全局出现 `.deepvcode` 也是错误。`PROJECT_DIR_PREFIX = '.deepvcode'` 定义在 `packages/core/src/utils/paths.ts`。例如飞书凭证只走全局，固定写入 `~/.deepv/feishu-credentials.json`，不接受 projectRoot 参数。

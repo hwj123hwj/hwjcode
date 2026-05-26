@@ -61,14 +61,12 @@ let activeReplyToMessageId: string | null = null;
  * as a typed result instead of throwing — handlers can produce a friendly
  * actionable message instead of a stack trace.
  */
-async function loadCredsSafe(
-  projectRoot?: string,
-): Promise<
+async function loadCredsSafe(): Promise<
   | { ok: true; creds: FeishuCredentials | null }
   | { ok: false; error: string }
 > {
   try {
-    const creds = await loadCredentials(projectRoot);
+    const creds = await loadCredentials();
     return { ok: true, creds };
   } catch (e) {
     if (e instanceof CredentialsLoadError) {
@@ -85,7 +83,7 @@ function helpText(): string {
   return t('feishu.help.text');
 }
 
-async function handleSetup(args: string, projectRoot?: string): Promise<string> {
+async function handleSetup(args: string): Promise<string> {
   const trimmed = args.trim();
   // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
   const manualMatch = trimmed.match(/^--manual\s+(.+)$/s);
@@ -95,11 +93,11 @@ async function handleSetup(args: string, projectRoot?: string): Promise<string> 
     const parts = rest.split(/\s+/).filter(Boolean);
     const appId = parts[0];
     const appSecret = parts[1];
-    return await handleManualSetup(appId, appSecret, projectRoot);
+    return await handleManualSetup(appId, appSecret);
   }
 
   // 没有 --manual 则走 QR
-  return await handleQrSetup(projectRoot);
+  return await handleQrSetup();
 }
 
 /**
@@ -108,7 +106,7 @@ async function handleSetup(args: string, projectRoot?: string): Promise<string> 
  * 同步等待扫码结果（最多 expireIn 秒），结果显示在命令返回的消息中。
  * 这样可以避免 TUI 模式下后台 console.log 不可见的问题。
  */
-async function handleQrSetup(projectRoot?: string): Promise<string> {
+async function handleQrSetup(): Promise<string> {
   const lines: string[] = [t('feishu.setup.qr.title')];
   lines.push(t('feishu.setup.qr.connecting'));
 
@@ -169,15 +167,13 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
       ownerOpenId: pollResult.openId,
     };
 
-    await saveCredentials(creds, projectRoot);
+    await saveCredentials(creds);
 
     lines.push('');
     lines.push(t('feishu.setup.qr.success'));
     lines.push(`  App ID:      ${creds.appId}`);
     if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
-    lines.push(tp('feishu.setup.qr.creds_saved', {
-      path: projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/',
-    }));
+    lines.push(t('feishu.setup.qr.creds_saved'));
     lines.push('');
     lines.push(t('feishu.setup.qr.next_step_start'));
     return lines.join('\n');
@@ -194,7 +190,7 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
 /**
  * 档 3：手动输入凭据
  */
-async function handleManualSetup(appId?: string, appSecret?: string, projectRoot?: string): Promise<string> {
+async function handleManualSetup(appId?: string, appSecret?: string): Promise<string> {
   if (!appId || !appSecret) {
     return [
       t('feishu.setup.manual.title'),
@@ -221,13 +217,11 @@ async function handleManualSetup(appId?: string, appSecret?: string, projectRoot
     botOpenId: botInfo?.botOpenId,
   };
 
-  await saveCredentials(creds, projectRoot);
+  await saveCredentials(creds);
 
   lines.push(botInfo ? t('feishu.setup.manual.creds_valid') : t('feishu.setup.manual.creds_invalid'));
   if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
-  lines.push(tp('feishu.setup.qr.creds_saved', {
-    path: projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/',
-  }));
+  lines.push(t('feishu.setup.qr.creds_saved'));
   lines.push('');
   lines.push(t('feishu.setup.manual.owner_warning'));
   lines.push(t('feishu.setup.manual.owner_warning_2'));
@@ -498,8 +492,7 @@ async function handleFeishuCommand(
  * 启动网关（从已保存的凭证）
  */
 async function handleStart(context?: CommandContext): Promise<string> {
-  const projectRoot = context?.services?.config?.getProjectRoot();
-  const result = await loadCredsSafe(projectRoot);
+  const result = await loadCredsSafe();
   if (!result.ok) {
     return tp('feishu.start.creds_load_failed', { error: result.error });
   }
@@ -804,8 +797,8 @@ async function handleStop(context?: CommandContext): Promise<string> {
 /**
  * 查看状态
  */
-async function handleStatus(projectRoot?: string): Promise<string> {
-  const result = await loadCredsSafe(projectRoot);
+async function handleStatus(): Promise<string> {
+  const result = await loadCredsSafe();
   if (!result.ok) {
     return tp('feishu.start.creds_load_failed', { error: result.error });
   }
@@ -851,7 +844,7 @@ async function handleStatus(projectRoot?: string): Promise<string> {
  *
  * 用法：/feishu allow <openId>
  */
-async function handleAllow(args: string, projectRoot?: string): Promise<string> {
+async function handleAllow(args: string): Promise<string> {
   const openId = args.trim();
   if (!openId) {
     return [
@@ -863,7 +856,7 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
   }
   let creds: FeishuCredentials | null;
   try {
-    creds = await loadCredentials(projectRoot);
+    creds = await loadCredentials();
   } catch (e) {
     return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
@@ -877,7 +870,7 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
   // 如果 owner 未绑定，把这个 openId 设为 owner
   if (!creds.ownerOpenId) {
     creds.ownerOpenId = openId;
-    await saveCredentials(creds, projectRoot);
+    await saveCredentials(creds);
     return tp('feishu.allow.set_as_owner', { openId });
   }
   const list = new Set(creds.allowlist ?? []);
@@ -886,7 +879,7 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
   }
   list.add(openId);
   creds.allowlist = [...list];
-  await saveCredentials(creds, projectRoot);
+  await saveCredentials(creds);
   return tp('feishu.allow.added', { openId, count: creds.allowlist.length });
 }
 
@@ -895,14 +888,14 @@ async function handleAllow(args: string, projectRoot?: string): Promise<string> 
  *
  * 用法：/feishu deny <openId>
  */
-async function handleDeny(args: string, projectRoot?: string): Promise<string> {
+async function handleDeny(args: string): Promise<string> {
   const openId = args.trim();
   if (!openId) {
     return t('feishu.deny.usage');
   }
   let creds: FeishuCredentials | null;
   try {
-    creds = await loadCredentials(projectRoot);
+    creds = await loadCredentials();
   } catch (e) {
     return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
@@ -917,17 +910,17 @@ async function handleDeny(args: string, projectRoot?: string): Promise<string> {
   if (creds.allowlist.length === before) {
     return tp('feishu.deny.not_in_list', { openId });
   }
-  await saveCredentials(creds, projectRoot);
+  await saveCredentials(creds);
   return tp('feishu.deny.removed', { openId, count: creds.allowlist.length });
 }
 
 /**
  * 列出授权白名单（B1 — 授权管理）
  */
-async function handleAllowlist(projectRoot?: string): Promise<string> {
+async function handleAllowlist(): Promise<string> {
   let creds: FeishuCredentials | null;
   try {
-    creds = await loadCredentials(projectRoot);
+    creds = await loadCredentials();
   } catch (e) {
     return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
   }
@@ -954,7 +947,7 @@ async function handleAllowlist(projectRoot?: string): Promise<string> {
 /**
  * 清除凭证
  */
-async function handleLogout(projectRoot?: string, context?: CommandContext): Promise<string> {
+async function handleLogout(context?: CommandContext): Promise<string> {
   if (activeGateway) {
     // 🎯 注销飞书工具
     const config = context?.services?.config;
@@ -974,15 +967,15 @@ async function handleLogout(projectRoot?: string, context?: CommandContext): Pro
   tuiContext = null; // 清除 TUI 上下文
   activeChatId = null;
   activeReplyToMessageId = null;
-  await clearCredentials(projectRoot);
+  await clearCredentials();
   return t('feishu.logout.cleared');
 }
 
 /**
  * 交互式主入口
  */
-async function handleInteractive(projectRoot?: string): Promise<string> {
-  const result = await loadCredsSafe(projectRoot);
+async function handleInteractive(): Promise<string> {
+  const result = await loadCredsSafe();
   if (!result.ok) {
     return tp('feishu.start.creds_load_failed', { error: result.error });
   }
@@ -1027,20 +1020,14 @@ export const feishuCommand: SlashCommand = {
   kind: CommandKind.BUILT_IN,
 
   // /feishu（无子命令）→ 显示帮助
-  action: async (ctx) => {
-    const pr = ctx.services?.config?.getProjectRoot();
-    return msg(await handleInteractive(pr));
-  },
+  action: async () => msg(await handleInteractive()),
 
   subCommands: [
     {
       name: 'setup',
       description: t('feishu.subcmd.setup.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx, args) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleSetup(args, pr));
-      },
+      action: async (_ctx, args) => msg(await handleSetup(args)),
     },
     {
       name: 'start',
@@ -1060,46 +1047,31 @@ export const feishuCommand: SlashCommand = {
       name: 'status',
       description: t('feishu.subcmd.status.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleStatus(pr));
-      },
+      action: async () => msg(await handleStatus()),
     },
     {
       name: 'logout',
       description: t('feishu.subcmd.logout.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleLogout(pr, ctx));
-      },
+      action: async (ctx) => msg(await handleLogout(ctx)),
     },
     {
       name: 'allow',
       description: t('feishu.subcmd.allow.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx, args) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleAllow(args, pr));
-      },
+      action: async (_ctx, args) => msg(await handleAllow(args)),
     },
     {
       name: 'deny',
       description: t('feishu.subcmd.deny.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx, args) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleDeny(args, pr));
-      },
+      action: async (_ctx, args) => msg(await handleDeny(args)),
     },
     {
       name: 'allowlist',
       description: t('feishu.subcmd.allowlist.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (ctx) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleAllowlist(pr));
-      },
+      action: async () => msg(await handleAllowlist()),
     },
     {
       name: 'help',
