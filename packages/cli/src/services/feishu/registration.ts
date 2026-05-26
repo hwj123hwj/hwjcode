@@ -19,8 +19,6 @@
  * 移植自 easyagent feishu_setup.py 档 1。
  */
 
-import * as crypto from 'node:crypto';
-
 const ACCOUNTS_URLS: Record<string, string> = {
   feishu: 'https://accounts.feishu.cn',
   lark: 'https://accounts.larksuite.com',
