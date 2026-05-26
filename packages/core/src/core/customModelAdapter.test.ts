@@ -2599,6 +2599,93 @@ describe('callGeminiNativeModel', () => {
     expect(parts[0]).toEqual({ reasoning: 'Let me think about this step by step.' });
     expect(parts[1]).toEqual({ text: 'Final answer is 9.' });
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Cache-token field normalisation
+  //
+  // Why this test exists:
+  //   The "Token Usage" footer (geminiChat.ts:240 → tokenUsageEventManager
+  //   → TokenUsageDisplay.tsx) only reads `usageMetadata.cacheReadInputTokens`
+  //   — the cross-provider canonical name set by the anthropic / openai-* paths
+  //   in this same file. Gemini's upstream uses `cachedContentTokenCount`
+  //   instead, so without normalisation the footer permanently shows
+  //   "No cache information available" for any custom Gemini model on round 2+.
+  //   Confirmed by scripts/probe-cache-fields.mjs (round 2 of gemini-2.5-flash
+  //   returns cachedContentTokenCount=3059).
+  // ────────────────────────────────────────────────────────────────────────
+  it('normalises cachedContentTokenCount to cacheReadInputTokens when cache hits', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'cached!' }] } }],
+        usageMetadata: {
+          promptTokenCount: 3514,
+          candidatesTokenCount: 23,
+          totalTokenCount: 3537,
+          cachedContentTokenCount: 3059,
+          cacheTokensDetails: [{ modality: 'TEXT', tokenCount: 3059 }],
+        },
+      }),
+    });
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    const result = await callGeminiNativeModel(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi again' }] }] },
+    );
+
+    const usage = result.usageMetadata as any;
+    // Original Gemini fields preserved (SessionManager + cost calculator
+    // still read these directly).
+    expect(usage.cachedContentTokenCount).toBe(3059);
+    expect(usage.cacheTokensDetails).toEqual([{ modality: 'TEXT', tokenCount: 3059 }]);
+    // Cross-provider alias added so the UI footer can pick up the hit.
+    expect(usage.cacheReadInputTokens).toBe(3059);
+    // Other counts are untouched.
+    expect(usage.promptTokenCount).toBe(3514);
+    expect(usage.candidatesTokenCount).toBe(23);
+  });
+
+  it('omits cacheReadInputTokens on cache miss (round 1) so downstream `|| 0` fallbacks behave identically', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'fresh' }] } }],
+        // Round 1 shape — no cachedContentTokenCount at all.
+        usageMetadata: {
+          promptTokenCount: 3514,
+          candidatesTokenCount: 29,
+          totalTokenCount: 3543,
+        },
+      }),
+    });
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    const result = await callGeminiNativeModel(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }] },
+    );
+
+    const usage = result.usageMetadata as any;
+    expect(usage.cachedContentTokenCount).toBeUndefined();
+    // Critically: do NOT add cacheReadInputTokens=0 on a miss — that would
+    // be indistinguishable from a real-but-zero hit and confuses cost calcs.
+    // Downstream code uses `(usage as any).cacheReadInputTokens || 0`, which
+    // handles `undefined` correctly.
+    expect(usage.cacheReadInputTokens).toBeUndefined();
+  });
 });
 
 describe('callGeminiNativeModelStream', () => {
@@ -2725,5 +2812,50 @@ describe('callGeminiNativeModelStream', () => {
     expect(capturedUrl).toBe(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse&key=k',
     );
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Cache-token field normalisation on the SSE path.
+  // Mirrors the unary test above — the SSE path forwards a separate
+  // GenerateContentResponse for the usageMetadata chunk, so the alias must
+  // also land on that chunk for the UI footer event to fire.
+  // ────────────────────────────────────────────────────────────────────────
+  it('aliases cachedContentTokenCount → cacheReadInputTokens on the streaming usage chunk', async () => {
+    const sse = [
+      'data: ' + JSON.stringify({
+        candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+      }) + '\n\n',
+      'data: ' + JSON.stringify({
+        usageMetadata: {
+          promptTokenCount: 3514,
+          candidatesTokenCount: 23,
+          totalTokenCount: 3537,
+          cachedContentTokenCount: 3059,
+        },
+      }) + '\n\n',
+    ];
+    global.fetch = vi.fn().mockResolvedValue(mockSseResponse(sse));
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-2.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-2.5-flash',
+    };
+    const responses: any[] = [];
+    for await (const r of callGeminiNativeModelStream(
+      modelConfig as any,
+      { contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi again' }] }] },
+    )) {
+      responses.push(r);
+    }
+
+    const usageResp = responses.find((r: any) => r.usageMetadata);
+    expect(usageResp).toBeDefined();
+    const u = usageResp.usageMetadata;
+    expect(u.cachedContentTokenCount).toBe(3059);   // original preserved
+    expect(u.cacheReadInputTokens).toBe(3059);      // alias added
+    expect(u.promptTokenCount).toBe(3514);
   });
 });
