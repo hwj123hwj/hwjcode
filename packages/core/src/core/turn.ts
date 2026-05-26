@@ -335,7 +335,9 @@ export class Turn {
             type: GeminiEventType.Reasoning,
             value: reasoning,
           };
-          // 重要：使用 continue 跳过后续处理，不让 reasoning 进入上下文
+          // reasoning 仅用于 UI 显示，不再走 getResponseText 等正文处理路径。
+          // 注意：reasoning 会保留在 history 中，由 GeminiChat.processStreamResponse
+          // 收集进 outputContent，再交由 DeepV Server 决定如何转发上游。
           continue;
         }
 
@@ -347,6 +349,31 @@ export class Turn {
         // Handle function calls (requesting tool execution)
         const functionCalls = resp.functionCalls ?? [];
         for (const fnCall of functionCalls) {
+          // 🛡️ 防御：跳过明显残缺的 functionCall（无 name 或 name 为空）。
+          // 流式合并失败时（DeepVServerAdapter.mergeStreamContent 兜底之外
+          // 的边缘情况）可能会传到这里。残缺的 fnCall 进入 pendingToolCalls
+          // 后会以 "undefined_tool_name" 调度，污染会话历史并导致后续模型
+          // 困惑。这里直接丢弃 + 警告。
+          const fnName = (fnCall.name || '').toString().trim();
+          if (!fnName) {
+            console.warn(
+              `[Turn] Dropping incomplete functionCall (no name). args=${JSON.stringify(fnCall.args ?? null).substring(0, 200)}`,
+            );
+            continue;
+          }
+          // 🛡️ 防御：去重 callId。流式合并失败可能让同一 callId 的 functionCall
+          // 在多个 chunk 里被反复 push。pendingToolCalls 重复会导致工具被多次
+          // 调度，污染历史。
+          const callId = fnCall.id;
+          if (
+            callId &&
+            this.pendingToolCalls.some((tc) => tc.callId === callId)
+          ) {
+            console.warn(
+              `[Turn] Dropping duplicate functionCall with callId=${callId} name=${fnName}`,
+            );
+            continue;
+          }
           const event = this.handlePendingFunctionCall(fnCall);
           if (event) {
             yield event;
@@ -358,10 +385,27 @@ export class Turn {
 
         if (finishReason) {
           // 🔍 STOP-DEBUG: 记录 finishReason 详情
-          console.log(`[STOP-DEBUG] Turn.run(): finishReason=${finishReason}, functionCalls=${(resp.functionCalls ?? []).length}, hasText=${!!getResponseText(resp)}, candidateIndex=${resp.candidates?.[0]?.index}`);
 
-          // 🔍 STOP-DEBUG: 当 finishReason=STOP 且无工具调用时，dump 原始响应以排查模型是否返回了非标准工具调用
-          if (finishReason === 'STOP' && (resp.functionCalls ?? []).length === 0) {
+
+          // 🔍 STOP-DEBUG: dump 原始响应。两种值得排查的场景：
+          //   1. finishReason=STOP 且无工具调用 —— 模型是否返回了非标准工具调用？
+          //   2. finishReason=FUNCTION_CALL 且无工具调用 —— ⚠ server 端 bug：
+          //      Claude 模型返回了 tool_use，但 DeepV proxy 在翻译成 Gemini
+          //      schema 时丢失了 functionCall part（candidates[0].content.parts
+          //      变成了空数组 []），只剩 finishReason 这个壳。已知发生在
+          //      claude-opus-4-7 上。需要后端修复；客户端这里只能尽量观察并报警。
+          //
+          // 注：FinishReason 这个 enum 来自 @google/genai，里面没有 'FUNCTION_CALL'
+          // 字面量（Gemini 原生用 'STOP'/'MAX_TOKENS' 等）。但 DeepV proxy 在
+          // 翻译 Claude 响应时会把 stop_reason='tool_use' 映射成 'FUNCTION_CALL'
+          // 这个非标值，所以这里要按字符串比较，不能依赖 enum 类型。
+          const isEmptyFunctionCallChunk =
+            (finishReason as unknown as string) === 'FUNCTION_CALL' &&
+            (resp.functionCalls ?? []).length === 0;
+          if (
+            (finishReason === 'STOP' && (resp.functionCalls ?? []).length === 0) ||
+            isEmptyFunctionCallChunk
+          ) {
             try {
               const candidate = resp.candidates?.[0];
               const parts = candidate?.content?.parts ?? [];
@@ -375,22 +419,47 @@ export class Turn {
                 if ('reasoning' in p) desc += ` reasoning=present`;
                 return desc;
               });
-              console.log(`[STOP-DEBUG] 🔍 RAW RESPONSE DUMP (finishReason=STOP, no functionCalls):`);
-              console.log(`[STOP-DEBUG]   candidate.finishReason: ${candidate?.finishReason}`);
-              console.log(`[STOP-DEBUG]   candidate.content.role: ${candidate?.content?.role}`);
-              console.log(`[STOP-DEBUG]   candidate.content.parts count: ${parts.length}`);
-              partsSummary.forEach((s: string) => console.log(`[STOP-DEBUG]   ${s}`));
-              console.log(`[STOP-DEBUG]   resp.functionCalls: ${JSON.stringify(resp.functionCalls)}`);
-              console.log(`[STOP-DEBUG]   resp.text: ${JSON.stringify((resp.text || '').substring(0, 300))}`);
+
+              if (isEmptyFunctionCallChunk) {
+                // ❌ 这是确凿的 server 端 bug：finishReason 表明模型决定调用工具了
+                // （而且消耗了 candidatesToken），但 parts 数组是空的，工具调用
+                // payload 没被翻译/序列化出来。
+                //
+                // 已知触发场景：claude-opus-4-7 走 DeepV proxy 时，Claude 原生
+                // tool_use block 应被翻译成 Gemini functionCall part，但 proxy
+                // 在 SSE 最后一个 chunk 里漏写了这个 part，只保留了 finishReason。
+                //
+                // 客户端无法兜底——调用名/参数全都丢了，根本不知道模型想调什么。
+                // 只在日志里大声报警，留给后端排查。用户层面表现：模型说一句话就停。
+                console.error(
+                  `[Turn] ❌ SERVER BUG — empty FUNCTION_CALL chunk detected.\n` +
+                  `  Symptom: finishReason="FUNCTION_CALL" but candidates[0].content.parts=[].\n` +
+                  `  Meaning: the proxy server told the client the model wanted to call a tool,\n` +
+                  `           but did NOT deliver the tool-call payload (name + args). The model's\n` +
+                  `           intended tool call was lost in translation between the upstream model\n` +
+                  `           response and the Gemini-shaped SSE stream.\n` +
+                  `  Likely cause: Claude tool_use → Gemini functionCall translation drop in the\n` +
+                  `                DeepV proxy /v1/chat/stream handler. Especially seen on claude-opus-4-7.\n` +
+                  `  Effect: the agent appears to "say one sentence and stop". No recovery is possible\n` +
+                  `          client-side — the tool name and arguments are gone. This needs a server fix.\n` +
+                  `  Context: model=${this.modelName}, candidatesTokenCount=${resp.usageMetadata?.candidatesTokenCount ?? 'unknown'}, role=${candidate?.content?.role ?? 'unknown'}`,
+                );
+              }
+
+
+
+
+
+
               // 尝试完整dump（限制大小防止日志爆炸）
               const rawJson = JSON.stringify(resp, null, 2);
               if (rawJson.length <= 5000) {
-                console.log(`[STOP-DEBUG]   FULL RAW JSON:\n${rawJson}`);
+
               } else {
-                console.log(`[STOP-DEBUG]   RAW JSON (truncated to 5000 chars):\n${rawJson.substring(0, 5000)}...`);
+
               }
             } catch (dumpError) {
-              console.log(`[STOP-DEBUG]   Failed to dump raw response: ${dumpError}`);
+
             }
           }
 
@@ -460,15 +529,15 @@ export class Turn {
         }
       }
       // 🔍 STOP-DEBUG: Turn.run() 流正常结束，记录汇总信息
-      console.log(`[STOP-DEBUG] Turn.run(): stream ended normally. pendingToolCalls=${this.pendingToolCalls.length}, toolNames=[${this.pendingToolCalls.map(tc => tc.name).join(', ')}], debugResponses=${this.debugResponses.length}, model=${this.modelName}`);
+
     } catch (e) {
       const error = toFriendlyError(e);
       if (error instanceof UnauthorizedError) {
-        console.log(`[STOP-DEBUG] Turn.run(): UnauthorizedError thrown, re-throwing`);
+
         throw error;
       }
       if (signal.aborted) {
-        console.log(`[STOP-DEBUG] Turn.run(): signal aborted during error handling, yielding UserCancelled`);
+
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;

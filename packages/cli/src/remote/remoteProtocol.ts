@@ -25,6 +25,14 @@ export enum MessageType {
   TOOL_CALL = 'tool_call',           // 工具调用（包含执行结果）
   TOOL_STATUS = 'tool_status',       // 工具执行状态更新
 
+  // 思考类（thinking mode）
+  // 与本地 CLI 的 GeminiEventType.Thought / Reasoning 一一对应：
+  // - THOUGHT：离散的思考事件，Gemini 风格 (subject + description)
+  // - REASONING_CHUNK：流式 reasoning 增量，OpenAI / Claude / DeepSeek 风格
+  // 同一轮思考共享 thoughtId，便于 Web 端聚合渲染、飞书端节流 patch
+  THOUGHT = 'thought',
+  REASONING_CHUNK = 'reasoning_chunk',
+
   // UI状态类
   REQUEST_UI_STATE = 'request_ui_state',    // 请求UI状态数据
   UI_STATE_RESPONSE = 'ui_state_response',  // UI状态响应
@@ -142,6 +150,38 @@ export interface ToolStatusMessage extends RemoteMessage {
       total: number;
       description?: string;
     };
+  };
+}
+
+/**
+ * 思考事件消息（Gemini 风格的离散思考）
+ * 对应 core 层 GeminiEventType.Thought 事件
+ * 服务端用法：
+ * - Web 端：渲染为可折叠的思考标题/进展条
+ * - 飞书端：累积到卡片顶部"💭 思考过程"折叠区
+ */
+export interface ThoughtMessage extends RemoteMessage {
+  type: MessageType.THOUGHT;
+  payload: {
+    thoughtId: string;     // 同一轮对话共享，便于客户端聚合
+    subject: string;       // 思考主题（如 "Looking at code"）
+    description: string;   // 思考描述
+  };
+}
+
+/**
+ * 流式 reasoning chunk（OpenAI/Claude/DeepSeek 风格的增量思考）
+ * 对应 core 层 GeminiEventType.Reasoning 事件
+ * 客户端聚合规则：
+ * - 同 thoughtId 的所有 chunk 累加成一段完整 reasoning
+ * - isComplete=true 表示该段思考结束（一轮 idle 前必发一条空 isComplete=true 收尾）
+ */
+export interface ReasoningChunkMessage extends RemoteMessage {
+  type: MessageType.REASONING_CHUNK;
+  payload: {
+    thoughtId: string;     // 聚合键，按对话轮次生成
+    text: string;          // 本次增量
+    isComplete: boolean;   // 该段思考是否结束
   };
 }
 
@@ -422,6 +462,32 @@ export class MessageFactory {
     };
   }
 
+  static createThought(
+    thoughtId: string,
+    subject: string,
+    description: string
+  ): ThoughtMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.THOUGHT,
+      payload: { thoughtId, subject, description },
+      timestamp: Date.now(),
+    };
+  }
+
+  static createReasoningChunk(
+    thoughtId: string,
+    text: string,
+    isComplete: boolean
+  ): ReasoningChunkMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.REASONING_CHUNK,
+      payload: { thoughtId, text, isComplete },
+      timestamp: Date.now(),
+    };
+  }
+
   static createInterrupt(): InterruptMessage {
     return {
       id: this.generateId(),
@@ -646,6 +712,24 @@ export class MessageValidator {
       typeof msg.payload.callId === 'string' &&
       typeof msg.payload.success === 'boolean' &&
       typeof msg.payload.args === 'object'
+    );
+  }
+
+  static isThoughtMessage(msg: RemoteMessage): msg is ThoughtMessage {
+    return (
+      msg.type === MessageType.THOUGHT &&
+      typeof msg.payload?.thoughtId === 'string' &&
+      typeof msg.payload?.subject === 'string' &&
+      typeof msg.payload?.description === 'string'
+    );
+  }
+
+  static isReasoningChunkMessage(msg: RemoteMessage): msg is ReasoningChunkMessage {
+    return (
+      msg.type === MessageType.REASONING_CHUNK &&
+      typeof msg.payload?.thoughtId === 'string' &&
+      typeof msg.payload?.text === 'string' &&
+      typeof msg.payload?.isComplete === 'boolean'
     );
   }
 

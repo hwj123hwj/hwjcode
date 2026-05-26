@@ -59,19 +59,29 @@ export function ModelManagementMenu({
   }, [modelsModified, onComplete]);
 
   // 处理添加模型完成
-  const handleAddComplete = useCallback((newModel: CustomModelConfig) => {
-    if (newModel) {
-      // 保存模型（使用独立存储系统）
-      addOrUpdateCustomModel(newModel);
-      setModelsModified(true);
+  // Accepts either a single config (manual flow) or an array (EasyRouter batch).
+  const handleAddComplete = useCallback(
+    (newModels: CustomModelConfig | CustomModelConfig[]) => {
+      const list = Array.isArray(newModels) ? newModels : [newModels];
+      if (list.length > 0) {
+        for (const model of list) {
+          addOrUpdateCustomModel(model);
+        }
+        setModelsModified(true);
 
-      // 🔥 热重载：立即更新 Config 实例，让当前会话可以使用新配置的模型
-      const updatedModels = loadCustomModels();
-      config.setCustomModels(updatedModels);
-      console.log(`[ModelManagement] Added/Updated model: ${newModel.displayName}`);
-    }
-    setMenuState('main');
-  }, [config]);
+        // 🔥 热重载：立即更新 Config 实例，让当前会话可以使用新配置的模型
+        const updatedModels = loadCustomModels();
+        config.setCustomModels(updatedModels);
+        console.log(
+          `[ModelManagement] Added/Updated ${list.length} model(s): ${list
+            .map((m) => m.displayName)
+            .join(', ')}`,
+        );
+      }
+      setMenuState('main');
+    },
+    [config],
+  );
 
   // 处理添加模型取消
   const handleAddCancel = useCallback(() => {

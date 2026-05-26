@@ -12,7 +12,9 @@
 .model-selector {
   position: relative;
   display: inline-block;
-  width: 200px; /* 🎯 增加宽度，避免模型名称被截断 */
+  min-width: 180px; /* 🎯 设立自适应的最小宽度，保证基础美观 */
+  max-width: 260px; /* 🎯 扩大最大宽度限制，容纳长名称+脑部图标 */
+  width: auto;     /* 🎯 启用宽度自适应 */
   z-index: 100;
 }
 
@@ -449,4 +451,125 @@
     animation: none;
     opacity: 1;
   }
+}
+
+/* 🧠 思考模式选择区 - 优雅嵌入模型选择器头部 */
+.dropdown-thinking-section {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--vscode-dropdown-border);
+  background: var(--vscode-dropdown-background);
+}
+
+.thinking-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  opacity: 0.7;
+  color: var(--vscode-dropdown-foreground);
+}
+
+.thinking-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.thinking-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-dropdown-border);
+  background: transparent;
+  color: var(--vscode-dropdown-foreground);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.thinking-pill:hover {
+  background: var(--vscode-dropdown-listBackground);
+  border-color: var(--vscode-focusBorder);
+}
+
+.thinking-pill.active {
+  background: var(--vscode-dropdown-listBackground);
+  border-color: var(--vscode-focusBorder);
+  color: var(--vscode-focusBorder);
+  font-weight: 500;
+}
+
+.pill-icon {
+  font-size: 11px;
+}
+
+.pill-label {
+  font-size: 11px;
+}
+
+/* 🟢 + Add Custom Model entry — sits at the bottom of the list with a subtle
+   accent so users can find it without it competing with real model rows. */
+.model-option.model-option-add-custom {
+  border-top: 1px dashed var(--vscode-panel-border);
+  margin-top: 4px;
+  padding-top: 12px;
+  color: var(--vscode-textLink-foreground);
+}
+
+.model-option.model-option-add-custom:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.model-option.model-option-add-custom .model-icon {
+  color: var(--vscode-textLink-foreground);
+}
+
+.model-option.model-option-add-custom .model-name {
+  font-weight: 600;
+}
+
+/* 🟢 [Provider] badge for custom-model rows — color is set inline from
+   CUSTOM_PROVIDER_BADGES (theme-aware). Uses the editor's mono font so the
+   bracketed prefix lines up with the displayName. */
+.model-custom-badge {
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 6px;
+  letter-spacing: 0.01em;
+}
+
+/* 🟢 X delete button shown on every custom-model row. Subdued by default,
+   turns red on hover so it's clearly destructive without being noisy. */
+.model-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.model-delete-btn:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15));
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.model-delete-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }

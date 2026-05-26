@@ -118,6 +118,61 @@ describe('GeminiChat', () => {
         config: {},
       }, SceneType.CHAT_CONVERSATION);
     });
+
+    it('should merge consecutive reasoning chunks and keep them in history', async () => {
+      // 模拟服务器流式下发：3 个 reasoning chunk + 1 个最终 text chunk
+      const response = (async function* () {
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'Let me ' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'think about ' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ reasoning: 'this...' }] },
+            index: 0,
+          }],
+        } as unknown as GenerateContentResponse;
+        yield {
+          candidates: [{
+            content: { role: 'model', parts: [{ text: 'Final answer.' }] },
+            finishReason: 'STOP',
+            index: 0,
+          }],
+          text: () => 'Final answer.',
+        } as unknown as GenerateContentResponse;
+      })();
+      vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(
+        response,
+      );
+
+      const stream = await chat.sendMessageStream(
+        { message: 'hello' },
+        'prompt-id-2',
+        SceneType.CHAT_CONVERSATION,
+      );
+      // 消费完整个流以触发 recordHistory
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of stream) { /* drain */ }
+
+      const history = chat.getHistory();
+      // user + reasoning(合并后) + text，共 3 条
+      expect(history.length).toBe(3);
+      expect(history[0].role).toBe('user');
+      expect(history[1].role).toBe('model');
+      expect((history[1].parts?.[0] as any).reasoning).toBe(
+        'Let me think about this...',
+      );
+      expect(history[2].role).toBe('model');
+      expect(history[2].parts?.[0]?.text).toBe('Final answer.');
+    });
   });
 
   describe('recordHistory', () => {
@@ -473,6 +528,38 @@ describe('GeminiChat', () => {
       expect(history[1].parts?.[1]?.functionCall?.id).toBe('call2');
       expect(history[1].parts?.[2]?.functionCall?.id).toBe('call3');
     });
+
+    it('should keep reasoning content in history (not filter it out)', () => {
+      const modelOutput: Content[] = [
+        { role: 'model', parts: [{ reasoning: 'thinking step 1' } as Part] },
+        { role: 'model', parts: [{ text: 'final answer' }] },
+      ];
+      // @ts-expect-error Accessing private method for testing purposes
+      chat.recordHistory(userInput, modelOutput);
+      const history = chat.getHistory();
+      expect(history.length).toBe(3);
+      expect(history[0]).toEqual(userInput);
+      expect((history[1].parts?.[0] as any).reasoning).toBe('thinking step 1');
+      expect(history[2].parts?.[0]?.text).toBe('final answer');
+    });
+
+    it('should not merge reasoning content with subsequent text content', () => {
+      // reasoning 与紧随其后的 text 必须保持为独立的两条 model content，
+      // 否则 OpenAI/DeepSeek 协议下无法正确还原 reasoning_content 字段。
+      const modelOutput: Content[] = [
+        { role: 'model', parts: [{ reasoning: 'inner thought' } as Part] },
+        { role: 'model', parts: [{ text: 'visible answer' }] },
+      ];
+      // @ts-expect-error Accessing private method for testing purposes
+      chat.recordHistory(userInput, modelOutput);
+      const history = chat.getHistory();
+      expect(history.length).toBe(3);
+      // 第二条仍是 reasoning，没有被合并到 text 里
+      expect((history[1].parts?.[0] as any).reasoning).toBe('inner thought');
+      expect(history[1].parts?.[0]?.text).toBeUndefined();
+      // 第三条是纯 text
+      expect(history[2].parts?.[0]?.text).toBe('visible answer');
+    });
   });
 
   describe('addHistory', () => {
@@ -502,6 +589,146 @@ describe('GeminiChat', () => {
       expect(history.length).toBe(2);
       expect(history[0]).toEqual(content1);
       expect(history[1]).toEqual(content2);
+    });
+  });
+
+  describe('fixRequestContents - merge adjacent same-role messages', () => {
+    /**
+     * 通过 setHistory + sendMessage 间接验证 fixRequestContents 的行为：
+     * setHistory(historyEndingWithUserFR) → sendMessage(textQuery) →
+     * sendMessage 内部会把 textQuery 作为新 user 消息 concat 到 history 后面，
+     * 形成 [..., user(fr), user(text)] 的相邻 user 序列，
+     * fixRequestContents 应当把它们合并成一条 user 消息。
+     */
+    function makeStubResponse(): GenerateContentResponse {
+      return {
+        candidates: [
+          {
+            content: { parts: [{ text: 'ok' }], role: 'model' },
+            finishReason: 'STOP',
+            index: 0,
+            safetyRatings: [],
+          },
+        ],
+        text: () => 'ok',
+      } as unknown as GenerateContentResponse;
+    }
+
+    it('合并 user(functionResponse) + user(text) 为一条 user', async () => {
+      vi.mocked(mockModelsModule.generateContent).mockResolvedValue(makeStubResponse());
+
+      // 历史以 model(fc) → user(fr) 收尾，模拟"流被中断、tool_result 已落但下一轮 model 还没来得及说话"
+      chat.setHistory([
+        { role: 'user', parts: [{ text: 'do something' }] },
+        { role: 'model', parts: [{ functionCall: { id: 'call_1', name: 'fn', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { id: 'call_1', name: 'fn', response: { output: 'done' } } }] },
+      ]);
+
+      // 客户端流恢复逻辑会再发一条 user(text)（即"continue"消息）
+      await chat.sendMessage(
+        { message: '[System] continue from where you left off' },
+        'prompt-continue',
+        SceneType.CHAT_CONVERSATION,
+      );
+
+      // 拿到实际传给 contentGenerator 的 contents
+      const args = vi.mocked(mockModelsModule.generateContent).mock.calls[0][0] as {
+        contents: Content[];
+      };
+
+      // user(fr) 和 user(text) 应被合并成一条 user，parts = [fr, text]
+      const last = args.contents[args.contents.length - 1];
+      expect(last.role).toBe('user');
+      expect(last.parts).toHaveLength(2);
+      expect(last.parts?.[0]?.functionResponse?.id).toBe('call_1');
+      expect(last.parts?.[1]?.text).toBe('[System] continue from where you left off');
+
+      // 合并后整体不应再出现 [user, user] 相邻
+      for (let i = 1; i < args.contents.length; i++) {
+        expect(args.contents[i].role).not.toBe(args.contents[i - 1].role);
+      }
+    });
+
+    it('合并三条连续 user 消息（fr + text + text）', async () => {
+      vi.mocked(mockModelsModule.generateContent).mockResolvedValue(makeStubResponse());
+
+      chat.setHistory([
+        { role: 'user', parts: [{ text: 'q' }] },
+        { role: 'model', parts: [{ functionCall: { id: 'c2', name: 'fn', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { id: 'c2', name: 'fn', response: { output: 'r' } } }] },
+        // 客户端额外注入的相邻 user 消息（极端情况，模拟连续中断）
+        { role: 'user', parts: [{ text: 'first injected' }] },
+      ]);
+
+      await chat.sendMessage(
+        { message: 'second injected' },
+        'prompt-multi',
+        SceneType.CHAT_CONVERSATION,
+      );
+
+      const args = vi.mocked(mockModelsModule.generateContent).mock.calls[0][0] as {
+        contents: Content[];
+      };
+      const last = args.contents[args.contents.length - 1];
+      expect(last.role).toBe('user');
+      // 三条 user 合并：fr + 'first injected' + 'second injected' = 3 个 part
+      expect(last.parts).toHaveLength(3);
+      expect(last.parts?.[0]?.functionResponse?.id).toBe('c2');
+      expect(last.parts?.[1]?.text).toBe('first injected');
+      expect(last.parts?.[2]?.text).toBe('second injected');
+    });
+
+    it('保留中间不同 role 的消息不变（user → model → user 不合并）', async () => {
+      vi.mocked(mockModelsModule.generateContent).mockResolvedValue(makeStubResponse());
+
+      chat.setHistory([
+        { role: 'user', parts: [{ text: 'first' }] },
+        { role: 'model', parts: [{ text: 'reply' }] },
+      ]);
+      await chat.sendMessage(
+        { message: 'second' },
+        'prompt-noop',
+        SceneType.CHAT_CONVERSATION,
+      );
+
+      const args = vi.mocked(mockModelsModule.generateContent).mock.calls[0][0] as {
+        contents: Content[];
+      };
+      // 顺序应保持 user → model → user，不合并
+      expect(args.contents.length).toBe(3);
+      expect(args.contents[0].role).toBe('user');
+      expect(args.contents[1].role).toBe('model');
+      expect(args.contents[2].role).toBe('user');
+      expect(args.contents[2].parts?.[0]?.text).toBe('second');
+    });
+
+    it('不影响原 history（仅修改请求时的副本）', async () => {
+      vi.mocked(mockModelsModule.generateContent).mockResolvedValue(makeStubResponse());
+
+      const original: Content[] = [
+        { role: 'user', parts: [{ text: 'q' }] },
+        { role: 'model', parts: [{ functionCall: { id: 'c3', name: 'fn', args: {} } }] },
+        { role: 'user', parts: [{ functionResponse: { id: 'c3', name: 'fn', response: { output: 'r' } } }] },
+      ];
+      chat.setHistory(original);
+
+      await chat.sendMessage(
+        { message: 'continue' },
+        'prompt-history-untouched',
+        SceneType.CHAT_CONVERSATION,
+      );
+
+      // history 不应被合并影响（addHistory 在 sendMessage 内部会单独执行，
+      // 但应保持 model + 单条 user(fr) 的原结构 + 新的 user(text) 独立追加）
+      const finalHistory = chat.getHistory(/* curated */ true);
+      // 结构上，最后一条 user(fr) 和后续追加的 user(text) 仍应在 history 里独立保存
+      // （我们只在请求层合并，history 层保持原貌，留给后续逻辑做更精细处理）
+      const userFrInHistory = finalHistory.find(
+        (c) => c.role === 'user' && c.parts?.some((p) => p.functionResponse?.id === 'c3'),
+      );
+      expect(userFrInHistory).toBeDefined();
+      // user(fr) 这条 history 项仍应只含 functionResponse，不应被合并
+      expect(userFrInHistory?.parts?.length).toBe(1);
     });
   });
 });

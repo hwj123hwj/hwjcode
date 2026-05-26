@@ -31,6 +31,7 @@ import {
   GEMINI_CONFIG_DIR as GEMINI_DIR,
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { ImageReaderTool } from '../tools/image-reader.js';
 import { TodoWriteTool } from '../tools/todo-write.js';
 import { ReadLintsTool } from '../tools/read-lints.js';
 import { LintFixTool } from '../tools/lint-fix.js';
@@ -48,6 +49,8 @@ import { MultiEditTool } from '../tools/multiedit.js';
 import { PatchTool } from '../tools/patch.js';
 import { BatchTool } from '../tools/batch.js';
 import { AskUserQuestionTool } from '../tools/ask-user-question.js';
+import { LocalTimeTool } from '../tools/local-time.js';
+import { GoalAchievedTool } from '../tools/goal-achieved.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
@@ -441,6 +444,22 @@ export class Config {
       setSilentMode(true);
     }
 
+    // 🧹 异步清理 ~/.deepv/last-requests/ 内超过 3 天的旧 dump 文件。
+    // 进程内只跑一次，不阻塞 initialize；失败不影响启动。
+    void (async () => {
+      try {
+        const { cleanupLastRequestsDir } = await import('../utils/lastRequestsCleanup.js');
+        const removed = await cleanupLastRequestsDir();
+        if (removed > 0) {
+          // 用 console.log 而不是 logger，避免与 silentMode 互锁。
+          // 信息量很小，启动期带一行无害。
+          console.log(`[deepv] last-requests cleanup: removed ${removed} stale dump file(s)`);
+        }
+      } catch {
+        // 清理失败永远不能阻塞或抛错。
+      }
+    })();
+
     // Initialize centralized FileDiscoveryService
     this.getFileService();
     if (this.getCheckpointingEnabled()) {
@@ -831,6 +850,22 @@ export class Config {
     this.projectSettingsManager.setAgentStyle(style);
   }
 
+  /**
+   * 获取当前思考配置（来自项目设置，可被 /thinking 命令修改）
+   * 返回 undefined 表示用户未显式设置，应使用模型/provider 默认值
+   */
+  getThinkingConfig(): import('../types/customModel.js').ThinkingConfig | undefined {
+    return this.projectSettingsManager.getThinkingConfig();
+  }
+
+  /**
+   * 设置思考配置并持久化
+   * 传入 undefined 可清除项目级配置（恢复为模型默认）
+   */
+  setThinkingConfig(config: import('../types/customModel.js').ThinkingConfig | undefined): void {
+    this.projectSettingsManager.setThinkingConfig(config);
+  }
+
   getShowMemoryUsage(): boolean {
     return this.showMemoryUsage;
   }
@@ -1066,6 +1101,7 @@ export class Config {
     registerCoreTool(ShellTool, this);
     registerCoreTool(MemoryTool, this);
     registerCoreTool(WebSearchTool, this);
+    registerCoreTool(ImageReaderTool, this);
     registerCoreTool(TodoWriteTool, this);
     registerCoreTool(ReadLintsTool, this);
     registerCoreTool(LintFixTool, this);
@@ -1082,6 +1118,8 @@ export class Config {
     registerCoreTool(PatchTool, this);
     registerCoreTool(BatchTool, this);
     registerCoreTool(AskUserQuestionTool, this);
+    registerCoreTool(LocalTimeTool, this);
+    registerCoreTool(GoalAchievedTool, this);
 
     // TaskTool (SubAgent) is disabled in VSCode plugin mode
     // but remains available in CLI mode and other IDE environments

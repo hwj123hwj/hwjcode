@@ -361,9 +361,6 @@ export class RemoteServer {
       this.cloudMode = true;
       this.cloudServerUrl = cloudServerUrl;
 
-      // 🆕 设置云模式环境变量，用于禁用SSE流式传输
-      process.env.DEEPV_CLOUD_MODE = 'true';
-
       // 🔧 先清理已存在的CloudClient，避免重复创建
       if (this.cloudClient) {
         console.log(t('cloud.cleanup.existing'));
@@ -421,9 +418,6 @@ export class RemoteServer {
     // 清理云端模式状态
     this.cloudMode = false;
     this.cloudServerUrl = undefined;
-
-    // 🆕 清除云模式环境变量
-    delete process.env.DEEPV_CLOUD_MODE;
 
     // 清理所有sessions
     for (const sessionInfo of this.sessions.values()) {
