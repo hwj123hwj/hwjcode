@@ -341,8 +341,19 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       wrappedUpdateOutput(createSubAgentUpdateMessage(currentDisplayData));
 
       // 返回结构化数据而不是文本
+      // 对 max_turns 触达的特殊路径，summary 中已包含 i18n 警告 + 子 Agent 的部分发现，
+      // 此时不应再加 "Task Failed:" 前缀（会让主 Agent 误判为完全失败丢信息），
+      // 改为 "Task Partially Completed (max turns reached):" 提示主 Agent 这是部分结果。
+      let llmContent: string;
+      if (result.success) {
+        llmContent = `Task Completed: ${result.summary}`;
+      } else if (result.reason === 'max_turns_exceeded') {
+        llmContent = `Task Partially Completed (max turns reached):\n${result.summary}`;
+      } else {
+        llmContent = `Task Failed: ${result.summary}`;
+      }
       return {
-        llmContent: result.success ? `Task Completed: ${result.summary}` : `Task Failed: ${result.summary}`,
+        llmContent,
         returnDisplay: currentDisplayData,
       };
 
