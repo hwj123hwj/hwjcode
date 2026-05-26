@@ -67,7 +67,7 @@ export const KNOWLEDGE_TIPS_EN = [
   // Custom Commands & Configuration
   'Create custom slash commands in ~/.deepv/commands/',
   'Use {{args}} in custom commands to inject parameters',
-  'Configure MCP servers in .deepv/settings.json',
+  'Configure MCP servers in .deepvcode/settings.json',
   'Set preferredEditor in settings.json for diff viewing',
   'Use DEEPV.md for project-specific AI instructions',
   // Advanced Features
@@ -133,7 +133,7 @@ export const KNOWLEDGE_TIPS_ZH = [
   // 自定义命令和配置
   '可以在 ~/.deepv/commands/ 创建自定义斜杠命令',
   '在自定义命令中使用 {{args}} 注入参数',
-  '在 .deepv/settings.json 中配置 MCP 服务器',
+  '在 .deepvcode/settings.json 中配置 MCP 服务器',
   '在 settings.json 中设置 preferredEditor 用于 diff 查看',
   '使用 DEEPV.md 文件为项目编写 AI 特定指令',
   // 高级功能

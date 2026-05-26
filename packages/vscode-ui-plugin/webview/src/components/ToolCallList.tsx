@@ -11,6 +11,7 @@ import { TodoDisplayRenderer } from './renderers/TodoDisplayRenderer';
 import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { DiffRenderer } from './renderers/DiffRenderer';
 import { BackgroundTaskOutputRenderer } from './renderers/BackgroundTaskOutputRenderer';
+import { GoalAchievedDisplayRenderer } from './renderers/GoalAchievedDisplayRenderer';
 import { AskUserQuestionMessage } from './AskUserQuestionMessage';
 import './renderers/Renderers.css';
 
@@ -23,6 +24,7 @@ const getResultType = (result: any): string | null => {
   // 检查特殊渲染类型
   if (dataType === 'todo_display') return 'todo_display';
   if (dataType === 'subagent_display' || dataType === 'subagent_update') return 'subagent_display';
+  if (dataType === 'goal_achieved_display') return 'goal_achieved_display';
   if (result?.fileDiff || result?.data?.fileDiff) return 'diff_display';
   if (result?.toolName === 'background_task_output' || result?.data?.toolName === 'background_task_output') return 'background_task_output';
 
@@ -94,6 +96,13 @@ const renderResult = (result: any): React.ReactNode => {
       agentData = dataType === 'subagent_update' ? result.data.data : result.data;
     }
     return <SubAgentDisplayRenderer data={agentData} />;
+  }
+
+  // 🎯 Goal achieved 完成卡片 - 见 GoalAchievedDisplayRenderer 的设计注释
+  if (dataType === 'goal_achieved_display') {
+    console.log('🎯 [renderResult] Goal achieved display detected');
+    const goalData = result.data || result;
+    return <GoalAchievedDisplayRenderer data={goalData} />;
   }
 
   // Diff显示 - 检查两种可能的结构
@@ -905,11 +914,17 @@ interface ToolCallListProps {
 }
 
 export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm, showCompact = false, onMoveToBackground, isInPlanMode = false }) => {
-  // 🎯 初始化时，background_task_output 类型的工具默认展开
+  // 🎯 初始化时，下列工具调用默认展开：
+  //   - background_task_output：实时输出，折叠会让用户看不到正在跑的命令
+  //   - goal_achieved：模型刚刚正式宣告 /goal 完成，reason 字段是用户最关心
+  //     的"为什么完成"审计依据；默认折叠会埋掉这个里程碑事件
   const getDefaultExpandedTools = () => {
     const expanded = new Set<string>();
     toolCalls?.forEach(tc => {
       if (tc.toolName === 'background_task_output') {
+        expanded.add(tc.id);
+      }
+      if (tc.toolName === 'goal_achieved') {
         expanded.add(tc.id);
       }
     });
@@ -926,6 +941,22 @@ export const ToolCallList: React.FC<ToolCallListProps> = ({ toolCalls, onConfirm
       setExpandedTools(prev => {
         const newSet = new Set(prev);
         bgTools.forEach(tc => newSet.add(tc.id));
+        return newSet;
+      });
+    }
+  }, [toolCalls]);
+
+  // 🎯 当有新的 goal_achieved 工具到达时，自动展开。
+  //   getDefaultExpandedTools 只在 mount 时跑一次；如果用户在会话中途
+  //   触发 goal_achieved，那次工具调用 id 不在初始集合里，必须靠这条
+  //   useEffect 加进去。和上面 background_task_output 的处理对称。
+  React.useEffect(() => {
+    if (!toolCalls) return;
+    const goalTools = toolCalls.filter(tc => tc.toolName === 'goal_achieved');
+    if (goalTools.length > 0) {
+      setExpandedTools(prev => {
+        const newSet = new Set(prev);
+        goalTools.forEach(tc => newSet.add(tc.id));
         return newSet;
       });
     }

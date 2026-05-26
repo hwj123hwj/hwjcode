@@ -51,6 +51,34 @@ export interface ChatMessage {
   type: 'user' | 'assistant' | 'system';
   // 🎯 新增：工具调用相关
   associatedToolCalls?: ToolCall[];
+  /**
+   * 🎯 /goal 模式启动元数据。
+   *
+   * 当且仅当本条 chat_message 是由 GoalWizardDialog 提交的"goal 启动消息"时
+   * 才会被设置。extension 侧在 onChatMessage 入口看到该字段后，会先在
+   * GeminiClient 上调用 setGoalContext({...})，再走正常的 processChatMessage
+   * 流程——这样"注册 goal context"和"发出原始 goal prompt"在同一个事件内
+   * 原子完成，不存在竞态。
+   *
+   * 价值：core 的 tryCompressChat 在每次自动/手动压缩后会检查
+   * activeGoalContext，若非空则把原 prompt + T0 时间锚 + 立即行动指令重新
+   * 注入历史，防止 summarizer 把 /goal 契约（最低工时、no-stop 纪律、
+   * 安全栏等）压没了导致 agent 在压缩后停摆。
+   *
+   * 字段：
+   *   - startedAt: T0 (Date.now())，由 webview 在 wizard 点击"启动"时捕获。
+   *     extension 不重新生成时间戳——避免 IPC 延迟造成 T0 漂移。
+   *   - hours:    最低连续工时下限。
+   *   - task:     任务摘要，用于日志/未来 UI。
+   *
+   * 注意：originalPrompt 不在这里——它就是 message.content 里的那条 text
+   * part，extension 端从 content 提取即可，避免冗余传递造成的不一致风险。
+   */
+  goalContext?: {
+    startedAt: number;
+    hours: number;
+    task: string;
+  };
 }
 
 export interface ChatResponse {
@@ -310,7 +338,7 @@ export type WebViewToExtensionMessage =
   // 🎯 Undo 模块
   | { type: 'undo_file_change'; payload: { sessionId: string; fileName: string; filePath?: string; originalContent: string; isNewFile: boolean; isDeletedFile: boolean } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_update'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_update'; payload: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any; healthyUse?: boolean } }
   | { type: 'project_settings_request'; payload: {} }
   // 🎯 Diff编辑器相关
   | { type: 'openDiffInEditor'; payload: { fileDiff: string; fileName: string; originalContent: string; newContent: string; filePath?: string } }
@@ -355,7 +383,20 @@ export type WebViewToExtensionMessage =
   | { type: 'request_user_stats'; payload: {} }
   // 🎯 后台任务管理
   | { type: 'background_task_request'; payload: { action: 'list' | 'kill'; taskId?: string } }
-  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } };
+  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } }
+  // 🎯 自定义模型管理（与 CLI 端共享 ~/.deepv/custom-models.json）
+  // ----------------------------------------------------------------
+  // EasyRouter / EasyClaw 元数据请求是从 webview 发起的（webview 直接拿到 API key
+  // 并发起 fetch，避免 key 跨进程多跳）。如果 webview 沙箱因 CSP 拒绝外部 fetch,
+  // extension 端也提供同名 IPC 作为后备路径——见 extension.ts 的 onFetchEasyRouter*。
+  | { type: 'list_custom_models'; payload: { requestId: string } }
+  | {
+      type: 'add_custom_models';
+      payload: { requestId: string; models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | { type: 'delete_custom_model'; payload: { requestId: string; modelId: string } }
+  | { type: 'fetch_easy_router_models'; payload: { requestId: string; apiKey: string } }
+  | { type: 'fetch_easy_claw_metadata'; payload: { requestId: string } };
 
 // Message types from Extension to WebView
 export type ExtensionToWebViewMessage =
@@ -412,7 +453,7 @@ export type ExtensionToWebViewMessage =
   // 🎯 文件路径解析结果
   | { type: 'file_paths_resolved'; payload: { resolvedFiles: string[] } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_response'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_response'; payload: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any } }
   // 🎯 服务初始化状态
   | { type: 'service_initialization_status'; payload: { status: 'starting' | 'progress' | 'ready' | 'failed'; message: string; timestamp: number } }
   | { type: 'service_initialization_done'; payload: {} }
@@ -440,6 +481,7 @@ export type ExtensionToWebViewMessage =
   | { type: 'rules_save_response'; payload: { success: boolean; error?: string } }
   | { type: 'rules_delete_response'; payload: { success: boolean; error?: string } }
   | { type: 'open_rules_management'; payload: {} }
+  | { type: 'open_goal_wizard'; payload: {} }
   // 🎯 NanoBanana 图像生成（支持多轮会话 + 多图参考）
   | { type: 'nanobanana_upload_response'; payload: { success: boolean; publicUrl?: string; error?: string } }
   | { type: 'nanobanana_batch_upload_response'; payload: { success: boolean; publicUrls?: string[]; error?: string } }
@@ -473,7 +515,45 @@ export type ExtensionToWebViewMessage =
   // 🎯 后台任务完成通知（用于触发 AI 继续）
   | { type: 'background_task_completed_notification'; payload: BackgroundTaskCompletedPayload }
   // 🎯 后台任务结果显示（在聊天界面显示任务输出）
-  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload };
+  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload }
+  // 🎯 自定义模型管理响应（与上行 IPC 一一对应）
+  // 所有请求都携带 requestId，webview 用同一 requestId 匹配响应——和 model_response
+  // 的模式一致，避免上下行混合在同一通道时跨请求误投递。
+  | {
+      type: 'custom_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: import('deepv-code-core').CustomModelConfig[];
+        error?: string;
+      };
+    }
+  // 任意 webview 触发自定义模型变更（add/delete）后，extension 主动广播这条
+  // 给所有 webview，让 ModelSelector 不必主动轮询就能拿到最新列表。
+  | {
+      type: 'custom_models_changed';
+      payload: { models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | {
+      type: 'fetch_easy_router_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: Array<{ id: string; owned_by?: string; supported_endpoint_types?: string[] }>;
+        error?: string;
+        status?: number;
+      };
+    }
+  | {
+      type: 'fetch_easy_claw_metadata_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        // map.entries() 序列化为 [key, value][]，避免 Map 不能跨 IPC clone。
+        entries?: Array<[string, import('deepv-code-core').EasyClawModelMetadata]>;
+        error?: string;
+      };
+    };
 
 /**
  * 🔌 MCP 状态消息负载

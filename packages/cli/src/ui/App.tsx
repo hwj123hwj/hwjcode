@@ -29,6 +29,7 @@ import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
 import { useDebateWizard } from './hooks/useDebateWizard.js';
+import { useGoalWizard } from './hooks/useGoalWizard.js';
 import { useAuthCommand } from './hooks/useAuthCommand.js';
 import { useLoginCommand } from './hooks/useLoginCommand.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
@@ -37,6 +38,7 @@ import { useSettingsMenu } from './hooks/useSettingsMenu.js';
 import { usePluginInstallCommand } from './hooks/usePluginInstallCommand.js';
 import { useSlashCommandProcessor } from './hooks/slashCommandProcessor.js';
 import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
+import { useGoalActive } from './hooks/useGoalActive.js';
 import { useConsoleMessages } from './hooks/useConsoleMessages.js';
 import { useBackgroundTaskNotifications, formatBackgroundTaskResult } from './hooks/useBackgroundTaskNotifications.js';
 import { BackgroundTaskPanel } from './components/BackgroundTaskPanel.js';
@@ -45,6 +47,7 @@ import { Header } from './components/Header.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { LoadingIndicator } from './components/LoadingIndicator.js';
 import { AutoAcceptIndicator } from './components/AutoAcceptIndicator.js';
+import { GoalActiveIndicator } from './components/GoalActiveIndicator.js';
 import { ShellModeIndicator } from './components/ShellModeIndicator.js';
 import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
@@ -56,6 +59,7 @@ import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
 import { DebateWizard } from './components/DebateWizard.js';
+import { GoalWizard } from './components/GoalWizard.js';
 import { DebateIndicator } from './components/DebateIndicator.js';
 import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
@@ -871,6 +875,47 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     advanceAbortRef: debateAdvanceAbortRef,
   });
 
+  // 🎯 目标驱动模式向导。和 debate 一样，submitQuery 在下面才被定义，
+  // 走同一个 ref 中转。
+  const submitQueryForGoalRef = useRef<DebateSubmitQuery | null>(null);
+  const {
+    isGoalWizardOpen,
+    openGoalWizard,
+    handleGoalWizardComplete,
+    handleGoalWizardCancel,
+  } = useGoalWizard({
+    config,
+    addItem,
+    submitQuery: (q, o) => {
+      const impl = submitQueryForGoalRef.current;
+      if (impl) {
+        impl(q, o);
+        return;
+      }
+      // submitQuery 尚未挂上：与 debate 同样的 race window，轮询重试 1s。
+      const deadline = Date.now() + 1000;
+      const tick = () => {
+        const impl2 = submitQueryForGoalRef.current;
+        if (impl2) {
+          impl2(q, o);
+          return;
+        }
+        if (Date.now() > deadline) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: t('goalWizard.submit_not_ready'),
+            },
+            Date.now(),
+          );
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      setTimeout(tick, 50);
+    },
+  });
+
   const {
     isSettingsMenuDialogOpen,
     openSettingsMenuDialog,
@@ -991,7 +1036,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     addItem(
       {
         type: MessageType.INFO,
-        text: 'Refreshing hierarchical memory (DEEPV.md or other context files)...',
+        text: t('memory.refreshing'),
       },
       Date.now(),
     );
@@ -1009,9 +1054,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       config.setGeminiMdFileCount(fileCount);
       setGeminiMdFileCount(fileCount);
 
-      let successMessage = `Memory refreshed successfully. ${memoryContent.length > 0 ? `Loaded ${memoryContent.length} characters from ${fileCount} file(s).` : 'No memory content found.'}`;
-      if (fileCount > 0 && filePaths.length > 0) {
-        successMessage += `\nMemory files:\n${filePaths.map(f => `  - ${f}`).join('\n')}`;
+      let successMessage = memoryContent.length > 0 ? tp('memory.refresh_success_loaded', { characters: memoryContent.length, count: fileCount }) : t('memory.refresh_success_no_content');      if (fileCount > 0 && filePaths.length > 0) {
+        successMessage += tp('memory.files_list', { files: filePaths.map(f => `  - ${f}`).join('\n') });
       }
 
       addItem(
@@ -1034,7 +1078,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       addItem(
         {
           type: MessageType.ERROR,
-          text: `Error refreshing memory: ${errorMessage}`,
+          text: tp('memory.refresh_error', { errorMessage }),
         },
         Date.now(),
       );
@@ -1235,6 +1279,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openPluginInstallDialog, // 🆕 传递 openPluginInstallDialog
     openDebateWizard, // 🎭 传递 openDebateWizard
     handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
+    openGoalWizard, // 🎯 传递 openGoalWizard
   );
 
   const {
@@ -1272,6 +1317,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 发开场白（提交给首个模型）。effect 每次 submitQuery 引用变化时更新。
   useEffect(() => {
     submitQueryForDebateRef.current = submitQuery;
+    submitQueryForGoalRef.current = submitQuery;
   }, [submitQuery]);
 
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
@@ -1528,6 +1574,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     async (submittedValue: string) => {
       const trimmedValue = submittedValue.trim();
       if (trimmedValue.length > 0) {
+        // 更新最后用户交互时间（goal 看门狗用）
+        lastUserInteractionRef.current = Date.now();
         // Clear screen once when user first submits message after logo is shown
         if (logoShows) {
           clearScreenWithScrollBuffer(stdout);
@@ -1692,6 +1740,69 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     }
   }, [elapsedTime, streamingState]);
 
+  // 🎯 /goal 模式心跳：每秒探测 GeminiClient.activeGoalContext，让底部状态栏
+  // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
+  const isGoalActive = useGoalActive(config);
+
+  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
+
+  // ──── Goal 模式 Idle 看门狗 ────
+  // 问题：某些 AI 模型在 /goal 模式下会"发呆"——既不继续工作，也不调用
+  // goal_achieved。表现为 streamingState=Idle 但 goal 契约未释放。
+  // 解决：跟踪上次用户交互时间；如果 goal active + idle + 60s 无交互，
+  // 自动 silent-submit 一条提示消息让 AI 继续。
+  const GOAL_IDLE_TIMEOUT_MS = 60_000;
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const goalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 追踪用户交互：任何提交输入、slash命令等都会更新此时间戳
+  // 我们在 handleFinalSubmit 中手动更新，避免闭包依赖问题
+
+  useEffect(() => {
+    // 卫语句：只有在 goal 活跃、当前空闲、且非退出状态时，才需要开启看门狗
+    const isWatchdogNeeded = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+    if (!isWatchdogNeeded) {
+      return;
+    }
+
+    const elapsed = Date.now() - lastUserInteractionRef.current;
+    const remainingTime = Math.max(0, GOAL_IDLE_TIMEOUT_MS - elapsed);
+
+    goalIdleTimerRef.current = setTimeout(() => {
+      goalIdleTimerRef.current = null;
+
+      // 触发时二次确认条件仍然满足
+      const isStillEligible = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+      if (!isStillEligible) {
+        return;
+      }
+
+      // 发送前更新时间戳，避免消息发出后立即又触发（防抖）
+      lastUserInteractionRef.current = Date.now();
+
+      const goalContinuePrompt =
+        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
+        '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
+        '请立即执行以下检查：\n' +
+        '1. 调用 local_time 确认当前时间和你的工作时长\n' +
+        '2. 对照目标契约检查完成情况——哪些达标、哪些还差\n' +
+        '3. 如果全部达标 → 调用 goal_achieved 声明完成\n' +
+        '4. 如果未达标 → 继续执行剩余工作（调用工具、写代码、运行测试等）\n\n' +
+        '目标契约仍在生效中，请继续工作。';
+
+      submitQuery(goalContinuePrompt, { silent: true });
+    }, remainingTime);
+
+    return () => {
+      if (goalIdleTimerRef.current) {
+        clearTimeout(goalIdleTimerRef.current);
+        goalIdleTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGoalActive, streamingState, getIsQuitting]);
+
   const { shouldShowSummary, completionElapsedTime } = useTaskCompletionSummary(
     streamingState,
     lastElapsedTimeBeforeIdleRef.current
@@ -1703,8 +1814,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       completionSummaryCounterRef.current += 1;
     }
   }, [shouldShowSummary]);
-
-  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
 
   const handleExit = useCallback(
     (
@@ -2310,7 +2419,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
          * ensure that it's statically rendered.
          *
          * Background on the Static Item: Anything in the Static component is written a single time
-         * to the console. Think of it like doing a console.log and then never using ANSI codes to
+         * to the console. Think of it like doing a logger.debug and then never using ANSI codes to
          * clear that content ever again. Effectively it has a moving frame that every time new static
          * content is set it'll flush content to the terminal and move the area which it's "clearing"
          * down a notch. Without Static the area which gets erased and redrawn continuously grows.
@@ -2342,8 +2451,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
         {showHelp ? <Help commands={slashCommands} /> : null}
 
-        {/* 🆕 显示思考过程框（在pending内容后，一旦开始内容就隐藏） */}
-        {reasoning && !hasContentStarted ? (
+        {/* 显示思考过程框：reasoning 存在就显示。
+            正文开始 / 流式结束 / 用户取消 / 新一轮提问 时由
+            useGeminiStream 立即置 null 隐藏。 */}
+
+        {reasoning ? (
           <ReasoningDisplay
             reasoning={reasoning}
             terminalHeight={terminalHeight}
@@ -2425,6 +2537,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onComplete={handleDebateWizardComplete}
                 onCancel={handleDebateWizardCancel}
                 onLanguageSelected={handleDebateLanguageSelected}
+              />
+            </Box>
+          ) : isGoalWizardOpen ? (
+            <Box flexDirection="column">
+              <GoalWizard
+                onComplete={handleGoalWizardComplete}
+                onCancel={handleGoalWizardCancel}
               />
             </Box>
           ) : isPluginInstallDialogOpen ? (
@@ -2619,8 +2738,16 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 </Box>
                 <Box>
                   {planModeActive ? <PlanModeIndicator /> : null}
+                  {/* 🎯 状态栏优先级：plan > goal > YOLO/AUTO_EDIT。
+                      goal 模式下强制启用 YOLO，再显示 "YOLO mode (ctrl+y)"
+                      就只是噪音；用 goal 指示器替代它，告诉用户"长时任务在跑、
+                      已运行多久"，更有信息量。/goal clear 后 isGoalActive 变 false，
+                      立即恢复原有 YOLO/AUTO_EDIT 显示。 */}
+                  {!planModeActive && isGoalActive && !shellModeActive && !helpModeActive ? (
+                    <GoalActiveIndicator config={config} />
+                  ) : null}
                   {showAutoAcceptIndicator !== ApprovalMode.DEFAULT &&
-                    !shellModeActive && !helpModeActive && !planModeActive ? (
+                    !shellModeActive && !helpModeActive && !planModeActive && !isGoalActive ? (
                       <AutoAcceptIndicator
                         approvalMode={showAutoAcceptIndicator}
                       />
@@ -2789,7 +2916,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}

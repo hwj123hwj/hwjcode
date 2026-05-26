@@ -62,5 +62,11 @@
 |------|-------------|
 | [debate-i18n-enhancement](wiki/debate-i18n-enhancement.md) | Debate mode i18n & language selection — multilingual UI and prompts |
 
+## Guides & Checklists
+
+| Page | Description |
+|------|-------------|
+| [adding-builtin-tool-checklist](wiki/adding-builtin-tool-checklist.md) | Checklist & pitfalls when adding a built-in tool to `core/src/tools/` (derived from `local_time` debugging) |
+
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->

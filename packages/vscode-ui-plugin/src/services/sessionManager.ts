@@ -505,6 +505,36 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * 🎯 设置项目级别的 thinking 配置并同步到所有session
+   */
+  async setProjectThinkingConfig(thinking: any): Promise<void> {
+    try {
+      this.logger.info(`[Thinking] Syncing thinking config to sessions: ${JSON.stringify(thinking)}`);
+
+      const sessionIds = Array.from(this.aiServices.keys());
+      if (sessionIds.length === 0) {
+        return;
+      }
+
+      for (const sessionId of sessionIds) {
+        try {
+          const aiService = this.aiServices.get(sessionId);
+          if (aiService) {
+            const config = aiService.getConfig();
+            if (config) {
+              config.setThinkingConfig(thinking);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`[Thinking] Failed to set thinking config for session ${sessionId}`, error instanceof Error ? error : undefined);
+        }
+      }
+    } catch (error) {
+      this.logger.error('[Thinking] Failed to sync thinking config', error instanceof Error ? error : undefined);
+    }
+  }
+
   // =============================================================================
   // Session创建和管理
   // =============================================================================
@@ -1002,6 +1032,17 @@ export class SessionManager extends EventEmitter {
     try {
       this.validateSessionExists(sessionId);
 
+      // 🔒 防御：拒绝空 / 非字符串的 modelName 覆盖（避免 SSoT 被脏数据污染）
+      if (
+        modelConfig.modelName !== undefined &&
+        (typeof modelConfig.modelName !== 'string' || modelConfig.modelName.trim() === '')
+      ) {
+        this.logger.warn(
+          `⚠️ Rejected invalid modelName update for session ${sessionId}: ${JSON.stringify(modelConfig.modelName)}`
+        );
+        return;
+      }
+
       const sessionState = this.sessions.get(sessionId)!;
       sessionState.modelConfig = { ...sessionState.modelConfig, ...modelConfig };
       sessionState.info.lastActivity = Date.now();
@@ -1300,8 +1341,35 @@ export class SessionManager extends EventEmitter {
       throw new Error(`AIService not found for session: ${sessionId}`);
     }
 
-    // 如果已经初始化，直接返回
+    // 如果已经初始化，校准运行时模型与 session.modelConfig（用户最后一次成功的选择），再返回
     if (aiService.isServiceInitialized) {
+      const sessionState = this.sessions.get(sessionId);
+      const desiredModel = sessionState?.modelConfig?.modelName;
+      const config = aiService.getConfig();
+      const currentRuntimeModel = config?.getModel();
+
+      // 仅在 desired 是具体模型（非 auto）、且发生漂移时执行校准
+      if (
+        desiredModel &&
+        desiredModel !== 'auto' &&
+        currentRuntimeModel &&
+        desiredModel !== currentRuntimeModel
+      ) {
+        const geminiClient = config?.getGeminiClient();
+        if (geminiClient) {
+          this.logger.warn(
+            `🔧 Model drift detected for session ${sessionId}: runtime=${currentRuntimeModel}, desired=${desiredModel}. Reconciling via switchModel...`
+          );
+          const result = await geminiClient.switchModel(desiredModel, new AbortController().signal);
+          if (!result.success) {
+            // 校准失败：保留 modelConfig 不变（用户意图），抛出让本次操作失败、提示用户重试
+            const errMsg = `Failed to switch to model ${desiredModel}: ${result.error || 'unknown error'}`;
+            this.logger.error(`❌ Model reconcile failed for session ${sessionId}: ${errMsg}`);
+            throw new Error(errMsg);
+          }
+          this.logger.info(`✅ Model reconciled for session ${sessionId}: now using ${desiredModel}`);
+        }
+      }
       return aiService;
     }
 
