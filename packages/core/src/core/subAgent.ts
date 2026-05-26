@@ -42,6 +42,14 @@ export interface SubAgentResult {
   success: boolean;
   summary: string;
   error?: string;
+  /**
+   * 失败原因的机读标识。当前已知值：
+   * - 'max_turns_exceeded' —— 用尽轮数预算，summary 中已尽量保留子 Agent 的部分发现
+   * - 'execution_error'   —— 抛错中止
+   * - 'cancelled'         —— 被 AbortSignal 取消
+   * 用于主 Agent / UI 据此分类处理。
+   */
+  reason?: 'max_turns_exceeded' | 'execution_error' | 'cancelled';
   executionLog: string[];
   filesCreated?: string[];
   commandsRun?: string[];
@@ -71,6 +79,10 @@ export class SubAgent {
 
   // 待处理的工具结果，下次callGemini时一起发送
   private pendingToolResults: PartListUnion[] = [];
+
+  // 最近一次 AI 响应的文本部分。用于 max_turns 触达时把子 Agent 已写下的
+  // 报告/分析返回给主 Agent，避免长时间分析白白浪费。
+  private lastAssistantText: string = '';
 
   // 简化：无需中央状态管理
 
@@ -208,8 +220,11 @@ export class SubAgent {
       this.log(`SubAgent chat instance initialized, available tools: ${this.getAvailableToolNames().length}`);
 
       // 主对话循环
+      // 关键改动：在最后一轮显式标注 isFinalTurn，让 callGemini 注入"停止调用工具、立即总结"指令，
+      // 这样即便 max_turns 触达，主 Agent 也能拿到子 Agent 已积累的发现。
       while (this.context.currentTurn < this.context.maxTurns && this.context.isRunning) {
-        const turnResult = await this.executeConversationTurn();
+        const isFinalTurn = this.context.currentTurn + 1 >= this.context.maxTurns;
+        const turnResult = await this.executeConversationTurn(isFinalTurn);
 
         // 如果任务完成，返回结果
         if (turnResult) {
@@ -217,27 +232,30 @@ export class SubAgent {
         }
       }
 
-      // 超过最大轮数，任务未完成
-      const warning = t('task.timeout.warning', { turns: this.context.currentTurn });
-      const creditsNotice = t('task.timeout.credits.notice');
-      const summary = `${warning}\n${creditsNotice}`;
-      this.log(summary);
-      this.sendStatusChange('failed', {
-        reason: 'max_turns_exceeded',
-        summary,
-        turnsUsed: this.context.currentTurn,
-      });
-      return this.buildErrorResult(new Error(summary));
+      // 走到这里有两种情况：
+      // 1) currentTurn 已耗尽 maxTurns —— 走 handleMaxTurnsReached 返回部分结果
+      // 2) 被 abort 信号在循环条件处打断（isRunning=false） —— 抛出统一的取消错误，
+      //    交给外层 catch 走 cancelled 路径，避免被错误标注为 max_turns_exceeded
+      if (!this.context.isRunning && this.context.currentTurn < this.context.maxTurns) {
+        throw new Error('Task cancelled by AbortSignal');
+      }
+      return this.handleMaxTurnsReached();
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.log(t('task.execution.failed', { error: errorMessage }));
+      // 区分主动取消与异常退出，便于主 Agent / UI 显示
+      const isCancelled = this.abortSignal?.aborted === true;
       this.sendStatusChange('failed', {
-        reason: 'execution_error',
+        reason: isCancelled ? 'abort_signal' : 'execution_error',
         error: errorMessage,
         turnsUsed: this.context.currentTurn,
       });
-      return this.buildErrorResult(error);
+      const result = this.buildErrorResult(error);
+      if (isCancelled) {
+        result.reason = 'cancelled';
+      }
+      return result;
     } finally {
       this.context.isRunning = false;
 
@@ -315,28 +333,41 @@ export class SubAgent {
 
   /**
    * 执行单轮对话 - 一轮一次AI请求
+   * @param isFinalTurn 是否是最后一轮。最后一轮会注入"停止调用工具、立即总结"提示，
+   *                    并且即便 AI 仍然返回了工具调用，也不会再实际执行 —— 直接返回 null
+   *                    交给主循环走 handleMaxTurnsReached 路径。
    * @returns SubAgentResult 如果任务完成，否则返回 null
    */
-  private async executeConversationTurn(): Promise<SubAgentResult | null> {
+  private async executeConversationTurn(isFinalTurn: boolean = false): Promise<SubAgentResult | null> {
     // 🎯 检查AbortSignal - 每轮开始时检查
     this.checkAbortSignal();
 
     this.context.currentTurn++;
-    this.log(`Conversation turn ${this.context.currentTurn}/${this.context.maxTurns}`);
+    this.log(`Conversation turn ${this.context.currentTurn}/${this.context.maxTurns}${isFinalTurn ? ' (final turn — summary mode)' : ''}`);
 
     // 通知 UI 当前轮次，用于显示 Turn X/Y 进度
     this.sendTurnProgress();
 
     // 每轮调用AI，可能携带待处理的工具结果
-    const aiResponse = await this.callGemini();
+    const aiResponse = await this.callGemini(isFinalTurn);
 
     // 分析AI响应
     const responseAnalysis = this.analyzeAIResponse(aiResponse);
     this.logAIResponse(responseAnalysis);
 
+    // 记录文本部分，无论是否伴随工具调用 —— 用于 max_turns 触达时回收已有发现
+    this.lastAssistantText = responseAnalysis.responseText;
+
     // 如果没有工具调用，任务完成
     if (!responseAnalysis.hasToolCalls) {
       return this.handleTaskCompletion(responseAnalysis.responseText);
+    }
+
+    // 最后一轮即便 AI 仍调用了工具也不再执行 —— 直接返回 null 让主循环走 max_turns 路径，
+    // 这样可以保留已经获得的文本（即便是部分总结），避免再消耗 credits 跑工具。
+    if (isFinalTurn) {
+      this.log('Final turn produced tool calls instead of summary; skipping tool execution to preserve findings.');
+      return null;
     }
 
     // 有工具调用：执行工具并准备下轮携带结果
@@ -460,8 +491,10 @@ export class SubAgent {
 
   /**
    * 调用Gemini AI获取响应
+   * @param isFinalTurn 是否是最后一轮。最后一轮会在消息末尾追加 final-turn reminder，
+   *                    强制 AI 停止调用工具并立即输出结构化报告。
    */
-  private async callGemini(): Promise<Content> {
+  private async callGemini(isFinalTurn: boolean = false): Promise<Content> {
     if (!this.subAgentChat) {
       throw new Error('SubAgent chat not initialized');
     }
@@ -489,6 +522,13 @@ export class SubAgent {
         });
         this.pendingToolResults = [];
       }
+    }
+
+    // 最后一轮：追加强制总结指令（即便是 maxTurns=1 的极端情况，也会和任务描述一起发送）
+    if (isFinalTurn) {
+      messageParts.push({
+        text: TaskPrompts.buildFinalTurnReminder(this.context.currentTurn, this.context.maxTurns),
+      });
     }
 
     // 📝 保存请求日志
@@ -659,6 +699,50 @@ export class SubAgent {
       success: false,
       summary: `Task execution failed: ${errorMessage}`,
       error: errorMessage,
+      reason: 'execution_error',
+      executionLog: stats.executionLog,
+      filesCreated: stats.filesCreated,
+      commandsRun: stats.commandsRun,
+      tokenUsage: this.context.tokenUsage,
+    };
+  }
+
+  /**
+   * 处理 max_turns 触达：把子 Agent 在最后一轮已生成的文本（lastAssistantText）
+   * 作为 summary 返回给主 Agent，避免长时间分析白白浪费。
+   *
+   * 即便 lastAssistantText 为空（极端情况：AI 在最后一轮仍坚持只调用工具不写文本），
+   * 也会附带明确的 fallback 提示，让主 Agent 知道发生了什么。
+   *
+   * status 仍标记为 'failed' / reason 'max_turns_exceeded'，UI 不会误以为成功。
+   */
+  private handleMaxTurnsReached(): SubAgentResult {
+    const turnsUsed = this.context.currentTurn;
+    const header = t('task.timeout.partial.header', { turns: turnsUsed });
+    const creditsNotice = t('task.timeout.credits.notice');
+    const fallback = t('task.timeout.partial.no_summary');
+
+    const summary = TaskPrompts.buildPartialResultSummary(
+      this.lastAssistantText,
+      header,
+      creditsNotice,
+      fallback,
+    );
+
+    this.log(`Max turns reached after ${turnsUsed} turn(s); returning partial summary (${this.lastAssistantText.trim().length} chars of assistant text).`);
+
+    this.sendStatusChange('failed', {
+      reason: 'max_turns_exceeded',
+      summary,
+      turnsUsed,
+    });
+
+    const stats = this.getExecutionStats();
+    return {
+      success: false,
+      summary,
+      error: t('task.timeout.warning', { turns: turnsUsed }),
+      reason: 'max_turns_exceeded',
       executionLog: stats.executionLog,
       filesCreated: stats.filesCreated,
       commandsRun: stats.commandsRun,
