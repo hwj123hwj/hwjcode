@@ -8,7 +8,7 @@ import {
   GenerateContentResponse,
   FinishReason,
 } from '@google/genai';
-import { CustomModelConfig } from '../types/customModel.js';
+import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToGeminiLevel, effortToGeminiBudget, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking, applyOpenAIChatThinking } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
@@ -53,6 +53,66 @@ function resolveEnvVar(value: string): string {
     const varName = varName1 || varName2;
     return process.env[varName] || match;
   });
+}
+
+// ============================================================================
+// max_tokens 解析（output cap, 不是 context window）
+// ----------------------------------------------------------------------------
+// 历史包袱：CustomModelConfig.maxTokens 在向导里描述为"上下文窗口大小"
+// （EasyClaw 自动填充时也写入 max_context_length，量级 100K~1M），
+// 但在适配器里曾被直接当作 Anthropic 的 max_tokens 发出去——这等于把
+// 1M 的上下文当成单次输出上限发给 API，后果：
+//   - Anthropic 直接返回 400 "max_tokens too high for this model"
+//   - 即使没 400，也会让 prompt-budget 计算/重试逻辑彻底乱套
+//
+// 修复方式：新增独立字段 maxOutputTokens（output cap，4K~64K 量级），
+// 适配器一律用 resolveOutputTokens() 取值，maxTokens 留作上下文窗口
+// 语义不变。这个 helper 是单一事实源——所有 provider 走它。
+// ============================================================================
+
+/**
+ * 各 provider 的 max_tokens / max_output_tokens 兜底默认值。
+ *
+ * 设计取舍：写死 32K 作为统一默认。理由：
+ *   - 主流模型（Claude 4.5/4.7、GPT-4o、Gemini 2.5 Pro 等）输出上限都至少 32K
+ *   - 思考型模型（Claude extended thinking、o-series reasoning）需要更大的
+ *     输出 budget 才能装下 thinking + 文字回复
+ *   - EasyClaw 元数据填充时会用 max_output_length 覆盖（见 buildEasyRouterModelConfig），
+ *     用户用 EasyRouter 加的模型都会拿到 vendor-precise 的值
+ *   - 真正想自己改的高级用户可以编辑 ~/.deepv/custom-models.json
+ *
+ * 为什么不再分 provider 给保守默认（8K/4K）：实操中 4K 经常导致工具调用响应被
+ * 截断 + thinking 模型直接 budget 用完没空间出文字。32K 对绝大多数现代模型都安全，
+ * 旧模型若不支持会被 vendor 自己截到上限——比报 400 友好。
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
+
+/**
+ * 解析单次响应的 max output tokens。
+ *
+ * 优先级（高到低）：
+ *   1. modelConfig.maxOutputTokens（EasyClaw max_output_length 自动填充）
+ *   2. DEFAULT_MAX_OUTPUT_TOKENS（32K 统一兜底）
+ *
+ * ⚠️ 不要回退到 modelConfig.maxTokens —— 那是上下文窗口，量级和 output
+ * cap 差几个数量级，回退会把 bug 带回来。
+ */
+function resolveOutputTokens(
+  modelConfig: CustomModelConfig,
+  thinkingMinimum?: number,
+): number {
+  const explicit =
+    typeof modelConfig.maxOutputTokens === 'number' && modelConfig.maxOutputTokens > 0
+      ? modelConfig.maxOutputTokens
+      : undefined;
+  const base = explicit ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  // 思考型模型需要为思考预留 budget；如果 thinking budget 比当前 base 大，
+  // 把 max_tokens 抬到至少 thinking budget + 一个余量，否则模型会把
+  // 思考 budget 用完后没空间出文字。
+  if (thinkingMinimum !== undefined && thinkingMinimum > 0 && thinkingMinimum >= base) {
+    return thinkingMinimum + 1024;
+  }
+  return base;
 }
 
 /**
@@ -346,12 +406,31 @@ const OpenAIConverter = {
   },
 
   contentsToMessages(contents: any[]): any[] {
-    return contents.map((content: any) => {
-      const parts = content.parts || [];
+    const messages: any[] = [];
+    let pendingReasoning = '';
 
+    for (const content of contents) {
+      const parts = content.parts || [];
+      const role = content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user';
+
+      // 1. 检查是否为纯思考消息：
+      // 在历史中，我们把流式输出的多个 reasoning 块通过 appendReasoningToOutput 聚合成纯 reasoning Content。
+      // 它通常只有 parts 且都是带 reasoning 字段的对象。
+      const isPureReasoning = role === 'assistant' && parts.length > 0 && parts.every((p: any) => p.reasoning !== undefined);
+      if (isPureReasoning) {
+        pendingReasoning += parts.map((p: any) => p.reasoning).join('');
+        continue; // 过滤纯思考消息，使其不作为独立对话发送（避免 API 报错）
+      }
+
+      // 如果遇到用户消息，说明当前助手回合结束。如果还没用掉 pendingReasoning，则清空（未调用工具时不拼接）
+      if (role === 'user') {
+        pendingReasoning = '';
+      }
+
+      // 2. 处理包含工具调用的消息
       if (parts.some((p: any) => p.functionCall)) {
-        return {
-          role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
+        const msg: any = {
+          role,
           content: null,
           tool_calls: parts
             .filter((p: any) => p.functionCall)
@@ -366,40 +445,90 @@ const OpenAIConverter = {
               },
             })),
         };
+
+        // DeepSeek 思考模式规则：在进行了工具调用的轮次中，reasoning_content 必须随 assistant 消息回传。
+        if (pendingReasoning) {
+          msg.reasoning_content = pendingReasoning;
+          pendingReasoning = ''; // 消费后清除
+        }
+
+        messages.push(msg);
+        continue;
       }
 
+      // 3. 处理工具执行结果消息
       if (parts.some((p: any) => p.functionResponse)) {
         const functionResponseParts = parts.filter((p: any) => p.functionResponse);
-        return functionResponseParts.map((p: any) => ({
+        const toolMessages = functionResponseParts.map((p: any) => ({
           role: 'tool',
           tool_call_id: p.functionResponse.id || `call_${p.functionResponse.name}`,
           content: typeof p.functionResponse.response === 'string'
             ? p.functionResponse.response
             : JSON.stringify(p.functionResponse.response || {}),
         }));
+        messages.push(...toolMessages);
+        continue;
       }
 
-      // 检查是否包含图片内容
+      // 4. 检查是否包含图片内容
       const hasImageContent = parts.some((p: any) => p.inlineData);
 
       if (hasImageContent) {
-        // 使用数组格式以支持混合内容（文本 + 图片）
         const contentParts = parts
           .map((part: any) => OpenAIConverter.partToOpenAIContent(part))
           .filter(Boolean);
 
-        return {
-          role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
+        const msg: any = {
+          role,
           content: contentParts,
         };
+        messages.push(msg);
+        continue;
       }
 
-      // 纯文本内容，使用简单字符串格式
-      return {
-        role: content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user',
-        content: parts.map((part: any) => part.text || '').join('\n'),
+      // 5. 纯文本内容
+      const textContent = parts.map((part: any) => part.text || '').join('\n');
+      const msg: any = {
+        role,
+        content: textContent,
       };
-    }).flat();
+      messages.push(msg);
+    }
+
+    // 🔧 Post-merge: consolidate consecutive assistant messages into one.
+    // When reasoning, text, and tool_calls arrive as separate content entries
+    // (e.g., from OpenAI-compatible streaming), contentsToMessages produces
+    // multiple consecutive assistant messages. Models like Kimi K2.6 require
+    // a single assistant message with reasoning_content, content, and tool_calls
+    // combined for the same turn. Without this merge, tools calls may be rejected
+    // because reasoning_content is missing from the tool-call message.
+    const merged: any[] = [];
+    for (const msg of messages) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === 'assistant' && msg.role === 'assistant') {
+        // Merge reasoning_content: later message may carry it from pendingReasoning
+        if (msg.reasoning_content && !last.reasoning_content) {
+          last.reasoning_content = msg.reasoning_content;
+        }
+        // Merge text content: prefer non-null/non-empty; don't overwrite with null
+        if (msg.content && !last.content) {
+          last.content = msg.content;
+        } else if (msg.content && last.content) {
+          last.content = last.content + '\n' + msg.content;
+        }
+        // Merge tool_calls from the later message into the previous one
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          if (!last.tool_calls) {
+            last.tool_calls = msg.tool_calls;
+          } else {
+            last.tool_calls.push(...msg.tool_calls);
+          }
+        }
+      } else {
+        merged.push(msg);
+      }
+    }
+    return merged;
   },
 
   toolsToOpenAITools(tools: any[]): any[] | undefined {
@@ -411,7 +540,11 @@ const OpenAIConverter = {
           function: {
             name: fd.name,
             description: fd.description,
-            parameters: fd.parameters,
+            // 🔧 与 Responses API 共用：把 Google GenAI 的大写 type
+            // ("STRING" / "BOOLEAN" / ...) 转小写，并强转 integer 关键字。
+            // 严格的 OpenAI 兼容网关（DeepSeek 等）会按 JSON Schema 校验，
+            // 收到 "BOOLEAN" 直接 400 报错。
+            parameters: OpenAIResponsesConverter.cleanSchema(fd.parameters),
           },
         }));
       }
@@ -420,7 +553,7 @@ const OpenAIConverter = {
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: tool.parameters,
+          parameters: OpenAIResponsesConverter.cleanSchema(tool.parameters),
         },
       }];
     });
@@ -629,12 +762,22 @@ export async function callOpenAICompatibleModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const url = `${baseUrl}/chat/completions`;
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     messages: OpenAIConverter.contentsToMessages(request.contents),
     tools: OpenAIConverter.toolsToOpenAITools(request.config?.tools),
     stream: false,
+    // 🟢 max_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
   };
+
+  // Vendor-aware thinking dispatch — mirrors DeepVServerAdapter so direct &
+  // proxied paths produce identical upstream requests.
+  // Unknown vendors (DeepSeek / Kimi / Grok / MiniMax / MiMo) intentionally
+  // emit no thinking field to avoid HTTP 400 from strict OpenAI-compat layers.
+  applyOpenAIChatThinking(requestBody, modelConfig.modelId, thinkingConfig);
 
   // 使用指数退避重试包装 API 调用
   return retryWithBackoff(
@@ -660,6 +803,9 @@ export async function callOpenAICompatibleModel(
       const message = choice.message;
 
       const parts: any[] = [];
+      if (message.reasoning_content) {
+        parts.push({ reasoning: message.reasoning_content });
+      }
       if (message.content) parts.push({ text: message.content });
       if (message.tool_calls) {
         for (const tc of message.tool_calls) {
@@ -875,13 +1021,27 @@ const OpenAIResponsesConverter = {
 
   /**
    * 从 Responses API 的 output items 中提取 parts
+   *
+   * 项目类型对照：
+   * - reasoning  → 含 summary[] 数组（gpt-5.x 思考摘要），映射为 { reasoning } parts
+   * - message    → 内含 content[] 含 output_text，映射为 { text } parts
+   * - function_call → 直接映射为 { functionCall } part
    */
   outputToParts(output: any[]): any[] {
     const parts: any[] = [];
     if (!output || !Array.isArray(output)) return parts;
 
     for (const item of output) {
-      if (item.type === 'message') {
+      if (item.type === 'reasoning') {
+        // Reasoning items hold one or more summary blocks: { type:'summary_text', text:'…' }
+        if (Array.isArray(item.summary)) {
+          for (const s of item.summary) {
+            if (s?.type === 'summary_text' && typeof s.text === 'string' && s.text) {
+              parts.push({ reasoning: s.text });
+            }
+          }
+        }
+      } else if (item.type === 'message') {
         // message item contains content array
         if (item.content && Array.isArray(item.content)) {
           for (const c of item.content) {
@@ -927,12 +1087,34 @@ export async function callOpenAIResponsesModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const url = `${baseUrl}/responses`;
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     input: OpenAIResponsesConverter.contentsToInput(request.contents),
     tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
     store: false, // Don't store responses on the server
+    // 🟢 max_output_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_output_tokens: resolveOutputTokens(modelConfig),
   };
+
+  // OpenAI Responses API expects `reasoning.effort`; the value mirrors what
+  // we'd send as Chat Completions' `reasoning_effort`.
+  // - mode='off'  → effort='low' to keep tokens minimal (Responses API rejects 'none' for some models).
+  // - mode!='off' → effort from user (auto → 'medium' so gpt-5.x actually thinks).
+  //
+  // 🚨 EasyRouter gateway quirk (probe-confirmed 2026-05-26):
+  //   The default `summary='auto'` does NOT actually emit reasoning summary
+  //   chunks for gpt-5.x via llm-endpoint.net. Only `summary='detailed'`
+  //   produces `response.reasoning_summary_text.delta` events. Without this,
+  //   the client receives 0 reasoning bytes even with effort='high'.
+  //   See scripts/probe-gpt55-thinking.mjs.
+  if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning = { effort: 'low', summary: 'detailed' };
+  } else {
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort) ?? 'medium';
+    requestBody.reasoning = { effort: openaiEffort, summary: 'detailed' };
+  }
 
   return retryWithBackoff(
     async () => {
@@ -995,13 +1177,26 @@ export async function* callOpenAIResponsesModelStream(
   const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
   const apiKey = resolveEnvVar(modelConfig.apiKey);
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     input: OpenAIResponsesConverter.contentsToInput(request.contents),
     tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
     stream: true,
     store: false,
+    // 🟢 max_output_tokens：output cap，32K 统一兜底；同 callOpenAIResponsesModel。
+    max_output_tokens: resolveOutputTokens(modelConfig),
   };
+
+  // Same routing as the non-stream Responses path — see callOpenAIResponsesModel.
+  // EasyRouter gateway requires summary='detailed' to actually emit reasoning
+  // chunks; 'auto' silently drops them.
+  if (thinkingConfig.mode === 'off') {
+    requestBody.reasoning = { effort: 'low', summary: 'detailed' };
+  } else {
+    const openaiEffort = effortToOpenAIEffort(thinkingConfig.effort) ?? 'medium';
+    requestBody.reasoning = { effort: openaiEffort, summary: 'detailed' };
+  }
 
   const response = await retryWithBackoff(
     async () => {
@@ -1088,6 +1283,22 @@ export async function* callOpenAIResponsesModelStream(
 
         try {
           const event = JSON.parse(dataStr);
+
+          // response.reasoning_summary_text.delta - reasoning summary streaming
+          // gpt-5.x emits these only when reasoning.summary='detailed' is set
+          // (EasyRouter gateway never honors 'auto'). The delta string is
+          // a chunk of natural-language summary; map it to a `reasoning` part
+          // so the UI thinking-block renderer picks it up.
+          if (event.type === 'response.reasoning_summary_text.delta') {
+            const reasoning = event.delta || '';
+            if (reasoning) {
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as any as GenerateContentResponse;
+            }
+          }
 
           // response.output_text.delta - text content streaming
           if (event.type === 'response.output_text.delta') {
@@ -1199,11 +1410,13 @@ export async function callAnthropicModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const { messages, system } = AnthropicConverter.contentsToAnthropic(request.contents);
 
+  // ⚠️ 注意：max_tokens 走 resolveOutputTokens()（output cap），不是
+  // modelConfig.maxTokens（context window）。详见 resolveOutputTokens 文档。
   const requestBody: any = {
     model: modelConfig.modelId,
     messages,
     tools: AnthropicConverter.toolsToAnthropicTools(request.config?.tools),
-    max_tokens: modelConfig.maxTokens || 4096,
+    max_tokens: resolveOutputTokens(modelConfig),
   };
 
   // 添加 system（数组格式，带 cache_control 支持）
@@ -1211,22 +1424,37 @@ export async function callAnthropicModel(
     requestBody.system = system;
   }
 
-  // 🆕 Extended Thinking 智能启用策略：
-  // 1. 如果用户明确设置了 enableThinking，遵循用户配置
-  // 2. 如果用户未设置（undefined），默认启用（所有 Anthropic 协议）
-  // 3. 不支持的模型会自动忽略 thinking 参数，因此统一启用更简单
-  const shouldEnableThinking = modelConfig.enableThinking !== undefined
-    ? modelConfig.enableThinking
-    : shouldEnableThinkingByDefault();
+  // 🆕 Extended Thinking 智能启用与力度调控策略：
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  const isHaiku = modelConfig.modelId.toLowerCase().includes('haiku');
+  const isThinkingEnabled = !isHaiku && (thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
-  if (shouldEnableThinking) {
-    const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
-    requestBody.thinking = {
-      type: 'enabled',
-      budget_tokens: Math.min(maxTokens - 1, 31999), // budget_tokens 必须小于 max_tokens，默认使用官方推荐的 31999
-    };
-    // 确保 max_tokens 足够大以容纳 thinking + 回复
-    requestBody.max_tokens = Math.max(maxTokens, 32000);
+  if (isThinkingEnabled) {
+    // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
+    // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
+    const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
+      (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+
+    if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
+      const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
+      applyAnthropicAdaptiveThinking(requestBody, effort);
+      // adaptive 模式下 budget 由 effort 决定，max_tokens 用 output cap 即可。
+    } else {
+      // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
+      const budgetTokens = thinkingConfig.budgetTokens !== undefined
+        ? thinkingConfig.budgetTokens
+        : effortToAnthropicBudget(thinkingConfig.effort);
+
+      // 抬高 max_tokens 以容纳 thinking budget + 至少 1024 输出余量。
+      // 旧逻辑直接用 maxTokens（=context window）覆盖 max_tokens，会触发 400。
+      const adjustedMax = resolveOutputTokens(modelConfig, budgetTokens);
+      requestBody.max_tokens = adjustedMax;
+      requestBody.thinking = {
+        type: 'enabled',
+        budget_tokens: Math.min(adjustedMax - 1, budgetTokens),
+      };
+    }
   }
 
   // 使用指数退避重试包装 API 调用
@@ -1309,13 +1537,20 @@ export async function* callOpenAICompatibleModelStream(
   const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
   const apiKey = resolveEnvVar(modelConfig.apiKey);
 
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
   const requestBody: any = {
     model: modelConfig.modelId,
     messages: OpenAIConverter.contentsToMessages(request.contents),
     tools: OpenAIConverter.toolsToOpenAITools(request.config?.tools),
     stream: true,
-    stream_options: { include_usage: true } // 请求包含 usage 信息
+    stream_options: { include_usage: true }, // 请求包含 usage 信息
+    // 🟢 max_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
   };
+
+  // Vendor-aware thinking dispatch (see callOpenAICompatibleModel for details).
+  applyOpenAIChatThinking(requestBody, modelConfig.modelId, thinkingConfig);
 
   // 使用指数退避重试包装初始连接
   const response = await retryWithBackoff(
@@ -1410,13 +1645,22 @@ export async function* callOpenAICompatibleModelStream(
           if (choice) {
             const delta = choice.delta;
 
+            // 处理思考内容 - 立即 yield
+            if (delta?.reasoning_content) {
+              const content = { role: MESSAGE_ROLES.MODEL, parts: [{ reasoning: delta.reasoning_content }] };
+              const resp = { candidates: [{ content, index: 0 }] };
+              addFunctionCallsGetter(resp);
+              addFunctionCallsGetter(content);
+              yield resp as any as GenerateContentResponse;
+            }
+
             // 处理文本内容 - 立即 yield
             if (delta?.content) {
               const content = { role: MESSAGE_ROLES.MODEL, parts: [{ text: delta.content }] };
               const resp = { candidates: [{ content, index: 0 }] };
               addFunctionCallsGetter(resp);
               addFunctionCallsGetter(content);
-              yield resp as GenerateContentResponse;
+              yield resp as any as GenerateContentResponse;
             }
 
             // 聚合工具调用 - 不立即 yield，等待完全接收
@@ -1490,7 +1734,8 @@ export async function* callAnthropicModelStream(
     model: modelConfig.modelId,
     messages,
     tools: AnthropicConverter.toolsToAnthropicTools(request.config?.tools),
-    max_tokens: modelConfig.maxTokens || 4096,
+    // ⚠️ output cap，不是 context window — 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
     stream: true,
   };
 
@@ -1499,22 +1744,37 @@ export async function* callAnthropicModelStream(
     requestBody.system = system;
   }
 
-  // 🆕 Extended Thinking 智能启用策略（流式调用）：
-  // 1. 如果用户明确设置了 enableThinking，遵循用户配置
-  // 2. 如果用户未设置（undefined），默认启用（所有 Anthropic 协议）
-  // 3. 不支持的模型会自动忽略 thinking 参数，因此统一启用更简单
-  const shouldEnableThinking = modelConfig.enableThinking !== undefined
-    ? modelConfig.enableThinking
-    : shouldEnableThinkingByDefault();
+  // 🆕 Extended Thinking 智能启用与力度调控策略（流式调用）：
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  const isHaiku = modelConfig.modelId.toLowerCase().includes('haiku');
+  const isThinkingEnabled = !isHaiku && (thinkingConfig.mode === 'on' ||
+    (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
-  if (shouldEnableThinking) {
-    const maxTokens = modelConfig.maxTokens || 32000; // 思考模式建议使用较大的 max_tokens
-    requestBody.thinking = {
-      type: 'enabled',
-      budget_tokens: Math.min(maxTokens - 1, 31999), // budget_tokens 必须小于 max_tokens，默认使用官方推荐的 31999
-    };
-    // 确保 max_tokens 足够大以容纳 thinking + 回复
-    requestBody.max_tokens = Math.max(maxTokens, 32000);
+  if (isThinkingEnabled) {
+    // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
+    // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
+    const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
+      (thinkingConfig.effort !== undefined && thinkingConfig.effort !== 'auto');
+
+    if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
+      const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
+      applyAnthropicAdaptiveThinking(requestBody, effort);
+      // adaptive 模式下 budget 由 effort 决定，max_tokens 用 output cap 即可。
+    } else {
+      // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
+      const budgetTokens = thinkingConfig.budgetTokens !== undefined
+        ? thinkingConfig.budgetTokens
+        : effortToAnthropicBudget(thinkingConfig.effort);
+
+      // 抬高 max_tokens 以容纳 thinking budget + 至少 1024 输出余量。
+      // 旧逻辑直接用 maxTokens（=context window）覆盖 max_tokens，会触发 400。
+      const adjustedMax = resolveOutputTokens(modelConfig, budgetTokens);
+      requestBody.max_tokens = adjustedMax;
+      requestBody.thinking = {
+        type: 'enabled',
+        budget_tokens: Math.min(adjustedMax - 1, budgetTokens),
+      };
+    }
   }
 
   // 使用指数退避重试包装初始连接
@@ -1702,18 +1962,650 @@ export async function* callAnthropicModelStream(
   }
 }
 
+// ============================================================================
+// Gemini native (GenAI v1beta) — POST /v1beta/models/{id}:streamGenerateContent
+// ----------------------------------------------------------------------------
+// Mirrors what DeepVServerAdapter sends for Gemini through its proxy: the
+// request body is a real Google GenAI payload (not OpenAI-shimmed), so we
+// keep `thinkingConfig`, `thoughts`, `parts.functionCall`, and other native
+// features instead of round-tripping through OpenAI's reduced schema.
+//
+// Probe-confirmed (2026-05-26) on EasyRouter:
+//   • /v1beta/models/{id}:streamGenerateContent?key=…&alt=sse  → 200 OK
+//   • thinkingConfig: { thinkingBudget: -1, includeThoughts: true } actually
+//     emits parts with `thought: true` and reasoning text.
+// See scripts/probe-gemini-thinking.mjs for the verification harness.
+// ============================================================================
+
 /**
- * 统一入口
+ * Apply user's resolved {@link ThinkingConfig} to a Gemini GenAI request body.
+ * Branches on Gemini family the same way DeepVServerAdapter does:
+ *   - Gemini 3 / 3.5  →  thinkingConfig.thinkingLevel ('minimal'|'low'|'medium'|'high')
+ *   - Gemini 2.5 (default) →  thinkingConfig.thinkingBudget (number; -1=dynamic, 0=disable)
+ * Always sets `includeThoughts: true` when thinking is on so the model emits
+ * `parts[].thought = true` chunks the UI renders as the thinking block.
  */
+function applyGeminiNativeThinking(
+  generationConfig: Record<string, unknown>,
+  modelId: string,
+  thinking: ReturnType<typeof resolveThinkingConfig>,
+): void {
+  const lower = modelId.toLowerCase();
+  const isGemini3 = lower.includes('gemini-3') || lower.includes('gemini-3.5');
+  if (thinking.mode === 'off') {
+    generationConfig.thinkingConfig = isGemini3
+      ? { thinkingLevel: 'minimal' }
+      : { thinkingBudget: 0 };
+    return;
+  }
+  if (isGemini3) {
+    const level = effortToGeminiLevel(thinking.effort) || 'medium';
+    generationConfig.thinkingConfig = { thinkingLevel: level, includeThoughts: true };
+  } else {
+    const budget =
+      thinking.budgetTokens !== undefined
+        ? thinking.budgetTokens
+        : effortToGeminiBudget(thinking.effort) ?? -1; // -1 = dynamic thinking (Gemini 2.5 default)
+    generationConfig.thinkingConfig = { thinkingBudget: budget, includeThoughts: true };
+  }
+}
+
+/**
+ * Build the GenAI native request body. Forwards `request.contents` /
+ * `request.config.tools` / `request.config.systemInstruction` etc. directly —
+ * the server-side proxy has been doing this same passthrough already.
+ */
+function buildGeminiNativeRequestBody(
+  modelConfig: CustomModelConfig,
+  request: any,
+): Record<string, unknown> {
+  const reqConfig = request?.config || {};
+  const generationConfig: Record<string, unknown> = {
+    ...(reqConfig.generationConfig || {}),
+  };
+  // Pull selected top-level GenAI config knobs into generationConfig
+  // (the Google SDK lets users specify either at top-level config.* or under
+  // generationConfig.*; we normalise into generationConfig for the wire body).
+  for (const k of ['temperature', 'topP', 'topK', 'maxOutputTokens', 'stopSequences', 'candidateCount', 'responseMimeType', 'responseSchema'] as const) {
+    if (reqConfig[k] !== undefined && generationConfig[k] === undefined) {
+      generationConfig[k] = reqConfig[k];
+    }
+  }
+
+  // 🟢 maxOutputTokens 兜底：request 没指定 → 用 modelConfig.maxOutputTokens
+  // （EasyClaw 元数据填的）→ 用 32K 默认。统一走 resolveOutputTokens。
+  if (generationConfig['maxOutputTokens'] === undefined) {
+    generationConfig['maxOutputTokens'] = resolveOutputTokens(modelConfig);
+  }
+
+  const thinkingConfig = resolveThinkingConfig(modelConfig);
+  applyGeminiNativeThinking(generationConfig, modelConfig.modelId, thinkingConfig);
+
+  /**
+   * Sanitise `contents[].parts[]` for the GenAI v1beta endpoint.
+   *
+   * The chat history we accumulate contains UI-only / cross-protocol shapes
+   * that Gemini's strict schema rejects with HTTP 400:
+   *   * .parts[i].data: required oneof field 'data' must have one initialized field
+   *   * Function call is missing a thought_signature in functionCall parts
+   *
+   * Specifically:
+   *   - { reasoning } (our adapter's projection of Gemini `thought:true` parts) →
+   *     converted back to `{ thought:true, text, thoughtSignature? }` so any
+   *     thoughtSignature attached to the reasoning chunk survives the round
+   *     trip. Gemini 3.x with thinking REQUIRES the matching thoughtSignature
+   *     to be sent back, otherwise the next functionCall is rejected.
+   *   - { thought:true, text, thoughtSignature? } (raw) — kept as-is.
+   *   - functionCall / functionResponse — pass through after non-empty check;
+   *     thoughtSignature is preserved.
+   *   - text / inlineData / fileData — pass through canonically.
+   * Empty / unknown parts are dropped (oneof validator fails on `{}`).
+   */
+  const sanitiseContentsForGemini = (raw: any[] | undefined): any[] => {
+    if (!Array.isArray(raw)) return [];
+    const out: any[] = [];
+    for (const c of raw) {
+      if (!c || typeof c !== 'object') continue;
+      const role = c.role;
+      const parts = Array.isArray(c.parts) ? c.parts : [];
+      const cleanParts: any[] = [];
+      for (const p of parts) {
+        if (!p || typeof p !== 'object') continue;
+        // 1) UI-only `reasoning` projection → fold back to a thought part so
+        //    the attached thoughtSignature (if any) is preserved.
+        if (typeof p.reasoning === 'string') {
+          if (p.reasoning.length === 0) continue;
+          const part: any = { thought: true, text: p.reasoning };
+          if (typeof p.thoughtSignature === 'string') part.thoughtSignature = p.thoughtSignature;
+          cleanParts.push(part);
+          continue;
+        }
+        // 2) Raw Gemini `thought:true` part — pass through with signature.
+        if (p.thought === true) {
+          if (typeof p.text !== 'string' || p.text.length === 0) continue;
+          const part: any = { thought: true, text: p.text };
+          if (typeof p.thoughtSignature === 'string') part.thoughtSignature = p.thoughtSignature;
+          cleanParts.push(part);
+          continue;
+        }
+        // 3) Canonical GenAI shapes — pass through, but verify the inner
+        // shape is non-empty. The error
+        //   * parts[i].data: required oneof field 'data' must have one initialized field
+        // is also raised for shapes like `{ inlineData: {} }` or
+        // `{ functionResponse: { name:'…' } }` (missing `response`).
+        if (typeof p.text === 'string') {
+          // GenAI rejects '' for some models; keep only meaningful text.
+          if (p.text.length > 0) cleanParts.push({ text: p.text });
+          continue;
+        }
+        if (p.inlineData && typeof p.inlineData === 'object') {
+          const inline = p.inlineData as Record<string, unknown>;
+          if (typeof inline.mimeType === 'string' && typeof inline.data === 'string' && inline.data.length > 0) {
+            cleanParts.push({ inlineData: { mimeType: inline.mimeType, data: inline.data } });
+          }
+          continue;
+        }
+        if (p.functionCall && typeof p.functionCall === 'object') {
+          const fc = p.functionCall as Record<string, unknown>;
+          if (typeof fc.name === 'string' && fc.name.length > 0) {
+            const part: any = {
+              functionCall: {
+                name: fc.name,
+                args: (fc.args && typeof fc.args === 'object') ? fc.args : {},
+                ...(typeof fc.id === 'string' ? { id: fc.id } : {}),
+              },
+            };
+            // Preserve thoughtSignature on the part (Gemini 3.x with thinking
+            // requires this to round-trip; missing it ⇒ HTTP 400).
+            if (typeof p.thoughtSignature === 'string') {
+              part.thoughtSignature = p.thoughtSignature;
+            }
+            cleanParts.push(part);
+          }
+          continue;
+        }
+        if (p.functionResponse && typeof p.functionResponse === 'object') {
+          const fr = p.functionResponse as Record<string, unknown>;
+          // GenAI requires both `name` and `response` to be present and non-empty.
+          // If the response payload is missing/empty we synthesise an empty
+          // object so the part stays valid; dropping it would unbalance the
+          // tool-call/response pairing and cause subsequent 400s.
+          if (typeof fr.name === 'string' && fr.name.length > 0) {
+            const responseValue =
+              fr.response && typeof fr.response === 'object'
+                ? fr.response
+                : { result: typeof fr.response === 'string' ? fr.response : '' };
+            cleanParts.push({
+              functionResponse: {
+                name: fr.name,
+                response: responseValue,
+                ...(typeof fr.id === 'string' ? { id: fr.id } : {}),
+              },
+            });
+          }
+          continue;
+        }
+        if (p.fileData && typeof p.fileData === 'object') {
+          const fd = p.fileData as Record<string, unknown>;
+          if (typeof fd.fileUri === 'string' && fd.fileUri.length > 0) {
+            cleanParts.push({
+              fileData: {
+                fileUri: fd.fileUri,
+                ...(typeof fd.mimeType === 'string' ? { mimeType: fd.mimeType } : {}),
+              },
+            });
+          }
+          continue;
+        }
+        // Unknown shapes silently dropped — better than a 400 from Gemini.
+      }
+      // A Content with zero valid parts also fails validation; skip it.
+      if (cleanParts.length === 0) continue;
+      out.push(role ? { role, parts: cleanParts } : { parts: cleanParts });
+    }
+    return out;
+  };
+
+  const body: Record<string, unknown> = {
+    contents: sanitiseContentsForGemini(request.contents),
+    generationConfig,
+  };
+  /**
+   * Normalise `systemInstruction` to the GenAI wire shape `{ parts: [{ text }] }`.
+   *
+   * Callers historically passed it as either:
+   *   - a plain string (legacy convenience)
+   *   - `{ parts: [{ text }] }` (canonical GenAI)
+   *   - `{ text: '...' }` (intermediate form some adapters used)
+   * EasyRouter / Google's actual `/v1beta` endpoint only accepts the canonical
+   * form — passing a string yields HTTP 500 "json: cannot unmarshal string
+   * into Go struct field .systemInstruction of type GeminiChatContent".
+   */
+  const normaliseSystemInstruction = (raw: unknown): unknown => {
+    if (raw == null) return undefined;
+    if (typeof raw === 'string') {
+      return { parts: [{ text: raw }] };
+    }
+    if (typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      // already canonical
+      if (Array.isArray(obj.parts)) return obj;
+      // {text:'…'} short form
+      if (typeof obj.text === 'string') return { parts: [{ text: obj.text }] };
+    }
+    // Anything weirder — let it through verbatim; the upstream error message
+    // will still be informative if the structure is unrecognised.
+    return raw;
+  };
+
+  if (reqConfig.systemInstruction) {
+    const normalised = normaliseSystemInstruction(reqConfig.systemInstruction);
+    if (normalised !== undefined) body.systemInstruction = normalised;
+  }
+  if (reqConfig.tools) body.tools = reqConfig.tools;
+  if (reqConfig.toolConfig) body.toolConfig = reqConfig.toolConfig;
+  if (reqConfig.safetySettings) body.safetySettings = reqConfig.safetySettings;
+  return body;
+}
+
+/**
+ * Build the EasyRouter / GenAI endpoint URL. Uses Google's documented
+ * `?key=...` form (works on both google.googleapis.com and the EasyRouter
+ * gateway, no Authorization header required).
+ */
+function buildGeminiNativeUrl(
+  modelConfig: CustomModelConfig,
+  method: 'streamGenerateContent' | 'generateContent',
+): string {
+  const baseUrl = resolveEnvVar(modelConfig.baseUrl).replace(/\/+$/, '');
+  const apiKey = resolveEnvVar(modelConfig.apiKey);
+  // Normalise base: callers configure `https://llm-endpoint.net/v1` from
+  // EasyRouter, but the GenAI mount is /v1beta. If the configured base is
+  // already a /v1beta-style endpoint, leave it alone.
+  const root = baseUrl.endsWith('/v1beta')
+    ? baseUrl
+    : baseUrl.replace(/\/v1$/, '') + '/v1beta';
+  const sep = method === 'streamGenerateContent' ? '?alt=sse&key=' : '?key=';
+  return `${root}/models/${encodeURIComponent(modelConfig.modelId)}:${method}${sep}${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Normalise Gemini's usageMetadata into the cross-provider shape downstream
+ * consumers expect.
+ *
+ * Why this exists:
+ *   geminiChat.ts:240 (the single place that emits TokenUsageEvent for the
+ *   "Token Usage" footer) reads `usageMetadata.cacheReadInputTokens` —
+ *   the cross-provider canonical name set by anthropic / openai-chat /
+ *   openai-responses paths in this same file. Gemini, however, uses
+ *   `cachedContentTokenCount` (camelCase, with `Count` suffix). Forwarding
+ *   `data.usageMetadata` verbatim therefore caused the UI to permanently
+ *   show "No cache information available" for any custom Gemini model,
+ *   even when the upstream had handed back e.g. `cachedContentTokenCount: 3059`.
+ *
+ * Verified end-to-end via scripts/probe-cache-fields.mjs (round 2 hits
+ * always populate cachedContentTokenCount on EasyRouter's
+ * /v1beta/...:generateContent, both unary and SSE).
+ *
+ * Strategy: keep all original Gemini fields (some downstream code, e.g.
+ * SessionManager, still reads `cachedContentTokenCount` directly), and
+ * additionally project `cacheReadInputTokens` as an alias. We deliberately
+ * do NOT synthesise `cacheCreationInputTokens` — Gemini's implicit cache has
+ * no "creation" phase visible to clients (the tokens are billed once at
+ * input rate; the cache is server-managed). Pretending otherwise would
+ * double-count in cost calculators.
+ */
+function normaliseGeminiUsageMetadata(usage: any): any {
+  if (!usage || typeof usage !== 'object') return usage;
+  const cached = usage.cachedContentTokenCount || 0;
+  // Already normalised (defensive — never expected from Google's API today).
+  if (typeof usage.cacheReadInputTokens === 'number') return usage;
+  return {
+    ...usage,
+    // Alias only when the upstream actually reported a hit; absent field
+    // (round 1, miss) → leave undefined so existing `|| 0` fallbacks
+    // downstream behave identically.
+    ...(cached > 0 && { cacheReadInputTokens: cached }),
+  };
+}
+
+/**
+ * Map a single GenAI streaming JSON chunk to one or more
+ * GenerateContentResponse-shaped objects ready to yield. Specifically, splits
+ * `parts[]` into:
+ *   • `{ thought: true, text }` → `{ reasoning: text }` (UI thinking block)
+ *   • `{ text }`                → `{ text }`            (regular output)
+ *   • `{ functionCall }`        → `{ functionCall }`
+ * so downstream chat consumers see the same shape they expect from any other
+ * provider.
+ */
+function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentResponse> {
+  const cand = chunk?.candidates?.[0];
+  const parts = cand?.content?.parts;
+  if (Array.isArray(parts) && parts.length > 0) {
+    const mappedParts: any[] = [];
+    for (const p of parts) {
+      // Gemini 3.x with thinking emits a `thoughtSignature` on functionCall
+      // parts. We must propagate it back on the next request, otherwise
+      // Gemini rejects with HTTP 400 "Function call is missing a thought_signature".
+      // Carry the field as-is — opaque to us, validated by Gemini.
+      if (p?.thought === true && typeof p.text === 'string') {
+        const out: any = { reasoning: p.text };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
+      } else if (typeof p?.text === 'string') {
+        const out: any = { text: p.text };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
+      } else if (p?.functionCall) {
+        const out: any = {
+          functionCall: {
+            name: p.functionCall.name?.trim() || p.functionCall.name,
+            args: p.functionCall.args || {},
+            id: p.functionCall.id,
+          },
+        };
+        if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+        mappedParts.push(out);
+      } else if (p?.inlineData) {
+        // Pass through inline image/audio data unchanged.
+        mappedParts.push({ inlineData: p.inlineData });
+      }
+    }
+    if (mappedParts.length > 0) {
+      const content = { role: MESSAGE_ROLES.MODEL, parts: mappedParts };
+      const resp = {
+        candidates: [
+          {
+            content,
+            ...(cand.finishReason ? { finishReason: cand.finishReason } : {}),
+            index: 0,
+          },
+        ],
+      };
+      addFunctionCallsGetter(resp);
+      addFunctionCallsGetter(content);
+      yield resp as any as GenerateContentResponse;
+    }
+  }
+  // Usage metadata may arrive on any chunk (often the last one) — forward it,
+  // normalising Gemini's cache token field name so the UI footer can pick
+  // up cache hits the same way it does for anthropic / openai-* providers.
+  if (chunk?.usageMetadata) {
+    yield {
+      candidates: [],
+      usageMetadata: normaliseGeminiUsageMetadata(chunk.usageMetadata),
+    } as any;
+  }
+}
+
+/**
+ * Drop the most recent Gemini native request body to
+ * `~/.deepv/last-requests/{ts}_gemini-{kind}_{modelId}.json` so when EasyRouter
+ * / Google returns a schema-validation HTTP 400 we can inspect the *exact*
+ * contents we sent at byte level. Cheap (≤20KB usually), fire-and-forget,
+ * never blocks the request.
+ *
+ * Mirrors DeepVServerAdapter.dumpOutboundRequest():
+ *   - Same dir: `~/.deepv/last-requests/`
+ *   - Same ring buffer: keep the latest N entries
+ *
+ * Safety:
+ *   - Skipped under `vitest` so unit tests don't pollute the ring with
+ *     synthetic dumps. The runner sets `VITEST` automatically.
+ *   - Atomic via `.tmp` + rename so an in-flight crash never leaves
+ *     half-written / mixed-with-old-content bytes.
+ */
+const GEMINI_DUMP_DIR_SEGMENTS = ['.deepv', 'last-requests'] as const;
+const GEMINI_DUMP_RING_SIZE = 5;
+
+/**
+ * Sanitise a model id for use as a filesystem name segment.
+ *
+ * Strategy:
+ *   - Lowercase
+ *   - Replace any non `[a-z0-9._-]` character with `-`
+ *   - Collapse repeats and trim leading/trailing dashes
+ *   - Cap length to keep total path short on Windows (MAX_PATH = 260)
+ *   - Fall back to `unknown-model` if the result is empty
+ */
+function sanitiseModelIdForFilename(raw: string | undefined): string {
+  const id = (raw ?? '').toLowerCase().trim();
+  const cleaned = id
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 60);
+  return cleaned || 'unknown-model';
+}
+
+function dumpGeminiRequest(kind: 'unary' | 'stream', modelId: string, body: unknown): void {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  void (async () => {
+    try {
+      const os = await import('os');
+      const path = await import('path');
+      const fs = await import('fs');
+
+      const home = os.homedir();
+      const dumpDir = path.join(home, ...GEMINI_DUMP_DIR_SEGMENTS);
+      await fs.promises.mkdir(dumpDir, { recursive: true });
+
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const safeModel = sanitiseModelIdForFilename(modelId);
+      const ringFile = path.join(
+        dumpDir,
+        `${ts}_gemini-${kind}_${safeModel}.json`,
+      );
+
+      const payload = JSON.stringify(
+        { kind, modelId, ts: new Date().toISOString(), body },
+        null,
+        2,
+      );
+
+      // Atomic write to ring entry.
+      const tmp = ringFile + '.tmp';
+      await fs.promises.writeFile(tmp, payload, 'utf8');
+      await fs.promises.rename(tmp, ringFile);
+
+      // Trim ring to the last GEMINI_DUMP_RING_SIZE Gemini entries
+      // (DeepVServerAdapter writes its own kinds in the same dir; we only
+      // touch our own files identified by the `_gemini-` infix).
+      try {
+        const entries = await fs.promises.readdir(dumpDir);
+        const stale = entries
+          .filter((f) => /_gemini-(stream|unary)_/.test(f) && f.endsWith('.json'))
+          .sort()
+          .reverse() // newest first
+          .slice(GEMINI_DUMP_RING_SIZE);
+        await Promise.all(
+          stale.map((f) => fs.promises.unlink(path.join(dumpDir, f)).catch(() => undefined)),
+        );
+      } catch {
+        // ring trim is best-effort
+      }
+    } catch {
+      // Diagnostic dump must never break the call.
+    }
+  })();
+}
+
+/**
+ * Gemini native single-shot call (GenAI generateContent).
+ */
+export async function callGeminiNativeModel(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal,
+): Promise<GenerateContentResponse> {
+  const url = buildGeminiNativeUrl(modelConfig, 'generateContent');
+  const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+  dumpGeminiRequest('unary', modelConfig.modelId, requestBody);
+
+  return retryWithBackoff(
+    async () => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw createHttpError(response.status, `Gemini native error (${response.status}): ${errorText}`, response);
+      }
+      const data = await response.json();
+      const cand = data.candidates?.[0];
+      const rawParts = cand?.content?.parts || [];
+      const parts: any[] = [];
+      for (const p of rawParts) {
+        // See mapGeminiChunkToResponses() for why thoughtSignature must
+        // be carried through to all part shapes that may emit it.
+        if (p?.thought === true && typeof p.text === 'string') {
+          const out: any = { reasoning: p.text };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
+        } else if (typeof p?.text === 'string') {
+          const out: any = { text: p.text };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
+        } else if (p?.functionCall) {
+          const out: any = {
+            functionCall: {
+              name: p.functionCall.name?.trim() || p.functionCall.name,
+              args: p.functionCall.args || {},
+              id: p.functionCall.id,
+            },
+          };
+          if (typeof p.thoughtSignature === 'string') out.thoughtSignature = p.thoughtSignature;
+          parts.push(out);
+        } else if (p?.inlineData) {
+          parts.push({ inlineData: p.inlineData });
+        }
+      }
+
+      const result = {
+        candidates: [
+          {
+            content: { role: MESSAGE_ROLES.MODEL, parts: parts.length ? parts : [{ text: '' }] },
+            ...(cand?.finishReason ? { finishReason: cand.finishReason } : { finishReason: FinishReason.STOP }),
+            index: 0,
+          },
+        ],
+        // Normalise Gemini's cachedContentTokenCount → cacheReadInputTokens
+        // alias so the UI footer / cost calculator pick up cache hits the
+        // same way they do for anthropic / openai-* providers. Verified by
+        // scripts/probe-cache-fields.mjs.
+        usageMetadata: normaliseGeminiUsageMetadata(data.usageMetadata),
+      };
+      addFunctionCallsGetter(result);
+      return result as any as GenerateContentResponse;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    },
+  );
+}
+
+/**
+ * Gemini native streaming call (GenAI streamGenerateContent + alt=sse).
+ *
+ * EasyRouter follows Google's wire format: lines look like
+ *   data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"…"}]}}]}
+ * separated by blank lines. We tolerate both `\n` and `\r\n` framings and
+ * a trailing partial chunk on the buffer between reads.
+ */
+export async function* callGeminiNativeModelStream(
+  modelConfig: CustomModelConfig,
+  request: any,
+  abortSignal?: AbortSignal,
+): AsyncGenerator<GenerateContentResponse> {
+  const url = buildGeminiNativeUrl(modelConfig, 'streamGenerateContent');
+  const requestBody = buildGeminiNativeRequestBody(modelConfig, request);
+  dumpGeminiRequest('stream', modelConfig.modelId, requestBody);
+
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...modelConfig.headers,
+        },
+        body: JSON.stringify(requestBody),
+        signal: abortSignal,
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw createHttpError(res.status, `Gemini native stream error (${res.status}): ${errorText}`, res);
+      }
+      return res;
+    },
+    {
+      shouldRetry: shouldRetryCustomModel,
+    },
+  );
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        buffer += decoder.decode(undefined, { stream: false });
+      } else {
+        buffer += decoder.decode(value, { stream: true });
+      }
+
+      // SSE events are separated by blank lines. Tolerate both \n\n and \r\n\r\n.
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() || '';
+      for (const ev of events) {
+        // Only interested in `data:` lines; concatenate them per-event.
+        let data = '';
+        for (const line of ev.split(/\r?\n/)) {
+          const trimmed = line.replace(/^\s+/, '');
+          if (trimmed.startsWith('data:')) data += trimmed.slice(5).trim();
+        }
+        if (!data || data === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(data);
+          yield* mapGeminiChunkToResponses(chunk);
+        } catch {
+          // Tolerate malformed chunks — Gemini streaming occasionally
+          // sends framing artefacts; swallow and continue.
+        }
+      }
+      if (done) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+
 export async function* callCustomModelStream(
   modelConfig: CustomModelConfig,
   request: any,
   abortSignal?: AbortSignal
 ): AsyncGenerator<GenerateContentResponse> {
   console.log(`[CustomModel] Stream call: ${modelConfig.displayName} (${modelConfig.provider})`);
+  // 🐛 [thinking-debug] 直连自定义模型路径 - 打印解析后的 thinking 配置
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/stream) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
+  );
   if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') yield* callAnthropicModelStream(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'gemini') yield* callGeminiNativeModelStream(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider for streaming: ${modelConfig.provider}`);
 }
 
@@ -1723,9 +2615,15 @@ export async function callCustomModel(
   abortSignal?: AbortSignal
 ): Promise<GenerateContentResponse> {
   console.log(`[CustomModel] Unary call: ${modelConfig.displayName} (${modelConfig.provider})`);
+  // 🐛 [thinking-debug] 直连自定义模型路径 - 打印解析后的 thinking 配置
+  // eslint-disable-next-line no-console
+  console.log(
+    `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/unary) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
+  );
   if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, request, abortSignal);
   else if (modelConfig.provider === 'anthropic') return callAnthropicModel(modelConfig, request, abortSignal);
+  else if (modelConfig.provider === 'gemini') return callGeminiNativeModel(modelConfig, request, abortSignal);
   else throw new Error(`Unsupported custom model provider: ${modelConfig.provider}`);
 }
 

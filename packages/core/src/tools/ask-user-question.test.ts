@@ -91,21 +91,39 @@ describe('AskUserQuestionTool', () => {
       ).toMatch(/Duplicate question text/);
     });
 
-    it('rejects header longer than 12 characters', () => {
-      expect(
-        tool.validateToolParams({
-          questions: [
-            {
-              question: 'Q?',
-              header: 'ThisHeaderIsTooLong',
-              options: [
-                { label: 'a', description: 'a' },
-                { label: 'b', description: 'b' },
-              ],
-            },
-          ],
-        } as any),
-      ).toMatch(/header must be 1-12 characters/);
+    it('heals and truncates header longer than 12 characters', () => {
+      const params: any = {
+        questions: [
+          {
+            question: 'Q?',
+            header: 'ThisHeaderIsTooLong',
+            options: [
+              { label: 'a', description: 'a' },
+              { label: 'b', description: 'b' },
+            ],
+          },
+        ],
+      };
+      expect(tool.validateToolParams(params)).toBeNull();
+      expect(params.questions[0].header).toBe('ThisHeaderIs');
+    });
+
+    it('heals missing description and strings in options array', () => {
+      const params: any = {
+        questions: [
+          {
+            question: 'Q?',
+            options: [
+              'Option A',
+              { label: 'Option B' },
+            ],
+          },
+        ],
+      };
+      expect(tool.validateToolParams(params)).toBeNull();
+      expect(params.questions[0].header).toBe('Question'); // default header
+      expect(params.questions[0].options[0]).toEqual({ label: 'Option A', description: '' });
+      expect(params.questions[0].options[1]).toEqual({ label: 'Option B', description: '' });
     });
 
     it('rejects fewer than 2 or more than 4 options', () => {

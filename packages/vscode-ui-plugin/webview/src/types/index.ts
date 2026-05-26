@@ -68,6 +68,23 @@ export interface ChatMessage {
   isProcessingTools?: boolean;       // 🎯 是否正在处理工具调用
   toolsCompleted?: boolean;          // 🎯 所有工具调用是否完成
 
+  /**
+   * 🎯 /goal 模式启动元数据（仅由 GoalWizardDialog 提交路径设置）。
+   *
+   * 该字段通过 chat_message 协议透传到 extension 端，extension 在
+   * onChatMessage 入口看到该字段时会先在 GeminiClient 上调用
+   * setGoalContext({...})——保证后续自动/手动压缩能触发原始 goal prompt
+   * 重新注入。
+   *
+   * 与 packages/vscode-ui-plugin/src/types/messages.ts 中的同名字段保持
+   * 完全一致；任何修改两端都要同步。详见 src 侧字段注释。
+   */
+  goalContext?: {
+    startedAt: number;
+    hours: number;
+    task: string;
+  };
+
   // 🎯 工具输出消息专用字段
   toolName?: string;           // 工具名称
   toolId?: string;             // 工具ID

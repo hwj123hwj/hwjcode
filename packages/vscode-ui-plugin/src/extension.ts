@@ -31,7 +31,17 @@ import { SlashCommandService } from './services/slashCommandService';
 import { TerminalOutputService } from './services/terminalOutputService';
 import { McpEnabledStateService } from './services/mcpEnabledStateService';
 import { AIService } from './services/aiService';
-import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus, isOurAuthError } from 'deepv-code-core';
+import { CustomModelsStorageService } from './services/customModelsStorageService';
+import {
+  getAllMCPServerToolCounts,
+  getAllMCPServerToolNames,
+  MCPServerStatus,
+  isOurAuthError,
+  EASY_ROUTER_BASE_URL,
+  EASY_CLAW_METADATA_URL,
+  filterEasyRouterModels,
+  indexEasyClawMetadata,
+} from 'deepv-code-core';
 import { SessionType, SessionStatus } from './constants/sessionConstants';
 import { SessionInfo } from './types/sessionTypes';
 
@@ -462,6 +472,56 @@ function setupBasicMessageHandlers() {
 
       // 🎯 使用延迟初始化的AIService，只在真正需要AI功能时才初始化
       const aiService = await sessionManager.getInitializedAIService(message.sessionId);
+
+      // 🎯 /goal 模式启动检测
+      //
+      // 当 GoalWizardDialog 提交时，webview 会在 chat_message 上附带
+      // goalContext 元数据。在把消息送给 AI 之前，先把 goal context 写到
+      // GeminiClient 的内存里（和 CLI 端 useGoalWizard 同等效果）。
+      //
+      // 这一步是 VSCode 端 /goal 模式抗压缩续命的关键：core 的
+      // tryCompressChat 在每次自动/手动压缩后会检查 activeGoalContext，
+      // 若非空则把原始 prompt + T0 + 立即行动指令重新注入历史，防止
+      // summarizer 把契约（最低工时、no-stop 纪律、安全栏等）压没了。
+      //
+      // 时序保证：postMessage 是 FIFO，goalContext 与 prompt 在同一条
+      // chat_message 里到达，setGoalContext 在 processChatMessage 之前
+      // 同步完成 —— 不存在压缩先于注册触发的可能。
+      if (message.goalContext) {
+        try {
+          const geminiClient = aiService.getGeminiClient();
+          if (geminiClient) {
+            // originalPrompt 直接从 message.content 第一条 text part 提取，
+            // 避免 webview 重复传 prompt 字段造成不一致风险。goal 启动消息
+            // 在 GoalWizardDialog.handleStart 里只 push 了一条 text part。
+            const textPart = message.content?.find(
+              (p): p is { type: 'text'; value: string } => p?.type === 'text',
+            );
+            const originalPrompt = textPart?.value ?? '';
+            if (originalPrompt) {
+              geminiClient.setGoalContext({
+                originalPrompt,
+                startedAt: message.goalContext.startedAt,
+                hours: message.goalContext.hours,
+                task: message.goalContext.task,
+              });
+              logger.info(
+                `[Goal] Activated goal context for session ${message.sessionId}: T0=${new Date(message.goalContext.startedAt).toISOString()}, hours=${message.goalContext.hours}`,
+              );
+            } else {
+              logger.warn('[Goal] goalContext present but no text part found in content; skipping setGoalContext');
+            }
+          } else {
+            logger.warn('[Goal] goalContext present but GeminiClient not yet available; goal-mode compression resilience disabled for this session');
+          }
+        } catch (err) {
+          // 不阻断 goal 启动 —— 注册失败只是失去压缩续命能力，
+          // 单次任务依然能跑。与 CLI 端 useGoalWizard 的容错策略一致。
+          logger.warn(
+            `[Goal] Failed to register goal context: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       // 获取当前上下文
       const currentContext = contextService.getCurrentContext();
@@ -949,6 +1009,10 @@ function setupBasicMessageHandlers() {
 
           // 更新YOLO设置
           settings.yolo = data.yoloMode;
+          // 🆕 更新 thinking 设置
+          if (data.thinkingConfig !== undefined) {
+            settings.thinking = data.thinkingConfig;
+          }
           logger.debug(`[YOLO] Updated settings to: ${JSON.stringify(settings)}`);
 
           // 写入文件
@@ -975,6 +1039,11 @@ function setupBasicMessageHandlers() {
       // 🎯 然后同步YOLO模式设置到Core配置
       await sessionManager.setProjectYoloMode(data.yoloMode);
 
+      // 🆕 同步 thinking 配置到所有活跃 session 内存中
+      if (data.thinkingConfig !== undefined) {
+        await sessionManager.setProjectThinkingConfig(data.thinkingConfig);
+      }
+
       // 🎯 更新默认模型配置
       if (data.preferredModel) {
         const config = vscode.workspace.getConfiguration('deepv');
@@ -999,8 +1068,9 @@ function setupBasicMessageHandlers() {
     try {
       logger.info('[YOLO] Received project settings request');
 
-      // 获取 YOLO 模式
+      // 获取 YOLO 模式和 thinking 配置
       let yoloMode = false;
+      let thinkingConfig: any = undefined;
 
       // 🎯 优先从项目配置文件读取，确保准确性
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1012,6 +1082,10 @@ function setupBasicMessageHandlers() {
             if (settings.yolo !== undefined) {
               yoloMode = !!settings.yolo;
               logger.info(`[YOLO] ✅ Loaded from project config: ${yoloMode}`);
+            }
+            if (settings.thinking !== undefined) {
+              thinkingConfig = settings.thinking;
+              logger.info(`[Thinking] ✅ Loaded from project config: ${JSON.stringify(thinkingConfig)}`);
             }
           } catch (e) {
             logger.warn('[YOLO] Failed to parse project settings');
@@ -1038,7 +1112,7 @@ function setupBasicMessageHandlers() {
       const preferredModel = config.get<string>('preferredModel', 'auto');
       const healthyUse = config.get<boolean>('healthyUse', true);
 
-      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse });
+      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse, thinkingConfig });
       logger.info(`[YOLO] ✅ Response sent: YOLO=${yoloMode}, Model=${preferredModel}, HealthyUse=${healthyUse}`);
     } catch (error) {
       logger.error('[YOLO] Failed to get project settings', error instanceof Error ? error : undefined);
@@ -2394,6 +2468,10 @@ function setupLoginHandlers() {
         await sessionManager.updateSessionModelConfig(payload.sessionId, {
           modelName: payload.modelName
         });
+
+        // 🎯 通知前端模型切换完成（前端不做乐观更新，等此事件后才更新 selectedModelId）
+        // 这样保证：UI 显示 = modelConfig = runtime 三者一致
+        await communicationService.sendModelSwitchComplete(payload.sessionId, payload.modelName);
       }
 
       await communicationService.sendModelResponse(payload.requestId, {
@@ -2492,6 +2570,206 @@ function setupLoginHandlers() {
       await communicationService.sendModelResponse(payload.requestId, {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // ===========================================================================
+  // 🟢 自定义模型管理 IPC（与 CLI 共享 ~/.deepv/custom-models.json）
+  //
+  // 设计要点：
+  // - storage 是单例，与 CLI 一致用 displayName 作为 identity；任何 add 都触发
+  //   广播，让所有打开的 webview ModelSelector 立即看到最新列表。
+  // - 任何 add/delete 之后都对所有 active session 调 setCustomModels(),
+  //   达到 CLI 的 hot-reload 效果（不需要重开会话）。
+  // - EasyRouter / EasyClaw 的 fetch 走扩展宿主，避免 webview CSP 问题，
+  //   且 API key 仅在 IPC 层短暂出现。
+  // ===========================================================================
+
+  /**
+   * 把最新的 custom models 同步到所有 active AIService 的 Config，
+   * 等价于 CLI useCustomModelWizard 的 config.setCustomModels(updatedModels)。
+   * 失败一个 session 不影响其它 session。
+   */
+  const hotReloadCustomModelsToAllSessions = async (models: import('deepv-code-core').CustomModelConfig[]) => {
+    try {
+      const allSessionInfos = sessionManager.getAllSessionsInfo();
+      for (const sess of allSessionInfos) {
+        try {
+          const aiService = sessionManager.getAIService(sess.id);
+          // 仅对已初始化的 session 同步——未初始化的 session 在
+          // initialize() 时会从 storage 读到最新值。
+          const cfg = aiService?.getConfig?.();
+          if (cfg && typeof (cfg as any).setCustomModels === 'function') {
+            (cfg as any).setCustomModels(models);
+            logger.debug(`[CustomModels] hot-reloaded ${models.length} model(s) into session ${sess.id}`);
+          }
+        } catch (sessErr) {
+          logger.warn(
+            `[CustomModels] hot-reload skipped for session ${sess.id}`,
+            sessErr instanceof Error ? sessErr : undefined,
+          );
+        }
+      }
+    } catch (e) {
+      logger.warn('[CustomModels] hot-reload pass failed', e instanceof Error ? e : undefined);
+    }
+  };
+
+  // List
+  communicationService.onListCustomModels(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const models = storage.loadCustomModels();
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: true,
+        models,
+      });
+    } catch (error) {
+      logger.error('[CustomModels] list failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Add (single or batch)
+  communicationService.onAddCustomModels(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const merged = storage.addOrUpdateMany(payload.models);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: true,
+        models: merged,
+      });
+      // 广播 + 热加载（顺序无所谓，二者互不依赖）
+      await communicationService.sendCustomModelsChanged(merged);
+      await hotReloadCustomModelsToAllSessions(merged);
+    } catch (error) {
+      logger.error('[CustomModels] add failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Delete
+  communicationService.onDeleteCustomModel(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const removed = storage.deleteCustomModel(payload.modelId);
+      const merged = storage.loadCustomModels();
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: removed,
+        models: merged,
+        ...(removed ? {} : { error: `Model not found: ${payload.modelId}` }),
+      });
+      if (removed) {
+        await communicationService.sendCustomModelsChanged(merged);
+        await hotReloadCustomModelsToAllSessions(merged);
+      }
+    } catch (error) {
+      logger.error('[CustomModels] delete failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // EasyRouter /v1/models — done in extension host (CSP-friendly, key never leaves IPC).
+  communicationService.onFetchEasyRouterModels(async (payload) => {
+    const apiKey = (payload.apiKey || '').trim();
+    if (!apiKey) {
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: false,
+        error: 'API key is required',
+      });
+      return;
+    }
+    try {
+      const url = `${EASY_ROUTER_BASE_URL.replace(/\/+$/, '')}/models`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      let resp: Response;
+      try {
+        resp = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => resp.statusText);
+        await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+          success: false,
+          status: resp.status,
+          error: `EasyRouter HTTP ${resp.status}: ${txt.slice(0, 200)}`,
+        });
+        return;
+      }
+      const json = (await resp.json()) as { data?: any[] };
+      const list = Array.isArray(json?.data) ? filterEasyRouterModels(json.data) : [];
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: true,
+        models: list,
+      });
+    } catch (error) {
+      logger.warn(
+        '[CustomModels] EasyRouter fetch failed',
+        error instanceof Error ? error : undefined,
+      );
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // EasyClaw public model metadata — best-effort; failures return empty entries.
+  communicationService.onFetchEasyClawMetadata(async (payload) => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      let resp: Response;
+      try {
+        resp = await fetch(EASY_CLAW_METADATA_URL, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!resp.ok) {
+        await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+          success: true, // soft success
+          entries: [],
+        });
+        return;
+      }
+      const json = (await resp.json()) as { data?: any[] };
+      const map = Array.isArray(json?.data) ? indexEasyClawMetadata(json.data) : new Map();
+      const entries = Array.from(map.entries()) as Array<[string, any]>;
+      await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+        success: true,
+        entries,
+      });
+    } catch (error) {
+      logger.warn(
+        '[CustomModels] EasyClaw metadata fetch failed (best-effort, returning empty)',
+        error instanceof Error ? error : undefined,
+      );
+      await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+        success: true,
+        entries: [],
       });
     }
   });
@@ -4046,6 +4324,25 @@ function registerCommands(context: vscode.ExtensionContext) {
       } catch (error) {
         logger.error('Failed to open rules management', error instanceof Error ? error : undefined);
         vscode.window.showErrorMessage('Failed to open Rules Management');
+      }
+    }),
+
+    // 🎯 打开目标驱动模式向导（/goal 等价命令）
+    vscode.commands.registerCommand('deepv.openGoalWizard', async () => {
+      logger.info('deepv.openGoalWizard command executed');
+      try {
+        // 先聚焦侧边栏（确保 webview 已经打开）
+        await vscode.commands.executeCommand('deepv.aiAssistant.focus');
+        // 等 webview ready，最多 3s
+        await communicationService.waitForReady(3000);
+        // 通知 webview 打开 GoalWizardDialog
+        await communicationService.sendMessage({
+          type: 'open_goal_wizard',
+          payload: {}
+        });
+      } catch (error) {
+        logger.error('Failed to open goal wizard', error instanceof Error ? error : undefined);
+        vscode.window.showErrorMessage('Failed to open Goal-Driven Mode');
       }
     }),
 

@@ -41,6 +41,7 @@ import { vimCommand } from '../ui/commands/vimCommand.js';
 import { yoloCommand } from '../ui/commands/yoloCommand.js';
 import { healthyUseCommand } from '../ui/commands/healthyUseCommand.js';
 import { agentStyleCommand } from '../ui/commands/agentStyleCommand.js';
+import { thinkingCommand } from '../ui/commands/thinkingCommand.js';
 import { trimSpacesCommand } from '../ui/commands/trimSpacesCommand.js';
 import { sessionCommand } from '../ui/commands/sessionCommand.js';
 import { mcpCommand } from '../ui/commands/mcpCommand.js';
@@ -57,6 +58,7 @@ import { issueCommand } from '../ui/commands/issueCommand.js';
 import { newCommand } from '../ui/commands/newCommand.js';
 import { wikiCommand } from '../ui/commands/wikiCommand.js';
 import { debateCommand } from '../ui/commands/debateCommand.js';
+import { goalCommand } from '../ui/commands/goalCommand.js';
 
 /**
  * Loads the core, hard-coded slash commands that are an integral part
@@ -118,10 +120,12 @@ export class BuiltinCommandLoader implements ICommandLoader {
       yoloCommand,
       healthyUseCommand,
       agentStyleCommand,
+      thinkingCommand,
       accountCommand,
       pptCommand,
       wikiCommand,
       debateCommand,
+      goalCommand,
     ];
 
     return allDefinitions.filter((cmd): cmd is SlashCommand => cmd !== null);

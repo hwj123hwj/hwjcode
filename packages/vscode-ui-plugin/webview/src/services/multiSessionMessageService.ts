@@ -74,6 +74,8 @@ interface MultiSessionMessageFromExtension {
        'rules_list_response' |
        'rules_save_response' |
        'rules_delete_response' |
+       // 🎯 目标驱动模式向导
+       'open_goal_wizard' |
        // 🎯 文本优化命令（/refine）
        'refine_result' |
        'refine_error' |
@@ -93,7 +95,12 @@ interface MultiSessionMessageFromExtension {
        'stream_recovery_countdown' |
        'stream_recovery_end' |
        // 🔐 认证过期通知
-       'auth_expired';
+       'auth_expired' |
+       // 🟢 自定义模型管理响应
+       'custom_models_response' |
+       'custom_models_changed' |
+       'fetch_easy_router_models_response' |
+       'fetch_easy_claw_metadata_response';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -158,7 +165,13 @@ export interface MultiSessionMessageToExtension {
        'background_task_request' |
        'background_task_move_to_background' |
        // 🎯 注入系统消息到 AI 历史（不显示在 UI）
-       'inject_system_message';
+       'inject_system_message' |
+       // 🟢 自定义模型管理请求
+       'list_custom_models' |
+       'add_custom_models' |
+       'delete_custom_model' |
+       'fetch_easy_router_models' |
+       'fetch_easy_claw_metadata';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -435,16 +448,26 @@ export class MultiSessionMessageService {
 
   /**
    * 发送聊天消息
+   *
+   * @param goalContext 可选 — /goal 模式启动元数据。仅由 GoalWizardDialog
+   *   提交路径传入；extension 侧在 onChatMessage 收到后会先 setGoalContext
+   *   再处理消息内容。详见 types/messages.ts 的 ChatMessage.goalContext 注释。
    */
-  sendChatMessage(sessionId: string, content: MessageContent, msgId: string) {
+  sendChatMessage(
+    sessionId: string,
+    content: MessageContent,
+    msgId: string,
+    goalContext?: { startedAt: number; hours: number; task: string },
+  ) {
     this.sendMessage({
       type: 'chat_message',
       payload: {
         sessionId,
         id: msgId,
         content,
-        timestamp: Date.now()
-      }
+        timestamp: Date.now(),
+        ...(goalContext ? { goalContext } : {}),
+      },
     });
   }
 
@@ -601,7 +624,7 @@ export class MultiSessionMessageService {
   /**
    * 🎯 发送项目设置更新
    */
-  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string }) {
+  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any }) {
     this.sendMessage({
       type: 'project_settings_update',
       payload: settings
@@ -932,6 +955,13 @@ export class MultiSessionMessageService {
    */
   onOpenRulesManagement(callback: () => void) {
     return this.addMessageHandler('open_rules_management', callback);
+  }
+
+  /**
+   * 🎯 监听打开目标驱动模式向导
+   */
+  onOpenGoalWizard(callback: () => void) {
+    return this.addMessageHandler('open_goal_wizard', callback);
   }
 
   /**

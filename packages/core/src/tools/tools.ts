@@ -288,7 +288,7 @@ export interface McpThinkingDisplay {
   thoughtHistoryLength?: number;
 }
 
-export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay;
+export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay | GoalAchievedDisplay;
 
 // Export tool output message utilities
 export {
@@ -335,6 +335,28 @@ export interface TodoDisplay {
     status: 'pending' | 'in_progress' | 'completed';
     priority: 'high' | 'medium' | 'low';
   }>;
+}
+
+/**
+ * Structured UI display for `goal_achieved` tool results.
+ *
+ * Why this is a structured shape (not a plain string):
+ *   The default tool-result row is a single dim line — fine for routine
+ *   things like "ReadFolder Listed 3 items" but bad for a "I just declared
+ *   the long-running /goal task complete and here are my reasons"
+ *   announcement, which the user actually wants to *read*. Both UIs
+ *   (CLI Ink + VSCode webview React) special-case this `type` discriminator
+ *   to render a bordered card with the reason laid out as a multi-line
+ *   block, mirroring the same pattern used by TodoDisplay / SubAgentDisplay.
+ *
+ * Fields:
+ *   - reason: the raw text the model wrote into the tool's `reason` param.
+ *     Renderers should preserve whitespace/newlines so the model's
+ *     paragraph structure (e.g. "criterion 1: …\ncriterion 2: …") survives.
+ */
+export interface GoalAchievedDisplay {
+  type: 'goal_achieved_display';
+  reason: string;
 }
 
 export interface SubAgentDisplay {

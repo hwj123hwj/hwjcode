@@ -168,10 +168,10 @@ export class MCPResponseGuard {
       // 如果查找失败，继续使用备选方案
     }
 
-    // 备选：使用 HOME/.deepvcode/mcp-tmp
+    // 备选：使用 HOME/.deepv/mcp-tmp
     const homeDir = process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH;
     if (homeDir) {
-      return path.join(homeDir, '.deepvcode', 'mcp-tmp');
+      return path.join(homeDir, '.deepv', 'mcp-tmp');
     }
 
     // 最后的备选：使用系统临时目录

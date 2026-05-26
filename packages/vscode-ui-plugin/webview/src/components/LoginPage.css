@@ -279,6 +279,96 @@
   opacity: 0.8;
 }
 
+/* 🟢 自定义模型入口 — 与主登录按钮并列在登录卡片内。
+   不再视觉弱化（之前是 11/12px 的 footer 链接），现在是与登录平级的可选项。 */
+.login-page__custom-model-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* "or" 分隔线 — 用居中文字 + 两侧水平线表达"另一种选择"，
+   而不是把次级按钮塞在 footer 里。 */
+.login-page__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--vscode-descriptionForeground, #999999);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.login-page__divider::before,
+.login-page__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+}
+
+.login-page__divider-text {
+  white-space: nowrap;
+}
+
+/* 🟢 容器：把 "Continue" + "Add" 两个入口竖排居中。
+   参照 CLI 的 isCustomModelOnlyMode 流程，"Continue" 是回头用户的主入口，
+   而 "Add" 是首次用户和扩展配置的入口。 */
+.login-page__custom-model-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.login-page__custom-model-btn {
+  width: 100%;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 20px;
+  border-radius: 6px;
+  background-color: var(--vscode-button-secondaryBackground, rgba(90, 93, 94, 0.31));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #cccccc));
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.login-page__custom-model-btn:hover:not(:disabled) {
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(90, 93, 94, 0.5));
+  border-color: var(--vscode-focusBorder, #0078d4);
+  transform: translateY(-1px);
+}
+
+.login-page__custom-model-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.login-page__custom-model-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* "Continue with Custom Models" — 回头用户的主入口，比 "Add" 视觉更强。
+   仍弱于主登录按钮（无渐变 / 无强阴影），形成清晰的层级：
+   主登录 > Continue（已有模型）> Add（新增）。 */
+.login-page__custom-model-btn--primary {
+  background-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.25));
+  border-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.5));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-foreground, #3794ff));
+}
+
+.login-page__custom-model-btn--primary:hover:not(:disabled) {
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(60, 120, 200, 0.4));
+  border-color: var(--vscode-textLink-foreground, #3794ff);
+}
+
 /* 动画 */
 @keyframes loginBounce {
   0%, 20%, 50%, 80%, 100% {
