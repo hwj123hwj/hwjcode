@@ -55,6 +55,66 @@ function resolveEnvVar(value: string): string {
   });
 }
 
+// ============================================================================
+// max_tokens 解析（output cap, 不是 context window）
+// ----------------------------------------------------------------------------
+// 历史包袱：CustomModelConfig.maxTokens 在向导里描述为"上下文窗口大小"
+// （EasyClaw 自动填充时也写入 max_context_length，量级 100K~1M），
+// 但在适配器里曾被直接当作 Anthropic 的 max_tokens 发出去——这等于把
+// 1M 的上下文当成单次输出上限发给 API，后果：
+//   - Anthropic 直接返回 400 "max_tokens too high for this model"
+//   - 即使没 400，也会让 prompt-budget 计算/重试逻辑彻底乱套
+//
+// 修复方式：新增独立字段 maxOutputTokens（output cap，4K~64K 量级），
+// 适配器一律用 resolveOutputTokens() 取值，maxTokens 留作上下文窗口
+// 语义不变。这个 helper 是单一事实源——所有 provider 走它。
+// ============================================================================
+
+/**
+ * 各 provider 的 max_tokens / max_output_tokens 兜底默认值。
+ *
+ * 设计取舍：写死 32K 作为统一默认。理由：
+ *   - 主流模型（Claude 4.5/4.7、GPT-4o、Gemini 2.5 Pro 等）输出上限都至少 32K
+ *   - 思考型模型（Claude extended thinking、o-series reasoning）需要更大的
+ *     输出 budget 才能装下 thinking + 文字回复
+ *   - EasyClaw 元数据填充时会用 max_output_length 覆盖（见 buildEasyRouterModelConfig），
+ *     用户用 EasyRouter 加的模型都会拿到 vendor-precise 的值
+ *   - 真正想自己改的高级用户可以编辑 ~/.deepv/custom-models.json
+ *
+ * 为什么不再分 provider 给保守默认（8K/4K）：实操中 4K 经常导致工具调用响应被
+ * 截断 + thinking 模型直接 budget 用完没空间出文字。32K 对绝大多数现代模型都安全，
+ * 旧模型若不支持会被 vendor 自己截到上限——比报 400 友好。
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 32_000;
+
+/**
+ * 解析单次响应的 max output tokens。
+ *
+ * 优先级（高到低）：
+ *   1. modelConfig.maxOutputTokens（EasyClaw max_output_length 自动填充）
+ *   2. DEFAULT_MAX_OUTPUT_TOKENS（32K 统一兜底）
+ *
+ * ⚠️ 不要回退到 modelConfig.maxTokens —— 那是上下文窗口，量级和 output
+ * cap 差几个数量级，回退会把 bug 带回来。
+ */
+function resolveOutputTokens(
+  modelConfig: CustomModelConfig,
+  thinkingMinimum?: number,
+): number {
+  const explicit =
+    typeof modelConfig.maxOutputTokens === 'number' && modelConfig.maxOutputTokens > 0
+      ? modelConfig.maxOutputTokens
+      : undefined;
+  const base = explicit ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  // 思考型模型需要为思考预留 budget；如果 thinking budget 比当前 base 大，
+  // 把 max_tokens 抬到至少 thinking budget + 一个余量，否则模型会把
+  // 思考 budget 用完后没空间出文字。
+  if (thinkingMinimum !== undefined && thinkingMinimum > 0 && thinkingMinimum >= base) {
+    return thinkingMinimum + 1024;
+  }
+  return base;
+}
+
 /**
  * 安全解析 JSON - 增强版
  * 专门针对流式工具调用场景优化，处理各种不完整或格式异常的 JSON
@@ -708,6 +768,9 @@ export async function callOpenAICompatibleModel(
     messages: OpenAIConverter.contentsToMessages(request.contents),
     tools: OpenAIConverter.toolsToOpenAITools(request.config?.tools),
     stream: false,
+    // 🟢 max_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
   };
 
   // Vendor-aware thinking dispatch — mirrors DeepVServerAdapter so direct &
@@ -1030,6 +1093,9 @@ export async function callOpenAIResponsesModel(
     input: OpenAIResponsesConverter.contentsToInput(request.contents),
     tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
     store: false, // Don't store responses on the server
+    // 🟢 max_output_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_output_tokens: resolveOutputTokens(modelConfig),
   };
 
   // OpenAI Responses API expects `reasoning.effort`; the value mirrors what
@@ -1118,6 +1184,8 @@ export async function* callOpenAIResponsesModelStream(
     tools: OpenAIResponsesConverter.toolsToResponsesTools(request.config?.tools),
     stream: true,
     store: false,
+    // 🟢 max_output_tokens：output cap，32K 统一兜底；同 callOpenAIResponsesModel。
+    max_output_tokens: resolveOutputTokens(modelConfig),
   };
 
   // Same routing as the non-stream Responses path — see callOpenAIResponsesModel.
@@ -1342,11 +1410,13 @@ export async function callAnthropicModel(
   const apiKey = resolveEnvVar(modelConfig.apiKey);
   const { messages, system } = AnthropicConverter.contentsToAnthropic(request.contents);
 
+  // ⚠️ 注意：max_tokens 走 resolveOutputTokens()（output cap），不是
+  // modelConfig.maxTokens（context window）。详见 resolveOutputTokens 文档。
   const requestBody: any = {
     model: modelConfig.modelId,
     messages,
     tools: AnthropicConverter.toolsToAnthropicTools(request.config?.tools),
-    max_tokens: modelConfig.maxTokens || 4096,
+    max_tokens: resolveOutputTokens(modelConfig),
   };
 
   // 添加 system（数组格式，带 cache_control 支持）
@@ -1361,9 +1431,6 @@ export async function callAnthropicModel(
     (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
   if (isThinkingEnabled) {
-    // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
-    const maxTokens = modelConfig.maxTokens || 32000;
-
     // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
     // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
     const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
@@ -1372,19 +1439,22 @@ export async function callAnthropicModel(
     if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
       applyAnthropicAdaptiveThinking(requestBody, effort);
+      // adaptive 模式下 budget 由 effort 决定，max_tokens 用 output cap 即可。
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
       const budgetTokens = thinkingConfig.budgetTokens !== undefined
         ? thinkingConfig.budgetTokens
         : effortToAnthropicBudget(thinkingConfig.effort);
 
+      // 抬高 max_tokens 以容纳 thinking budget + 至少 1024 输出余量。
+      // 旧逻辑直接用 maxTokens（=context window）覆盖 max_tokens，会触发 400。
+      const adjustedMax = resolveOutputTokens(modelConfig, budgetTokens);
+      requestBody.max_tokens = adjustedMax;
       requestBody.thinking = {
         type: 'enabled',
-        budget_tokens: Math.min(maxTokens - 1, budgetTokens),
+        budget_tokens: Math.min(adjustedMax - 1, budgetTokens),
       };
     }
-    // 写入请求体中，尊重用户配置文件，仅在空缺时用 maxTokens
-    requestBody.max_tokens = modelConfig.maxTokens || maxTokens;
   }
 
   // 使用指数退避重试包装 API 调用
@@ -1473,7 +1543,10 @@ export async function* callOpenAICompatibleModelStream(
     messages: OpenAIConverter.contentsToMessages(request.contents),
     tools: OpenAIConverter.toolsToOpenAITools(request.config?.tools),
     stream: true,
-    stream_options: { include_usage: true } // 请求包含 usage 信息
+    stream_options: { include_usage: true }, // 请求包含 usage 信息
+    // 🟢 max_tokens：output cap，32K 统一兜底；EasyClaw 元数据填充时会更精确。
+    // 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
   };
 
   // Vendor-aware thinking dispatch (see callOpenAICompatibleModel for details).
@@ -1661,7 +1734,8 @@ export async function* callAnthropicModelStream(
     model: modelConfig.modelId,
     messages,
     tools: AnthropicConverter.toolsToAnthropicTools(request.config?.tools),
-    max_tokens: modelConfig.maxTokens || 4096,
+    // ⚠️ output cap，不是 context window — 详见 resolveOutputTokens 文档。
+    max_tokens: resolveOutputTokens(modelConfig),
     stream: true,
   };
 
@@ -1677,9 +1751,6 @@ export async function* callAnthropicModelStream(
     (thinkingConfig.mode === 'auto' && shouldEnableThinkingByDefault()));
 
   if (isThinkingEnabled) {
-    // 优先使用模型配置文件中的 maxTokens，若未配置且开启思考时才建议使用 32000 作为默认大输出窗口
-    const maxTokens = modelConfig.maxTokens || 32000;
-
     // 如果是现代的 Claude 4.6 / 4.7+ 系列，或者用户显式指定了特定的 effort，
     // 我们采用官方推荐且唯一的自适应思考 (adaptive) + 强度 (effort) 模式，彻底防范 400 报错
     const isAdaptiveModel = isAdaptiveThinkingClaude(modelConfig.modelId) ||
@@ -1688,19 +1759,22 @@ export async function* callAnthropicModelStream(
     if (isAdaptiveModel && thinkingConfig.budgetTokens === undefined) {
       const effort = effortToAnthropicEffort(thinkingConfig.effort) || 'high'; // 默认为 high
       applyAnthropicAdaptiveThinking(requestBody, effort);
+      // adaptive 模式下 budget 由 effort 决定，max_tokens 用 output cap 即可。
     } else {
       // 否则回退到传统的 "enabled" + budget_tokens（支持 Sonnet 3.7 / Sonnet 3.5 兼容等）
       const budgetTokens = thinkingConfig.budgetTokens !== undefined
         ? thinkingConfig.budgetTokens
         : effortToAnthropicBudget(thinkingConfig.effort);
 
+      // 抬高 max_tokens 以容纳 thinking budget + 至少 1024 输出余量。
+      // 旧逻辑直接用 maxTokens（=context window）覆盖 max_tokens，会触发 400。
+      const adjustedMax = resolveOutputTokens(modelConfig, budgetTokens);
+      requestBody.max_tokens = adjustedMax;
       requestBody.thinking = {
         type: 'enabled',
-        budget_tokens: Math.min(maxTokens - 1, budgetTokens),
+        budget_tokens: Math.min(adjustedMax - 1, budgetTokens),
       };
     }
-    // 写入请求体中，尊重用户配置文件，仅在空缺时用 maxTokens
-    requestBody.max_tokens = modelConfig.maxTokens || maxTokens;
   }
 
   // 使用指数退避重试包装初始连接
@@ -1956,6 +2030,12 @@ function buildGeminiNativeRequestBody(
     if (reqConfig[k] !== undefined && generationConfig[k] === undefined) {
       generationConfig[k] = reqConfig[k];
     }
+  }
+
+  // 🟢 maxOutputTokens 兜底：request 没指定 → 用 modelConfig.maxOutputTokens
+  // （EasyClaw 元数据填的）→ 用 32K 默认。统一走 resolveOutputTokens。
+  if (generationConfig['maxOutputTokens'] === undefined) {
+    generationConfig['maxOutputTokens'] = resolveOutputTokens(modelConfig);
   }
 
   const thinkingConfig = resolveThinkingConfig(modelConfig);
