@@ -76,4 +76,93 @@ describe('MessageBubble', () => {
     render(<MessageBubble message={message} />);
     expect(screen.getByTestId('reasoning-display')).toBeInTheDocument();
   });
+
+  // --- Defensive code-block rendering tests (added for empty-TEXT-block bug fix) ---
+
+  it('does not render code-block wrapper for empty fenced block while streaming', () => {
+    // Streaming mid-state: the fence opener has arrived but no body or closer yet.
+    // Before the fix this rendered an empty box with header "TEXT".
+    const message: ChatMessage = {
+      id: 'sb-1',
+      type: 'assistant',
+      content: [{ type: 'text', value: '```\n' }],
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    // The "TEXT" / language label must not appear for an empty streaming block.
+    expect(container.querySelector('.code-language')).toBeNull();
+    // No outer code-block-wrapper should be rendered for an empty body.
+    expect(container.querySelector('.code-block-wrapper')).toBeNull();
+  });
+
+  it('renders normal code block when content is present', () => {
+    const message: ChatMessage = {
+      id: 'sb-2',
+      type: 'assistant',
+      content: [
+        { type: 'text', value: '```bash\nchmod 600 ~/.config\n```' },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    // With real content, the wrapper must render and language must be 'bash'.
+    expect(container.querySelector('.code-block-wrapper')).not.toBeNull();
+    const lang = container.querySelector('.code-language');
+    expect(lang?.textContent).toBe('bash');
+  });
+
+  it('does not render code-block wrapper for empty block when finished (no language label leaks)', () => {
+    // Even if the LLM somehow emitted ```\n``` (empty block), we should not show a
+    // bare "TEXT" header — render minimal placeholder instead.
+    const message: ChatMessage = {
+      id: 'sb-3',
+      type: 'assistant',
+      content: [{ type: 'text', value: '```\n```' }],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.querySelector('.code-language')).toBeNull();
+    expect(container.querySelector('.code-block-wrapper')).toBeNull();
+  });
+
+  // --- Glued single-line fence rehab tests (real-world LLM outputs) ---
+
+  it('promotes single-line glued fence ```bashopen ios/foo``` to a real block', () => {
+    // Real LLM output: opener + body + closer all on the same line. By CommonMark
+    // spec react-markdown treats this as inline code. Our preprocessing should
+    // promote it to a block-level fenced code block with lang "bash".
+    const message: ChatMessage = {
+      id: 'sb-glued-1',
+      type: 'assistant',
+      content: [
+        { type: 'text', value: '```bashopen ios/Runner.xcworkspace```' },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    // Block code wrapper must be present.
+    expect(container.querySelector('.code-block-wrapper')).not.toBeNull();
+    expect(container.querySelector('.code-language')?.textContent).toBe('bash');
+    // The actual code body — read directly from <code>, NOT the whole tree
+    // (textContent of the wrapper would also include the language label).
+    const codeBody = container.querySelector('pre.code-block code')?.textContent ?? '';
+    expect(codeBody.trim()).toBe('open ios/Runner.xcworkspace');
+  });
+
+  it('promotes ```bash./ci/run_ios_prod.sh release``` to block with lang=bash', () => {
+    const message: ChatMessage = {
+      id: 'sb-glued-2',
+      type: 'assistant',
+      content: [
+        { type: 'text', value: '```bash./ci/run_ios_prod.sh release```' },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(container.querySelector('.code-block-wrapper')).not.toBeNull();
+    expect(container.querySelector('.code-language')?.textContent).toBe('bash');
+    const codeBody = container.querySelector('pre.code-block code')?.textContent ?? '';
+    expect(codeBody.trim()).toBe('./ci/run_ios_prod.sh release');
+  });
 });
