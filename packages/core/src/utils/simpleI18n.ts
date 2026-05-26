@@ -16,6 +16,8 @@ const translations = {
   en: {
     'task.timeout.warning': '⚠️ Task execution timeout: Completed {turns} conversation turns but task remains unfinished',
     'task.timeout.credits.notice': 'Continuing may consume additional credits. Please review carefully.',
+    'task.timeout.partial.header': '⚠️ Reached max turns ({turns}). Partial findings from sub-agent below:',
+    'task.timeout.partial.no_summary': '(Sub-agent did not produce a final summary before reaching the turn limit.)',
     'task.execution.failed': 'Execution failed: {error}',
     'shell.output.truncated': '... (showing last {maxLines} lines, {totalLines} lines total)',
     'shell.error.dangerous_node_kill_windows': 'This command attempts to kill all node.exe processes, which would terminate the CLI itself. Please use specific PIDs instead: taskkill /PID <process_id> /F',
@@ -32,6 +34,8 @@ const translations = {
   zh: {
     'task.timeout.warning': '⚠️ 任务执行超时：已执行{turns}轮对话但任务仍未完成',
     'task.timeout.credits.notice': '继续执行可能消耗更多 Credits，请谨慎审视。',
+    'task.timeout.partial.header': '⚠️ 已达到最大轮数 ({turns})。子 Agent 的部分发现如下：',
+    'task.timeout.partial.no_summary': '（子 Agent 未能在轮数耗尽前产生最终总结。）',
     'task.execution.failed': '执行失败: {error}',
     'shell.output.truncated': '... (显示最新 {maxLines} 行，共 {totalLines} 行)',
     'shell.error.dangerous_node_kill_windows': '该命令会批量结束所有 node.exe 进程，这将导致CLI自身被终止。请使用精准的PID方式：taskkill /PID <进程ID> /F',
