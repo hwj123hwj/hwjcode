@@ -279,18 +279,37 @@
   opacity: 0.8;
 }
 
-/* 🟢 "Add Custom Model" entry on the login screen — lets users with their own
-   API key skip OAuth entirely. Visually subordinate to the main login button. */
+/* 🟢 自定义模型入口 — 与主登录按钮并列在登录卡片内。
+   不再视觉弱化（之前是 11/12px 的 footer 链接），现在是与登录平级的可选项。 */
 .login-page__custom-model-section {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
 }
 
-.login-page__custom-model-hint {
-  margin: 0 0 8px 0;
-  font-size: 11px;
+/* "or" 分隔线 — 用居中文字 + 两侧水平线表达"另一种选择"，
+   而不是把次级按钮塞在 footer 里。 */
+.login-page__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   color: var(--vscode-descriptionForeground, #999999);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.login-page__divider::before,
+.login-page__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-panel-border, rgba(127, 127, 127, 0.3));
+}
+
+.login-page__divider-text {
+  white-space: nowrap;
 }
 
 /* 🟢 容器：把 "Continue" + "Add" 两个入口竖排居中。
@@ -301,24 +320,34 @@
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
-  margin-top: 4px;
 }
 
 .login-page__custom-model-btn {
+  width: 100%;
   font-family: inherit;
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 4px;
-  background-color: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 20px;
+  border-radius: 6px;
+  background-color: var(--vscode-button-secondaryBackground, rgba(90, 93, 94, 0.31));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground, #cccccc));
   border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.4));
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .login-page__custom-model-btn:hover:not(:disabled) {
-  background-color: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.1));
-  color: var(--vscode-textLink-activeForeground, #4daafc);
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(90, 93, 94, 0.5));
+  border-color: var(--vscode-focusBorder, #0078d4);
+  transform: translateY(-1px);
+}
+
+.login-page__custom-model-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .login-page__custom-model-btn:disabled {
@@ -326,18 +355,18 @@
   cursor: not-allowed;
 }
 
-/* "Continue with Custom Models" — 视觉上稍强调（实色背景）以区别于次级 "Add Custom Model"。
-   仍然比主登录按钮弱，避免抢戏。 */
+/* "Continue with Custom Models" — 回头用户的主入口，比 "Add" 视觉更强。
+   仍弱于主登录按钮（无渐变 / 无强阴影），形成清晰的层级：
+   主登录 > Continue（已有模型）> Add（新增）。 */
 .login-page__custom-model-btn--primary {
-  background-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.15));
-  border-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.4));
+  background-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.25));
+  border-color: var(--vscode-button-secondaryBackground, rgba(60, 120, 200, 0.5));
   color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-foreground, #3794ff));
-  font-weight: 500;
 }
 
 .login-page__custom-model-btn--primary:hover:not(:disabled) {
-  background-color: var(--vscode-button-secondaryHoverBackground, rgba(60, 120, 200, 0.25));
-  color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-activeForeground, #4daafc));
+  background-color: var(--vscode-button-secondaryHoverBackground, rgba(60, 120, 200, 0.4));
+  border-color: var(--vscode-textLink-foreground, #3794ff);
 }
 
 /* 动画 */
