@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, callOpenAIResponsesModel, callOpenAIResponsesModelStream, callGeminiNativeModel, callGeminiNativeModelStream, parseJSONSafeExport } from './customModelAdapter.js';
+import { callOpenAICompatibleModelStream, callAnthropicModelStream, callOpenAICompatibleModel, callAnthropicModel, callOpenAIResponsesModel, callOpenAIResponsesModelStream, callGeminiNativeModel, callGeminiNativeModelStream, parseJSONSafeExport, sanitiseGeminiToolSchemaExport, sanitiseGeminiToolsExport } from './customModelAdapter.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 
 // 为了测试内部函数，需要导出它（见下方的导出添加）
@@ -2859,3 +2859,312 @@ describe('callGeminiNativeModelStream', () => {
     expect(u.promptTokenCount).toBe(3514);
   });
 });
+
+// ----------------------------------------------------------------------------
+// Gemini-native tool schema sanitiser
+// ----------------------------------------------------------------------------
+// Regression coverage for the HTTP 400 we caught on 2026-05-26:
+//   "Invalid JSON payload received. Unknown name "$schema" at
+//    'tools[0].function_declarations[30].parameters': Cannot find field."
+// Root cause was that buildGeminiNativeRequestBody used to forward
+// request.config.tools verbatim, so MCP-supplied JSON-Schema-2020-12 keys
+// (`$schema`, `additionalProperties`, …) reached EasyRouter / Google's
+// strict OpenAPI-3-subset validator. The DeepVServerAdapter path didn't
+// trip this because the proxy strips them server-side.
+//
+// These tests exercise the pure helper directly (fast, deterministic) and
+// then verify end-to-end via callGeminiNativeModel + a captured body that
+// the wire payload no longer contains forbidden keys.
+describe('sanitiseGeminiToolSchema - GenAI v1beta schema cleanup', () => {
+  it('drops $schema, $id, $ref, $defs, definitions, additionalProperties, patternProperties, not', () => {
+    const input = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      $id: 'urn:example:foo',
+      $ref: '#/definitions/Foo',
+      $defs: { Foo: { type: 'string' } },
+      definitions: { Bar: { type: 'string' } },
+      type: 'object',
+      additionalProperties: false,
+      patternProperties: { '^x-': { type: 'string' } },
+      not: { type: 'null' },
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    };
+    const out = sanitiseGeminiToolSchemaExport(input) as Record<string, unknown>;
+    expect(out['$schema']).toBeUndefined();
+    expect(out['$id']).toBeUndefined();
+    expect(out['$ref']).toBeUndefined();
+    expect(out['$defs']).toBeUndefined();
+    expect(out['definitions']).toBeUndefined();
+    expect(out['additionalProperties']).toBeUndefined();
+    expect(out['patternProperties']).toBeUndefined();
+    expect(out['not']).toBeUndefined();
+    // Allowed keys survive.
+    expect(out['type']).toBe('OBJECT');
+    expect(out['properties']).toEqual({ name: { type: 'STRING' } });
+    expect(out['required']).toEqual(['name']);
+  });
+
+  it('does not mutate its input', () => {
+    const input = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: { q: { type: 'string' } },
+    };
+    const before = JSON.stringify(input);
+    sanitiseGeminiToolSchemaExport(input);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it('normalises lowercase JSON-Schema types to the GenAI uppercase Type enum', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        age: { type: 'integer' },
+        height: { type: 'number' },
+        active: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+    }) as any;
+    expect(out.type).toBe('OBJECT');
+    expect(out.properties.name.type).toBe('STRING');
+    expect(out.properties.age.type).toBe('INTEGER');
+    expect(out.properties.height.type).toBe('NUMBER');
+    expect(out.properties.active.type).toBe('BOOLEAN');
+    expect(out.properties.tags.type).toBe('ARRAY');
+    expect(out.properties.tags.items.type).toBe('STRING');
+  });
+
+  it('passes through already-uppercase types unchanged (built-in tool shape)', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'OBJECT',
+      properties: { p: { type: 'STRING' } },
+    }) as any;
+    expect(out.type).toBe('OBJECT');
+    expect(out.properties.p.type).toBe('STRING');
+  });
+
+  it('converts `const: x` to `enum: [x]` (Gemini supports enum only)', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'string',
+      const: 'fixed-value',
+    }) as any;
+    expect(out.const).toBeUndefined();
+    expect(out.enum).toEqual(['fixed-value']);
+  });
+
+  it('does not overwrite an existing `enum` when `const` is also present', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'string',
+      const: 'a',
+      enum: ['x', 'y'],
+    }) as any;
+    expect(out.const).toBeUndefined();
+    expect(out.enum).toEqual(['x', 'y']);
+  });
+
+  it('folds oneOf / allOf into anyOf (the only multi-schema combinator Gemini accepts)', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      oneOf: [{ type: 'string' }, { type: 'integer' }],
+      allOf: [{ type: 'object', properties: { a: { type: 'string' } } }],
+    }) as any;
+    expect(out.oneOf).toBeUndefined();
+    expect(out.allOf).toBeUndefined();
+    expect(Array.isArray(out.anyOf)).toBe(true);
+    expect(out.anyOf).toHaveLength(3);
+    // And types inside the combined branches were normalised too.
+    expect(out.anyOf[0].type).toBe('STRING');
+    expect(out.anyOf[1].type).toBe('INTEGER');
+    expect(out.anyOf[2].type).toBe('OBJECT');
+    expect(out.anyOf[2].properties.a.type).toBe('STRING');
+  });
+
+  it('preserves all Gemini Schema fields per @google/genai typings', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'object',
+      title: 'T', description: 'd', nullable: true, default: {},
+      example: { x: 1 }, format: 'enum', enum: ['a', 'b'],
+      maxItems: '5', maxLength: '10', maxProperties: '3', maximum: 100,
+      minItems: '0', minLength: '1', minProperties: '0', minimum: 0,
+      pattern: '^a', propertyOrdering: ['a', 'b'], required: ['a'],
+      properties: { a: { type: 'string' } },
+    }) as any;
+    expect(out.title).toBe('T');
+    expect(out.description).toBe('d');
+    expect(out.nullable).toBe(true);
+    expect(out.default).toEqual({});
+    expect(out.example).toEqual({ x: 1 });
+    expect(out.format).toBe('enum');
+    expect(out.enum).toEqual(['a', 'b']);
+    expect(out.maxItems).toBe('5');
+    expect(out.minimum).toBe(0);
+    expect(out.pattern).toBe('^a');
+    expect(out.propertyOrdering).toEqual(['a', 'b']);
+    expect(out.required).toEqual(['a']);
+  });
+
+  it('cleans nested $schema inside `items` and `properties` recursively', () => {
+    const out = sanitiseGeminiToolSchemaExport({
+      type: 'object',
+      properties: {
+        nested: {
+          $schema: 'http://json-schema.org/draft-07/schema#',
+          type: 'array',
+          items: {
+            $schema: 'http://json-schema.org/draft-07/schema#',
+            type: 'object',
+            additionalProperties: false,
+            properties: { x: { type: 'string' } },
+          },
+        },
+      },
+    }) as any;
+    expect(out.properties.nested.$schema).toBeUndefined();
+    expect(out.properties.nested.items.$schema).toBeUndefined();
+    expect(out.properties.nested.items.additionalProperties).toBeUndefined();
+    expect(out.properties.nested.items.properties.x.type).toBe('STRING');
+  });
+
+  it('handles primitives / null / undefined / arrays at the top level gracefully', () => {
+    expect(sanitiseGeminiToolSchemaExport(null)).toBeNull();
+    expect(sanitiseGeminiToolSchemaExport(undefined)).toBeUndefined();
+    expect(sanitiseGeminiToolSchemaExport(42)).toBe(42);
+    expect(sanitiseGeminiToolSchemaExport('s')).toBe('s');
+    expect(sanitiseGeminiToolSchemaExport([{ $schema: 'x', type: 'string' }]))
+      .toEqual([{ type: 'STRING' }]);
+  });
+});
+
+describe('sanitiseGeminiTools - functionDeclarations cleanup at the wire boundary', () => {
+  it('reproduces the failing-MCP-tool shape (Context7 query-docs) and produces a clean payload', () => {
+    // Verbatim re-creation of decl 31 from the captured 400 dump
+    // C:\\Users\\lijingyu\\.deepv\\last-requests\\
+    //   2026-05-26T03-17-44-180Z_gemini-stream_gemini-3.5-flash.json
+    const tools = [{
+      functionDeclarations: [
+        // Built-in tool — already uses uppercase types, no $schema.
+        {
+          name: 'list_directory',
+          description: 'Lists directory contents',
+          parameters: {
+            type: 'OBJECT',
+            properties: { path: { type: 'STRING', description: 'p' } },
+            required: ['path'],
+          },
+        },
+        // MCP tool — JSON-Schema-2020-12 with $schema and lowercase types.
+        {
+          name: 'query-docs',
+          description: 'Query docs',
+          parameters: {
+            type: 'object',
+            properties: {
+              libraryId: { type: 'string', description: 'id' },
+              query: { type: 'string', description: 'q' },
+            },
+            required: [],
+            $schema: 'http://json-schema.org/draft-07/schema#',
+          },
+        },
+      ],
+    }];
+
+    const out = sanitiseGeminiToolsExport(tools) as any[];
+    expect(out).toHaveLength(1);
+    expect(out[0].functionDeclarations).toHaveLength(2);
+
+    // Built-in tool: identical shape, types preserved.
+    const builtin = out[0].functionDeclarations[0];
+    expect(builtin.name).toBe('list_directory');
+    expect(builtin.parameters.type).toBe('OBJECT');
+    expect(builtin.parameters.properties.path.type).toBe('STRING');
+
+    // MCP tool: $schema gone, types upper-cased, required preserved.
+    const mcp = out[0].functionDeclarations[1];
+    expect(mcp.name).toBe('query-docs');
+    expect(mcp.parameters.$schema).toBeUndefined();
+    expect(mcp.parameters.type).toBe('OBJECT');
+    expect(mcp.parameters.properties.libraryId.type).toBe('STRING');
+    expect(mcp.parameters.required).toEqual([]);
+    // Crucially, the serialised payload contains zero "$schema" tokens.
+    expect(JSON.stringify(out)).not.toContain('$schema');
+  });
+
+  it('does not mutate the caller\'s tools array (so other adapter branches keep their JSON-Schema view)', () => {
+    const tools = [{
+      functionDeclarations: [{
+        name: 'q', description: '',
+        parameters: { $schema: 'x', type: 'object', properties: {} },
+      }],
+    }];
+    const before = JSON.stringify(tools);
+    sanitiseGeminiToolsExport(tools);
+    expect(JSON.stringify(tools)).toBe(before);
+  });
+
+  it('passes through non-array / weird input verbatim instead of throwing', () => {
+    expect(sanitiseGeminiToolsExport(undefined)).toBeUndefined();
+    expect(sanitiseGeminiToolsExport(null)).toBeNull();
+    expect(sanitiseGeminiToolsExport('not-an-array')).toBe('not-an-array');
+    // tool object missing functionDeclarations is left as-is.
+    const weird = [{ random: 'shape' }];
+    expect(sanitiseGeminiToolsExport(weird)).toEqual(weird);
+  });
+
+  it('end-to-end: callGeminiNativeModel\'s wire body has no $schema / additionalProperties for MCP tools', async () => {
+    let capturedBody: any;
+    global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' }] } }],
+        }),
+      };
+    });
+
+    const modelConfig = {
+      provider: 'gemini' as const,
+      modelId: 'gemini-3.5-flash',
+      baseUrl: 'https://llm-endpoint.net/v1',
+      apiKey: 'sk-test',
+      displayName: 'gemini-3.5-flash',
+    };
+
+    const request = {
+      contents: [{ role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' }] }],
+      config: {
+        tools: [{
+          functionDeclarations: [{
+            name: 'query-docs',
+            description: 'Query docs',
+            parameters: {
+              type: 'object',
+              properties: {
+                libraryId: { type: 'string' },
+                query: { type: 'string' },
+              },
+              required: [],
+              $schema: 'http://json-schema.org/draft-07/schema#',
+              additionalProperties: false,
+            },
+          }],
+        }],
+      },
+    };
+
+    await callGeminiNativeModel(modelConfig as any, request as any);
+
+    // The wire payload that actually went out is what the upstream
+    // validator would have rejected.
+    const serialised = JSON.stringify(capturedBody.tools);
+    expect(serialised).not.toContain('$schema');
+    expect(serialised).not.toContain('additionalProperties');
+    // Sanity: tool name & required fields survived, types upper-cased.
+    expect(capturedBody.tools[0].functionDeclarations[0].name).toBe('query-docs');
+    expect(capturedBody.tools[0].functionDeclarations[0].parameters.type).toBe('OBJECT');
+    expect(capturedBody.tools[0].functionDeclarations[0].parameters.properties.libraryId.type).toBe('STRING');
+  });
+});
+
