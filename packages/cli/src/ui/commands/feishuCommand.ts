@@ -26,6 +26,7 @@ import {
   probeCredentials,
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
+import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
 import {
   executeToolCall,
   ToolRegistry,
@@ -40,6 +41,10 @@ let activeGateway: FeishuGateway | null = null;
 
 /** TUI 上下文引用（用于同步显示飞书消息到 UI） */
 let tuiContext: CommandContext['ui'] | null = null;
+
+/** 当前活跃的飞书会话信息（用于 send_feishu_file 工具发送文件） */
+let activeChatId: string | null = null;
+let activeReplyToMessageId: string | null = null;
 
 /**
  * 构建帮助文本
@@ -206,6 +211,165 @@ async function handleManualSetup(appId?: string, appSecret?: string, projectRoot
   return lines.join('\n');
 }
 
+/**
+ * 从文本中提取文件路径，上传并发送到飞书
+ *
+ * 匹配模式：
+ *   - 绝对路径: /path/to/file.ext
+ *   - 相对路径: ./path/to/file.ext
+ *   - 图片扩展名: png, jpg, jpeg, gif, webp, svg, bmp
+ *   - 其他常见文件: pdf, txt, csv, json, zip 等
+ */
+async function sendDetectedFiles(
+  gateway: FeishuGateway,
+  chatId: string,
+  replyToMessageId: string | undefined,
+  text: string,
+): Promise<void> {
+  // 匹配文件路径的正则（绝对路径或明确的 ./ 开头）
+  const filePathRegex = /(?:^|\s|["'`])((?:\/[\w\-./]+)|(?:\.\/[\w\-./]+))\.(png|jpe?g|gif|webp|svg|bmp|pdf|txt|csv|json|zip|tar\.gz|py|js|ts|tsx|jsx|md|html|css|yaml|yml|toml)(?:["'`\s,;.)]|$)/gim;
+
+  const matches: Array<{ path: string; ext: string }> = [];
+  let match;
+  while ((match = filePathRegex.exec(text)) !== null) {
+    const filePath = match[1] + '.' + match[2];
+    // 去重
+    if (!matches.some(m => m.path === filePath)) {
+      matches.push({ path: filePath, ext: match[2].toLowerCase() });
+    }
+  }
+
+  const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+
+  for (const { path: filePath, ext } of matches) {
+    try {
+      const fs = await import('fs');
+      if (!fs.existsSync(filePath)) continue;
+
+      if (IMAGE_EXTS.includes(ext)) {
+        // 图片：上传图片 → 发送图片消息
+        const imageKey = await gateway.uploadImage(filePath);
+        await gateway.sendImage(chatId, imageKey, replyToMessageId);
+        tuiContext?.addItem(
+          { type: 'info', text: `📎 已发送图片: ${filePath}` },
+          Date.now(),
+        );
+      } else {
+        // 其他文件：上传文件 → 发送文件消息
+        const fileKey = await gateway.uploadFile(filePath);
+        await gateway.sendFile(chatId, fileKey, replyToMessageId);
+        tuiContext?.addItem(
+          { type: 'info', text: `📎 已发送文件: ${filePath}` },
+          Date.now(),
+        );
+      }
+    } catch (err: any) {
+      console.error(`❌ 发送文件到飞书失败 (${filePath}):`, err.message);
+      // 文件发送失败不影响主流程
+    }
+  }
+}
+
+/**
+ * 飞书模式下拦截 ask_user_question：发送交互卡片，等用户点按钮
+ *
+ * 交互方式：发送选项列表（markdown），用户回复序号或选项名称来选择。
+ * （飞书 WebSocket 长连接不支持卡片回调，因此使用文本选择模式）
+ *
+ * 超时（60s）→ 自动返回"用户未回答"
+ */
+async function handleAskUserQuestionViaCard(
+  gateway: FeishuGateway,
+  chatId: string,
+  replyToMessageId: string | undefined,
+  args: {
+    questions?: Array<{
+      question: string;
+      header?: string;
+      options?: Array<{ label: string; description?: string }>;
+      multiSelect?: boolean;
+    }>;
+  },
+  callId: string,
+): Promise<Part> {
+  const questions = args.questions || [];
+  const answers: Record<string, string> = {};
+
+  for (const q of questions) {
+    const options = q.options || [];
+    if (options.length === 0) {
+      answers[q.question] = '(无选项)';
+      continue;
+    }
+
+    // 构建卡片正文：列出选项及其描述
+    const contentLines = options.map((opt, i) => {
+      const line = `**${opt.label}**`;
+      return opt.description ? `${line}: ${opt.description}` : line;
+    });
+    const content = contentLines.join('\n\n');
+
+    // 构建按钮
+    const buttons = options.map((opt) => ({
+      label: opt.label,
+      value: opt.label,
+    }));
+    // 添加"跳过"按钮
+    buttons.push({ label: '⏭ 跳过', value: '__skip__' });
+
+    const title = q.header ? `${q.header}: ${q.question}` : q.question;
+
+    // 发送卡片并等待用户点击
+    const userChoice = await gateway.waitForCardAction(
+      chatId,
+      title,
+      content,
+      buttons,
+      '__timeout__', // 默认值（超时）
+      60000,         // 60 秒超时
+      replyToMessageId,
+    );
+
+    // 发送新消息提示用户的选择结果
+    {
+      let feedbackText: string;
+      if (userChoice === '__timeout__') {
+        feedbackText = '⏰ 等待超时 — 未收到回答';
+      } else if (userChoice === '__skip__') {
+        feedbackText = '⏭ 已跳过';
+      } else {
+        feedbackText = `✅ 已选择: ${userChoice}`;
+      }
+      await gateway.sendMessage(chatId, feedbackText);
+    }
+
+    if (userChoice === '__timeout__') {
+      answers[q.question] = '用户未在 60 秒内回答，请自行决策';
+    } else if (userChoice === '__skip__') {
+      answers[q.question] = '用户选择跳过，请自行决策';
+    } else {
+      answers[q.question] = userChoice;
+    }
+  }
+
+  // 构造和 AskUserQuestionTool.execute() 相同格式的 functionResponse
+  const parts = Object.entries(answers).map(
+    ([questionText, answer]) => `"${questionText}"="${answer}"`,
+  );
+  const answersText = parts.join(', ');
+  const llmContent = answersText
+    ? `User has answered your questions: ${answersText}. You can now continue with the user's answers in mind.`
+    : 'User has answered your questions (no answers provided).';
+
+  return {
+    functionResponse: {
+      id: callId,
+      name: 'ask_user_question',
+      response: { output: llmContent },
+    },
+  } as Part;
+}
+
 /** 飞书支持的斜杠命令列表（用于 /help 展示） */
 const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/new':      '新建会话（重置对话历史，保留工具能力）',
@@ -311,6 +475,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return null;
     }
 
+    // 🎯 保存当前会话上下文（供 send_feishu_file 工具使用）
+    activeChatId = msg.chatId;
+    activeReplyToMessageId = msg.messageId;
+
     // 同步显示飞书消息到 TUI
     tuiContext?.addItem({ type: 'user', text: `[飞书] ${messageText}` }, Date.now());
 
@@ -345,7 +513,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
       // Agent 循环：和 TUI 共享同一个会话，走 geminiClient.sendMessageStream
       let currentMessage: PartListUnion = messageText;
-      const MAX_TURNS = 20;
+      const MAX_TURNS = 100;
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const stream = geminiClient.sendMessageStream(
@@ -373,20 +541,68 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
 
-        // 无工具调用 → 返回最终文本
+        // 无工具调用 → 最终回复
         if (toolCallRequests.length === 0) {
           const replyText = responseText || '（无回复）';
           tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
-          return replyText;
+
+          // 直接发送最终回复到飞书（使用 post 格式，支持 markdown 渲染）
+          await gateway.sendMarkdown(msg.chatId, replyText, msg.messageId);
+
+          // 检测并发送文件
+          await sendDetectedFiles(gateway, msg.chatId, msg.messageId, replyText);
+          return null; // 自己已发送，不触发 gateway 自动回复
         }
+
+        // 工具执行
+        const toolNames = toolCallRequests.map(r => r.name || 'unknown').join(', ');
+        tuiContext?.addItem(
+          { type: 'info', text: `🔧 执行工具: ${toolNames}` },
+          Date.now(),
+        );
 
         // 执行工具调用，收集 functionResponse
         const toolResponseParts: Part[] = [];
         for (const req of toolCallRequests) {
-          const toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
-          if (toolResponse.responseParts) {
-            const parts = Array.isArray(toolResponse.responseParts) ? toolResponse.responseParts : [toolResponse.responseParts];
-            toolResponseParts.push(...(parts as Part[]));
+          const toolName = req.name || 'unknown';
+          const toolArgsDesc = req.args ? JSON.stringify(req.args).slice(0, 100) : '';
+          tuiContext?.addItem(
+            { type: 'info', text: `🔧 执行工具: ${toolName}${toolArgsDesc ? ' ' + toolArgsDesc : ''}` },
+            Date.now(),
+          );
+          try {
+            // 🎯 飞书模式：拦截 ask_user_question，用交互卡片让用户回答
+            if (toolName === 'ask_user_question' && req.args) {
+              const cardResult = await handleAskUserQuestionViaCard(
+                gateway,
+                msg.chatId,
+                msg.messageId,
+                req.args as any,
+                req.callId,
+              );
+              toolResponseParts.push(cardResult);
+              tuiContext?.addItem(
+                { type: 'info', text: `✅ 用户已回答问题` },
+                Date.now(),
+              );
+              continue;
+            }
+
+            const toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+            if (toolResponse.responseParts) {
+              const parts = Array.isArray(toolResponse.responseParts) ? toolResponse.responseParts : [toolResponse.responseParts];
+              toolResponseParts.push(...(parts as Part[]));
+            }
+            tuiContext?.addItem(
+              { type: 'info', text: `✅ 工具完成: ${toolName}` },
+              Date.now(),
+            );
+          } catch (toolErr: any) {
+            tuiContext?.addItem(
+              { type: 'error', text: `❌ 工具失败: ${toolName} — ${toolErr.message}` },
+              Date.now(),
+            );
+            throw toolErr;
           }
         }
 
@@ -394,9 +610,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         currentMessage = toolResponseParts;
       }
 
-      const replyText = '（达到最大对话轮数限制）';
-      tuiContext?.addItem({ type: 'info', text: replyText }, Date.now());
-      return replyText;
+      // 达到最大轮数
+      await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
+      return null;
     } catch (err: any) {
       console.error('❌ 飞书 Agent 处理错误:', err.message);
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
@@ -416,6 +632,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
   try {
     await gateway.connect();
     activeGateway = gateway;
+
+    // 🎯 动态注册 send_feishu_file 工具，让 Agent 可以直接发送文件到飞书
+    if (config && geminiClient) {
+      try {
+        const toolRegistry: ToolRegistry = await config.getToolRegistry();
+        toolRegistry.registerTool(new SendFeishuFileTool(
+          gateway,
+          () => activeChatId ?? undefined,
+          () => activeReplyToMessageId ?? undefined,
+        ));
+        await geminiClient.setTools();
+        console.log('✅ 已注册飞书文件发送工具 (send_feishu_file)');
+      } catch (toolErr: any) {
+        console.warn('⚠️ 注册飞书工具失败（不影响主流程）:', toolErr.message);
+      }
+    }
+
     return [
       '✅ 飞书 Bot 已启动！',
       `  Bot 名称: ${creds.botName || '(未知)'}`,
@@ -432,14 +665,32 @@ async function handleStart(context?: CommandContext): Promise<string> {
 /**
  * 停止网关
  */
-async function handleStop(): Promise<string> {
+async function handleStop(context?: CommandContext): Promise<string> {
   if (!activeGateway) {
     return '⚠️ 飞书 Bot 未运行。';
+  }
+
+  // 🎯 动态注销 send_feishu_file 工具
+  const config = context?.services?.config;
+  const geminiClient = config?.getGeminiClient?.();
+  if (config && geminiClient) {
+    try {
+      const toolRegistry: ToolRegistry = await config.getToolRegistry();
+      const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
+      if (removed) {
+        await geminiClient.setTools();
+        console.log('✅ 已注销飞书文件发送工具 (send_feishu_file)');
+      }
+    } catch (toolErr: any) {
+      console.warn('⚠️ 注销飞书工具失败:', toolErr.message);
+    }
   }
 
   await activeGateway.disconnect();
   activeGateway = null;
   tuiContext = null; // 清除 TUI 上下文
+  activeChatId = null;
+  activeReplyToMessageId = null;
   return '🛑 飞书 Bot 已停止。';
 }
 
@@ -474,12 +725,26 @@ async function handleStatus(projectRoot?: string): Promise<string> {
 /**
  * 清除凭证
  */
-async function handleLogout(projectRoot?: string): Promise<string> {
+async function handleLogout(projectRoot?: string, context?: CommandContext): Promise<string> {
   if (activeGateway) {
+    // 🎯 注销飞书工具
+    const config = context?.services?.config;
+    const geminiClient = config?.getGeminiClient?.();
+    if (config && geminiClient) {
+      try {
+        const toolRegistry: ToolRegistry = await config.getToolRegistry();
+        toolRegistry.unregisterTool(SendFeishuFileTool.Name);
+        await geminiClient.setTools();
+      } catch {
+        // ignore
+      }
+    }
     await activeGateway.disconnect();
     activeGateway = null;
   }
   tuiContext = null; // 清除 TUI 上下文
+  activeChatId = null;
+  activeReplyToMessageId = null;
   await clearCredentials(projectRoot);
   return '🗑️ 飞书凭证已清除，Bot 已断开。';
 }
@@ -555,8 +820,7 @@ export const feishuCommand: SlashCommand = {
       description: '停止飞书 Bot',
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
-        const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleStop());
+        return msg(await handleStop(ctx));
       },
     },
     {
@@ -574,7 +838,7 @@ export const feishuCommand: SlashCommand = {
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => {
         const pr = ctx.services?.config?.getProjectRoot();
-        return msg(await handleLogout(pr));
+        return msg(await handleLogout(pr, ctx));
       },
     },
     {
