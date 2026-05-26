@@ -114,6 +114,15 @@ function dumpOutboundRequest(kind: 'stream' | 'unified', body: unknown): void {
  * @param modelName - The model name/ID to check
  * @returns true if the model supports SSE streaming
  */
+/**
+ * 过滤 HTTP header 值中的非 Latin-1 字符（如中文分支名）。
+ * HTTP/1.1 header 值只允许 Latin-1 字符集（\x00-\xFF）。
+ * 非法字符静默移除，保证请求不因 header 格式错误而崩溃。
+ */
+function toSafeHeaderValue(value: string): string {
+  return value.replace(/[^\x00-\xFF]/g, '');
+}
+
 function supportsSSEStreaming(modelName: string): boolean {
   const name = modelName.toLowerCase();
 
@@ -375,7 +384,18 @@ export class DeepVServerAdapter implements ContentGenerator {
 
       const branch = getGitBranch(cwd);
       if (branch) {
-        headers['X-Git-Branch'] = branch;
+        headers['X-Git-Branch'] = toSafeHeaderValue(branch);
+      }
+
+      // 协议 v1.4.2 新增
+      const commitSha = getGitCommitSha(cwd);
+      if (commitSha) {
+        headers['X-Git-Commit'] = commitSha; // sha 只含 [0-9a-f]，无需过滤
+      }
+
+      const projectPath = getGitProjectPath(cwd);
+      if (projectPath) {
+        headers['X-Git-Project-Path'] = toSafeHeaderValue(projectPath);
       }
     } else {
       // 兜底：当前目录不是 git 仓库时，扫描下一级子目录中的 git 仓库
@@ -613,7 +633,9 @@ export class DeepVServerAdapter implements ContentGenerator {
       logger.info(`[DeepV Server] Calling unified chat API with model: ${modelToUse}`);
 
       // 2. 统一API调用 - 服务端处理所有模型差异
-      const response = await this.callUnifiedChatAPI('/v1/chat/messages', unifiedRequest, request.config?.abortSignal);
+      // scene 是 SceneType 枚举，转为字符串后做合法性守卫，防止 "undefined" 流入服务端
+      const sceneValue = scene != null && String(scene) !== 'undefined' ? String(scene) : undefined;
+      const response = await this.callUnifiedChatAPI('/v1/chat/messages', unifiedRequest, request.config?.abortSignal, sceneValue);
 
       // 3. 日志记录工具调用
       if (response.functionCalls && response.functionCalls.length > 0 && (process.env.DEBUG || process.env.NODE_ENV === 'development')) {
@@ -633,10 +655,10 @@ export class DeepVServerAdapter implements ContentGenerator {
    * 🆕 使用指数退避重试策略处理 429 和 5xx 错误
    * @see https://cloud.google.com/storage/docs/retry-strategy#exponential-backoff
    */
-  private async callUnifiedChatAPI(endpoint: string, requestBody: any, abortSignal?: AbortSignal): Promise<GenerateContentResponse> {
+  private async callUnifiedChatAPI(endpoint: string, requestBody: any, abortSignal?: AbortSignal, sceneType?: string): Promise<GenerateContentResponse> {
     // 使用指数退避包装实际的 API 调用
     return retryWithBackoff(
-      () => this.executeUnifiedChatAPICall(endpoint, requestBody, abortSignal),
+      () => this.executeUnifiedChatAPICall(endpoint, requestBody, abortSignal, sceneType),
       {
         // 使用标准退避配置，适合大多数场景
         // 对于大量工具调用场景，可以在调用处设置 aggressiveBackoff: true
@@ -706,8 +728,8 @@ export class DeepVServerAdapter implements ContentGenerator {
    * 执行实际的 API 调用（不含重试逻辑）
    * 被 callUnifiedChatAPI 通过 retryWithBackoff 包装调用
    */
-  private async executeUnifiedChatAPICall(endpoint: string, requestBody: any, abortSignal?: AbortSignal): Promise<GenerateContentResponse> {
-    const userHeaders = await proxyAuthManager.getUserHeaders();
+  private async executeUnifiedChatAPICall(endpoint: string, requestBody: any, abortSignal?: AbortSignal, sceneType?: string): Promise<GenerateContentResponse> {
+    const userHeaders = await proxyAuthManager.getUserHeaders(sceneType);
     const proxyUrl = `${proxyAuthManager.getProxyServerUrl()}${endpoint}`;
 
     const controller = new AbortController();
@@ -1066,7 +1088,9 @@ export class DeepVServerAdapter implements ContentGenerator {
       logger.info(`[DeepV Server] Starting stream with model: ${modelToUse}`);
 
       // 调用流式API（错误处理已在callStreamAPI中统一处理）
-      const response = await this.callStreamAPI('/v1/chat/stream', streamRequest, request.config?.abortSignal);
+      // scene 是 SceneType 枚举，转为字符串后做合法性守卫，防止 "undefined" 流入服务端
+      const sceneValue = scene != null && String(scene) !== 'undefined' ? String(scene) : undefined;
+      const response = await this.callStreamAPI('/v1/chat/stream', streamRequest, request.config?.abortSignal, sceneValue);
 
       // 返回流式生成器
       return this.createStreamGenerator(response, request.config?.abortSignal);
@@ -1082,10 +1106,10 @@ export class DeepVServerAdapter implements ContentGenerator {
    * 使用指数退避重试策略处理初始连接的 429 和 5xx 错误
    * 注意：只对初始连接进行重试，一旦流开始就不再重试
    */
-  private async callStreamAPI(endpoint: string, requestBody: any, abortSignal?: AbortSignal): Promise<Response> {
+  private async callStreamAPI(endpoint: string, requestBody: any, abortSignal?: AbortSignal, sceneType?: string): Promise<Response> {
     // 使用指数退避包装实际的流式 API 调用
     return retryWithBackoff(
-      () => this.executeStreamAPICall(endpoint, requestBody, abortSignal),
+      () => this.executeStreamAPICall(endpoint, requestBody, abortSignal, sceneType),
       {
         shouldRetry: (error: Error) => {
           // 🚫 DeepX配额错误(402) - 不重试，立即显示友好提示
@@ -1153,8 +1177,8 @@ export class DeepVServerAdapter implements ContentGenerator {
    * 执行实际的流式 API 调用（不含重试逻辑）
    * 被 callStreamAPI 通过 retryWithBackoff 包装调用
    */
-  private async executeStreamAPICall(endpoint: string, requestBody: any, abortSignal?: AbortSignal): Promise<Response> {
-    const userHeaders = await proxyAuthManager.getUserHeaders();
+  private async executeStreamAPICall(endpoint: string, requestBody: any, abortSignal?: AbortSignal, sceneType?: string): Promise<Response> {
+    const userHeaders = await proxyAuthManager.getUserHeaders(sceneType);
     const proxyUrl = `${proxyAuthManager.getProxyServerUrl()}${endpoint}`;
 
     // 🔍 调试：打印代理相关信息（流式调用）- 仅在调试模式下显示
@@ -1972,7 +1996,7 @@ export class DeepVServerAdapter implements ContentGenerator {
         headers: {
           'Content-Type': 'application/json',
           ...userHeaders,
-          ...this.getGitHeaders(),
+          // 注意：count-tokens 端点不发送 git header（协议 v1.4.2 §DoD）
         },
         body: JSON.stringify(requestBody),
       });
