@@ -52,24 +52,29 @@ export interface FeishuCredentials {
 const FEISHU_CREDENTIALS_FILE = 'feishu-credentials.json';
 const ENCRYPTION_KEY_FILE = 'feishu-key';
 
-/** 优先用项目目录，fallback 到全局目录 */
-function credDir(projectRoot?: string): string {
-  return projectRoot
-    ? path.join(projectRoot, '.deepv')
-    : path.join(os.homedir(), '.deepv');
+/**
+ * 飞书凭证统一存放在用户全局目录 `~/.deepv/`。
+ *
+ * 命名约定（重要，避免混淆）：
+ *   - 全局：`<home>/.deepv/`        ← 这里
+ *   - 项目：`<projectRoot>/.deepvcode/`
+ * 飞书 Bot 凭证不区分项目，固定走全局，因此不接受 projectRoot 形参。
+ */
+function credDir(): string {
+  return path.join(os.homedir(), '.deepv');
 }
 
-function credPath(projectRoot?: string): string {
-  return path.join(credDir(projectRoot), FEISHU_CREDENTIALS_FILE);
+function credPath(): string {
+  return path.join(credDir(), FEISHU_CREDENTIALS_FILE);
 }
 
-function keyPath(projectRoot?: string): string {
-  return path.join(credDir(projectRoot), ENCRYPTION_KEY_FILE);
+function keyPath(): string {
+  return path.join(credDir(), ENCRYPTION_KEY_FILE);
 }
 
-async function loadOrCreateKey(projectRoot?: string): Promise<Buffer> {
-  const dir = credDir(projectRoot);
-  const kp = keyPath(projectRoot);
+async function loadOrCreateKey(): Promise<Buffer> {
+  const dir = credDir();
+  const kp = keyPath();
   await fs.mkdir(dir, { recursive: true });
   try {
     const existing = await fs.readFile(kp);
@@ -142,12 +147,10 @@ export class CredentialsLoadError extends Error {
  * Throws CredentialsLoadError on decryption / parse failure (so users
  * can be told to run `/feishu logout` and re-setup).
  */
-export async function loadCredentials(
-  projectRoot?: string,
-): Promise<FeishuCredentials | null> {
+export async function loadCredentials(): Promise<FeishuCredentials | null> {
   let encrypted: string;
   try {
-    encrypted = (await fs.readFile(credPath(projectRoot), 'utf8')).trim();
+    encrypted = (await fs.readFile(credPath(), 'utf8')).trim();
   } catch (e: unknown) {
     if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
       return null;
@@ -160,7 +163,7 @@ export async function loadCredentials(
 
   let key: Buffer;
   try {
-    key = await loadOrCreateKey(projectRoot);
+    key = await loadOrCreateKey();
   } catch (e: unknown) {
     throw new CredentialsLoadError(
       `Failed to read Feishu encryption key: ${(e as Error).message}`,
@@ -184,18 +187,17 @@ export async function loadCredentials(
 
 export async function saveCredentials(
   creds: FeishuCredentials,
-  projectRoot?: string,
 ): Promise<void> {
-  await fs.mkdir(credDir(projectRoot), { recursive: true });
-  const key = await loadOrCreateKey(projectRoot);
+  await fs.mkdir(credDir(), { recursive: true });
+  const key = await loadOrCreateKey();
   const json = JSON.stringify(creds);
   const encrypted = encryptGcm(json, key);
-  await fs.writeFile(credPath(projectRoot), encrypted, { mode: 0o600 });
+  await fs.writeFile(credPath(), encrypted, { mode: 0o600 });
 }
 
-export async function clearCredentials(projectRoot?: string): Promise<void> {
+export async function clearCredentials(): Promise<void> {
   try {
-    await fs.unlink(credPath(projectRoot));
+    await fs.unlink(credPath());
   } catch {
     // ignore
   }
