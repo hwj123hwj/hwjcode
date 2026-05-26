@@ -21,6 +21,7 @@ import { SystemNotificationMessage } from './SystemNotificationMessage';
 import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { messageContentToString } from '../utils/messageContentUtils';
 import { linkifyTextNode } from '../utils/filePathLinkifier';
+import { rehabGluedSingleLineFences } from '../utils/markdownPreprocess';
 import './ToolCalls.css';
 import './MessageMarkdown.css';
 import './ChatInterface.css'; // 🎯 导入确认对话框样式
@@ -35,13 +36,20 @@ declare const window: Window & {
 };
 
 // 代码块组件（提取为独立组件以正确管理状态）
-const CodeBlock: React.FC<any> = ({ node, children, t, ...props }) => {
+const CodeBlock: React.FC<any> = ({ node, children, t, isStreaming, ...props }) => {
   const [isCopied, setIsCopied] = React.useState(false);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
-  // 提取代码内容用于复制
+  // Locate the inner <code> element produced by react-markdown for fenced code blocks.
+  // Note: react-markdown v9 + custom `components.code` causes the child's `type` to be a
+  // function (the custom component) rather than the string 'code'. The reliable signal is
+  // that the child carries a `language-…` className. We accept either: (a) the legacy
+  // string-typed <code> element, or (b) any element whose className contains a language tag.
   const codeElement = React.Children.toArray(children).find(
-    (child: any) => child?.type === 'code'
+    (child: any) =>
+      child?.type === 'code' ||
+      (typeof child?.props?.className === 'string' &&
+        /\blanguage-/.test(child.props.className)),
   ) as any;
 
   // 深度递归提取所有文本内容的函数
@@ -71,8 +79,25 @@ const CodeBlock: React.FC<any> = ({ node, children, t, ...props }) => {
   }
 
   const className = codeElement?.props?.className || '';
-  const match = /language-(\w+)/.exec(className);
-  const language = match ? match[1] : 'text';
+  // Match language identifiers including chars common to language names (c++, c#, obj-c, f#, .net…).
+  // Fall back to empty string (not 'text') so the header label can be conditionally hidden.
+  const match = /language-([\w+#.-]+)/.exec(className);
+  const language = match ? match[1] : '';
+
+  // Defensive: if the rendered code body is empty, do not render the wrapper at all.
+  // This avoids the "TEXT-headed empty block" artifact that appears mid-stream when
+  // react-markdown emits a partial fence (no body / no closing fence yet) or when the
+  // LLM literally outputs an empty fenced block.
+  // Distinguish two empty-body cases:
+  //   1. Streaming or no language hint → hide entirely (likely transient artifact).
+  //   2. Non-streaming with explicit language → render a minimal placeholder so the
+  //      user still sees that an (intentionally) empty block was produced.
+  if (!codeString.trim()) {
+    if (isStreaming || !language) {
+      return null;
+    }
+    return <pre className="code-block code-block-empty" {...props} />;
+  }
 
   // 计算代码行数
   const lines = codeString.split('\n');
@@ -557,7 +582,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
               }
 
               // 🎯 手动解析 <think> 标签，避免 ReactMarkdown 渲染器嵌套错误
-              const rawContent = messageContentToString(message.content);
+              // Apply defensive preprocessing first: rehab single-line glued fences
+              // (real-world LLM outputs like ```bashopen ios/foo``` that CommonMark
+              // would otherwise treat as inline code).
+              const rawContent = rehabGluedSingleLineFences(
+                messageContentToString(message.content),
+              );
               const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
               const renderParts: { type: 'text' | 'think'; content: string }[] = [];
               let lastIndex = 0;
@@ -599,7 +629,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
 
               const markdownComponents = {
                 // 代码块美化 - 使用独立的 CodeBlock 组件
-                pre: (props: any) => <CodeBlock {...props} t={t} />,
+                pre: (props: any) => (
+                  <CodeBlock {...props} t={t} isStreaming={message.isStreaming} />
+                ),
 
                 // 行内代码 - 添加文件路径和方法名链接支持
                 code({node, className, children, ...props}: any) {
