@@ -234,28 +234,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
           )}
-        </div>
 
-        {/* 底部信息 - 只在非检查状态时显示 */}
-        {!isCheckingAuth && (
-          <div className="login-page__footer">
-            <p className="login-page__footer-text">
-              DeepV Code uses secure OAuth2 authentication flow
-            </p>
-            <p className="login-page__footer-subtext">
-              Your authentication information will be securely stored locally
-            </p>
+          {/* 🟢 未登录入口 — 用户可直接配置 EasyRouter / 第三方自定义模型，
+              免去 OAuth 流程。已登录用户仍可在主界面 ModelSelector 末尾使用同一个向导。
 
-            {/* 🟢 未登录入口 — 用户可直接配置 EasyRouter / 第三方自定义模型，
-                免去 OAuth 流程。已登录用户仍可在主界面 ModelSelector 末尾使用同一个向导。
+              两种入口：
+                1. 已经有自定义模型 → "Continue with Custom Models"（直接进入主界面）
+                2. 还没有 / 想再加 → "Add Custom Model"（打开 wizard）
 
-                两种入口：
-                  1. 已经有自定义模型 → "Continue with Custom Models"（直接进入主界面）
-                  2. 还没有 / 想再加 → "Add Custom Model"（打开 wizard） */}
+              放在登录卡片内 — 与主登录按钮形成"并列选项"而非弱化的 footer 链接。 */}
+          {!isCheckingAuth && (
             <div className="login-page__custom-model-section">
-              <p className="login-page__custom-model-hint">
-                Or use your own API key (no DeepV login required):
-              </p>
+              <div className="login-page__divider">
+                <span className="login-page__divider-text">or use your own API key</span>
+              </div>
               <div className="login-page__custom-model-buttons">
                 {hasExistingCustomModels && (
                   <button
@@ -277,6 +269,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 </button>
               </div>
             </div>
+          )}
+        </div>
+
+        {/* 底部信息 - 只在非检查状态时显示 */}
+        {!isCheckingAuth && (
+          <div className="login-page__footer">
+            <p className="login-page__footer-text">
+              DeepV Code uses secure OAuth2 authentication flow
+            </p>
+            <p className="login-page__footer-subtext">
+              Your authentication information will be securely stored locally
+            </p>
           </div>
         )}
       </div>
