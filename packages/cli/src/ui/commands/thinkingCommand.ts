@@ -109,9 +109,21 @@ const applyThinking = async (
 
   try {
     const currentConfig: ThinkingConfig = config.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+    // Effort resolution: explicit param > previous value > 'auto'.
+    // 但当 mode === 'auto' 时，强制把 effort 也归位为 'auto'，避免出现
+    // {mode:'auto', effort:'high'} 这种"语义模糊"的组合（参见 footerUtils 注释）。
+    let effectiveEffort: ThinkingConfig['effort'];
+    if (newEffort !== undefined) {
+      effectiveEffort = newEffort;
+    } else if (newMode === 'auto') {
+      effectiveEffort = 'auto';
+    } else {
+      effectiveEffort = currentConfig.effort ?? 'auto';
+    }
+
     const updated: ThinkingConfig = {
       mode: newMode,
-      effort: newEffort ?? currentConfig.effort ?? 'auto',
+      effort: effectiveEffort,
       ...(currentConfig.budgetTokens !== undefined ? { budgetTokens: currentConfig.budgetTokens } : {}),
     };
 
@@ -137,7 +149,13 @@ const applyThinking = async (
   }
 };
 
-/** 强度子命令工厂：切换强度时若原 mode 为 'auto' 则保持 'auto'，否则自动设为 'on' */
+/**
+ * 强度子命令工厂：用户显式选择某个强度等价于「我想要 thinking 开启」，
+ * 因此总是把 mode 设为 'on'。在网络层 mode='auto'+effort=具体值 与 mode='on'+
+ * effort=具体值 行为完全一致（见 customModel.applyOpenAIChatThinking 的分发
+ * 矩阵），过去保留 'auto' 只是 UI 标签的形式上的尊重，反而会让 footer 与
+ * VSCode 选择器无法直观反映强度。
+ */
 const makeEffortSubCommand = (
   effort: Exclude<ThinkingConfig['effort'], undefined>,
   description: string,
@@ -145,11 +163,7 @@ const makeEffortSubCommand = (
   name: effort,
   description,
   kind: CommandKind.BUILT_IN,
-  action: async (context) => {
-    const cur = context.services.config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
-    const targetMode: 'on' | 'auto' = cur.mode === 'auto' ? 'auto' : 'on';
-    return applyThinking(context, targetMode, effort);
-  },
+  action: async (context) => applyThinking(context, 'on', effort),
 });
 
 export const thinkingCommand: SlashCommand = {
