@@ -33,7 +33,7 @@ import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { getGlobalDispatcher } from 'undici';
 import { isCustomModel, resolveThinkingConfig, effortToGeminiLevel, effortToGeminiBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToAnthropicBudget, ThinkingConfig, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking } from '../types/customModel.js';
 import { callCustomModel, callCustomModelStream } from './customModelAdapter.js';
-import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos } from '../utils/gitUtils.js';
+import { getGitRemotes, getGitBranch, getSubdirectoryGitInfos, getGitCommitSha, getGitProjectPath } from '../utils/gitUtils.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
