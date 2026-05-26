@@ -19,6 +19,7 @@
 // Note: Using console.log instead of logger to avoid dependency issues
 import { getActiveProxyServerUrl } from '../config/proxyConfig.js';
 import { logIfNotSilent } from '../utils/logging.js';
+import { getSessionId } from '../utils/session.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -651,49 +652,57 @@ export class ProxyAuthManager {
   /**
    * 获取用户请求头信息（用于API调用）
    * 使用JWT token认证
+   *
+   * @param sceneType 可选，调用方场景标识，注入到 X-DVCode-Scene header
    */
-  async getUserHeaders(): Promise<Record<string, string>> {
+  async getUserHeaders(sceneType?: string): Promise<Record<string, string>> {
     const token = await this.getAccessToken();
     const cliVersion = this.getCliVersion();
     const userAgent = this.getUserAgent();
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Client-Version': cliVersion,
+      'User-Agent': userAgent,
+      // 协议 v1.4.2：进程级 session id
+      'X-Session-ID': getSessionId(),
+    };
+
     if (token) {
-      return {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'X-Client-Version': cliVersion,
-        'User-Agent': userAgent
-      };
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return {
-      'X-Client-Version': cliVersion,
-      'User-Agent': userAgent
-    };
+    // 协议 v1.4.2：调用场景（inline_complete 不走此路径，由其链路自行设置）
+    if (sceneType) {
+      headers['X-DVCode-Scene'] = sceneType;
+    }
+
+    return headers;
   }
 
   /**
    * 同步获取用户请求头（兼容性方法）
    * 注意：此方法不会自动刷新token，可能返回过期的token
+   * sceneType 不在此方法注入（sync 调用方无法预知场景，由异步路径处理）
    */
   getUserHeadersSync(): Record<string, string> {
     const cliVersion = this.getCliVersion();
     const userAgent = this.getUserAgent();
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Client-Version': cliVersion,
+      'User-Agent': userAgent,
+      // 协议 v1.4.2：进程级 session id
+      'X-Session-ID': getSessionId(),
+    };
+
     // 使用当前的token（不进行刷新检查）
     if (this.jwtTokenData?.accessToken) {
-      return {
-        'Authorization': `Bearer ${this.jwtTokenData.accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Client-Version': cliVersion,
-        'User-Agent': userAgent
-      };
+      headers['Authorization'] = `Bearer ${this.jwtTokenData.accessToken}`;
     }
 
-    return {
-      'X-Client-Version': cliVersion,
-      'User-Agent': userAgent
-    };
+    return headers;
   }
 
   /**
