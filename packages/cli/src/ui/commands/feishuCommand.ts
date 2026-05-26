@@ -18,7 +18,14 @@
  */
 
 import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
-import { loadCredentials, saveCredentials, clearCredentials, FeishuCredentials } from '../../services/feishu/credentials.js';
+import {
+  loadCredentials,
+  saveCredentials,
+  clearCredentials,
+  isSenderAuthorized,
+  CredentialsLoadError,
+  FeishuCredentials,
+} from '../../services/feishu/credentials.js';
 import {
   initRegistration,
   beginRegistration,
@@ -33,7 +40,9 @@ import {
   GeminiEventType,
   ToolCallRequestInfo,
   SessionManager,
+  isWithinRoot,
 } from 'deepv-code-core';
+import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { Part, PartListUnion } from '@google/genai';
 
 /** 当前全局网关实例（进程内单例） */
@@ -45,6 +54,28 @@ let tuiContext: CommandContext['ui'] | null = null;
 /** 当前活跃的飞书会话信息（用于 send_feishu_file 工具发送文件） */
 let activeChatId: string | null = null;
 let activeReplyToMessageId: string | null = null;
+
+/**
+ * Wrapper around loadCredentials that surfaces decryption / parse errors
+ * as a typed result instead of throwing — handlers can produce a friendly
+ * actionable message instead of a stack trace.
+ */
+async function loadCredsSafe(
+  projectRoot?: string,
+): Promise<
+  | { ok: true; creds: FeishuCredentials | null }
+  | { ok: false; error: string }
+> {
+  try {
+    const creds = await loadCredentials(projectRoot);
+    return { ok: true, creds };
+  } catch (e) {
+    if (e instanceof CredentialsLoadError) {
+      return { ok: false, error: e.message };
+    }
+    return { ok: false, error: (e as Error).message };
+  }
+}
 
 /**
  * 构建帮助文本
@@ -62,10 +93,17 @@ function helpText(): string {
     '  /feishu status         查看当前状态',
     '  /feishu logout         清除凭证并断开',
     '',
+    '授权管理（重要）:',
+    '  /feishu allow <openId> 允许指定飞书用户调用 Bot',
+    '  /feishu deny  <openId> 移出授权白名单',
+    '  /feishu allowlist      查看当前 Owner 与白名单',
+    '',
     '首次使用:',
-    '  1. /feishu setup              # 扫码或手动配凭证',
+    '  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）',
     '  2. /feishu start              # 启动 Bot',
     '  3. 去飞书给 Bot 发消息        # dvcode 将在后台回答',
+    '',
+    '⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
   ].join('\n');
 }
 
@@ -148,6 +186,9 @@ async function handleQrSetup(projectRoot?: string): Promise<string> {
       domain: pollResult.domain as 'feishu' | 'lark',
       botName: botInfo?.botName,
       botOpenId: botInfo?.botOpenId,
+      // The user who scanned the QR code becomes the Bot owner — only they
+      // (and entries in `allowlist`) may invoke the agent. See B1 in MR review.
+      ownerOpenId: pollResult.openId,
     };
 
     await saveCredentials(creds, projectRoot);
@@ -206,6 +247,8 @@ async function handleManualSetup(appId?: string, appSecret?: string, projectRoot
   if (creds.botName) lines.push(`  Bot 名称:    ${creds.botName}`);
   lines.push(`  凭证已保存到 ${projectRoot ? projectRoot + '/.deepv/' : '~/.deepv/'}feishu-credentials.json`);
   lines.push('');
+  lines.push('  ⚠️ 手动配置模式下未自动绑定 Bot 拥有者。在 /feishu start 之后，');
+  lines.push('     首次给 Bot 发消息时会拒绝并提示你将自己加入授权白名单。');
   lines.push('  下一步: 输入 /feishu start 启动 Bot');
 
   return lines.join('\n');
@@ -214,57 +257,90 @@ async function handleManualSetup(appId?: string, appSecret?: string, projectRoot
 /**
  * 从文本中提取文件路径，上传并发送到飞书
  *
- * 匹配模式：
- *   - 绝对路径: /path/to/file.ext
- *   - 相对路径: ./path/to/file.ext
- *   - 图片扩展名: png, jpg, jpeg, gif, webp, svg, bmp
- *   - 其他常见文件: pdf, txt, csv, json, zip 等
+ * 安全约束（B2）：仅发送项目根目录内、且扩展名在白名单中的文件。
+ * 跨平台支持：同时识别 POSIX 路径（/foo/bar.ext, ./foo.ext）和 Windows 路径
+ *   （C:\foo\bar.ext, .\foo.ext）。
+ *
+ * 不在白名单内的扩展名一律不发送，可疑路径（绝对路径但不在 projectRoot 内）
+ * 也会被忽略，避免文本中提及的路径被自动外发到飞书。
  */
 async function sendDetectedFiles(
   gateway: FeishuGateway,
   chatId: string,
   replyToMessageId: string | undefined,
   text: string,
+  projectRoot: string,
 ): Promise<void> {
-  // 匹配文件路径的正则（绝对路径或明确的 ./ 开头）
-  const filePathRegex = /(?:^|\s|["'`])((?:\/[\w\-./]+)|(?:\.\/[\w\-./]+))\.(png|jpe?g|gif|webp|svg|bmp|pdf|txt|csv|json|zip|tar\.gz|py|js|ts|tsx|jsx|md|html|css|yaml|yml|toml)(?:["'`\s,;.)]|$)/gim;
+  // 文件路径正则 — 同时匹配 POSIX 与 Windows 风格：
+  //   POSIX：/abs/path/file.ext, ./rel/path/file.ext
+  //   Windows：C:\abs\path\file.ext, .\rel\path\file.ext
+  // 反斜杠在 JSON/markdown 中常被双写为 \\，正则用 [\\\\/] 匹配 / 或 \。
+  const filePathRegex =
+    /(?:^|[\s"'`])((?:[A-Za-z]:[\\/][\w\-./\\]+)|(?:\/[\w\-./]+)|(?:\.[\\/][\w\-./\\]+))\.(png|jpe?g|gif|webp|svg|bmp|pdf|txt|csv|json|zip|tar\.gz|py|js|ts|tsx|jsx|md|html|css|yaml|yml|toml)(?=["'`\s,;.)]|$)/gim;
 
-  const matches: Array<{ path: string; ext: string }> = [];
-  let match;
-  while ((match = filePathRegex.exec(text)) !== null) {
-    const filePath = match[1] + '.' + match[2];
-    // 去重
-    if (!matches.some(m => m.path === filePath)) {
-      matches.push({ path: filePath, ext: match[2].toLowerCase() });
+  type Match = { path: string; ext: string };
+  const matches: Match[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = filePathRegex.exec(text)) !== null) {
+    const filePath = m[1] + '.' + m[2];
+    if (!matches.some((x) => x.path === filePath)) {
+      matches.push({ path: filePath, ext: m[2].toLowerCase() });
     }
   }
+  if (matches.length === 0) return;
 
-  const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+  const fs = await import('node:fs');
+  const path = await import('node:path');
 
-  for (const { path: filePath, ext } of matches) {
+  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
+  const REJECTED_EXTS = new Set([
+    'exe', 'dll', 'bat', 'cmd', 'ps1', 'msi', 'scr', 'com',
+    'so', 'dylib', 'sh', 'bash', 'zsh', 'fish',
+    'jar', 'class', 'msp', 'msc',
+  ]);
+
+  for (const { path: rawPath, ext } of matches) {
+    if (REJECTED_EXTS.has(ext)) {
+      dwarn(`🛡️ 拒绝发送可疑扩展名 .${ext}: ${rawPath}`);
+      continue;
+    }
+
+    // Resolve to absolute, then enforce project-root sandbox.
+    const abs = path.isAbsolute(rawPath)
+      ? path.resolve(rawPath)
+      : path.resolve(projectRoot, rawPath);
+    if (!isWithinRoot(abs, projectRoot)) {
+      dwarn(`🛡️ 拒绝发送项目根目录外的文件: ${abs}`);
+      continue;
+    }
+
     try {
-      const fs = await import('fs');
-      if (!fs.existsSync(filePath)) continue;
+      if (!fs.existsSync(abs)) continue;
+      const stat = fs.statSync(abs);
+      if (!stat.isFile()) continue;
+      // 50 MiB cap; matches send_feishu_file tool.
+      if (stat.size > 50 * 1024 * 1024) {
+        dwarn(`🛡️ 拒绝发送 > 50MiB 的文件: ${abs} (${stat.size} bytes)`);
+        continue;
+      }
 
-      if (IMAGE_EXTS.includes(ext)) {
-        // 图片：上传图片 → 发送图片消息
-        const imageKey = await gateway.uploadImage(filePath);
+      if (IMAGE_EXTS.has(ext)) {
+        const imageKey = await gateway.uploadImage(abs);
         await gateway.sendImage(chatId, imageKey, replyToMessageId);
         tuiContext?.addItem(
-          { type: 'info', text: `📎 已发送图片: ${filePath}` },
+          { type: 'info', text: `📎 已发送图片: ${abs}` },
           Date.now(),
         );
       } else {
-        // 其他文件：上传文件 → 发送文件消息
-        const fileKey = await gateway.uploadFile(filePath);
+        const fileKey = await gateway.uploadFile(abs);
         await gateway.sendFile(chatId, fileKey, replyToMessageId);
         tuiContext?.addItem(
-          { type: 'info', text: `📎 已发送文件: ${filePath}` },
+          { type: 'info', text: `📎 已发送文件: ${abs}` },
           Date.now(),
         );
       }
-    } catch (err: any) {
-      console.error(`❌ 发送文件到飞书失败 (${filePath}):`, err.message);
+    } catch (err: unknown) {
+      derror(`❌ 发送文件到飞书失败 (${abs}):`, (err as Error)?.message);
       // 文件发送失败不影响主流程
     }
   }
@@ -441,7 +517,11 @@ async function handleFeishuCommand(
  */
 async function handleStart(context?: CommandContext): Promise<string> {
   const projectRoot = context?.services?.config?.getProjectRoot();
-  const creds = await loadCredentials(projectRoot);
+  const result = await loadCredsSafe(projectRoot);
+  if (!result.ok) {
+    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+  }
+  const creds = result.creds;
   if (!creds) {
     return [
       '⚠️ 未找到飞书凭证',
@@ -473,6 +553,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
     if (!messageText) {
       return null;
+    }
+
+    // 🛡️ 授权检查（B1）：只允许 ownerOpenId 或 allowlist 中的 senderOpenId
+    // 触发 LLM/工具调用。任何其他人发送的消息直接拒绝，绝不会进入 agent 循环
+    // 或访问本地文件系统，避免 Bot 成为远程 RCE 入口。
+    if (!isSenderAuthorized(creds, msg.senderOpenId)) {
+      const reply = creds.ownerOpenId
+        ? `🛡️ 此 Bot 仅响应授权用户。如需使用，请联系 Bot 拥有者用 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
+        : `🛡️ 此 Bot 尚未配置授权用户。请 Bot 拥有者在 dvcode 中执行 \`/feishu allow ${msg.senderOpenId}\` 后再试。`;
+      tuiContext?.addItem(
+        {
+          type: 'info',
+          text: `🛡️ 拒绝未授权消息: openId=${msg.senderOpenId} text="${messageText.slice(0, 60)}"`,
+        },
+        Date.now(),
+      );
+      return reply;
     }
 
     // 🎯 保存当前会话上下文（供 send_feishu_file 工具使用）
@@ -549,8 +646,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
           // 直接发送最终回复到飞书（使用 post 格式，支持 markdown 渲染）
           await gateway.sendMarkdown(msg.chatId, replyText, msg.messageId);
 
-          // 检测并发送文件
-          await sendDetectedFiles(gateway, msg.chatId, msg.messageId, replyText);
+          // 检测并发送文件（沙箱化到 projectRoot，扩展名白名单）
+          const projectRoot: string =
+            (typeof config?.getProjectRoot === 'function' && config.getProjectRoot()) ||
+            process.cwd();
+          await sendDetectedFiles(
+            gateway,
+            msg.chatId,
+            msg.messageId,
+            replyText,
+            projectRoot,
+          );
           return null; // 自己已发送，不触发 gateway 自动回复
         }
 
@@ -614,7 +720,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
       return null;
     } catch (err: any) {
-      console.error('❌ 飞书 Agent 处理错误:', err.message);
+      derror('❌ 飞书 Agent 处理错误:', err.message);
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
       tuiContext?.addItem({ type: 'error', text: errorReply }, Date.now());
       return errorReply;
@@ -622,11 +728,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
   };
 
   gateway.onReady = () => {
-    console.log('✅ 飞书 Bot 已就绪，可以开始聊天了！');
+    dlog('✅ 飞书 Bot 已就绪，可以开始聊天了！');
   };
 
   gateway.onDisconnect = () => {
-    console.log('🔌 飞书连接已断开');
+    dlog('🔌 飞书连接已断开');
   };
 
   try {
@@ -637,15 +743,19 @@ async function handleStart(context?: CommandContext): Promise<string> {
     if (config && geminiClient) {
       try {
         const toolRegistry: ToolRegistry = await config.getToolRegistry();
+        const projectRoot: string =
+          (typeof config.getProjectRoot === 'function' && config.getProjectRoot()) ||
+          process.cwd();
         toolRegistry.registerTool(new SendFeishuFileTool(
           gateway,
           () => activeChatId ?? undefined,
           () => activeReplyToMessageId ?? undefined,
+          () => projectRoot,
         ));
         await geminiClient.setTools();
-        console.log('✅ 已注册飞书文件发送工具 (send_feishu_file)');
+        dlog('✅ 已注册飞书文件发送工具 (send_feishu_file)');
       } catch (toolErr: any) {
-        console.warn('⚠️ 注册飞书工具失败（不影响主流程）:', toolErr.message);
+        dwarn('⚠️ 注册飞书工具失败（不影响主流程）:', toolErr.message);
       }
     }
 
@@ -679,10 +789,10 @@ async function handleStop(context?: CommandContext): Promise<string> {
       const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
       if (removed) {
         await geminiClient.setTools();
-        console.log('✅ 已注销飞书文件发送工具 (send_feishu_file)');
+        dlog('✅ 已注销飞书文件发送工具 (send_feishu_file)');
       }
     } catch (toolErr: any) {
-      console.warn('⚠️ 注销飞书工具失败:', toolErr.message);
+      dwarn('⚠️ 注销飞书工具失败:', toolErr.message);
     }
   }
 
@@ -698,13 +808,21 @@ async function handleStop(context?: CommandContext): Promise<string> {
  * 查看状态
  */
 async function handleStatus(projectRoot?: string): Promise<string> {
-  const creds = await loadCredentials(projectRoot);
+  const result = await loadCredsSafe(projectRoot);
+  if (!result.ok) {
+    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+  }
+  const creds = result.creds;
   const lines: string[] = ['📊 飞书状态:'];
 
   if (creds) {
     lines.push(`  App ID:      ${creds.appId}`);
     lines.push(`  Bot 名称:    ${creds.botName || '(未知)'}`);
     lines.push(`  平台:        ${creds.domain === 'lark' ? 'Lark' : '飞书'}`);
+    lines.push(`  Bot Owner:   ${creds.ownerOpenId || '(未绑定 — 首次扫码用户为 Owner)'}`);
+    if (creds.allowlist && creds.allowlist.length > 0) {
+      lines.push(`  授权白名单:  ${creds.allowlist.length} 人 (用 /feishu allowlist 查看)`);
+    }
   } else {
     lines.push('  凭证:        未配置');
     lines.push('');
@@ -719,6 +837,115 @@ async function handleStatus(projectRoot?: string): Promise<string> {
     lines.push('  运行 /feishu start 启动 Bot');
   }
 
+  return lines.join('\n');
+}
+
+/**
+ * 添加 open_id 到授权白名单（B1 — 授权管理）
+ *
+ * 用法：/feishu allow <openId>
+ */
+async function handleAllow(args: string, projectRoot?: string): Promise<string> {
+  const openId = args.trim();
+  if (!openId) {
+    return [
+      '用法: /feishu allow <openId>',
+      '',
+      '允许指定 open_id 的飞书用户向 Bot 发送消息并触发 LLM/工具调用。',
+      'open_id 可在 Bot 拒绝消息时的提示中找到，或在飞书开放平台 → 通讯录中查询。',
+    ].join('\n');
+  }
+  let creds: FeishuCredentials | null;
+  try {
+    creds = await loadCredentials(projectRoot);
+  } catch (e) {
+    return `❌ 读取凭证失败: ${(e as Error).message}`;
+  }
+  if (!creds) {
+    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+  }
+  // owner 已是该 openId 时无需再加
+  if (creds.ownerOpenId === openId) {
+    return `ℹ️ ${openId} 已是 Bot Owner，无需加入白名单。`;
+  }
+  // 如果 owner 未绑定，把这个 openId 设为 owner
+  if (!creds.ownerOpenId) {
+    creds.ownerOpenId = openId;
+    await saveCredentials(creds, projectRoot);
+    return `✅ 已将 ${openId} 设为 Bot Owner。`;
+  }
+  const list = new Set(creds.allowlist ?? []);
+  if (list.has(openId)) {
+    return `ℹ️ ${openId} 已在授权白名单中。`;
+  }
+  list.add(openId);
+  creds.allowlist = [...list];
+  await saveCredentials(creds, projectRoot);
+  return `✅ 已将 ${openId} 加入授权白名单 (共 ${creds.allowlist.length} 人)。`;
+}
+
+/**
+ * 从授权白名单移除 open_id（B1 — 授权管理）
+ *
+ * 用法：/feishu deny <openId>
+ */
+async function handleDeny(args: string, projectRoot?: string): Promise<string> {
+  const openId = args.trim();
+  if (!openId) {
+    return '用法: /feishu deny <openId>';
+  }
+  let creds: FeishuCredentials | null;
+  try {
+    creds = await loadCredentials(projectRoot);
+  } catch (e) {
+    return `❌ 读取凭证失败: ${(e as Error).message}`;
+  }
+  if (!creds) {
+    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+  }
+  if (creds.ownerOpenId === openId) {
+    return [
+      `❌ 不能直接移除 Bot Owner (${openId})。`,
+      '',
+      '如需更换 Owner，请：',
+      '  1. /feishu allow <new-owner-openId> 先把新 Owner 加入白名单',
+      '  2. /feishu logout 清除全部凭证后重新 setup',
+    ].join('\n');
+  }
+  const before = creds.allowlist?.length ?? 0;
+  creds.allowlist = (creds.allowlist ?? []).filter((id) => id !== openId);
+  if (creds.allowlist.length === before) {
+    return `ℹ️ ${openId} 不在授权白名单中。`;
+  }
+  await saveCredentials(creds, projectRoot);
+  return `✅ 已将 ${openId} 移出授权白名单 (剩余 ${creds.allowlist.length} 人)。`;
+}
+
+/**
+ * 列出授权白名单（B1 — 授权管理）
+ */
+async function handleAllowlist(projectRoot?: string): Promise<string> {
+  let creds: FeishuCredentials | null;
+  try {
+    creds = await loadCredentials(projectRoot);
+  } catch (e) {
+    return `❌ 读取凭证失败: ${(e as Error).message}`;
+  }
+  if (!creds) {
+    return '⚠️ 未找到飞书凭证。请先运行 /feishu setup。';
+  }
+  const lines = ['🛡️ 飞书 Bot 授权列表:'];
+  lines.push(`  Owner:       ${creds.ownerOpenId || '(未绑定)'}`);
+  if (creds.allowlist && creds.allowlist.length > 0) {
+    lines.push('  白名单:');
+    for (const id of creds.allowlist) {
+      lines.push(`    - ${id}`);
+    }
+  } else {
+    lines.push('  白名单:      (空)');
+  }
+  lines.push('');
+  lines.push('管理: /feishu allow <openId>  /  /feishu deny <openId>');
   return lines.join('\n');
 }
 
@@ -753,7 +980,11 @@ async function handleLogout(projectRoot?: string, context?: CommandContext): Pro
  * 交互式主入口
  */
 async function handleInteractive(projectRoot?: string): Promise<string> {
-  const creds = await loadCredentials(projectRoot);
+  const result = await loadCredsSafe(projectRoot);
+  if (!result.ok) {
+    return `❌ 读取飞书凭证失败：${result.error}\n\n如需重新配置：/feishu logout 然后 /feishu setup`;
+  }
+  const creds = result.creds;
 
   if (!creds) {
     // 未配置，引导 setup
@@ -839,6 +1070,33 @@ export const feishuCommand: SlashCommand = {
       action: async (ctx) => {
         const pr = ctx.services?.config?.getProjectRoot();
         return msg(await handleLogout(pr, ctx));
+      },
+    },
+    {
+      name: 'allow',
+      description: '将飞书 open_id 加入授权白名单',
+      kind: CommandKind.BUILT_IN,
+      action: async (ctx, args) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleAllow(args, pr));
+      },
+    },
+    {
+      name: 'deny',
+      description: '从授权白名单中移除指定 open_id',
+      kind: CommandKind.BUILT_IN,
+      action: async (ctx, args) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleDeny(args, pr));
+      },
+    },
+    {
+      name: 'allowlist',
+      description: '列出当前 Bot 的 Owner 与授权白名单',
+      kind: CommandKind.BUILT_IN,
+      action: async (ctx) => {
+        const pr = ctx.services?.config?.getProjectRoot();
+        return msg(await handleAllowlist(pr));
       },
     },
     {
