@@ -193,6 +193,19 @@ export const PLATFORM_MESSAGES = {
 } as const;
 
 // =============================================================================
+// 认证相关消息
+// =============================================================================
+
+export const AUTH_MESSAGES = {
+  // 🎯 登录状态消息
+  NO_VALID_AUTH_INFO: '未找到有效的认证信息',
+  NO_VALID_AUTH_INFO_NEEDS_LOGIN: '未找到有效的认证信息，需要登录',
+  AUTH_STATUS_CHECK_FAILED: '登录状态检查失败',
+  LOGIN_FLOW_START_FAILED: '登录流程启动失败',
+  LOGIN_TIMEOUT: '登录超时（5分钟）',
+} as const;
+
+// =============================================================================
 // 通用消息
 // =============================================================================
 
@@ -270,6 +283,7 @@ export const I18N_MESSAGES = {
   FILE_OPERATION: FILE_OPERATION_MESSAGES,
   LOOP_DETECTION: LOOP_DETECTION_MESSAGES,
   PLATFORM: PLATFORM_MESSAGES,
+  AUTH: AUTH_MESSAGES,
   COMMON: COMMON_MESSAGES,
 } as const;
 
