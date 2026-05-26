@@ -18,6 +18,8 @@
  * 收到消息 → 调 onMessage 回调 → 发回复走 REST API
  */
 
+import { dlog, dwarn, derror } from './logger.js';
+
 const API_BASE_URLS: Record<string, string> = {
   feishu: 'https://open.feishu.cn',
   lark: 'https://open.larksuite.com',
@@ -140,7 +142,7 @@ export class FeishuGateway {
     const data: any = await res.json();
 
     if (!data.tenant_access_token) {
-      throw new Error(`获取 tenant_access_token 失败: ${JSON.stringify(data)}`);
+      throw new Error(`Failed to fetch tenant_access_token: ${JSON.stringify(data)}`);
     }
 
     this.tenantToken = data.tenant_access_token;
@@ -219,7 +221,7 @@ export class FeishuGateway {
 
         // 消息去重：先按 messageId，再按内容+时间窗口兜底
         if (this.processedMessages.has(feishuMsg.messageId)) {
-          console.log(`⏭️ 跳过重复消息 (messageId): ${feishuMsg.messageId}`);
+          dlog(`Skipped duplicate message (messageId): ${feishuMsg.messageId}`);
           return { code: 0 };
         }
 
@@ -227,7 +229,7 @@ export class FeishuGateway {
         const now = Date.now();
         const firstSeen = this.recentContents.get(contentKey);
         if (firstSeen !== undefined && now - firstSeen < this.dedupWindowMs) {
-          console.log(`⏭️ 跳过重复消息 (内容去重): "${feishuMsg.text.slice(0, 30)}" (${now - firstSeen}ms 内重复)`);
+          dlog(`Skipped duplicate message (content dedup): "${feishuMsg.text.slice(0, 30)}" (within ${now - firstSeen}ms)`);
           return { code: 0 };
         }
 
@@ -262,7 +264,7 @@ export class FeishuGateway {
               await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
             }
           } catch (err) {
-            console.error('❌ feishu onMessage 处理器错误:', err);
+            derror('feishu onMessage handler error:', err);
           } finally {
             // 处理完成，移除"思考中"表情
             await this.removeReaction(feishuMsg.messageId, reactionId);
@@ -271,7 +273,7 @@ export class FeishuGateway {
 
         return { code: 0 };
       } catch (err) {
-        console.error('❌ feishu 事件处理错误:', err);
+        derror('feishu event handler error:', err);
         return { code: 0 };
       }
       }
@@ -281,8 +283,8 @@ export class FeishuGateway {
     dispatcher.register({
       'card.action.trigger': async (data: any) => {
         try {
-          console.log('🃏 收到 card.action.trigger 事件, 完整数据:', JSON.stringify(data, null, 2));
-          console.log('🃏 当前等待中的 cardCallbacks keys:', [...this.cardCallbacks.keys()]);
+          dlog('Received card.action.trigger event, full payload:', JSON.stringify(data, null, 2));
+          dlog('Current pending cardCallbacks keys:', [...this.cardCallbacks.keys()]);
 
           const action = data?.event?.action || data?.action || data;
           const openId = data?.event?.operator?.open_id
@@ -299,7 +301,7 @@ export class FeishuGateway {
             : rawValue;
           const strValue = String(choiceValue ?? '');
 
-          console.log(`🃏 解析结果: openId=${openId}, messageId=${messageId}, strValue=${strValue}`);
+          dlog(`Parsed: openId=${openId}, messageId=${messageId}, strValue=${strValue}`);
 
           if (messageId && this.onCardAction) {
             this.onCardAction({ value: strValue, openId, messageId });
@@ -308,15 +310,15 @@ export class FeishuGateway {
           // 查找是否有等待中的 Promise
           const pending = this.cardCallbacks.get(messageId);
           if (pending) {
-            console.log(`🃏 找到匹配的 pending callback, resolve with: ${strValue}`);
+            dlog(`Matched pending callback, resolving with: ${strValue}`);
             clearTimeout(pending.timer);
             this.cardCallbacks.delete(messageId);
             pending.resolve(strValue);
           } else {
-            console.log(`🃏 未找到匹配的 pending callback for messageId=${messageId}`);
+            dlog(`No matching pending callback for messageId=${messageId}`);
           }
         } catch (err) {
-          console.error('❌ 飞书卡片回调处理错误:', err);
+          derror('Feishu card callback handler error:', err);
         }
         return { code: 0 };
       },
@@ -331,20 +333,20 @@ export class FeishuGateway {
         domain: domainUrl,
         loggerLevel: 3, // error only
         onReady: () => {
-          console.log('✅ 飞书 Bot 已就绪，可以开始聊天了！');
+          dlog('Feishu Bot ready');
           this._onReady?.();
           if (!settled) { settled = true; resolve(); }
         },
         onError: (err: Error) => {
-          console.error('❌ 飞书 WSClient 错误:', err.message);
+          derror('Feishu WSClient error:', err.message);
           this._onDisconnect?.(err);
           if (!settled) { settled = true; reject(err); }
         },
         onReconnecting: () => {
-          console.log('🔄 飞书正在重连...');
+          dlog('Feishu reconnecting...');
         },
         onReconnected: () => {
-          console.log('✅ 飞书重连成功');
+          dlog('Feishu reconnected');
         },
       });
 
@@ -408,9 +410,9 @@ export class FeishuGateway {
       if (directData.code === 0) {
         return directData.data?.message_id || null;
       }
-      console.error('❌ 飞书发消息失败:', JSON.stringify(directData));
+      derror('Feishu sendMessage failed:', JSON.stringify(directData));
     } else {
-      console.error('❌ 飞书发消息失败:', JSON.stringify(data));
+      derror('Feishu sendMessage failed:', JSON.stringify(data));
     }
     return null;
   }
@@ -445,12 +447,12 @@ export class FeishuGateway {
       );
       const data: any = await res.json();
       if (data.code !== 0) {
-        console.warn(`⚠️ 更新飞书消息失败: ${JSON.stringify(data)}`);
+        dwarn(`Failed to update Feishu message: ${JSON.stringify(data)}`);
         return false;
       }
       return true;
     } catch (err) {
-      console.warn('⚠️ 更新飞书消息异常:', err);
+      dwarn('Failed to update Feishu message:', err);
       return false;
     }
   }
@@ -488,12 +490,12 @@ export class FeishuGateway {
       );
       const data: any = await res.json();
       if (data.code !== 0) {
-        console.warn(`⚠️ 更新飞书 Markdown 消息失败: ${JSON.stringify(data)}`);
+        dwarn(`Failed to update Feishu Markdown message: ${JSON.stringify(data)}`);
         return false;
       }
       return true;
     } catch (err) {
-      console.warn('⚠️ 更新飞书 Markdown 消息异常:', err);
+      dwarn('Failed to update Feishu Markdown message:', err);
       return false;
     }
   }
@@ -534,7 +536,7 @@ export class FeishuGateway {
 
     const data: any = await res.json();
     if (data.code !== 0) {
-      console.error('❌ 飞书发送 markdown 失败:', JSON.stringify(data));
+      derror('Feishu sendMarkdown failed:', JSON.stringify(data));
       return null;
     }
     return data.data?.message_id || null;
@@ -726,10 +728,10 @@ export class FeishuGateway {
         return data.data.reaction_id;
       }
       if (data.code !== 0) {
-        console.warn(`⚠️ 添加 reaction 失败: ${JSON.stringify(data)}`);
+        dwarn(`Failed to add reaction: ${JSON.stringify(data)}`);
       }
     } catch (err) {
-      console.warn('⚠️ 添加 reaction 异常:', err);
+      dwarn('Failed to add reaction:', err);
     }
     return '';
   }
@@ -753,10 +755,10 @@ export class FeishuGateway {
       );
       const data: any = await res.json();
       if (data.code !== 0) {
-        console.warn(`⚠️ 删除 reaction 失败: ${JSON.stringify(data)}`);
+        dwarn(`Failed to remove reaction: ${JSON.stringify(data)}`);
       }
     } catch (err) {
-      console.warn('⚠️ 删除 reaction 异常:', err);
+      dwarn('Failed to remove reaction:', err);
     }
   }
 
@@ -781,7 +783,7 @@ export class FeishuGateway {
       body: formData,
     });
     const data: any = await res.json();
-    if (data.code !== 0) throw new Error(`上传文件失败: ${JSON.stringify(data)}`);
+    if (data.code !== 0) throw new Error(`Upload file failed: ${JSON.stringify(data)}`);
     return data.data.file_key;
   }
 
@@ -814,7 +816,7 @@ export class FeishuGateway {
 
     const data: any = await res.json();
     if (data.code !== 0) {
-      console.error('❌ 飞书发送文件失败:', JSON.stringify(data));
+      derror('Feishu sendFile failed:', JSON.stringify(data));
       return null;
     }
     return data.data?.message_id || null;
@@ -838,7 +840,7 @@ export class FeishuGateway {
       body: formData,
     });
     const data: any = await res.json();
-    if (data.code !== 0) throw new Error(`上传图片失败: ${JSON.stringify(data)}`);
+    if (data.code !== 0) throw new Error(`Upload image failed: ${JSON.stringify(data)}`);
     return data.data.image_key;
   }
 
@@ -871,7 +873,7 @@ export class FeishuGateway {
 
     const data: any = await res.json();
     if (data.code !== 0) {
-      console.error('❌ 飞书发送图片失败:', JSON.stringify(data));
+      derror('Feishu sendImage failed:', JSON.stringify(data));
       return null;
     }
     return data.data?.message_id || null;
@@ -942,7 +944,7 @@ export class FeishuGateway {
 
     const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
 
-    console.log('📤 飞书发送卡片请求:', JSON.stringify({
+    dlog('Feishu sendCard request:', JSON.stringify({
       url: directUrl,
       msg_type: 'interactive',
       cardContent: cardContent,
@@ -959,19 +961,19 @@ export class FeishuGateway {
 
     const data: any = await res.json();
     if (data.code === 0) {
-      console.log('✅ 飞书卡片发送成功, message_id:', data.data?.message_id);
+      dlog('Feishu sendCard ok, message_id:', data.data?.message_id);
       return data.data?.message_id || null;
     }
 
     // 直接发送失败，尝试 reply 方式
-    console.warn(`⚠️ 飞书卡片直接发送失败 (code=${data.code}): ${data.msg}`);
+    dwarn(`Feishu sendCard direct failed (code=${data.code}): ${data.msg}`);
     if (replyToMessageId) {
       const replyUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages/${replyToMessageId}/reply`;
       const replyBody: any = {
         msg_type: 'interactive',
         content: contentStr,
       };
-      console.log('📤 飞书尝试 reply 发送卡片...');
+      dlog('Feishu retrying sendCard via reply...');
       const replyRes = await fetch(replyUrl, {
         method: 'POST',
         headers: {
@@ -982,12 +984,12 @@ export class FeishuGateway {
       });
       const replyData: any = await replyRes.json();
       if (replyData.code === 0) {
-        console.log('✅ 飞书卡片 reply 发送成功, message_id:', replyData.data?.message_id);
+        dlog('Feishu sendCard reply ok, message_id:', replyData.data?.message_id);
         return replyData.data?.message_id || null;
       }
-      console.error('❌ 飞书卡片 reply 也失败:', JSON.stringify(replyData));
+      derror('Feishu sendCard reply also failed:', JSON.stringify(replyData));
     } else {
-      console.error('❌ 飞书发送卡片失败:', JSON.stringify(data));
+      derror('Feishu sendCard failed:', JSON.stringify(data));
     }
     return null;
   }
@@ -1043,12 +1045,12 @@ export class FeishuGateway {
       );
       const data: any = await res.json();
       if (data.code !== 0) {
-        console.warn(`⚠️ 更新飞书卡片失败: ${JSON.stringify(data)}`);
+        dwarn(`Failed to update Feishu card: ${JSON.stringify(data)}`);
         return false;
       }
       return true;
     } catch (err) {
-      console.warn('⚠️ 更新飞书卡片异常:', err);
+      dwarn('Failed to update Feishu card:', err);
       return false;
     }
   }
@@ -1073,7 +1075,7 @@ export class FeishuGateway {
     _replyToMessageId?: string,
   ): Promise<string> {
     // WebSocket 长连接不支持卡片回调，直接使用文本选择模式
-    console.log('📋 WS 长连接模式：使用文本选择（卡片回调需要 HTTP Webhook）');
+    dlog('WS long-connection mode: using text-choice fallback (card callbacks require HTTP webhook)');
     return this.waitForTextChoice(chatId, title, buttons, defaultValue, timeoutMs);
   }
 
