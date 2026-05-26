@@ -5,33 +5,52 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import {
+
+/**
+ * Tests use a per-test isolated fake-home dir inside the OS tmp dir, with
+ * os.homedir() mocked to return it, so they never touch the user's real
+ * ~/.deepv directory. credentials.ts always writes to <home>/.deepv/.
+ *
+ * Note: on Windows, process.env.USERPROFILE is NOT consulted by the native
+ * os.homedir() impl, so vi.mock is the only portable interception point.
+ */
+let fakeHome = '';
+
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual<typeof import('node:os')>('node:os');
+  return {
+    ...actual,
+    default: actual,
+    homedir: () => fakeHome || actual.homedir(),
+  };
+});
+
+const {
   loadCredentials,
   saveCredentials,
   clearCredentials,
   isSenderAuthorized,
   CredentialsLoadError,
-  type FeishuCredentials,
-} from './credentials.js';
+} = await import('./credentials.js');
+type FeishuCredentials = import('./credentials.js').FeishuCredentials;
 
-/**
- * Tests run against a per-test isolated project root inside the OS tmp dir
- * so they never touch the user's real ~/.deepv directory.
- */
-let projectRoot: string;
+let credsDir: string;
 
 beforeEach(async () => {
-  projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dvcode-feishu-creds-'));
+  fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'dvcode-feishu-creds-'));
+  credsDir = path.join(fakeHome, '.deepv');
 });
 
 afterEach(async () => {
-  await fs.rm(projectRoot, { recursive: true, force: true });
+  const toDelete = fakeHome;
+  fakeHome = '';
+  await fs.rm(toDelete, { recursive: true, force: true });
 });
 
 const baseCreds: FeishuCredentials = {
@@ -45,33 +64,33 @@ const baseCreds: FeishuCredentials = {
 
 describe('FeishuCredentials — round-trip', () => {
   it('saveCredentials then loadCredentials returns the original object', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    const loaded = await loadCredentials(projectRoot);
+    await saveCredentials(baseCreds);
+    const loaded = await loadCredentials();
     expect(loaded).toEqual(baseCreds);
   });
 
   it('returns null when credentials file does not exist', async () => {
-    const loaded = await loadCredentials(projectRoot);
+    const loaded = await loadCredentials();
     expect(loaded).toBeNull();
   });
 
   it('clearCredentials removes the file (subsequent load returns null)', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    await clearCredentials(projectRoot);
-    const loaded = await loadCredentials(projectRoot);
+    await saveCredentials(baseCreds);
+    await clearCredentials();
+    const loaded = await loadCredentials();
     expect(loaded).toBeNull();
   });
 
   it('clearCredentials is idempotent on a missing file', async () => {
-    await expect(clearCredentials(projectRoot)).resolves.toBeUndefined();
-    await expect(clearCredentials(projectRoot)).resolves.toBeUndefined();
+    await expect(clearCredentials()).resolves.toBeUndefined();
+    await expect(clearCredentials()).resolves.toBeUndefined();
   });
 });
 
 describe('FeishuCredentials — encryption format', () => {
   it('persists ciphertext, never the plaintext appSecret', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    const filePath = path.join(projectRoot, '.deepv', 'feishu-credentials.json');
+    await saveCredentials(baseCreds);
+    const filePath = path.join(credsDir, 'feishu-credentials.json');
     const onDisk = await fs.readFile(filePath, 'utf8');
     expect(onDisk).not.toContain(baseCreds.appSecret);
     expect(onDisk).not.toContain(baseCreds.appId);
@@ -84,9 +103,9 @@ describe('FeishuCredentials — encryption format', () => {
       // Windows POSIX permission bits are not meaningful — skip.
       return;
     }
-    await saveCredentials(baseCreds, projectRoot);
-    const filePath = path.join(projectRoot, '.deepv', 'feishu-credentials.json');
-    const keyFilePath = path.join(projectRoot, '.deepv', 'feishu-key');
+    await saveCredentials(baseCreds);
+    const filePath = path.join(credsDir, 'feishu-credentials.json');
+    const keyFilePath = path.join(credsDir, 'feishu-key');
 
     const credStat = await fs.stat(filePath);
     const keyStat = await fs.stat(keyFilePath);
@@ -96,8 +115,8 @@ describe('FeishuCredentials — encryption format', () => {
   });
 
   it('throws CredentialsLoadError when ciphertext is corrupted', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    const filePath = path.join(projectRoot, '.deepv', 'feishu-credentials.json');
+    await saveCredentials(baseCreds);
+    const filePath = path.join(credsDir, 'feishu-credentials.json');
     // Flip a hex character inside the ciphertext payload to invalidate the GCM tag.
     const original = await fs.readFile(filePath, 'utf8');
     const corrupted = original.replace(/[0-9a-f]$/i, (last) =>
@@ -105,47 +124,46 @@ describe('FeishuCredentials — encryption format', () => {
     );
     await fs.writeFile(filePath, corrupted);
 
-    await expect(loadCredentials(projectRoot)).rejects.toBeInstanceOf(
+    await expect(loadCredentials()).rejects.toBeInstanceOf(
       CredentialsLoadError,
     );
   });
 
   it('throws CredentialsLoadError when key file is replaced (cannot decrypt)', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    const keyFilePath = path.join(projectRoot, '.deepv', 'feishu-key');
+    await saveCredentials(baseCreds);
+    const keyFilePath = path.join(credsDir, 'feishu-key');
     // Overwrite key with a different random 32-byte key.
     await fs.writeFile(keyFilePath, crypto.randomBytes(32), { mode: 0o600 });
-    await expect(loadCredentials(projectRoot)).rejects.toBeInstanceOf(
+    await expect(loadCredentials()).rejects.toBeInstanceOf(
       CredentialsLoadError,
     );
   });
 
   it('reads legacy AES-256-CBC ciphertext written before the GCM upgrade', async () => {
     // Synthesise a legacy file: <iv-hex>:<cbc-hex> with no 'gcm:' prefix.
-    const dir = path.join(projectRoot, '.deepv');
-    await fs.mkdir(dir, { recursive: true });
+    await fs.mkdir(credsDir, { recursive: true });
     const key = crypto.randomBytes(32);
-    await fs.writeFile(path.join(dir, 'feishu-key'), key, { mode: 0o600 });
+    await fs.writeFile(path.join(credsDir, 'feishu-key'), key, { mode: 0o600 });
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
     const json = JSON.stringify(baseCreds);
     const enc = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
     const legacyPayload = `${iv.toString('hex')}:${enc.toString('hex')}`;
     await fs.writeFile(
-      path.join(dir, 'feishu-credentials.json'),
+      path.join(credsDir, 'feishu-credentials.json'),
       legacyPayload,
       { mode: 0o600 },
     );
 
-    const loaded = await loadCredentials(projectRoot);
+    const loaded = await loadCredentials();
     expect(loaded).toEqual(baseCreds);
   });
 });
 
 describe('FeishuCredentials — file location resolution', () => {
-  it('saves under <projectRoot>/.deepv when projectRoot provided', async () => {
-    await saveCredentials(baseCreds, projectRoot);
-    const filePath = path.join(projectRoot, '.deepv', 'feishu-credentials.json');
+  it('saves under <home>/.deepv (global, not project)', async () => {
+    await saveCredentials(baseCreds);
+    const filePath = path.join(credsDir, 'feishu-credentials.json');
     expect(fsSync.existsSync(filePath)).toBe(true);
   });
 });
