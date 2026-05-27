@@ -44,13 +44,19 @@ import {
   getVersion,
   tokenLimit,
   uiTelemetryService,
+  Config,
+  GeminiClient,
+  BaseTool,
+  ToolResult,
+  Icon,
 } from 'deepv-code-core';
 import { SettingScope } from '../../config/settings.js';
 import { getAvailableModels } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
+import { appEvents, AppEvent } from '../../utils/events.js';
 import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { t, tp } from '../utils/i18n.js';
-import { Part, PartListUnion } from '@google/genai';
+import { Part, PartListUnion, Type } from '@google/genai';
 
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
@@ -68,21 +74,78 @@ let activeAbortController: AbortController | null = null;
 /** 全局命令上下文引用 */
 let globalCommandContext: CommandContext | null = null;
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+interface FeishuProjectRoute {
+  projectRoot: string;
+  description?: string;
+}
+
+// 路由文件路径（指向 ~/.deepv/feishu-projects.json）
+const ROUTE_CONFIG_FILE = path.join(os.homedir(), '.deepv', 'feishu-projects.json');
+
+/**
+ * 读取多项目路由表
+ */
+async function loadProjectRoutes(): Promise<Record<string, FeishuProjectRoute>> {
+  try {
+    const credsDir = path.dirname(ROUTE_CONFIG_FILE);
+    if (!fs.existsSync(credsDir)) {
+      fs.mkdirSync(credsDir, { recursive: true });
+    }
+    if (!fs.existsSync(ROUTE_CONFIG_FILE)) {
+      return {};
+    }
+    const data = fs.readFileSync(ROUTE_CONFIG_FILE, 'utf8');
+    return JSON.parse(data) as Record<string, FeishuProjectRoute>;
+  } catch (e) {
+    dwarn(`Failed to load feishu-projects.json: ${(e as Error).message}`);
+    return {};
+  }
+}
+
+/**
+ * 写入路由表
+ */
+async function saveProjectRoute(chatId: string, route: FeishuProjectRoute): Promise<void> {
+  try {
+    const routes = await loadProjectRoutes();
+    routes[chatId] = route;
+    fs.writeFileSync(ROUTE_CONFIG_FILE, JSON.stringify(routes, null, 2), 'utf8');
+    dlog(`[Router] Successfully bound Chat ID '${chatId}' to '${route.projectRoot}'`);
+  } catch (e) {
+    derror(`Failed to save feishu-projects.json: ${(e as Error).message}`);
+  }
+}
+
+/** 当前活跃的发送者 OpenID (用于拉当前交互的人建群) */
+let activeSenderOpenId: string | null = null;
+
+/** 隔离的运行时环境缓存 (chatId -> { config, geminiClient }) */
+const isolatedSessions = new Map<string, { config: Config; geminiClient: GeminiClient }>();
+
 interface QueuedMessage {
   msg: FeishuMessage;
   resolve: (value: any) => void;
   reject: (err: any) => void;
 }
 
-const messageQueue: QueuedMessage[] = [];
-let isProcessingQueue = false;
+// 群聊独立的队列容器
+const messageQueues = new Map<string, QueuedMessage[]>();
+const isProcessingQueues = new Map<string, boolean>();
 
 function clearMessageQueue() {
-  for (const item of messageQueue) {
-    item.resolve(null);
+  for (const queue of messageQueues.values()) {
+    for (const item of queue) {
+      item.resolve(null);
+    }
   }
-  messageQueue.length = 0;
-  isProcessingQueue = false;
+  messageQueues.clear();
+  isProcessingQueues.clear();
+  isolatedSessions.clear();
+  activeSenderOpenId = null;
 }
 
 /**
@@ -583,6 +646,9 @@ async function handleFeishuCommand(
         };
         config?.setThinkingConfig?.(updated);
         globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        if (config) {
+          appEvents.emit(AppEvent.ModelChanged, config.getModel() || '');
+        }
         return `✨ 已成功将思考模式切换为: **${newMode === 'on' ? '开启' : newMode === 'off' ? '关闭' : '自动'}** (力度: ${updated.effort})`;
       } else if (['low', 'medium', 'high', 'max', 'xhigh'].includes(sub)) {
         const newEffort = sub as any;
@@ -593,6 +659,9 @@ async function handleFeishuCommand(
         };
         config?.setThinkingConfig?.(updated);
         globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        if (config) {
+          appEvents.emit(AppEvent.ModelChanged, config.getModel() || '');
+        }
         return `✨ 已成功开启思考模式，并设置思考力度为: **${newEffort}**`;
       } else {
         return `❌ 未知的思考参数: ${parts[1]}\n请使用 off / auto / low / medium / high / max`;
@@ -651,6 +720,9 @@ async function handleFeishuCommand(
             } else if (switchResult.compressionSkipReason) {
               responseMsg += `\n✓ ${switchResult.compressionSkipReason}`;
             }
+
+            // 🎯 发出 ModelChanged 事件，强制通知并更新 CLI 终端的 Footer 状态显示
+            appEvents.emit(AppEvent.ModelChanged, actualModelName);
             return responseMsg;
           }
         }
@@ -739,16 +811,89 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return reply;
     }
 
-    // 如果当前正在处理，或者队列中已有消息，则提示用户排队
-    if (isProcessingQueue || messageQueue.length > 0) {
-      const queuePosition = messageQueue.length + 1;
-      const queueTip = `⏳ *当前任务正在处理中，您的消息已加入排队队列（当前处于第 ${queuePosition} 位）...*`;
+    // 拦截群内自助绑定的 `/bind` 命令
+    if (messageText.startsWith('/bind')) {
+      const parts = messageText.split(/\s+/);
+      if (parts.length < 2) {
+        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`';
+      }
+      const targetPath = parts[1].trim();
+      try {
+        const path = await import('node:path');
+        const fs = await import('node:fs');
+        const absPath = path.resolve(targetPath);
+        if (!fs.existsSync(absPath)) {
+          fs.mkdirSync(absPath, { recursive: true });
+        }
+        await saveProjectRoute(msg.chatId, { projectRoot: absPath });
+        return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
+      } catch (e: any) {
+        return `❌ 绑定目录失败: ${e.message}`;
+      }
+    }
+
+    // 🎯 更新全局活跃发送人 (让建群工具可以拉当前发消息的人进新群)
+    activeSenderOpenId = msg.senderOpenId;
+
+    // 🎯 实时、动态拉取最新的 config 和 geminiClient，防止闭包在启动后变化而未感知
+    const activeConfig = globalCommandContext?.services?.config || config;
+    const activeClient = activeConfig?.getGeminiClient?.();
+
+    // 🚀 多项目路由环境拦截
+    const routes = await loadProjectRoutes();
+    const route = routes[msg.chatId];
+
+    let currentConfig = activeConfig;
+    let currentClient = activeClient;
+
+    if (route && route.projectRoot) {
+      // 从项目工作目录实例化/加载环境
+      let session = isolatedSessions.get(msg.chatId);
+      if (!session) {
+        dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${route.projectRoot}'`);
+        const isolatedConfig = new Config({
+          sessionId: `feishu-${msg.chatId}-${Date.now()}`,
+          cwd: route.projectRoot,
+          debugMode: config?.getDebugMode() || false,
+          targetDir: route.projectRoot,
+        });
+        const isolatedClient = isolatedConfig.getGeminiClient();
+        session = { config: isolatedConfig, geminiClient: isolatedClient };
+        isolatedSessions.set(msg.chatId, session);
+      }
+      currentConfig = session.config;
+      currentClient = session.geminiClient;
+    } else {
+      // 未绑定。如果当前是群聊消息，提示去单聊由 AI 自助建群，或在群内 /bind 绑定
+      if (msg.chatId.startsWith('oc_')) {
+        const bindTip = `⏳ **本飞书群尚未绑定任何本地项目工作区。**\n\n` +
+          `请群管理员或 Bot 拥有者在此群发送：\n` +
+          `  \`/bind <您本地项目的绝对路径>\`\n` +
+          `*(例如：\`/bind D:\\projects\\my-great-app\`)*\n\n` +
+          `绑定成功后，我将在此专属群里为您提供该项目的 AI 远程控制和代码读写服务！\n\n` +
+          `💡 **提示**: 您也可以在单聊私信中，直接对我说：“创建一个新项目 工作目录是 d:\\123”，让我为您自动建群并绑定工作区哦！`;
+        await gateway.sendMessage(msg.chatId, bindTip, msg.messageId);
+        return null;
+      }
+    }
+
+    // 2. 获取或创建 Chat 专属队列并排队
+    let queue = messageQueues.get(msg.chatId);
+    if (!queue) {
+      queue = [];
+      messageQueues.set(msg.chatId, queue);
+    }
+    const isProcessing = isProcessingQueues.get(msg.chatId) || false;
+
+    if (isProcessing || queue.length > 0) {
+      const queuePosition = queue.length + 1;
+      const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
       await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
     }
 
     return new Promise<string | null>((resolve, reject) => {
-      messageQueue.push({ msg, resolve, reject });
-      processMessageQueue(gateway, config, geminiClient, creds);
+      queue!.push({ msg, resolve, reject });
+      processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId);
     });
   };
 
@@ -787,7 +932,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
 
     if (!geminiClient || !config) {
-      const noLlmReply = '⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。';
+      const noLlmReply = '⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。' +
+        '\n\n💡 **提示**: 即便在 AI 未配置时，您也可以通过发送斜杠命令进行本地控制操作（如输入 `/help` 查看指令，或直接在群聊中发送 `/bind <本地工作区绝对路径>` 强行进行项目手动绑定哦！）';
       tuiContext?.addItem({ type: 'info', text: noLlmReply }, Date.now());
       return noLlmReply;
     }
@@ -1233,18 +1379,20 @@ async function handleStart(context?: CommandContext): Promise<string> {
     return `${headLine}${branchLine}${contentBox}`;
   }
 
-  async function processMessageQueue(
+  async function processMessageQueueForChat(
     gateway: FeishuGateway,
     config: any,
     geminiClient: any,
     creds: FeishuCredentials,
+    chatId: string
   ) {
-    if (isProcessingQueue) return;
-    isProcessingQueue = true;
+    if (isProcessingQueues.get(chatId)) return;
+    isProcessingQueues.set(chatId, true);
 
     try {
-      while (messageQueue.length > 0) {
-        const item = messageQueue.shift();
+      const queue = messageQueues.get(chatId);
+      while (queue && queue.length > 0) {
+        const item = queue.shift();
         if (!item) continue;
 
         const { msg, resolve, reject } = item;
@@ -1256,7 +1404,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
       }
     } finally {
-      isProcessingQueue = false;
+      isProcessingQueues.set(chatId, false);
     }
   }
 
@@ -1285,8 +1433,18 @@ async function handleStart(context?: CommandContext): Promise<string> {
           () => activeReplyToMessageId ?? undefined,
           () => projectRoot,
         ));
+
+        // 🎯 动态注册自动建群及多项目隔离管理工具：create_project_and_group_chat
+        toolRegistry.registerTool(new CreateProjectGroupTool(
+          gateway,
+          () => activeSenderOpenId ?? undefined,
+          async (chatId, path) => {
+            await saveProjectRoute(chatId, { projectRoot: path });
+          }
+        ));
+
         await geminiClient.setTools();
-        dlog('Registered Feishu file-send tool (send_feishu_file)');
+        dlog('Registered Feishu file-send tool and group-chat tool successfully.');
       } catch (toolErr: any) {
         dwarn('Failed to register Feishu tool (continuing):', toolErr.message);
       }
@@ -1316,16 +1474,17 @@ async function handleStop(context?: CommandContext): Promise<string> {
     return t('feishu.stop.not_running');
   }
 
-  // 🎯 动态注销 send_feishu_file 工具
+  // 🎯 动态注销 send_feishu_file 及 create_project_and_group_chat 工具
   const config = context?.services?.config;
   const geminiClient = config?.getGeminiClient?.();
   if (config && geminiClient) {
     try {
       const toolRegistry: ToolRegistry = await config.getToolRegistry();
       const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
-      if (removed) {
+      const removedGroupTool = toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
+      if (removed || removedGroupTool) {
         await geminiClient.setTools();
-        dlog('Unregistered Feishu file-send tool (send_feishu_file)');
+        dlog('Unregistered Feishu file-send and group-chat tools successfully.');
       }
     } catch (toolErr: any) {
       dwarn('Failed to unregister Feishu tool:', toolErr.message);
@@ -1555,6 +1714,90 @@ async function handleInteractive(): Promise<string> {
   }
 
   return t('feishu.interactive.already_running');
+}
+
+interface CreateProjectGroupParams {
+  project_path: string;
+  group_name: string;
+}
+
+class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResult> {
+  static readonly Name = 'create_project_and_group_chat';
+
+  constructor(
+    private readonly gateway: FeishuGateway,
+    private readonly getSenderOpenId: () => string | undefined,
+    private readonly onProjectCreated: (chatId: string, path: string) => Promise<void>
+  ) {
+    super(
+      CreateProjectGroupTool.Name,
+      'CreateProjectAndGroupChat',
+      'Creates a new local directory and automatically creates a dedicated Feishu group chat for this project, inviting the current user and binding the workspace. Only available in direct/P2P chat.',
+      Icon.Globe,
+      {
+        type: Type.OBJECT,
+        properties: {
+          project_path: {
+            type: Type.STRING,
+            description: 'The absolute local physical path to create or bind, e.g. D:\\my-project'
+          },
+          group_name: {
+            type: Type.STRING,
+            description: 'The name for the newly created group chat'
+          }
+        },
+        required: ['project_path', 'group_name']
+      }
+    );
+  }
+
+  async execute(params: CreateProjectGroupParams, signal: AbortSignal): Promise<ToolResult> {
+    const senderOpenId = this.getSenderOpenId();
+    if (!senderOpenId) {
+      return {
+        llmContent: 'Error: Cannot create group chat because the sender openId is unknown.',
+        returnDisplay: 'Error: Sender unknown'
+      };
+    }
+
+    try {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+
+      // 1. 本地目录安全校检/自建
+      const absPath = path.resolve(params.project_path);
+      if (!fs.existsSync(absPath)) {
+        fs.mkdirSync(absPath, { recursive: true });
+        dlog(`[CreateProjectGroupTool] Created folder: ${absPath}`);
+      }
+
+      // 2. 飞书端调用建群并拉人
+      const newChatId = await this.gateway.createGroupChat(params.group_name, senderOpenId);
+      if (!newChatId) {
+        return {
+          llmContent: `Error: Feishu open platform failed to create group chat '${params.group_name}'.`,
+          returnDisplay: 'Error creating Feishu chat'
+        };
+      }
+
+      // 3. 触发持久化绑定路由
+      await this.onProjectCreated(newChatId, absPath);
+
+      // 4. 主动往新群发首条欢迎及就绪通知消息
+      const welcomeMsg = `👋 您好！本群项目工作目录 \`${absPath}\` 已经成功就绪。现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！`;
+      await this.gateway.sendMessage(newChatId, welcomeMsg);
+
+      return {
+        llmContent: `Successfully created project directory at '${absPath}', and created dedicated Feishu group chat '${params.group_name}' with ID '${newChatId}'. Invited user and sent setup ready notification into the group successfully.`,
+        returnDisplay: `Successfully created project and group chat ${params.group_name}`
+      };
+    } catch (e: any) {
+      return {
+        llmContent: `Error during project creation and binding: ${e.message}`,
+        returnDisplay: `Error: ${e.message}`
+      };
+    }
+  }
 }
 
 /** 通用 MessageActionReturn 包装 */
