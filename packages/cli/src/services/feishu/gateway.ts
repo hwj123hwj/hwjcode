@@ -155,6 +155,34 @@ export class FeishuGateway {
   }
 
   /**
+   * 下载飞书 IM 消息中的图片资源并保存为本地临时文件
+   */
+  async downloadImageResource(messageId: string, imageKey: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return null;
+
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/resources/${imageKey}?type=image`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+
+      const buffer = await res.arrayBuffer();
+
+      const fs = await import('node:fs');
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const tempDir = os.tmpdir();
+      const localPath = path.join(tempDir, `feishu-image-${imageKey}.png`);
+      fs.writeFileSync(localPath, Buffer.from(buffer));
+      return localPath;
+    } catch (e: any) {
+      dlog(`[Feishu] downloadImageResource failed: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /**
    * 连接飞书 WS 事件订阅（通过 SDK WSClient）
    *
    * SDK 自动：
@@ -189,13 +217,36 @@ export class FeishuGateway {
 
         // 解析文本内容，确保始终返回字符串
         let text = '';
-        try {
-          const content = JSON.parse(message.content || '{}');
-          // 确保 text 是字符串类型
-          text = typeof content.text === 'string' ? content.text : String(content.text || '');
-        } catch {
-          // JSON 解析失败，直接使用 content（确保转为字符串）
-          text = typeof message.content === 'string' ? message.content : String(message.content || '');
+        const msgType = message.message_type || 'text';
+
+        if (msgType === 'text') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            text = typeof content.text === 'string' ? content.text : String(content.text || '');
+          } catch {
+            text = typeof message.content === 'string' ? message.content : String(message.content || '');
+          }
+        } else if (msgType === 'image') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const imageKey = content.image_key;
+            if (imageKey) {
+              dlog(`[Feishu] Downloading incoming image key: ${imageKey}...`);
+              const localPath = await this.downloadImageResource(message.message_id, imageKey);
+              if (localPath) {
+                text = `![image](${localPath})`;
+                dlog(`[Feishu] Incoming image downloaded successfully to local path: ${localPath}`);
+              } else {
+                text = `[图片消息: ${imageKey}]`;
+              }
+            } else {
+              text = '[图片消息]';
+            }
+          } catch {
+            text = '[图片消息]';
+          }
+        } else {
+          text = `[不支持的消息类型: ${msgType}]`;
         }
 
         // 去掉 @bot 占位符
