@@ -898,7 +898,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             gateway,
             msg.chatId,
             msg.messageId,
-            accumulatedMarkdown,
+            replyText,
             projectRoot,
           );
           return null; // 自己已发送，不触发 gateway 自动回复
