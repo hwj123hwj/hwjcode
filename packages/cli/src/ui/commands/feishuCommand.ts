@@ -1205,9 +1205,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
       branchLine = `\n └ ... (showing last ${displayedLines.length} lines, ${totalLines} lines total)`;
 
-      // 构建美化垂直双竖线边框的黑框控制台
-      const boxedLines = displayedLines.map(line => ` │ ${line.padEnd(80).slice(0, 80)} │`).join('\n');
-      contentBox = `\n │${'─'.repeat(81)}│\n${boxedLines}\n │${'─'.repeat(81)}│`;
+      // 直接使用飞书原生支持的最美观且自适应等宽的代码框组件，确保在任何端上绝不乱行
+      contentBox = `\n\`\`\`bash\n${displayedLines.join('\n')}\n\`\`\``;
     } else if (toolName === 'read_file') {
       const startLine = args.offset !== undefined ? args.offset + 1 : 1;
       const limit = args.limit !== undefined ? args.limit : 'all';
