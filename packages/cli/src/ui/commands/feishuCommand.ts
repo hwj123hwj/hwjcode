@@ -935,7 +935,7 @@ async function formatStatusMessage(config: any, geminiClient: any, chatId?: stri
     `  Credits: ${lastTokenUsage?.creditsUsage != null ? lastTokenUsage.creditsUsage : 0} / ${remainingCredits}`,
     `📚 **Context**: ${contextK}/${maxM} (${contextPct})`,
     `🧵 **Session**: feishu_${chatId || 'unknown'}`,
-    `⚙️ **Think**: ${currentConfig.effort || 'auto'} / ${currentConfig.mode}`,
+    `⚙️ **Think**: ${currentConfig.mode === 'off' ? 'off' : (currentConfig.effort || 'auto')}`,
   ].join('\n');
 }
 
