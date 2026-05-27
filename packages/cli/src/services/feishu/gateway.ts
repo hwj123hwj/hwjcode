@@ -116,6 +116,10 @@ export class FeishuGateway {
   get onDisconnect(): ((error?: Error) => void) | null { return this._onDisconnect; }
   set onDisconnect(fn: ((error?: Error) => void) | null) { this._onDisconnect = fn; }
 
+  getAppId(): string { return this.appId; }
+  getAppSecret(): string { return this.appSecret; }
+  getDomain(): string { return this.domain; }
+
   constructor(appId: string, appSecret: string, domain: 'feishu' | 'lark' = 'feishu') {
     this.appId = appId;
     this.appSecret = appSecret;
