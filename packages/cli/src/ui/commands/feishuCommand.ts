@@ -17,6 +17,7 @@
  *   /feishu logout    — 清除凭证
  */
 
+import qrcodeTerminal from 'qrcode-terminal';
 import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
 import { MessageType } from '../types.js';
 import {
@@ -195,7 +196,7 @@ async function handleSetup(args: string, ctx?: CommandContext): Promise<string> 
     const parts = rest.split(/\s+/).filter(Boolean);
     const appId = parts[0];
     const appSecret = parts[1];
-    return await handleManualSetup(appId, appSecret);
+    return await handleManualSetup(appId, appSecret, ctx);
   }
 
   // 没有 --manual 则走 QR
@@ -208,15 +209,20 @@ async function handleSetup(args: string, ctx?: CommandContext): Promise<string> 
  * qrcode-terminal 默认会用空格 + █ 字符渲染，small 模式用半角块字符
  * 让二维码体积减半，更适合 TUI 窗口显示。
  *
+ * 注意：qrcode-terminal 的 generate 是**同步** 调用 callback 的（没有任何 IO），
+ * 所以可以直接通过闭包变量收集结果。
+ *
  * 失败时返回 null，调用方可以降级到"只展示链接"。
  */
 function renderQrCode(text: string): string | null {
   try {
-    // qrcode-terminal 是 CJS 模块，运行时 require 即可
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const qrcode = require('qrcode-terminal');
     let output = '';
-    qrcode.generate(text, { small: true }, (qr: string) => {
+    const generator = (qrcodeTerminal as any).generate || (qrcodeTerminal as any).default?.generate;
+    if (typeof generator !== 'function') {
+      dwarn('[Feishu] qrcodeTerminal.generate is not a function');
+      return null;
+    }
+    generator(text, { small: true }, (qr: string) => {
       output = qr;
     });
     return output || null;
@@ -307,7 +313,7 @@ async function handleQrSetup(ctx?: CommandContext): Promise<string> {
           );
           return;
         }
-        const result = await finalizeQrSetup(pollResult);
+        const result = await finalizeQrSetup(pollResult, ctx);
         ctx.ui.addItem(
           { type: MessageType.INFO, text: result },
           Date.now(),
@@ -338,12 +344,15 @@ async function handleQrSetup(ctx?: CommandContext): Promise<string> {
  * 阶段 2 的收尾：拿到 device-code 轮询结果后，做 probe + 保存凭证 + 拼最终提示。
  * 提取成独立函数是为了让交互式与非交互式两条调用路径共享同一段逻辑。
  */
-async function finalizeQrSetup(pollResult: {
-  appId: string;
-  appSecret: string;
-  domain: string;
-  openId?: string;
-}): Promise<string> {
+async function finalizeQrSetup(
+  pollResult: {
+    appId: string;
+    appSecret: string;
+    domain: string;
+    openId?: string;
+  },
+  ctx?: CommandContext,
+): Promise<string> {
   const lines: string[] = [];
   const botInfo = await probeCredentials(
     pollResult.appId, pollResult.appSecret, pollResult.domain,
@@ -369,6 +378,18 @@ async function finalizeQrSetup(pollResult: {
 
   // ✨ 关键升级：检测应用已开通的 scope，输出"一键申请缺失权限"链接
   appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
+
+  // 🚀 自动帮用户执行 start 逻辑以启动监听服务
+  try {
+    lines.push('');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('🚀 **正在为您自动开启飞书 Bot 监听服务...**');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    const startMsg = await handleStart(ctx);
+    lines.push(startMsg);
+  } catch (err: any) {
+    lines.push(`❌ 自动启动服务失败：${err?.message || err}`);
+  }
 
   lines.push('');
   lines.push(t('feishu.setup.qr.next_step_start'));
@@ -461,7 +482,11 @@ function appendPostSetupGuidance(
 /**
  * 档 3：手动输入凭据
  */
-async function handleManualSetup(appId?: string, appSecret?: string): Promise<string> {
+async function handleManualSetup(
+  appId?: string,
+  appSecret?: string,
+  ctx?: CommandContext,
+): Promise<string> {
   if (!appId || !appSecret) {
     return [
       t('feishu.setup.manual.title'),
@@ -499,6 +524,18 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
 
   // ✨ 与 QR setup 一致，附加「一键开权限」+ 事件订阅引导
   appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
+
+  // 🚀 手动配置成功后，也自动帮用户执行 start 逻辑以启动监听服务
+  try {
+    lines.push('');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('🚀 **正在为您自动开启飞书 Bot 监听服务...**');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    const startMsg = await handleStart(ctx);
+    lines.push(startMsg);
+  } catch (err: any) {
+    lines.push(`❌ 自动启动服务失败：${err?.message || err}`);
+  }
 
   lines.push('');
   lines.push(t('feishu.setup.qr.next_step_start'));
