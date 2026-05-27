@@ -1154,6 +1154,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
         ? route.projectRoot
         : ((typeof activeConfig?.getProjectRoot === 'function' && activeConfig.getProjectRoot()) || process.cwd());
 
+      // 🔍 打印实时调试诊断信息到 TUI 大厅，以便看清到底解析到了哪个 chatId 和工作目录
+      tuiContext?.addItem({
+        type: 'info',
+        text: `🔍 [Router] 收到来自 Chat ID \`${msg.chatId}\` 的消息，解析工作目录为: \`${workspaceRoot}\` (绑定路由: ${route ? '有' : '无'})`
+      }, Date.now());
+
       dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${workspaceRoot}'`);
       const isolatedConfig = new Config({
         sessionId: `feishu-${msg.chatId}-${Date.now()}`,
@@ -1163,6 +1169,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
       });
 
       try {
+        // 🚀 关键：必须先对全新的 Config 实例执行 initialize()，否则内部的 toolRegistry、
+        // hookSystem 等核心组件不会被构建，导致 refreshAuth 抛错或 fallback 回主环境，
+        // 从而引发“群聊工作目录依旧是 D:\projects\deepVcode\DeepCode”的安全状态漂移 Bug。
+        dlog(`[Router] Initializing isolatedConfig on '${workspaceRoot}'...`);
+        await isolatedConfig.initialize();
+
         // 主动 refreshAuth 初始化 GeminiClient
         const settings = globalCommandContext?.services?.settings;
         const isolatedAuthType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
