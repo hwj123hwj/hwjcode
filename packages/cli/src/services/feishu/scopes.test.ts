@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   REQUIRED_APP_SCOPES,
+  SENSITIVE_GROUP_MSG_SCOPE,
   buildScopeApplyUrl,
   buildPermissionPageUrl,
   buildEventSubUrl,
@@ -29,6 +30,20 @@ describe('scopes/REQUIRED_APP_SCOPES', () => {
     // Mirrors openclaw-lark's HIGH_RISK_SCOPES policy. dvcode never sends
     // as a user, only as the bot, so this scope must NOT be requested.
     expect([...REQUIRED_APP_SCOPES]).not.toContain('im:message.send_as_user');
+  });
+
+  it('does NOT include the sensitive im:message.group_msg scope by default', () => {
+    // im:message.group_msg is the "no-@-mention required" scope but it's
+    // sensitive (needs human review at Feishu). It must be opt-in only,
+    // never silently bundled into the default required list.
+    expect([...REQUIRED_APP_SCOPES]).not.toContain(SENSITIVE_GROUP_MSG_SCOPE);
+    expect([...REQUIRED_APP_SCOPES]).not.toContain('im:message.group_msg');
+  });
+});
+
+describe('scopes/SENSITIVE_GROUP_MSG_SCOPE', () => {
+  it('exposes the sensitive scope name as a separate constant', () => {
+    expect(SENSITIVE_GROUP_MSG_SCOPE).toBe('im:message.group_msg');
   });
 });
 
