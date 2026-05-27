@@ -1513,7 +1513,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           } else {
             await gateway.sendMessage(msg.chatId, cmdResult, msg.messageId);
           }
-          return cmdResult;
+          return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
         }
         // 如果是未知斜杠命令，给予友好提示，也是直接响应不排队
         if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
@@ -1528,7 +1528,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           } else {
             await gateway.sendMessage(msg.chatId, hint, msg.messageId);
           }
-          return hint;
+          return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
         }
       } catch (err: any) {
         const errMsg = `❌ 执行命令出错：${err.message || err}`;
@@ -1542,7 +1542,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         } else {
           await gateway.sendMessage(msg.chatId, errMsg, msg.messageId);
         }
-        return errMsg;
+        return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
       }
     }
 
