@@ -1376,6 +1376,32 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
       // Agent 循环：和 TUI 共享同一个会话，走 geminiClient.sendMessageStream
       let currentMessage: PartListUnion = messageText;
+
+      // 🎨 完美多模态对齐：检测输入消息中是否带有由飞书网关自动下载的本地图片标记 ![image](path)
+      // 如果存在，我们将该图片读取为 Base64 并构造成 Gemini 兼容的多模态 `inlineData` Part 共同投喂！
+      const imageMatch = messageText.match(/!\[image\]\(([^)]+)\)/);
+      if (imageMatch) {
+        const localImagePath = imageMatch[1];
+        try {
+          if (fs.existsSync(localImagePath)) {
+            const ext = path.extname(localImagePath).toLowerCase();
+            const mimeType = ext === '.png' ? 'image/png' :
+                             ext === '.gif' ? 'image/gif' :
+                             ext === '.webp' ? 'image/webp' : 'image/jpeg';
+            const base64Data = fs.readFileSync(localImagePath).toString('base64');
+            const strippedText = messageText.replace(/!\[image\]\([^)]+\)/g, '').trim();
+
+            currentMessage = [
+              { inlineData: { mimeType, data: base64Data } },
+              { text: strippedText || '请帮我阅读分析这张图片。' }
+            ];
+            dlog(`[Feishu] Multimodal image part successfully constructed from: ${localImagePath}`);
+          }
+        } catch (e: any) {
+          dwarn(`[Feishu] Failed to convert local image to inlineData: ${e?.message || e}`);
+        }
+      }
+
       const MAX_TURNS = 100;
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
