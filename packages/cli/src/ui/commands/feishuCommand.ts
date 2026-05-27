@@ -41,7 +41,13 @@ import {
   ToolCallRequestInfo,
   SessionManager,
   isWithinRoot,
+  getVersion,
+  tokenLimit,
+  uiTelemetryService,
 } from 'deepv-code-core';
+import { SettingScope } from '../../config/settings.js';
+import { getAvailableModels } from './modelCommand.js';
+import { getCreditsService } from '../../services/creditsService.js';
 import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { t, tp } from '../utils/i18n.js';
 import { Part, PartListUnion } from '@google/genai';
@@ -55,6 +61,12 @@ let tuiContext: CommandContext['ui'] | null = null;
 /** 当前活跃的飞书会话信息（用于 send_feishu_file 工具发送文件） */
 let activeChatId: string | null = null;
 let activeReplyToMessageId: string | null = null;
+
+/** 当前正在运行任务的中止控制器 */
+let activeAbortController: AbortController | null = null;
+
+/** 全局命令上下文引用 */
+let globalCommandContext: CommandContext | null = null;
 
 interface QueuedMessage {
   msg: FeishuMessage;
@@ -444,6 +456,10 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/new':      '新建会话（重置对话历史，保留工具能力）',
   '/compress': '压缩对话历史（释放上下文窗口）',
   '/compact':  '同 /compress',
+  '/stop':     '中止当前正在运行的 AI 任务',
+  '/status':   '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
+  '/thinking': '切换/配置 AI 思考模式与深度',
+  '/model':    '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
   '/help':     '显示此帮助',
 };
 
@@ -487,6 +503,149 @@ async function handleFeishuCommand(
         return '⚠️ 没有需要压缩的内容';
       } catch (err: any) {
         return `❌ 压缩失败: ${err.message}`;
+      }
+    }
+
+    case '/stop': {
+      if (activeAbortController) {
+        activeAbortController.abort();
+        activeAbortController = null;
+        return '🛑 已中止当前正在运行的 AI 任务。';
+      }
+      return '⚠️ 当前没有正在运行的 AI 任务。';
+    }
+
+    case '/status': {
+      try {
+        const cliVersion = await getVersion().catch(() => 'unknown');
+
+        let creditsStr = '获取失败';
+        try {
+          const creditsInfo = await getCreditsService().getCreditsInfo(true);
+          if (creditsInfo) {
+            creditsStr = `${creditsInfo.remainingCredits.toLocaleString()} / ${creditsInfo.totalCredits.toLocaleString()} (已用: ${creditsInfo.usedCredits.toLocaleString()} Credits)`;
+          }
+        } catch (e) {
+          creditsStr = '未知';
+        }
+
+        const currentModel = config?.getModel() || '未选择';
+        const cloudModelInfo = config?.getCloudModelInfo?.(currentModel);
+        const modelDisplayName = cloudModelInfo?.displayName || currentModel;
+
+        const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+        const thinkingStr = `${currentConfig.mode === 'on' ? '开启' : currentConfig.mode === 'off' ? '关闭' : '自动'} (力度: ${currentConfig.effort || 'auto'})`;
+
+        const maxTokens = tokenLimit(currentModel, config || undefined);
+        const actualPromptTokens = uiTelemetryService.getLastPromptTokenCount();
+
+        return [
+          `📊 **DeepV Code CLI 状态面板**`,
+          `───────────────────────`,
+          `🤖 **当前模型**: ${modelDisplayName}`,
+          `💭 **思考模式**: ${thinkingStr}`,
+          `📦 **上下文大小**: ${actualPromptTokens ? `${actualPromptTokens.toLocaleString()}` : '0'} / ${maxTokens ? `${maxTokens.toLocaleString()}` : '未知'} tokens`,
+          `💰 **积分剩余量**: ${creditsStr}`,
+          `💻 **CLI 版本**: v${cliVersion}`,
+          `───────────────────────`,
+        ].join('\n');
+      } catch (err: any) {
+        return `❌ 获取状态信息失败: ${err.message}`;
+      }
+    }
+
+    case '/thinking': {
+      const parts = messageText.split(/\s+/);
+      if (parts.length === 1) {
+        const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+        return [
+          `💭 **思考配置状态**`,
+          `───────────────────────`,
+          `当前思考模式: **${currentConfig.mode === 'on' ? '开启' : currentConfig.mode === 'off' ? '关闭' : '自动'}**`,
+          `思考强度力度: **${currentConfig.effort || 'auto'}**`,
+          `───────────────────────`,
+          `💡 **使用以下命令进行切换**:`,
+          `  /thinking off  - 关闭思考模式`,
+          `  /thinking auto - 设为自动模式`,
+          `  /thinking low|medium|high|max - 开启并设置思考强度`,
+        ].join('\n');
+      }
+
+      const sub = parts[1].toLowerCase();
+      const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+
+      if (['on', 'off', 'auto'].includes(sub)) {
+        const newMode = sub as 'on' | 'off' | 'auto';
+        const updated = {
+          ...currentConfig,
+          mode: newMode,
+          effort: newMode === 'auto' ? 'auto' : (currentConfig.effort ?? 'auto')
+        };
+        config?.setThinkingConfig?.(updated);
+        globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        return `✨ 已成功将思考模式切换为: **${newMode === 'on' ? '开启' : newMode === 'off' ? '关闭' : '自动'}** (力度: ${updated.effort})`;
+      } else if (['low', 'medium', 'high', 'max', 'xhigh'].includes(sub)) {
+        const newEffort = sub as any;
+        const updated = {
+          ...currentConfig,
+          mode: 'on' as const,
+          effort: newEffort
+        };
+        config?.setThinkingConfig?.(updated);
+        globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        return `✨ 已成功开启思考模式，并设置思考力度为: **${newEffort}**`;
+      } else {
+        return `❌ 未知的思考参数: ${parts[1]}\n请使用 off / auto / low / medium / high / max`;
+      }
+    }
+
+    case '/model': {
+      const parts = messageText.split(/\s+/);
+      const settings = globalCommandContext?.services?.settings;
+      if (!settings) {
+        return '❌ settings 服务不可用，无法更改模型。';
+      }
+
+      try {
+        const { modelNames, modelInfos } = await getAvailableModels(settings, config || undefined);
+
+        if (parts.length === 1) {
+          // 列出可用模型列表
+          const lines = ['🤖 **可用模型列表:**', ''];
+          modelInfos.forEach((m: any) => {
+            let modelLine = `• **${m.name}** (${m.displayName})`;
+            if (m.creditsPerRequest) {
+              modelLine += ` - ${m.creditsPerRequest}x credits`;
+            }
+            lines.push(modelLine);
+          });
+          lines.push('');
+          lines.push('💡 **提示**: 输入 `/model <模型名>` 即可在线切换 AI 模型');
+          return lines.join('\n');
+        }
+
+        const targetModelName = parts[1].trim();
+        // 查找最匹配的模型
+        const exactMatch = modelInfos.find((m: any) => m.name.toLowerCase() === targetModelName.toLowerCase() || m.displayName.toLowerCase() === targetModelName.toLowerCase());
+
+        if (!exactMatch) {
+          return `❌ 未能找到模型 "${targetModelName}"，请通过输入 \`/model\` 查看可用模型列表。`;
+        }
+
+        const actualModelName = exactMatch.name;
+        settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
+
+        if (config) {
+          const geminiClient = config.getGeminiClient();
+          if (geminiClient) {
+            await geminiClient.waitForChatInitialized();
+            await geminiClient.switchModel(actualModelName, new AbortController().signal);
+          }
+        }
+
+        return `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
+      } catch (err: any) {
+        return `❌ 切换模型失败: ${err.message}`;
       }
     }
 
@@ -535,6 +694,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
   if (context?.ui) {
     tuiContext = context.ui;
   }
+  globalCommandContext = context || null;
 
   // 获取 GeminiClient
   const config = context?.services?.config;
@@ -622,7 +782,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     const toolRegistry: ToolRegistry = await config.getToolRegistry();
     const abortController = new AbortController();
+    activeAbortController = abortController;
     const promptId = `feishu-${Date.now()}`;
+
+    let activeCardId: string | null = null;
+    let accumulatedMarkdown = '';
 
     try {
       // 确保 chat 已初始化
@@ -631,9 +795,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
       // Agent 循环：和 TUI 共享同一个会话，走 geminiClient.sendMessageStream
       let currentMessage: PartListUnion = messageText;
       const MAX_TURNS = 100;
-
-      let activeCardId: string | null = null;
-      let accumulatedMarkdown = '';
 
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const stream = geminiClient.sendMessageStream(
@@ -814,6 +975,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
       return null;
     } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('canceled') || err.message?.includes('cancelled')) {
+        if (activeCardId) {
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中止)', accumulatedMarkdown + '\n\n*🛑 任务已被用户中止。*');
+        }
+        return null;
+      }
       derror('Feishu Agent processing error:', err.message);
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
       tuiContext?.addItem(
@@ -821,6 +988,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
         Date.now(),
       );
       return errorReply;
+    } finally {
+      activeAbortController = null;
     }
   }
 
@@ -947,6 +1116,7 @@ async function handleStop(context?: CommandContext): Promise<string> {
   await activeGateway.disconnect();
   activeGateway = null;
   tuiContext = null; // 清除 TUI 上下文
+  globalCommandContext = null;
   activeChatId = null;
   activeReplyToMessageId = null;
   return t('feishu.stop.stopped');
