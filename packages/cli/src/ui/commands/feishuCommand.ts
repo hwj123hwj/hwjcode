@@ -1978,6 +1978,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
               break;
             case GeminiEventType.TokenUsage:
               lastRequestTokenUsage = event.value;
+              if (msg && msg.chatId) {
+                chatLastTokenUsage.set(msg.chatId, event.value);
+              }
               break;
             case GeminiEventType.ChatCompressed:
               tuiContext?.addItem({ type: 'info', text: t('feishu.tui.context_compressed') }, Date.now());
