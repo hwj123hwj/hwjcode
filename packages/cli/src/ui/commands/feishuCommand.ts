@@ -865,7 +865,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       currentClient = session.geminiClient;
     } else {
       // 未绑定。如果当前是群聊消息，提示去单聊由 AI 自助建群，或在群内 /bind 绑定
-      if (msg.chatId.startsWith('oc_')) {
+      if (msg.chatType === 'group') {
         const bindTip = `⏳ **本飞书群尚未绑定任何本地项目工作区。**\n\n` +
           `请群管理员或 Bot 拥有者在此群发送：\n` +
           `  \`/bind <您本地项目的绝对路径>\`\n` +
