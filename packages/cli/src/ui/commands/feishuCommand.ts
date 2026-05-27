@@ -66,7 +66,17 @@ import {
   loadServerHierarchicalMemory,
   FileDiscoveryService,
   ProxyAuthManager,
+  SettingsManager,
+  MarketplaceManager,
+  SkillLoader,
 } from 'deepv-code-core';
+import { CommandService } from '../../services/CommandService.js';
+import { McpPromptLoader } from '../../services/McpPromptLoader.js';
+import { BuiltinCommandLoader } from '../../services/BuiltinCommandLoader.js';
+import { InlineCommandLoader } from '../../services/InlineCommandLoader.js';
+import { ExtensionCommandLoader } from '../../services/ExtensionCommandLoader.js';
+import { FileCommandLoader } from '../../services/FileCommandLoader.js';
+import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command-loader.js';
 import { SettingScope } from '../../config/settings.js';
 import { getAvailableModels } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
@@ -1209,6 +1219,205 @@ async function handleFeishuCommand(
   }
 }
 
+interface CliSlashCommandResult {
+  type: 'text' | 'submit_prompt';
+  content: string;
+}
+
+/**
+ * 载入并执行通用的 CLI 斜杠命令
+ */
+async function handleCliSlashCommandInFeishu(
+  messageText: string,
+  config: any,
+  chatId: string,
+): Promise<CliSlashCommandResult | null> {
+  const settingsManager = new SettingsManager();
+  const marketplaceManager = new MarketplaceManager(settingsManager);
+  const skillLoader = new SkillLoader(settingsManager, marketplaceManager);
+
+  // 1. 初始化 loaders
+  const loaders = [
+    new McpPromptLoader(config),
+    new BuiltinCommandLoader(config),
+    new InlineCommandLoader(config),
+    new ExtensionCommandLoader(config),
+    new FileCommandLoader(config),
+    new PluginCommandLoader(skillLoader, settingsManager),
+  ];
+
+  // 2. 加载所有的 CLI SlashCommand
+  const abortController = new AbortController();
+  const commandService = await CommandService.create(loaders, abortController.signal);
+  const commands = commandService.getCommands();
+
+  // 3. 解析用户输入的命令
+  const trimmed = messageText.trim();
+  const parts = trimmed.substring(1).trim().split(/\s+/);
+  const commandPath = parts.filter((p) => p);
+
+  if (commandPath.length === 0) {
+    return null;
+  }
+
+  // 4. 寻找匹配的命令
+  let currentCommands: readonly SlashCommand[] = commands;
+  let commandToExecute: SlashCommand | undefined;
+  let pathIndex = 0;
+
+  for (const part of commandPath) {
+    let foundCommand = currentCommands.find((cmd) => cmd.name === part);
+    if (!foundCommand) {
+      foundCommand = currentCommands.find((cmd) =>
+        cmd.altNames?.includes(part),
+      );
+    }
+
+    if (foundCommand) {
+      commandToExecute = foundCommand;
+      pathIndex++;
+      if (foundCommand.subCommands) {
+        currentCommands = foundCommand.subCommands;
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  if (!commandToExecute) {
+    return null; // 不是有效 CLI 斜杠命令
+  }
+
+  // 5. 提取参数
+  const args = parts.slice(pathIndex).join(' ');
+
+  // 6. 构造 CommandContext 并执行
+  const collectedTexts: string[] = [];
+  const context: CommandContext = {
+    invocation: {
+      raw: trimmed,
+      name: commandToExecute.name,
+      args,
+    },
+    isNonInteractive: true,
+    services: {
+      config,
+      settings: globalCommandContext?.services?.settings || ({} as any),
+      git: globalCommandContext?.services?.git,
+      logger: console as any,
+    },
+    ui: {
+      addItem: (item) => {
+        if (item && item.text) {
+          collectedTexts.push(item.text);
+        }
+        return Date.now();
+      },
+      clear: () => {
+        collectedTexts.push('🧹 (屏幕已清空)');
+      },
+      setDebugMessage: () => {},
+      pendingItem: null,
+      setPendingItem: () => {},
+      loadHistory: () => {},
+      toggleCorgiMode: () => {},
+      toggleVimEnabled: async () => false,
+    },
+    session: {
+      stats: {
+        sessionStartTime: new Date(),
+        lastPromptTokenCount: 0,
+        promptCount: 0,
+        subAgentStats: {
+          totalApiCalls: 0,
+          totalErrors: 0,
+          totalLatencyMs: 0,
+          totalTokens: 0,
+          promptTokens: 0,
+          candidatesTokens: 0,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          cacheReadTokens: 0,
+          thoughtsTokens: 0,
+          toolTokens: 0,
+        },
+        metrics: {
+          models: {},
+          tools: {
+            totalCalls: 0,
+            totalSuccess: 0,
+            totalFail: 0,
+            totalDurationMs: 0,
+            totalDecisions: {
+              accept: 0,
+              reject: 0,
+              modify: 0,
+            },
+            byName: {},
+          },
+        },
+      },
+      cumulativeCredits: 0,
+      totalSessionCredits: 0,
+    },
+  };
+
+  if (commandToExecute.action) {
+    const actionResult = await commandToExecute.action(context, args);
+
+    // 如果命令执行返回了结果
+    if (actionResult) {
+      if (actionResult.type === 'message') {
+        collectedTexts.push(actionResult.content);
+      } else if (actionResult.type === 'submit_prompt') {
+        return {
+          type: 'submit_prompt',
+          content: actionResult.content,
+        };
+      } else if (actionResult.type === 'dialog') {
+        // 提供极致贴心的飞书端 TUI 交互拦截友好提示
+        const dialogType = actionResult.dialog;
+        let hint = `⚠️ **该命令需要终端（TUI）交互界面支持。**\n\n您当前正在通过【飞书机器人远程模式】进行操作，无法打开本地 TUI 设置浮窗。`;
+
+        if (dialogType === 'settings-menu' || dialogType === 'theme' || dialogType === 'editor') {
+          hint += `\n\n💡 **您可以通过输入具体的配置子命令来直接配置（免交互）**:\n` +
+                  `  • \`/model <模型名>\` - 在线直接切换 AI 模型\n` +
+                  `  • \`/thinking <off|auto|high>\` - 配置 AI 思考模式与力度`;
+        } else if (dialogType === 'debate-wizard') {
+          hint += `\n\n💡 **您可以通过以下免交互的辩论子命令来进行管理**:\n` +
+                  `  • \`/debate status\` - 查看当前辩论详情\n` +
+                  `  • \`/debate continue\` - 继续暂停的辩论\n` +
+                  `  • \`/debate end\` - 强制结束当前辩论`;
+        } else if (dialogType === 'goal-wizard') {
+          hint += `\n\n💡 **目标驱动模式在飞书端暂仅支持清空操作**:\n` +
+                  `  • \`/goal clear\` - 结束当前 goal 模式，释放契约约束\n\n` +
+                  `*(如需开启新目标契约任务，请直接在您的 CLI 终端物理机上通过 \`/goal\` 设定)*`;
+        }
+
+        collectedTexts.push(hint);
+      } else if (actionResult.type === 'select_session') {
+        collectedTexts.push(
+          `⚠️ **该命令需要 TUI 列表光标交互支持。**\n\n` +
+          `您当前处于飞书端，无法进行光标选择。建议您通过 \`/new\` 直接开始一个干净的新会话。`
+        );
+      } else if (actionResult.type === 'quit') {
+        collectedTexts.push(
+          `⚠️ **无法在远程模式下终止服务端进程。**\n\n` +
+          `如果您想中断当前的 AI 生成任务，请使用 \`/stop\` 命令。`
+        );
+      }
+    }
+  }
+
+  // 返回收集到的所有输出文本
+  return {
+    type: 'text',
+    content: collectedTexts.join('\n'),
+  };
+}
+
 /**
  * 清理消息文本中多余的首部 @机器人 提及。
  *
@@ -1500,6 +1709,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     if (messageText.startsWith('/')) {
       dlog(`[Router] High-priority slash command matched: ${messageText}`);
       try {
+        // 1. 尝试匹配飞书特定的专用命令
         const cmdResult = await handleFeishuCommand(messageText, currentClient, currentConfig, msg.chatId);
         if (cmdResult !== null) {
           tuiContext?.addItem({ type: 'info', text: cmdResult }, Date.now());
@@ -1515,21 +1725,67 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
           return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
         }
-        // 如果是未知斜杠命令，给予友好提示，也是直接响应不排队
-        if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
-          const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
-          tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
+
+        // 2. 如果飞书专有命令未匹配，尝试加载并执行通用的 CLI 斜杠命令
+        const cliCmdResult = await handleCliSlashCommandInFeishu(messageText, currentConfig, msg.chatId);
+        if (cliCmdResult !== null) {
+          if (cliCmdResult.type === 'submit_prompt') {
+            // 命令指示重新投喂 prompt 给 LLM agent (例如 /ask 的行为)
+            const fakeMsg: FeishuMessage = {
+              ...msg,
+              text: cliCmdResult.content,
+            };
+            dlog(`[Router] CLI Slash command redirected to prompt queue: ${cliCmdResult.content}`);
+
+            // 2. 获取或创建 Chat 专属队列并排队
+            let queue = messageQueues.get(msg.chatId);
+            if (!queue) {
+              queue = [];
+              messageQueues.set(msg.chatId, queue);
+            }
+            const isProcessing = isProcessingQueues.get(msg.chatId) || false;
+
+            if (isProcessing || queue.length > 0) {
+              const queuePosition = queue.length + 1;
+              const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
+              await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+            }
+
+            return new Promise<string | null>((resolve, reject) => {
+              queue!.push({ msg: fakeMsg, resolve, reject });
+              const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
+              processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
+            });
+          }
+
+          // 常规文本结果输出
+          const responseText = cliCmdResult.content || `✅ 命令已成功执行。`;
+          tuiContext?.addItem({ type: 'info', text: responseText }, Date.now());
 
           const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
-          const card = buildCardKitFinalCard(hint, metrics, 'DeepV Code');
+          const card = buildCardKitFinalCard(responseText, metrics, 'DeepV Code');
           const cardId = await gateway.createCardKitCard(card);
           if (cardId) {
             await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
           } else {
-            await gateway.sendMessage(msg.chatId, hint, msg.messageId);
+            await gateway.sendMessage(msg.chatId, responseText, msg.messageId);
           }
-          return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
+          return null; // 🚀 防止 gateway.ts 底层二次发送纯文本消息造成重复
         }
+
+        // 3. 兜底：既不是飞书专用命令，也不是 CLI 的命令，才判为未知斜杠命令
+        const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
+        tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
+
+        const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
+        const card = buildCardKitFinalCard(hint, metrics, 'DeepV Code');
+        const cardId = await gateway.createCardKitCard(card);
+        if (cardId) {
+          await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
+        } else {
+          await gateway.sendMessage(msg.chatId, hint, msg.messageId);
+        }
+        return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
       } catch (err: any) {
         const errMsg = `❌ 执行命令出错：${err.message || err}`;
         tuiContext?.addItem({ type: 'info', text: errMsg }, Date.now());
