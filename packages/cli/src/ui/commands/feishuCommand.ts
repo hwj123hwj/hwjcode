@@ -82,6 +82,15 @@ let activeReplyToMessageId: string | null = null;
 /** 当前正在运行任务的中止控制器 */
 let activeAbortController: AbortController | null = null;
 
+/** 各会话的最新消息 ID (用于文件发送工具，完全线程安全，多群独立) */
+const chatLastMessageId = new Map<string, string>();
+
+/** 各会话当前活跃的发送者 OpenID */
+const activeSenderOpenIds = new Map<string, string>();
+
+/** 各会话独立运行任务的中止控制器 (完全并发安全，允许不同群独立 /stop 中止) */
+const activeAbortControllers = new Map<string, AbortController>();
+
 /** 全局命令上下文引用 */
 let globalCommandContext: CommandContext | null = null;
 
@@ -156,6 +165,16 @@ function clearMessageQueue() {
   messageQueues.clear();
   isProcessingQueues.clear();
   isolatedSessions.clear();
+  chatLastMessageId.clear();
+  activeSenderOpenIds.clear();
+  for (const controller of activeAbortControllers.values()) {
+    try {
+      controller.abort();
+    } catch {
+      // ignore
+    }
+  }
+  activeAbortControllers.clear();
   activeSenderOpenId = null;
 }
 
@@ -756,6 +775,7 @@ async function handleFeishuCommand(
   messageText: string,
   geminiClient: any,
   config: any,
+  chatId?: string,
 ): Promise<string | null> {
   const cmd = messageText.split(/\s+/)[0].toLowerCase();
 
@@ -791,9 +811,14 @@ async function handleFeishuCommand(
     }
 
     case '/stop': {
-      if (activeAbortController) {
-        activeAbortController.abort();
-        activeAbortController = null;
+      const controller = chatId ? activeAbortControllers.get(chatId) : activeAbortController;
+      if (controller) {
+        controller.abort();
+        if (chatId) {
+          activeAbortControllers.delete(chatId);
+        } else {
+          activeAbortController = null;
+        }
         return '🛑 已中止当前正在运行的 AI 任务。';
       }
       return '⚠️ 当前没有正在运行的 AI 任务。';
@@ -1098,66 +1123,98 @@ async function handleStart(context?: CommandContext): Promise<string> {
       debugTrail.push(`step0=noActiveConfig`);
     }
 
+    // 🎯 1. 实时更新当前会话上下文辅助数据（供 session 隔离下的工具调用读取最新状态）
+    chatLastMessageId.set(msg.chatId, msg.messageId);
+    activeSenderOpenIds.set(msg.chatId, msg.senderOpenId);
+
     // 🚀 多项目路由环境拦截
     const routes = await loadProjectRoutes();
     const route = routes[msg.chatId];
 
+    // 如果当前是群聊消息，且完全没有绑定任何本地项目，提示绑定并拦截
+    if (msg.chatType === 'group' && (!route || !route.projectRoot)) {
+      const bindTip = `⏳ **本飞书群尚未绑定任何本地项目工作区。**\n\n` +
+        `请群管理员或 Bot 拥有者在此群发送：\n` +
+        `  \`/bind <您本地项目的绝对路径>\`\n` +
+        `*(例如：\`/bind D:\\projects\\my-great-app\`)*\n\n` +
+        `绑定成功后，我将在此专属群里为您提供该项目的 AI 远程控制和代码读写服务！\n\n` +
+        `💡 **提示**: 您也可以在单聊私信中，直接对我说：“创建一个新项目 工作目录是 d:\\123”，让我为您自动建群并绑定工作区哦！`;
+      await gateway.sendMessage(msg.chatId, bindTip, msg.messageId);
+      return null;
+    }
+
+    // 🚀 确保每一笔会话（私聊或绑定的群聊）都具有完整、彻底隔离的环境！
+    let session = isolatedSessions.get(msg.chatId);
     let currentConfig = activeConfig;
     let currentClient = activeClient;
 
-    if (route && route.projectRoot) {
-      // 从项目工作目录实例化/加载环境
-      let session = isolatedSessions.get(msg.chatId);
-      if (!session) {
-        dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${route.projectRoot}'`);
-        const isolatedConfig = new Config({
-          sessionId: `feishu-${msg.chatId}-${Date.now()}`,
-          cwd: route.projectRoot,
-          debugMode: config?.getDebugMode() || false,
-          targetDir: route.projectRoot,
-        });
-        try {
-          // 🚀 关键：isolatedConfig 是全新实例，必须主动 refreshAuth 才能初始化 GeminiClient
-          // 否则 getGeminiClient() 会返回 undefined（typescript 的非空断言只是骗编译器）
-          const settings = globalCommandContext?.services?.settings;
-          const isolatedAuthType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
-          dlog(`[Router] Calling refreshAuth(${isolatedAuthType}) on isolatedConfig...`);
-          await isolatedConfig.refreshAuth(isolatedAuthType);
-          const isolatedClient = isolatedConfig.getGeminiClient();
-          if (!isolatedClient) {
-            throw new Error('refreshAuth completed but isolatedConfig.getGeminiClient() still returns null/undefined.');
-          }
-          session = { config: isolatedConfig, geminiClient: isolatedClient };
-          isolatedSessions.set(msg.chatId, session);
-          debugTrail.push(`isolatedReady`);
-          dlog(`[Router] Isolated session ready for '${msg.chatId}' at '${route.projectRoot}'`);
-        } catch (e: any) {
-          initErrorMsg = `Isolated session init failed: ${e.message || String(e)}`;
-          debugTrail.push(`isolatedFail:${(e.message || String(e)).slice(0, 80)}`);
-          dwarn(`[Router] Failed to init isolated session: ${initErrorMsg}`);
-          // ⚠️ 降级策略：如果 isolated session 初始化失败，回退到主 config/client，
-          // 避免一个损坏的路由记录把整个聊天全部锁死
-          dwarn(`[Router] Fallback to main session/client.`);
+    if (!session) {
+      // 决定此会话的目标工作区路径
+      const workspaceRoot = (route && route.projectRoot)
+        ? route.projectRoot
+        : ((typeof activeConfig?.getProjectRoot === 'function' && activeConfig.getProjectRoot()) || process.cwd());
+
+      dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${workspaceRoot}'`);
+      const isolatedConfig = new Config({
+        sessionId: `feishu-${msg.chatId}-${Date.now()}`,
+        cwd: workspaceRoot,
+        debugMode: config?.getDebugMode() || false,
+        targetDir: workspaceRoot,
+      });
+
+      try {
+        // 主动 refreshAuth 初始化 GeminiClient
+        const settings = globalCommandContext?.services?.settings;
+        const isolatedAuthType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
+        dlog(`[Router] Calling refreshAuth(${isolatedAuthType}) on isolatedConfig...`);
+        await isolatedConfig.refreshAuth(isolatedAuthType);
+        const isolatedClient = isolatedConfig.getGeminiClient();
+        if (!isolatedClient) {
+          throw new Error('refreshAuth completed but isolatedConfig.getGeminiClient() still returns null/undefined.');
         }
-      } else {
-        debugTrail.push(`isolatedCached`);
-      }
-      if (session) {
-        currentConfig = session.config;
-        currentClient = session.geminiClient;
+
+        // 🎯 在此会话特定的 toolRegistry 中，专属且精确注册飞书工具，绝不污染或错乱其他群的消息卡片
+        const toolRegistry = await isolatedConfig.getToolRegistry();
+
+        // 注册专属于此 chatId 的文件发送工具，彻底杜绝多群并发时发送文件发错群的问题
+        toolRegistry.registerTool(new SendFeishuFileTool(
+          gateway,
+          () => msg.chatId,
+          () => chatLastMessageId.get(msg.chatId),
+          () => workspaceRoot,
+        ));
+
+        // 注册专属于此 chatId 的建群工具
+        toolRegistry.registerTool(new CreateProjectGroupTool(
+          gateway,
+          () => activeSenderOpenIds.get(msg.chatId),
+          async (newChatId, path) => {
+            await saveProjectRoute(newChatId, { projectRoot: path });
+          }
+        ));
+
+        await isolatedClient.setTools();
+        dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
+
+        session = { config: isolatedConfig, geminiClient: isolatedClient };
+        isolatedSessions.set(msg.chatId, session);
+        debugTrail.push(`isolatedReady`);
+      } catch (e: any) {
+        initErrorMsg = `Isolated session init failed: ${e.message || String(e)}`;
+        debugTrail.push(`isolatedFail:${(e.message || String(e)).slice(0, 80)}`);
+        dwarn(`[Router] Failed to init isolated session: ${initErrorMsg}`);
+        // 回退
+        if (activeConfig && activeClient) {
+          session = { config: activeConfig, geminiClient: activeClient };
+        }
       }
     } else {
-      // 未绑定。如果当前是群聊消息，提示去单聊由 AI 自助建群，或在群内 /bind 绑定
-      if (msg.chatType === 'group') {
-        const bindTip = `⏳ **本飞书群尚未绑定任何本地项目工作区。**\n\n` +
-          `请群管理员或 Bot 拥有者在此群发送：\n` +
-          `  \`/bind <您本地项目的绝对路径>\`\n` +
-          `*(例如：\`/bind D:\\projects\\my-great-app\`)*\n\n` +
-          `绑定成功后，我将在此专属群里为您提供该项目的 AI 远程控制和代码读写服务！\n\n` +
-          `💡 **提示**: 您也可以在单聊私信中，直接对我说：“创建一个新项目 工作目录是 d:\\123”，让我为您自动建群并绑定工作区哦！`;
-        await gateway.sendMessage(msg.chatId, bindTip, msg.messageId);
-        return null;
-      }
+      debugTrail.push(`isolatedCached`);
+    }
+
+    if (session) {
+      currentConfig = session.config;
+      currentClient = session.geminiClient;
     }
 
     // 2. 获取或创建 Chat 专属队列并排队
@@ -1228,7 +1285,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     const toolRegistry: ToolRegistry = await config.getToolRegistry();
     const abortController = new AbortController();
-    activeAbortController = abortController;
+    activeAbortControllers.set(msg.chatId, abortController);
     const promptId = `feishu-${Date.now()}`;
 
     let activeCardId: string | null = null;
@@ -1536,7 +1593,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       );
       return errorReply;
     } finally {
-      activeAbortController = null;
+      activeAbortControllers.delete(msg.chatId);
     }
   }
 
