@@ -1012,6 +1012,35 @@ async function handleFeishuCommand(
 }
 
 /**
+ * 清理消息文本中多余的首部 @机器人 提及。
+ *
+ * 飞书群聊消息由于必须通过 @机器人 触发，因此传入的消息通常包含 `@dvcode2`、`@_user_1` 等前缀。
+ * 本函数自动匹配并剥除这些提及前缀，使得：
+ *  1. 群聊中的斜杠命令（例如 `@dvcode2 /new` 变成 `/new`）能被正确识别和拦截。
+ *  2. 群聊中的绑定指令（例如 `@dvcode2 /bind d:\123` 变成 `/bind d:\123`）能顺畅执行。
+ *  3. LLM 接收到纯净的提问，不易产生 @ 前缀造成的格式幻觉。
+ */
+function stripBotMention(text: string, botName?: string): string {
+  let cleaned = text.trim();
+
+  // 1. 剥除飞书常用的 @_user_xxx 格式提及
+  cleaned = cleaned.replace(/^@_user_\d+\s*/, '');
+
+  // 2. 剥除指定 botName 形式的提及
+  if (botName) {
+    const escapedName = botName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(`^@${escapedName}\\s*`, 'i');
+    cleaned = cleaned.replace(regex, '');
+  }
+
+  // 3. 兜底剥除通用的 @dvcode 提及
+  cleaned = cleaned.replace(/^@dvcode2?\\s*/i, '');
+  cleaned = cleaned.replace(/^@智能体\s*/i, ''); // 飞书自带的应用标签前缀
+
+  return cleaned.trim();
+}
+
+/**
  * 启动网关（从已保存的凭证）
  */
 async function handleStart(context?: CommandContext): Promise<string> {
@@ -1049,7 +1078,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
   // 设置消息处理 — 使用主会话的 agent 模式（带工具执行能力）
   gateway.onMessage = async (msg: FeishuMessage): Promise<string | null> => {
-    const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
+    let messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
+    if (!messageText) {
+      return null;
+    }
+
+    // 🧹 清理消息文本中由于群聊 @ 产生的提及前缀，使群内斜杠命令（如 /new, /bind）能够正常拦截执行
+    messageText = stripBotMention(messageText, creds.botName);
     if (!messageText) {
       return null;
     }
