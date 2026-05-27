@@ -897,13 +897,30 @@ async function handleStart(context?: CommandContext): Promise<string> {
           targetDir: route.projectRoot,
         });
         try {
+          // 🚀 关键：isolatedConfig 是全新实例，必须主动 refreshAuth 才能初始化 GeminiClient
+          // 否则 getGeminiClient() 会返回 undefined（typescript 的非空断言只是骗编译器）
+          const settings = globalCommandContext?.services?.settings;
+          const isolatedAuthType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
+          dlog(`[Router] Calling refreshAuth(${isolatedAuthType}) on isolatedConfig...`);
+          await isolatedConfig.refreshAuth(isolatedAuthType);
           const isolatedClient = isolatedConfig.getGeminiClient();
+          if (!isolatedClient) {
+            throw new Error('refreshAuth completed but isolatedConfig.getGeminiClient() still returns null/undefined.');
+          }
           session = { config: isolatedConfig, geminiClient: isolatedClient };
           isolatedSessions.set(msg.chatId, session);
+          debugTrail.push(`isolatedReady`);
+          dlog(`[Router] Isolated session ready for '${msg.chatId}' at '${route.projectRoot}'`);
         } catch (e: any) {
-          initErrorMsg = e.message || String(e);
-          dwarn(`[Router] Failed to getGeminiClient for isolated session: ${initErrorMsg}`);
+          initErrorMsg = `Isolated session init failed: ${e.message || String(e)}`;
+          debugTrail.push(`isolatedFail:${(e.message || String(e)).slice(0, 80)}`);
+          dwarn(`[Router] Failed to init isolated session: ${initErrorMsg}`);
+          // ⚠️ 降级策略：如果 isolated session 初始化失败，回退到主 config/client，
+          // 避免一个损坏的路由记录把整个聊天全部锁死
+          dwarn(`[Router] Fallback to main session/client.`);
         }
+      } else {
+        debugTrail.push(`isolatedCached`);
       }
       if (session) {
         currentConfig = session.config;
