@@ -49,6 +49,231 @@ export interface CardActionData {
 
 export type OnCardActionCallback = (data: CardActionData) => void;
 
+/** 飞书卡片页脚指标 */
+export interface FeishuFooterMetrics {
+  status?: string; // 例如: "Completed", "Error", "Processing"
+  elapsedMs?: number; // 耗时 (毫秒)
+  tokens?: { input: number; output: number }; // Token 使用量
+  contextPercentage?: number; // 上下文剩余百分比
+  model?: string; // 使用的模型名称
+  cacheRead?: number; // 缓存读取 tokens 数
+  cacheHitRate?: number; // 缓存命中百分比 (0-100)
+  credits?: number; // 扣减点数
+}
+
+/** CardKit 2.0 流式卡片中正文的固定 element_id */
+export const CARDKIT_STREAMING_ELEMENT_ID = 'streaming_content';
+
+/** CardKit 2.0 流式卡片中页脚的固定 element_id */
+export const CARDKIT_FOOTER_ELEMENT_ID = 'footer_content';
+
+/** CardKit 2.0 流式卡片中 loading 图标的固定 element_id（终态由整卡覆盖移除） */
+export const CARDKIT_LOADING_ELEMENT_ID = 'loading_icon';
+
+/**
+ * 飞书内置 loading 动画 img_key（与 openclaw-lark 插件一致）。
+ *
+ * 这个 img_key 是飞书官方提供给 streaming 卡片的转圈图标资源。
+ * 只要 streaming_mode = true 且卡片里有这个图标元素，客户端就会自动渲染打字机
+ * 加载视觉，不需要再在正文里写"思考中..."、"运行工具中..."之类的提示尾巴。
+ */
+const CARDKIT_LOADING_IMG_KEY = 'img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg';
+
+/**
+ * 格式化毫秒数为人类可读的持续时间字符串。
+ */
+function formatElapsed(ms: number): string {
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+/**
+ * 把 footer metrics 渲染为单行 markdown 文本，供 CardKit 2.0 的 footer
+ * markdown 元素直接作为 content 使用。
+ */
+export function renderFooterMarkdown(metrics: FeishuFooterMetrics): string {
+  const parts: string[] = [];
+  let isError = false;
+
+  if (metrics.status) {
+    let statusText = metrics.status;
+    const lower = metrics.status.toLowerCase();
+    if (lower.includes('error') || lower.includes('failed') || lower.includes('出错') || lower.includes('失败')) {
+      statusText = `<font color='red'>${metrics.status}</font>`;
+      isError = true;
+    } else if (lower.includes('processing') || lower.includes('thinking') || lower.includes('思考中') || lower.includes('运行')) {
+      statusText = `<font color='grey'>${metrics.status}</font>`;
+    } else {
+      statusText = `<font color='green'>${metrics.status}</font>`;
+    }
+    parts.push(statusText);
+  }
+
+  if (metrics.elapsedMs != null) {
+    parts.push(`耗时 ${formatElapsed(metrics.elapsedMs)}`);
+  }
+
+  if (metrics.model) {
+    parts.push(metrics.model);
+  }
+
+  if (metrics.tokens) {
+    parts.push(`↑${metrics.tokens.input.toLocaleString()} ↓${metrics.tokens.output.toLocaleString()}`);
+  }
+
+  if (metrics.cacheRead != null && metrics.cacheRead > 0) {
+    let cacheText = `缓存读取 ${metrics.cacheRead.toLocaleString()}`;
+    if (metrics.cacheHitRate != null && metrics.cacheHitRate > 0) {
+      cacheText += ` (${metrics.cacheHitRate.toFixed(1)}%)`;
+    }
+    parts.push(cacheText);
+  }
+
+  if (metrics.credits != null && metrics.credits > 0) {
+    parts.push(`积分: ${metrics.credits.toLocaleString()}`);
+  }
+
+  if (metrics.contextPercentage != null) {
+    parts.push(`上下文 ${metrics.contextPercentage.toFixed(0)}%`);
+  }
+
+  if (parts.length === 0) return '';
+  const text = parts.join(' · ');
+  return isError ? `<font color='red'>${text}</font>` : text;
+}
+
+/**
+ * 构建一个标准飞书卡片页脚元素数组（旧版 1.x 卡片用）。
+ * 新版 CardKit 2.0 的卡片直接走 renderFooterMarkdown + 单 markdown 元素。
+ */
+function buildFeishuFooterElements(metrics: FeishuFooterMetrics): any[] {
+  const content = renderFooterMarkdown(metrics);
+  if (!content) return [];
+  return [
+    {
+      tag: 'markdown',
+      content,
+      text_size: 'notation',
+    },
+  ];
+}
+
+/**
+ * 构建 CardKit 2.0 流式起始卡片（schema 2.0）。
+ *
+ * 包含：
+ *   - 一个 markdown 元素（element_id=streaming_content）作为流式正文容器
+ *   - 一个 markdown 元素（element_id=footer_content）作为可独立流式更新的页脚
+ *   - 一个 loading 图标元素（element_id=loading_icon），streaming_mode 期间自动转圈
+ *
+ * 说明：飞书 CardKit 2.0 的流式打字机效果，必须满足
+ *   1) config.streaming_mode = true
+ *   2) 通过 cardkit.v1.cardElement.content() 接口（PUT 增量）只更新某个 element
+ *   3) 调用 sequence 单调递增
+ *   4) loading_icon 元素的存在让客户端显示加载动画 — 终态用 card.update 整卡
+ *      覆盖时不再带这个元素，动画即自动消失（不需要主动 PATCH 移除）
+ */
+export function buildCardKitStreamingCard(initialContent: string = '', initialFooter: string = ''): Record<string, any> {
+  const elements: any[] = [
+    {
+      tag: 'markdown',
+      element_id: CARDKIT_STREAMING_ELEMENT_ID,
+      content: initialContent || ' ',
+      text_align: 'left',
+      text_size: 'normal_v2',
+    },
+    // loading 转圈图标 — 与 openclaw-lark 一致
+    {
+      tag: 'markdown',
+      element_id: CARDKIT_LOADING_ELEMENT_ID,
+      content: ' ',
+      icon: {
+        tag: 'custom_icon',
+        img_key: CARDKIT_LOADING_IMG_KEY,
+        size: '16px 16px',
+      },
+    },
+  ];
+  if (initialFooter) {
+    elements.push({
+      tag: 'markdown',
+      element_id: CARDKIT_FOOTER_ELEMENT_ID,
+      content: initialFooter,
+      text_size: 'notation',
+    });
+  } else {
+    // 占位 footer，方便后续 streamCardElement 直接更新
+    elements.push({
+      tag: 'markdown',
+      element_id: CARDKIT_FOOTER_ELEMENT_ID,
+      content: ' ',
+      text_size: 'notation',
+    });
+  }
+
+  return {
+    schema: '2.0',
+    config: {
+      streaming_mode: true,
+      summary: {
+        content: 'Processing...',
+        i18n_content: { zh_cn: '处理中...', en_us: 'Processing...' },
+      },
+    },
+    body: { elements },
+  };
+}
+
+/**
+ * 构建 CardKit 2.0 终态卡片（streaming_mode 关闭后用 card.update 整卡覆盖）。
+ */
+export function buildCardKitFinalCard(content: string, footerMetrics?: FeishuFooterMetrics, headerTitle?: string): Record<string, any> {
+  const elements: any[] = [
+    {
+      tag: 'markdown',
+      element_id: CARDKIT_STREAMING_ELEMENT_ID,
+      content: content || ' ',
+      text_align: 'left',
+      text_size: 'normal_v2',
+    },
+  ];
+
+  const footerContent = footerMetrics ? renderFooterMarkdown(footerMetrics) : '';
+  if (footerContent) {
+    elements.push({
+      tag: 'markdown',
+      element_id: CARDKIT_FOOTER_ELEMENT_ID,
+      content: footerContent,
+      text_size: 'notation',
+    });
+  }
+
+  // 用文本前 120 字符做 feed summary（去掉 markdown 符号）
+  const summaryText = content.replace(/[*_`#>[\]()~]/g, '').trim().slice(0, 120) || 'Done';
+
+  const card: Record<string, any> = {
+    schema: '2.0',
+    config: {
+      streaming_mode: false,
+      summary: { content: summaryText },
+    },
+    body: { elements },
+  };
+
+  if (headerTitle) {
+    card.header = {
+      title: { tag: 'plain_text', content: headerTitle },
+      template: 'blue',
+    };
+  }
+  return card;
+}
+
 /**
  * 飞书 WS 网关（基于 @larksuiteoapi/node-sdk）
  *
@@ -244,6 +469,64 @@ export class FeishuGateway {
             }
           } catch {
             text = '[图片消息]';
+          }
+        } else if (msgType === 'post') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            let postContent: any[][] = [];
+            let title = '';
+
+            const locales = Object.keys(content);
+            const firstLocale = locales[0];
+            if (firstLocale && content[firstLocale] && Array.isArray(content[firstLocale].content)) {
+              postContent = content[firstLocale].content;
+              title = content[firstLocale].title || '';
+            } else if (Array.isArray(content.content)) {
+              postContent = content.content;
+              title = content.title || '';
+            } else if (Array.isArray(content)) {
+              postContent = content;
+            }
+
+            let parts: string[] = [];
+            if (title) {
+              parts.push(`**${title}**`);
+            }
+
+            for (const paragraph of postContent) {
+              if (!Array.isArray(paragraph)) continue;
+              let paragraphText = '';
+              for (const element of paragraph) {
+                if (!element || typeof element !== 'object') continue;
+
+                if (element.tag === 'text') {
+                  paragraphText += element.text || '';
+                } else if (element.tag === 'a') {
+                  paragraphText += `[${element.text || ''}](${element.href || ''})`;
+                } else if (element.tag === 'at') {
+                  paragraphText += element.text || '';
+                } else if (element.tag === 'img') {
+                  const imageKey = element.image_key;
+                  if (imageKey) {
+                    dlog(`[Feishu] Downloading post image key: ${imageKey}...`);
+                    const localPath = await this.downloadImageResource(message.message_id, imageKey);
+                    if (localPath) {
+                      paragraphText += ` ![image](${localPath}) `;
+                      dlog(`[Feishu] Post image downloaded successfully to local path: ${localPath}`);
+                    } else {
+                      paragraphText += ` [图片: ${imageKey}] `;
+                    }
+                  }
+                }
+              }
+              if (paragraphText.trim()) {
+                parts.push(paragraphText);
+              }
+            }
+            text = parts.join('\n');
+          } catch (e: any) {
+            derror('Parse feishu post message failed:', e);
+            text = `[解析富文本消息失败]`;
           }
         } else {
           text = `[不支持的消息类型: ${msgType}]`;
@@ -949,6 +1232,7 @@ export class FeishuGateway {
     title: string,
     content: string,
     buttons: Array<{ label: string; value: string }>,
+    footerMetrics?: FeishuFooterMetrics, // 新增 footerMetrics 参数
     replyToMessageId?: string,
   ): Promise<string | null> {
     const token = await this.getTenantToken();
@@ -975,6 +1259,11 @@ export class FeishuGateway {
           value: { choice: btn.value },
         })),
       });
+    }
+
+    // 添加页脚
+    if (footerMetrics) {
+      elements.push(...buildFeishuFooterElements(footerMetrics));
     }
 
     const cardContent: Record<string, any> = {
@@ -1102,6 +1391,7 @@ export class FeishuGateway {
     messageId: string,
     title: string,
     content: string,
+    footerMetrics?: FeishuFooterMetrics, // 新增 footerMetrics 参数
   ): Promise<boolean> {
     if (!messageId) return false;
     try {
@@ -1110,6 +1400,11 @@ export class FeishuGateway {
       const elements: any[] = [];
       if (content) {
         elements.push({ tag: 'markdown', content });
+      }
+
+      // 添加页脚
+      if (footerMetrics) {
+        elements.push(...buildFeishuFooterElements(footerMetrics));
       }
 
       const cardContent = {
@@ -1144,6 +1439,324 @@ export class FeishuGateway {
       return true;
     } catch (err) {
       dwarn('Failed to update Feishu card:', err);
+      return false;
+    }
+  }
+
+  /**
+   * 发送一个 CardKit 2.0 流式卡片，并返回流式更新接口。
+   *
+   * 工作流程（参考 openclaw-lark 的 streaming-card-controller）：
+   *   1. cardkit.v1.card.create  →  card_id
+   *   2. im.message.create/reply (msg_type=interactive, content={type:'card',data:{card_id}})  →  message_id
+   *   3. （流式中多次）cardkit.v1.cardElement.content  →  增量推送到 element_id 上，飞书自带打字机动画
+   *   4. （结束时）cardkit.v1.card.settings(streaming_mode:false) + cardkit.v1.card.update(终态整卡)
+   *
+   * 节流策略：CardKit 流式更新接口节流极低（~100ms），调用方按需节流即可。
+   *
+   * @param chatId            目标 chat_id
+   * @param initialContent    流式起始内容（可空）
+   * @param initialFooter     初始页脚 metrics（可选，渲染为 footer markdown）
+   * @param replyToMessageId  回复的源消息 message_id（可选）
+   * @returns                 一个会话句柄；若 CardKit 创建失败，messageId 为 null
+   */
+  async sendStreamingCardWithFooter(
+    chatId: string,
+    initialContent: string,
+    initialFooterMetrics?: FeishuFooterMetrics,
+    replyToMessageId?: string,
+  ): Promise<{
+    messageId: string | null;
+    cardId: string | null;
+    /**
+     * 增量推送正文到 streaming_content element。content 是当前累计的完整文本（不是 delta）。
+     * 飞书自动 diff 渲染打字机效果。
+     */
+    pushContent: (content: string) => Promise<boolean>;
+    /**
+     * 增量更新 footer 元素（独立于正文，使用同一 sequence 计数器）。
+     */
+    pushFooter: (metrics: FeishuFooterMetrics) => Promise<boolean>;
+    /**
+     * 结束流式：关闭 streaming_mode 并整卡覆盖一次（终态文本 + footer）。
+     */
+    finalize: (finalContent: string, finalFooterMetrics?: FeishuFooterMetrics) => Promise<boolean>;
+  }> {
+    const noopHandle = {
+      messageId: null,
+      cardId: null,
+      pushContent: async () => false,
+      pushFooter: async () => false,
+      finalize: async () => false,
+    };
+
+    // Step 1: cardkit.v1.card.create — 拿到 card_id
+    const initialFooterText = initialFooterMetrics ? renderFooterMarkdown(initialFooterMetrics) : '';
+    const initialCard = buildCardKitStreamingCard(initialContent, initialFooterText);
+    const cardId = await this.createCardKitCard(initialCard);
+    if (!cardId) {
+      // CardKit 创建失败 — 调用方走 sendCard 兜底
+      return noopHandle;
+    }
+
+    // Step 2: im.message.create/reply 引用 card_id 把卡片送进群
+    const messageId = await this.sendCardKitMessage(chatId, cardId, replyToMessageId);
+    if (!messageId) {
+      return { ...noopHandle, cardId };
+    }
+
+    // 持有一个递增的 sequence，所有后续 cardkit.v1.* 调用共享
+    let sequence = 1;
+    let lastPushedContent = initialContent;
+    let lastPushedFooter = initialFooterText;
+
+    const pushContent = async (content: string): Promise<boolean> => {
+      if (content === lastPushedContent) return true; // 无变化，省一次 RPC
+      sequence += 1;
+      const ok = await this.streamCardKitElement(cardId, CARDKIT_STREAMING_ELEMENT_ID, content || ' ', sequence);
+      if (ok) lastPushedContent = content;
+      return ok;
+    };
+
+    const pushFooter = async (metrics: FeishuFooterMetrics): Promise<boolean> => {
+      const next = renderFooterMarkdown(metrics);
+      if (!next || next === lastPushedFooter) return true;
+      sequence += 1;
+      const ok = await this.streamCardKitElement(cardId, CARDKIT_FOOTER_ELEMENT_ID, next, sequence);
+      if (ok) lastPushedFooter = next;
+      return ok;
+    };
+
+    const finalize = async (
+      finalContent: string,
+      finalFooterMetrics?: FeishuFooterMetrics,
+    ): Promise<boolean> => {
+      // 关闭流式模式
+      sequence += 1;
+      await this.setCardKitStreamingMode(cardId, false, sequence);
+
+      // 整卡更新到终态
+      sequence += 1;
+      const finalCard = buildCardKitFinalCard(finalContent, finalFooterMetrics);
+      return await this.updateCardKitCard(cardId, finalCard, sequence);
+    };
+
+    return { messageId, cardId, pushContent, pushFooter, finalize };
+  }
+
+  // ------------------------------------------------------------------
+  // CardKit 2.0 底层 API（直接 fetch /open-apis/cardkit/v1/...）
+  // ------------------------------------------------------------------
+
+  /**
+   * cardkit.v1.card.create — 在飞书侧创建一张 CardKit 2.0 卡片实体。
+   * 注意：此时卡片尚未发送给任何用户，需要再调 im.message.create 引用 card_id 才会显示。
+   *
+   * @param card 完整卡片 JSON（schema:'2.0'）
+   * @returns card_id 或 null
+   */
+  async createCardKitCard(card: Record<string, any>): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/cardkit/v1/cards`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'card_json',
+          data: JSON.stringify(card),
+        }),
+      });
+      const data: any = await res.json();
+      if (data.code !== 0) {
+        derror(`Feishu cardkit.card.create failed (code=${data.code}): ${data.msg}`);
+        return null;
+      }
+      const cardId = data.data?.card_id || null;
+      dlog('Feishu cardkit.card.create ok, card_id:', cardId);
+      return cardId;
+    } catch (err: any) {
+      derror('Feishu cardkit.card.create error:', err?.message || err);
+      return null;
+    }
+  }
+
+  /**
+   * 把已创建的 CardKit 卡片以 IM 消息的形式发送到 chat。
+   * content 格式必须是 {"type":"card","data":{"card_id":"<id>"}}。
+   */
+  async sendCardKitMessage(
+    chatId: string,
+    cardId: string,
+    replyToMessageId?: string,
+  ): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      const contentStr = JSON.stringify({ type: 'card', data: { card_id: cardId } });
+
+      // 优先 reply（如果提供），否则直接发送
+      if (replyToMessageId) {
+        const replyUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages/${replyToMessageId}/reply`;
+        const replyRes = await fetch(replyUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            msg_type: 'interactive',
+            content: contentStr,
+          }),
+        });
+        const replyData: any = await replyRes.json();
+        if (replyData.code === 0) {
+          dlog('Feishu sendCardKitMessage(reply) ok, message_id:', replyData.data?.message_id);
+          return replyData.data?.message_id || null;
+        }
+        dwarn(`Feishu sendCardKitMessage(reply) failed (code=${replyData.code}): ${replyData.msg}`);
+        // 落到下面的直接发送
+      }
+
+      const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
+      const res = await fetch(directUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          receive_id: chatId,
+          msg_type: 'interactive',
+          content: contentStr,
+        }),
+      });
+      const data: any = await res.json();
+      if (data.code === 0) {
+        dlog('Feishu sendCardKitMessage(direct) ok, message_id:', data.data?.message_id);
+        return data.data?.message_id || null;
+      }
+      derror(`Feishu sendCardKitMessage failed (code=${data.code}): ${data.msg}`);
+      return null;
+    } catch (err: any) {
+      derror('Feishu sendCardKitMessage error:', err?.message || err);
+      return null;
+    }
+  }
+
+  /**
+   * cardkit.v1.cardElement.content — 流式增量更新某个 element 的 markdown content。
+   *
+   * 飞书会自动对比新旧 content，按字符差异渲染打字机动画。
+   * content 是 **当前完整累计文本**，不是 delta。
+   *
+   * @param cardId    cardkit.card.create 返回的 card_id
+   * @param elementId 要更新的元素 id（常用 'streaming_content' / 'footer_content'）
+   * @param content   新的完整文本
+   * @param sequence  单调递增的序号；同一 card_id 上必须严格递增，否则飞书会丢包/乱序
+   */
+  async streamCardKitElement(
+    cardId: string,
+    elementId: string,
+    content: string,
+    sequence: number,
+  ): Promise<boolean> {
+    try {
+      const token = await this.getTenantToken();
+      const url = `${this.apiBaseUrl}/open-apis/cardkit/v1/cards/${cardId}/elements/${elementId}/content`;
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content, sequence }),
+      });
+      const data: any = await res.json();
+      if (data.code === 0) return true;
+
+      // 速率限制（230020）— 静默跳过这一帧，不算错
+      if (data.code === 230020) {
+        dlog(`Feishu cardkit.cardElement.content rate limited (seq=${sequence}), skip`);
+        return false;
+      }
+      dwarn(
+        `Feishu cardkit.cardElement.content failed (code=${data.code}, seq=${sequence}): ${data.msg}`,
+      );
+      return false;
+    } catch (err: any) {
+      derror('Feishu cardkit.cardElement.content error:', err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * cardkit.v1.card.settings — 切换 streaming_mode（开/关）。
+   * 流式结束时务必调一次 streamingMode=false，否则飞书会一直保留流式视觉。
+   */
+  async setCardKitStreamingMode(
+    cardId: string,
+    streamingMode: boolean,
+    sequence: number,
+  ): Promise<boolean> {
+    try {
+      const token = await this.getTenantToken();
+      const url = `${this.apiBaseUrl}/open-apis/cardkit/v1/cards/${cardId}/settings`;
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          settings: JSON.stringify({ streaming_mode: streamingMode }),
+          sequence,
+        }),
+      });
+      const data: any = await res.json();
+      if (data.code === 0) return true;
+      dwarn(
+        `Feishu cardkit.card.settings failed (code=${data.code}, seq=${sequence}): ${data.msg}`,
+      );
+      return false;
+    } catch (err: any) {
+      derror('Feishu cardkit.card.settings error:', err?.message || err);
+      return false;
+    }
+  }
+
+  /**
+   * cardkit.v1.card.update — 整卡覆盖更新（终态用）。
+   * 与 streamCardKitElement 不同，这是一次性替换整张卡片的 JSON。
+   */
+  async updateCardKitCard(
+    cardId: string,
+    card: Record<string, any>,
+    sequence: number,
+  ): Promise<boolean> {
+    try {
+      const token = await this.getTenantToken();
+      const url = `${this.apiBaseUrl}/open-apis/cardkit/v1/cards/${cardId}`;
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          card: { type: 'card_json', data: JSON.stringify(card) },
+          sequence,
+        }),
+      });
+      const data: any = await res.json();
+      if (data.code === 0) return true;
+      dwarn(
+        `Feishu cardkit.card.update failed (code=${data.code}, seq=${sequence}): ${data.msg}`,
+      );
+      return false;
+    } catch (err: any) {
+      derror('Feishu cardkit.card.update error:', err?.message || err);
       return false;
     }
   }
