@@ -45,6 +45,11 @@ export interface SendFeishuFileParams {
    * rules upstream.
    */
   chat_id?: string;
+
+  /**
+   * Whether the user explicitly confirmed sending this file.
+   */
+  user_confirmed?: boolean;
 }
 
 /**
@@ -79,6 +84,11 @@ export class SendFeishuFileTool extends BaseTool<SendFeishuFileParams, ToolResul
               "or a path relative to the project root (e.g. 'docs/report.pdf').",
             type: Type.STRING,
           },
+          user_confirmed: {
+            description:
+              "Whether the user explicitly confirmed sending this file.",
+            type: Type.BOOLEAN,
+          },
         },
         required: ['file_path'],
         type: Type.OBJECT,
@@ -89,6 +99,9 @@ export class SendFeishuFileTool extends BaseTool<SendFeishuFileParams, ToolResul
   validateToolParams(params: SendFeishuFileParams): string | null {
     if (!params.file_path || typeof params.file_path !== 'string') {
       return 'file_path is required and must be a string';
+    }
+    if (!params.user_confirmed) {
+      return 'user_confirmed parameter must be true to send file. Ask user for confirmation and set this to true.';
     }
     return null;
   }
