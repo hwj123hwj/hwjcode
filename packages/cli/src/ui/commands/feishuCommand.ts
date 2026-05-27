@@ -824,7 +824,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
           switch (event.type) {
             case GeminiEventType.Content: {
               responseText += event.value;
-              const currentTotalMarkdown = accumulatedMarkdown + responseText;
+              // 确保两笔输出之间有安全的换行，避免大模型文本直接粘连在代码块的闭合标记 ``` 后面
+              let separator = '';
+              if (accumulatedMarkdown && !accumulatedMarkdown.endsWith('\n\n')) {
+                separator = accumulatedMarkdown.endsWith('\n') ? '\n' : '\n\n';
+              }
+              const currentTotalMarkdown = accumulatedMarkdown + separator + responseText;
               const trimmed = currentTotalMarkdown.trim();
               if (trimmed) {
                 const now = Date.now();
@@ -857,7 +862,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
 
         // 把当前这轮回复合并进累计 Markdown 中
-        accumulatedMarkdown += responseText;
+        if (accumulatedMarkdown && responseText) {
+          const separator = accumulatedMarkdown.endsWith('\n\n') ? '' : (accumulatedMarkdown.endsWith('\n') ? '\n' : '\n\n');
+          accumulatedMarkdown += separator + responseText;
+        } else if (responseText) {
+          accumulatedMarkdown += responseText;
+        }
 
         // 结束流式输出，做最终的、无中间提示的更新
         if (activeCardId) {
