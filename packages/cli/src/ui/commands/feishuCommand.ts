@@ -240,28 +240,42 @@ function renderQrCode(text: string): string | null {
     let output = '';
     let qt: any = qrcodeTerminal;
 
-    // 1. 尝试使用 ESM 各种 interop 形式获取 generate 方法
-    let generator = qt?.generate || qt?.default?.generate || qt?.default?.default?.generate;
+    // 🎯 1. 尝试直接以方法调用的形式在原始对象上调用，以保留正确的 `this` 上下文（否则会因 this 丢失导致 this.error 变成 undefined 进而报错）
+    if (qt && typeof qt.generate === 'function') {
+      qt.generate(text, { small: true }, (qr: string) => {
+        output = qr;
+      });
+      return output || null;
+    }
 
-    // 2. 如果因为打包/编译原因无法直接取到，尝试用 node 底层 require 兜底加载，以达到 100% 成功率
-    if (typeof generator !== 'function') {
-      try {
-        const cjsQt = requireFn('qrcode-terminal');
-        generator = cjsQt?.generate || cjsQt?.default?.generate || cjsQt;
-      } catch {
-        // 忽略 require 失败，依靠外层校验
+    if (qt && qt.default && typeof qt.default.generate === 'function') {
+      qt.default.generate(text, { small: true }, (qr: string) => {
+        output = qr;
+      });
+      return output || null;
+    }
+
+    // 🎯 2. 兜底尝试使用 requireFn 并以方法调用形式执行
+    try {
+      const cjsQt = requireFn('qrcode-terminal');
+      if (cjsQt && typeof cjsQt.generate === 'function') {
+        cjsQt.generate(text, { small: true }, (qr: string) => {
+          output = qr;
+        });
+        return output || null;
       }
+      if (cjsQt && cjsQt.default && typeof cjsQt.default.generate === 'function') {
+        cjsQt.default.generate(text, { small: true }, (qr: string) => {
+          output = qr;
+        });
+        return output || null;
+      }
+    } catch {
+      // 忽略 require 失败
     }
 
-    if (typeof generator !== 'function') {
-      dwarn('[Feishu] qrcodeTerminal.generate is not a function');
-      return null;
-    }
-
-    generator(text, { small: true }, (qr: string) => {
-      output = qr;
-    });
-    return output || null;
+    dwarn('[Feishu] qrcodeTerminal.generate is not a function');
+    return null;
   } catch (e: any) {
     dwarn(`[Feishu] renderQrCode failed: ${e?.message || e}`);
     return null;
