@@ -186,13 +186,25 @@ export async function pollRegistration(
 }
 
 /**
- * 校验凭证：用 app_id/app_secret 拿 tenant_access_token 然后调 bot/info
+ * 校验凭证：
+ *  1. 用 app_id / app_secret 拿 tenant_access_token
+ *  2. 调 /bot/v3/info 拿 bot 名字 + open_id
+ *  3. （如果应用已开通 application:application:self_manage）
+ *     调 /application/v6/applications/me 拿应用已开通的 scope 列表
+ *
+ * 第 3 步失败不会让 probe 整体失败——它只是无法报告 grantedScopes。
+ *
+ * @returns null = 凭证无效；否则返回 botName/botOpenId（+ 可选 grantedScopes）
  */
 export async function probeCredentials(
   appId: string,
   appSecret: string,
   domain: string = 'feishu',
-): Promise<{ botName?: string; botOpenId?: string } | null> {
+): Promise<{
+  botName?: string;
+  botOpenId?: string;
+  grantedScopes?: string[];
+} | null> {
   const openBase = domain === 'lark'
     ? 'https://open.larksuite.com'
     : 'https://open.feishu.cn';
@@ -216,9 +228,32 @@ export async function probeCredentials(
     if (botData.code !== 0) return null;
 
     const bot = botData.bot || botData.data?.bot || {};
+
+    // 3. (best-effort) 查应用已开通的 scope 列表（需要 application:application:self_manage 权限，
+    //    用户首次扫码建应用后通常没有，会 400/403——属正常情况，吞掉错误返回 undefined 即可）
+    let grantedScopes: string[] | undefined;
+    try {
+      const scopesRes = await fetch(
+        `${openBase}/open-apis/application/v6/applications/me?lang=zh_cn`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const scopesData: any = await scopesRes.json();
+      if (scopesData.code === 0) {
+        const app = scopesData.data?.app ?? scopesData.app ?? scopesData.data ?? {};
+        const rawScopes: Array<{ scope?: string }> =
+          app.scopes ?? app.online_version?.scopes ?? [];
+        grantedScopes = rawScopes
+          .map((s) => s.scope)
+          .filter((s): s is string => typeof s === 'string' && s.length > 0);
+      }
+    } catch {
+      /* 忽略——大多数情况下应用尚未开通 self_manage，是预期内的 */
+    }
+
     return {
       botName: bot.app_name || bot.bot_name,
       botOpenId: bot.open_id,
+      grantedScopes,
     };
   } catch {
     return null;

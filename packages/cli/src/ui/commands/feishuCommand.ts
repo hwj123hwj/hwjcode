@@ -35,6 +35,13 @@ import {
 import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
 import {
+  REQUIRED_APP_SCOPES,
+  buildScopeApplyUrl,
+  buildEventSubUrl,
+  buildPermissionPageUrl,
+  missingScopes as computeMissingScopes,
+} from '../../services/feishu/scopes.js';
+import {
   executeToolCall,
   ToolRegistry,
   GeminiEventType,
@@ -267,6 +274,10 @@ async function handleQrSetup(): Promise<string> {
     lines.push(`  App ID:      ${creds.appId}`);
     if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
     lines.push(t('feishu.setup.qr.creds_saved'));
+
+    // ✨ 关键升级：检测应用已开通的 scope，输出"一键申请缺失权限"链接
+    appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
+
     lines.push('');
     lines.push(t('feishu.setup.qr.next_step_start'));
     return lines.join('\n');
@@ -278,6 +289,66 @@ async function handleQrSetup(): Promise<string> {
       t('feishu.setup.qr.fallback_hint'),
     ].join('\n');
   }
+}
+
+/**
+ * 在 setup 流程结束时附加「下一步配置」引导：
+ *  1. 一键申请缺失的应用 scope（飞书开放平台原生支持 q= 参数预选 scope）
+ *  2. 事件订阅页（im.message.receive_v1 等）
+ *  3. 权限管理总览页（兜底）
+ *
+ * 这一段对齐 openclaw-lark `commands/doctor.ts` 的逻辑，但内嵌在 setup 成功
+ * 时直接输出，而不是单独的 doctor 命令。
+ */
+function appendPostSetupGuidance(
+  lines: string[],
+  creds: FeishuCredentials,
+  grantedScopes?: string[],
+): void {
+  const requiredAll = [...REQUIRED_APP_SCOPES];
+  const missing = grantedScopes
+    ? computeMissingScopes(grantedScopes, requiredAll)
+    : requiredAll; // 没拿到已开通列表（首次扫码很正常）→ 假定全部缺失
+
+  lines.push('');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  lines.push('🔧 **一键完成下一步配置（强烈建议）**');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  if (grantedScopes !== undefined && missing.length === 0) {
+    lines.push('  ✅ 应用已开通全部 dvcode 必需的 scope，无需额外申请。');
+  } else {
+    const scopeApplyUrl = buildScopeApplyUrl({
+      appId: creds.appId,
+      scopes: missing,
+      brand: creds.domain,
+      tokenType: 'tenant',
+    });
+    if (grantedScopes === undefined) {
+      lines.push('  📋 **第 1 步：一键申请应用所需权限**（自动预选 scope）');
+    } else {
+      lines.push(`  📋 **第 1 步：一键申请缺失的 ${missing.length} 项权限**（自动预选 scope）`);
+    }
+    lines.push(`     👉 ${scopeApplyUrl}`);
+    if (missing.length > 0 && missing.length <= 12) {
+      lines.push('     需申请的 scope：');
+      for (const s of missing) lines.push(`       - ${s}`);
+    }
+  }
+
+  lines.push('');
+  lines.push('  📡 **第 2 步：在事件订阅页勾选必要事件**');
+  lines.push(`     👉 ${buildEventSubUrl({ appId: creds.appId, brand: creds.domain })}`);
+  lines.push('     需订阅事件：');
+  lines.push('       - im.message.receive_v1（接收消息）');
+  lines.push('       - im.chat.member.bot.added_v1（被拉入群通知）');
+  lines.push('       - card.action.trigger（卡片按钮回调）');
+  lines.push('');
+  lines.push('  🔄 **第 3 步：申请发布版本**');
+  lines.push('     在权限管理页申请版本发布，让 scope 生效：');
+  lines.push(`     👉 ${buildPermissionPageUrl({ appId: creds.appId, brand: creds.domain })}`);
+  lines.push('');
+  lines.push('  💡 步骤 1-3 完成后，回到 dvcode 执行 `/feishu start` 即可使用！');
 }
 
 /**
@@ -318,6 +389,11 @@ async function handleManualSetup(appId?: string, appSecret?: string): Promise<st
   lines.push('');
   lines.push(t('feishu.setup.manual.owner_warning'));
   lines.push(t('feishu.setup.manual.owner_warning_2'));
+
+  // ✨ 与 QR setup 一致，附加「一键开权限」+ 事件订阅引导
+  appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
+
+  lines.push('');
   lines.push(t('feishu.setup.qr.next_step_start'));
 
   return lines.join('\n');
@@ -1607,6 +1683,42 @@ async function handleStatus(): Promise<string> {
     ? t('feishu.status.bot_status_running')
     : t('feishu.status.bot_status_stopped');
   lines.push(tp('feishu.status.bot_status_label', { status }));
+
+  // ✨ Mini-doctor：检测 scope 健康度，给出修复建议
+  try {
+    const probe = await probeCredentials(creds.appId, creds.appSecret, creds.domain);
+    if (probe?.grantedScopes) {
+      const missing = computeMissingScopes(probe.grantedScopes, [...REQUIRED_APP_SCOPES]);
+      lines.push('');
+      if (missing.length === 0) {
+        lines.push('  ✅ 应用权限：已开通全部 dvcode 必需的 scope');
+      } else {
+        const applyUrl = buildScopeApplyUrl({
+          appId: creds.appId,
+          scopes: missing,
+          brand: creds.domain,
+          tokenType: 'tenant',
+        });
+        lines.push(`  ⚠️ 应用权限：缺失 ${missing.length} 项必需 scope`);
+        lines.push(`     一键申请：${applyUrl}`);
+        if (missing.length <= 8) {
+          for (const s of missing) lines.push(`       - ${s}`);
+        }
+      }
+    } else {
+      // 应用还没开通 application:application:self_manage，无法 probe scope
+      lines.push('');
+      lines.push('  ℹ️ 无法读取应用 scope 列表（应用尚未开通 `application:application:self_manage`）');
+      lines.push(`     一键申请所有必需 scope：${buildScopeApplyUrl({
+        appId: creds.appId,
+        scopes: [...REQUIRED_APP_SCOPES],
+        brand: creds.domain,
+        tokenType: 'tenant',
+      })}`);
+    }
+  } catch {
+    /* probe 失败不阻塞 status 输出 */
+  }
 
   if (!activeGateway) {
     lines.push('');
