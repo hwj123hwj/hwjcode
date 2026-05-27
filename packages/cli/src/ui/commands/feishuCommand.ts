@@ -934,6 +934,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
             { type: 'info', text: tp('feishu.tui.tool_running_with_args', { name: toolName, args: toolArgsDesc }) },
             Date.now(),
           );
+
+          // 在卡片上单独展示当前正在运行的工具名称及参数
+          const currentToolNotice = `\n\n🔧 **正在运行工具**: \`${toolName}\`\n> **参数**: \`${JSON.stringify(req.args).slice(0, 200)}${JSON.stringify(req.args).length > 200 ? '...' : ''}\``;
+          if (activeCardId) {
+            await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行工具中)', accumulatedMarkdown + currentToolNotice);
+          }
+
           try {
             // 🎯 飞书模式：拦截 ask_user_question，用交互卡片让用户回答
             if (toolName === 'ask_user_question' && req.args) {
@@ -952,16 +959,104 @@ async function handleStart(context?: CommandContext): Promise<string> {
               continue;
             }
 
-            const toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+            let toolResponse;
+            if (toolName === 'run_shell_command') {
+              // 精细捕获 run_shell_command 的滚动输出！
+              const shellTool = toolRegistry.getTool('run_shell_command');
+              if (shellTool) {
+                const startTime = Date.now();
+                // 实时更新的节流计数器，避免更新卡片过快
+                let lastCardUpdateTime = 0;
+                const CARD_UPDATE_THROTTLE_MS = 1500;
+
+                const toolResult = await shellTool.execute(
+                  req.args,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    // 节流更新飞书卡片上的控制台滚动输出
+                    if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
+                      const scrolledLogs = getLatest20Lines(output);
+                      const shellRunningProgress = currentToolNotice + `\n\n💻 **控制台输出 (最后 20 行):**\n\`\`\`bash\n${scrolledLogs}\n\`\`\``;
+                      await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + shellRunningProgress);
+                      lastCardUpdateTime = now;
+                    }
+                  }
+                );
+
+                // 将 toolResult 转换为标准的 ToolCallResponseInfo 格式
+                const durationMs = Date.now() - startTime;
+                const responseLength = typeof toolResult.llmContent === 'string'
+                  ? toolResult.llmContent.length
+                  : JSON.stringify(toolResult.llmContent).length;
+
+                // 核心的 telemetry 日志，与 executeToolCall 同等质量
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'run_shell_command',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: responseLength,
+                });
+
+                const response = {
+                  functionResponse: {
+                    id: req.callId,
+                    name: 'run_shell_command',
+                    response: { output: toolResult.llmContent },
+                  }
+                };
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [response],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+              } else {
+                // 降级使用常规 executeToolCall
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
+            } else {
+              // 其它非 Shell 工具，直接通过 executeToolCall 执行
+              toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+            }
+
             if (toolResponse.responseParts) {
               const parts = Array.isArray(toolResponse.responseParts) ? toolResponse.responseParts : [toolResponse.responseParts];
               toolResponseParts.push(...(parts as Part[]));
             }
+
+            // 在 accumulatedMarkdown 后面追加当前工具的最终运行报告
+            const toolResultDesc = toolResponse.resultDisplay
+              ? getLatest20Lines(typeof toolResponse.resultDisplay === 'string'
+                  ? toolResponse.resultDisplay
+                  : JSON.stringify(toolResponse.resultDisplay, null, 2))
+              : '执行成功（无控制台输出）';
+
+            // 拼接进大卡片的 markdown
+            accumulatedMarkdown += `\n\n🔧 **工具执行完成: \`${toolName}\`**\n` +
+                                   `> **参数**: \`${JSON.stringify(req.args).slice(0, 150)}${JSON.stringify(req.args).length > 150 ? '...' : ''}\`\n\n` +
+                                   `📊 **执行结果 (最后 20 行):**\n\`\`\`bash\n${toolResultDesc}\n\`\`\``;
+
+            // 最终无打字机光标的连贯卡片更新
+            if (activeCardId) {
+              await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown);
+            }
+
             tuiContext?.addItem(
               { type: 'info', text: tp('feishu.tui.tool_done', { name: toolName }) },
               Date.now(),
             );
           } catch (toolErr: any) {
+            // 工具执行失败追加
+            accumulatedMarkdown += `\n\n❌ **工具执行失败: \`${toolName}\`**\n> \`${toolErr.message || '未知错误'}\``;
+            if (activeCardId) {
+              await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行失败)', accumulatedMarkdown);
+            }
+
             tuiContext?.addItem(
               { type: 'error', text: tp('feishu.tui.tool_failed', { name: toolName, error: toolErr.message }) },
               Date.now(),
@@ -972,7 +1067,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 工具执行结束，更新状态
         if (activeCardId) {
-          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown + `\n\n*(✅ 工具运行完成，正在继续思考...)*`);
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (思考中)', accumulatedMarkdown + `\n\n*(🧠 AI 正在结合工具结果继续思考...)*`);
         }
 
         // 将工具结果作为下一轮输入
@@ -1022,6 +1117,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
     return false;
+  }
+
+  function getLatest20Lines(text: string): string {
+    if (!text) return '';
+    const lines = text.split('\n');
+    if (lines.length > 20) {
+      return lines.slice(-20).join('\n');
+    }
+    return text;
   }
 
   async function processMessageQueue(
