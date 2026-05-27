@@ -18,6 +18,7 @@
  */
 
 import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
+import { MessageType } from '../types.js';
 import {
   loadCredentials,
   saveCredentials,
@@ -184,7 +185,7 @@ function helpText(): string {
   return t('feishu.help.text');
 }
 
-async function handleSetup(args: string): Promise<string> {
+async function handleSetup(args: string, ctx?: CommandContext): Promise<string> {
   const trimmed = args.trim();
   // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
   const manualMatch = trimmed.match(/^--manual\s+(.+)$/s);
@@ -198,16 +199,44 @@ async function handleSetup(args: string): Promise<string> {
   }
 
   // 没有 --manual 则走 QR
-  return await handleQrSetup();
+  return await handleQrSetup(ctx);
+}
+
+/**
+ * 渲染一个 ASCII 二维码（紧凑模式，TUI 友好）。
+ *
+ * qrcode-terminal 默认会用空格 + █ 字符渲染，small 模式用半角块字符
+ * 让二维码体积减半，更适合 TUI 窗口显示。
+ *
+ * 失败时返回 null，调用方可以降级到"只展示链接"。
+ */
+function renderQrCode(text: string): string | null {
+  try {
+    // qrcode-terminal 是 CJS 模块，运行时 require 即可
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const qrcode = require('qrcode-terminal');
+    let output = '';
+    qrcode.generate(text, { small: true }, (qr: string) => {
+      output = qr;
+    });
+    return output || null;
+  } catch (e: any) {
+    dwarn(`[Feishu] renderQrCode failed: ${e?.message || e}`);
+    return null;
+  }
 }
 
 /**
  * 档 1：扫码自动建应用
  *
- * 同步等待扫码结果（最多 expireIn 秒），结果显示在命令返回的消息中。
- * 这样可以避免 TUI 模式下后台 console.log 不可见的问题。
+ * 两阶段返回：
+ *  阶段 1（同步返回）：立刻渲染二维码 + 链接 + 等待提示，让用户**马上**看见可扫码内容。
+ *  阶段 2（后台异步）：等用户扫码后，通过 ctx.ui.addItem 把后续状态/结果一条一条 push 到
+ *                      history。这样 TUI 不会卡住等 60+ 秒，扫码体验非常流畅。
+ *
+ * 没有 ctx（被非交互式 CLI 调用，如 `dvcode -p`）时退化回单次同步返回。
  */
-async function handleQrSetup(): Promise<string> {
+async function handleQrSetup(ctx?: CommandContext): Promise<string> {
   const lines: string[] = [t('feishu.setup.qr.title')];
   lines.push(t('feishu.setup.qr.connecting'));
 
@@ -216,71 +245,84 @@ async function handleQrSetup(): Promise<string> {
     const begin = await beginRegistration('feishu');
     const qrUrl = begin.qrUrl;
 
+    // ============= 阶段 1：立刻拼好「二维码 + 链接 + 扫码提示」一并返回 =============
     lines.push(t('feishu.setup.qr.generated'));
-    lines.push(tp('feishu.setup.qr.url', { url: qrUrl }));
-    lines.push('');
-    lines.push(t('feishu.setup.qr.scan_hint'));
-    lines.push(t('feishu.setup.qr.browser_hint'));
     lines.push('');
 
-    // 尝试打开浏览器
-    try {
-      const { default: open } = await import('open');
-      open(qrUrl);
-      lines.push(t('feishu.setup.qr.browser_opened'));
-    } catch {
-      lines.push(t('feishu.setup.qr.browser_failed'));
+    // ASCII QR 码 — 紧凑模式，适合 TUI 窗口
+    const qrAscii = renderQrCode(qrUrl);
+    if (qrAscii) {
+      lines.push(qrAscii);
     }
 
+    lines.push('');
+    lines.push('  📱 ' + t('feishu.setup.qr.scan_hint'));
+    lines.push('');
+    lines.push('  🔗 备选：在浏览器打开此链接登录授权');
+    lines.push(`     ${qrUrl}`);
     lines.push('');
     lines.push(t('feishu.setup.qr.waiting'));
     lines.push(t('feishu.setup.qr.cancel_hint'));
 
-    // 同步等待扫码结果（带进度点回调）
-    let dots = '';
-    const pollResult = await pollRegistration(
-      begin.deviceCode,
-      begin.interval,
-      begin.expireIn,
-      'feishu',
-      (d) => { dots = d; },
-    );
-
-    if (!pollResult) {
+    // 没有 ctx → 非交互式调用，必须用旧的同步等待逻辑
+    if (!ctx) {
+      const pollResult = await pollRegistration(
+        begin.deviceCode,
+        begin.interval,
+        begin.expireIn,
+        'feishu',
+      );
+      if (!pollResult) {
+        lines.push('');
+        lines.push(t('feishu.setup.qr.timeout'));
+        lines.push(t('feishu.setup.qr.retry_hint'));
+        return lines.join('\n');
+      }
+      const result = await finalizeQrSetup(pollResult);
       lines.push('');
-      lines.push(t('feishu.setup.qr.timeout'));
-      lines.push(t('feishu.setup.qr.retry_hint'));
+      lines.push(result);
       return lines.join('\n');
     }
 
-    const botInfo = await probeCredentials(
-      pollResult.appId, pollResult.appSecret, pollResult.domain,
-    );
+    // ============= 阶段 2：交互模式 — 后台 await，扫码完成后 push 到 history =============
+    void (async () => {
+      try {
+        const pollResult = await pollRegistration(
+          begin.deviceCode,
+          begin.interval,
+          begin.expireIn,
+          'feishu',
+        );
+        if (!pollResult) {
+          ctx.ui.addItem(
+            {
+              type: MessageType.INFO,
+              text: [
+                '',
+                t('feishu.setup.qr.timeout'),
+                t('feishu.setup.qr.retry_hint'),
+              ].join('\n'),
+            },
+            Date.now(),
+          );
+          return;
+        }
+        const result = await finalizeQrSetup(pollResult);
+        ctx.ui.addItem(
+          { type: MessageType.INFO, text: result },
+          Date.now(),
+        );
+      } catch (err: any) {
+        ctx.ui.addItem(
+          {
+            type: MessageType.ERROR,
+            text: `❌ Feishu setup 后台轮询失败：${err?.message || err}`,
+          },
+          Date.now(),
+        );
+      }
+    })();
 
-    const creds: FeishuCredentials = {
-      appId: pollResult.appId,
-      appSecret: pollResult.appSecret,
-      domain: pollResult.domain as 'feishu' | 'lark',
-      botName: botInfo?.botName,
-      botOpenId: botInfo?.botOpenId,
-      // The user who scanned the QR code becomes the Bot owner — only they
-      // (and entries in `allowlist`) may invoke the agent. See B1 in MR review.
-      ownerOpenId: pollResult.openId,
-    };
-
-    await saveCredentials(creds);
-
-    lines.push('');
-    lines.push(t('feishu.setup.qr.success'));
-    lines.push(`  App ID:      ${creds.appId}`);
-    if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
-    lines.push(t('feishu.setup.qr.creds_saved'));
-
-    // ✨ 关键升级：检测应用已开通的 scope，输出"一键申请缺失权限"链接
-    appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
-
-    lines.push('');
-    lines.push(t('feishu.setup.qr.next_step_start'));
     return lines.join('\n');
   } catch (err: any) {
     return [
@@ -290,6 +332,47 @@ async function handleQrSetup(): Promise<string> {
       t('feishu.setup.qr.fallback_hint'),
     ].join('\n');
   }
+}
+
+/**
+ * 阶段 2 的收尾：拿到 device-code 轮询结果后，做 probe + 保存凭证 + 拼最终提示。
+ * 提取成独立函数是为了让交互式与非交互式两条调用路径共享同一段逻辑。
+ */
+async function finalizeQrSetup(pollResult: {
+  appId: string;
+  appSecret: string;
+  domain: string;
+  openId?: string;
+}): Promise<string> {
+  const lines: string[] = [];
+  const botInfo = await probeCredentials(
+    pollResult.appId, pollResult.appSecret, pollResult.domain,
+  );
+
+  const creds: FeishuCredentials = {
+    appId: pollResult.appId,
+    appSecret: pollResult.appSecret,
+    domain: pollResult.domain as 'feishu' | 'lark',
+    botName: botInfo?.botName,
+    botOpenId: botInfo?.botOpenId,
+    // The user who scanned the QR code becomes the Bot owner — only they
+    // (and entries in `allowlist`) may invoke the agent. See B1 in MR review.
+    ownerOpenId: pollResult.openId,
+  };
+
+  await saveCredentials(creds);
+
+  lines.push(t('feishu.setup.qr.success'));
+  lines.push(`  App ID:      ${creds.appId}`);
+  if (creds.botName) lines.push(tp('feishu.setup.qr.bot_name', { name: creds.botName }));
+  lines.push(t('feishu.setup.qr.creds_saved'));
+
+  // ✨ 关键升级：检测应用已开通的 scope，输出"一键申请缺失权限"链接
+  appendPostSetupGuidance(lines, creds, botInfo?.grantedScopes);
+
+  lines.push('');
+  lines.push(t('feishu.setup.qr.next_step_start'));
+  return lines.join('\n');
 }
 
 /**
@@ -2040,7 +2123,7 @@ export const feishuCommand: SlashCommand = {
       name: 'setup',
       description: t('feishu.subcmd.setup.description'),
       kind: CommandKind.BUILT_IN,
-      action: async (_ctx, args) => msg(await handleSetup(args)),
+      action: async (ctx, args) => msg(await handleSetup(args, ctx)),
     },
     {
       name: 'start',
