@@ -19,6 +19,7 @@
  */
 
 import { dlog, dwarn, derror } from './logger.js';
+import { optimizeMarkdownStyle } from './markdown-style.js';
 
 const API_BASE_URLS: Record<string, string> = {
   feishu: 'https://open.feishu.cn',
@@ -183,7 +184,7 @@ export function buildCardKitStreamingCard(initialContent: string = '', initialFo
     {
       tag: 'markdown',
       element_id: CARDKIT_STREAMING_ELEMENT_ID,
-      content: initialContent || ' ',
+      content: initialContent ? optimizeMarkdownStyle(initialContent, 2) : ' ',
       text_align: 'left',
       text_size: 'normal_v2',
     },
@@ -237,7 +238,7 @@ export function buildCardKitFinalCard(content: string, footerMetrics?: FeishuFoo
     {
       tag: 'markdown',
       element_id: CARDKIT_STREAMING_ELEMENT_ID,
-      content: content || ' ',
+      content: content ? optimizeMarkdownStyle(content, 2) : ' ',
       text_align: 'left',
       text_size: 'normal_v2',
     },
@@ -1244,7 +1245,7 @@ export class FeishuGateway {
     if (content) {
       elements.push({
         tag: 'markdown',
-        content,
+        content: optimizeMarkdownStyle(content, 1),
       });
     }
 
@@ -1399,7 +1400,7 @@ export class FeishuGateway {
 
       const elements: any[] = [];
       if (content) {
-        elements.push({ tag: 'markdown', content });
+        elements.push({ tag: 'markdown', content: optimizeMarkdownStyle(content, 1) });
       }
 
       // 添加页脚
@@ -1513,7 +1514,7 @@ export class FeishuGateway {
     const pushContent = async (content: string): Promise<boolean> => {
       if (content === lastPushedContent) return true; // 无变化，省一次 RPC
       sequence += 1;
-      const ok = await this.streamCardKitElement(cardId, CARDKIT_STREAMING_ELEMENT_ID, content || ' ', sequence);
+      const ok = await this.streamCardKitElement(cardId, CARDKIT_STREAMING_ELEMENT_ID, optimizeMarkdownStyle(content, 2) || ' ', sequence);
       if (ok) lastPushedContent = content;
       return ok;
     };
