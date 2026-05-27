@@ -935,12 +935,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
             Date.now(),
           );
 
-          // 在卡片上单独展示当前正在运行的工具名称及参数
-          const currentToolNotice = `\n\n🔧 **正在运行工具**: \`${toolName}\`\n> **参数**: \`${JSON.stringify(req.args).slice(0, 200)}${JSON.stringify(req.args).length > 200 ? '...' : ''}\``;
-          if (activeCardId) {
-            await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行工具中)', accumulatedMarkdown + currentToolNotice);
-          }
-
           try {
             // 🎯 飞书模式：拦截 ask_user_question，用交互卡片让用户回答
             if (toolName === 'ask_user_question' && req.args) {
@@ -965,7 +959,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
               const shellTool = toolRegistry.getTool('run_shell_command');
               if (shellTool) {
                 const startTime = Date.now();
-                // 实时更新的节流计数器，避免更新卡片过快
                 let lastCardUpdateTime = 0;
                 const CARD_UPDATE_THROTTLE_MS = 1500;
 
@@ -976,9 +969,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     const now = Date.now();
                     // 节流更新飞书卡片上的控制台滚动输出
                     if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
-                      const scrolledLogs = getLatest20Lines(output);
-                      const shellRunningProgress = currentToolNotice + `\n\n💻 **控制台输出 (最后 20 行):**\n\`\`\`bash\n${scrolledLogs}\n\`\`\``;
-                      await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + shellRunningProgress);
+                      const liveProgressMarkdown = formatToolCallWithBorder('run_shell_command', req.args, true, output, true);
+                      await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
                       lastCardUpdateTime = now;
                     }
                   }
@@ -990,7 +982,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                   ? toolResult.llmContent.length
                   : JSON.stringify(toolResult.llmContent).length;
 
-                // 核心的 telemetry 日志，与 executeToolCall 同等质量
+                // 核心的 telemetry 日志
                 config?.getTelemetry?.()?.logToolCall?.(config, {
                   'event.name': 'tool_call',
                   'event.timestamp': new Date().toISOString(),
@@ -1021,6 +1013,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
               }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
+              // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)
+              const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
+              if (activeCardId) {
+                await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行工具中)', accumulatedMarkdown + '\n\n' + liveToolProgress);
+              }
               toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
             }
 
@@ -1029,17 +1026,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
               toolResponseParts.push(...(parts as Part[]));
             }
 
-            // 在 accumulatedMarkdown 后面追加当前工具的最终运行报告
-            const toolResultDesc = toolResponse.resultDisplay
-              ? getLatest20Lines(typeof toolResponse.resultDisplay === 'string'
-                  ? toolResponse.resultDisplay
-                  : JSON.stringify(toolResponse.resultDisplay, null, 2))
-              : '执行成功（无控制台输出）';
+            // 在 accumulatedMarkdown 后面追加当前工具的最终精美运行报告
+            const finalDisplayOutput = typeof toolResponse.resultDisplay === 'string'
+              ? toolResponse.resultDisplay
+              : JSON.stringify(toolResponse.resultDisplay, null, 2);
+
+            const toolReportMarkdown = formatToolCallWithBorder(toolName, req.args, true, finalDisplayOutput, false);
 
             // 拼接进大卡片的 markdown
-            accumulatedMarkdown += `\n\n🔧 **工具执行完成: \`${toolName}\`**\n` +
-                                   `> **参数**: \`${JSON.stringify(req.args).slice(0, 150)}${JSON.stringify(req.args).length > 150 ? '...' : ''}\`\n\n` +
-                                   `📊 **执行结果 (最后 20 行):**\n\`\`\`bash\n${toolResultDesc}\n\`\`\``;
+            accumulatedMarkdown += `\n\n${toolReportMarkdown}`;
 
             // 最终无打字机光标的连贯卡片更新
             if (activeCardId) {
@@ -1051,8 +1046,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
               Date.now(),
             );
           } catch (toolErr: any) {
-            // 工具执行失败追加
-            accumulatedMarkdown += `\n\n❌ **工具执行失败: \`${toolName}\`**\n> \`${toolErr.message || '未知错误'}\``;
+            // 工具执行失败追加精美样式
+            const failedReportMarkdown = formatToolCallWithBorder(toolName, req.args, false, toolErr.message || '未知错误', false);
+            accumulatedMarkdown += `\n\n${failedReportMarkdown}`;
             if (activeCardId) {
               await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行失败)', accumulatedMarkdown);
             }
@@ -1126,6 +1122,106 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return lines.slice(-20).join('\n');
     }
     return text;
+  }
+
+  function getToolShortName(name: string): string {
+    switch (name) {
+      case 'run_shell_command': return 'Shell';
+      case 'read_file': return 'ReadFile';
+      case 'read_many_files': return 'ReadManyFiles';
+      case 'write_file': return 'WriteFile';
+      case 'delete_file': return 'DeleteFile';
+      case 'replace': return 'Replace';
+      case 'glob': return 'Glob';
+      case 'grep': return 'Grep';
+      case 'search_file_content': return 'SearchContent';
+      case 'web_search': return 'WebSearch';
+      case 'web_fetch': return 'WebFetch';
+      case 'todo_write': return 'TodoWrite';
+      case 'task': return 'SubAgentTask';
+      case 'use_skill': return 'UseSkill';
+      default: {
+        return name.split(/[-_]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+      }
+    }
+  }
+
+  function formatToolCallWithBorder(
+    toolName: string,
+    args: any,
+    success: boolean,
+    output: string,
+    isLive = false
+  ): string {
+    const shortName = getToolShortName(toolName);
+    const statusIcon = success ? '✅️' : '❌';
+    const liveStatusIcon = isLive ? '⏳' : statusIcon;
+
+    // 1. 提取参数主信息
+    let mainArg = '';
+    const keys = Object.keys(args || {});
+    if (toolName === 'run_shell_command' && args.command) {
+      mainArg = args.command;
+    } else if ((toolName === 'read_file' || toolName === 'write_file') && args.absolute_path) {
+      mainArg = args.absolute_path;
+    } else if (toolName === 'replace' && args.file_path) {
+      mainArg = args.file_path;
+    } else if (args.path) {
+      mainArg = args.path;
+    } else if (args.pattern) {
+      mainArg = args.pattern;
+    } else if (keys.length > 0) {
+      mainArg = String(args[keys[0]]);
+    }
+
+    // 缩短绝对路径到相对路径（看起来更整洁）
+    if (mainArg && mainArg.includes('DeepCode')) {
+      const parts = mainArg.split(/[\\/]DeepCode[\\/]/);
+      if (parts.length > 1) {
+        mainArg = parts[1];
+      }
+    }
+
+    // 2. 提取 description (很多大模型会在工具调用里附带 description)
+    const descriptionStr = args.description ? ` (${args.description})` : '';
+
+    // 3. 构建第一行头部
+    const headLine = `${liveStatusIcon} **${shortName}** \`${mainArg}\`${descriptionStr}`;
+
+    // 4. 构建树形分支及输出内容
+    let branchLine = '';
+    let contentBox = '';
+
+    if (toolName === 'run_shell_command') {
+      const rawOutput = output || '';
+      const lines = rawOutput.split('\n');
+      const totalLines = lines.length;
+      // 取最后 15 行
+      const maxLinesToShow = 15;
+      let displayedLines = lines;
+      if (lines.length > maxLinesToShow) {
+        displayedLines = lines.slice(-maxLinesToShow);
+      }
+
+      branchLine = `\n └ ... (showing last ${displayedLines.length} lines, ${totalLines} lines total)`;
+
+      // 构建美化垂直双竖线边框的黑框控制台
+      const boxedLines = displayedLines.map(line => ` │ ${line.padEnd(80).slice(0, 80)} │`).join('\n');
+      contentBox = `\n │${'─'.repeat(81)}│\n${boxedLines}\n │${'─'.repeat(81)}│`;
+    } else if (toolName === 'read_file') {
+      const startLine = args.offset !== undefined ? args.offset + 1 : 1;
+      const limit = args.limit !== undefined ? args.limit : 'all';
+      branchLine = `\n └ ( read lines: ${startLine}-${limit === 'all' ? 'end' : startLine + Number(limit) - 1} )`;
+    } else if (toolName === 'replace') {
+      branchLine = `\n └ ( apply replacements completed )`;
+    } else if (toolName === 'write_file') {
+      branchLine = `\n └ ( file write completed )`;
+    } else {
+      const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
+      branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
+    }
+
+    return `${headLine}${branchLine}${contentBox}`;
   }
 
   async function processMessageQueue(
