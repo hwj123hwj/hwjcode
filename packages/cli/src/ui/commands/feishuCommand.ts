@@ -36,7 +36,7 @@ import {
   pollRegistration,
   probeCredentials,
 } from '../../services/feishu/registration.js';
-import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
+import { FeishuGateway, FeishuMessage, FeishuFooterMetrics, buildCardKitFinalCard } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
 import {
   REQUIRED_APP_SCOPES,
@@ -46,6 +46,7 @@ import {
   buildPermissionPageUrl,
   missingScopes as computeMissingScopes,
 } from '../../services/feishu/scopes.js';
+import { getEncoding } from 'js-tiktoken';
 import {
   executeToolCall,
   ToolRegistry,
@@ -62,6 +63,9 @@ import {
   ToolResult,
   Icon,
   AuthType,
+  loadServerHierarchicalMemory,
+  FileDiscoveryService,
+  ProxyAuthManager,
 } from 'deepv-code-core';
 import { SettingScope } from '../../config/settings.js';
 import { getAvailableModels } from './modelCommand.js';
@@ -93,6 +97,9 @@ const activeSenderOpenIds = new Map<string, string>();
 /** 各会话独立运行任务的中止控制器 (完全并发安全，允许不同群独立 /stop 中止) */
 const activeAbortControllers = new Map<string, AbortController>();
 
+/** 各会话最后一笔成功交易的 Token 使用量 */
+const chatLastTokenUsage = new Map<string, any>();
+
 /** 全局命令上下文引用 */
 let globalCommandContext: CommandContext | null = null;
 
@@ -101,8 +108,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 interface FeishuProjectRoute {
-  projectRoot: string;
+  projectRoot?: string;
   description?: string;
+  model?: string;
+  thinking?: {
+    mode: 'on' | 'off' | 'auto';
+    effort?: 'auto' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+  };
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
@@ -129,14 +141,90 @@ async function loadProjectRoutes(): Promise<Record<string, FeishuProjectRoute>> 
 }
 
 /**
- * 写入路由表
+ * 飞书独立会话加载并过滤项目上下文/记忆 (DEEPV.md, AGENTS.md 等)
  */
-async function saveProjectRoute(chatId: string, route: FeishuProjectRoute): Promise<void> {
+async function loadFeishuSessionMemory(workspaceRoot: string, settings?: any): Promise<{ userMemory: string; memoryTokenCount: number; geminiMdFileCount: number }> {
+  try {
+    const fileService = new FileDiscoveryService(workspaceRoot);
+    const debugMode = false;
+
+    const fileFiltering = {
+      respectGitIgnore: settings?.merged?.fileFiltering?.respectGitIgnore ?? true,
+      respectGeminiIgnore: settings?.merged?.fileFiltering?.respectGeminiIgnore ?? true,
+      enableRecursiveFileSearch: settings?.merged?.fileFiltering?.enableRecursiveFileSearch ?? true,
+    };
+
+    const result = await loadServerHierarchicalMemory(
+      workspaceRoot,
+      debugMode,
+      fileService,
+      [], // extensionContextFilePaths
+      fileFiltering,
+      settings?.merged?.memoryDiscoveryMaxDirs,
+    );
+
+    // Apply projectMemoryMode filtering (all / deepv-only / none)
+    const mode = settings?.merged?.projectMemoryMode || 'all';
+    let filtered = result;
+
+    if (mode === 'none') {
+      filtered = { memoryContent: '', fileCount: 0, filePaths: [] };
+    } else if (mode === 'deepv-only') {
+      const filteredPaths = result.filePaths.filter((fp: string) => {
+        const filename = fp.split(/[\\/]/).pop() || '';
+        return !filename.toUpperCase().startsWith('AGENTS');
+      });
+      if (filteredPaths.length !== result.filePaths.length) {
+        const filteredContent = result.memoryContent
+          .split('\n\n')
+          .filter((block: string) => !block.includes('AGENTS.md ---'))
+          .join('\n\n')
+          .trim();
+        filtered = {
+          memoryContent: filteredContent,
+          fileCount: filteredPaths.length,
+          filePaths: filteredPaths,
+        };
+      }
+    }
+
+    // 计算 memory token
+    let memoryTokenCount = 0;
+    try {
+      const enc = getEncoding('cl100k_base');
+      memoryTokenCount = enc.encode(filtered.memoryContent).length;
+    } catch (e) {
+      // ignore token count error
+    }
+
+    return {
+      userMemory: filtered.memoryContent,
+      memoryTokenCount,
+      geminiMdFileCount: filtered.fileCount,
+    };
+  } catch (err: any) {
+    dwarn(`Failed to load memory for isolated session on ${workspaceRoot}: ${err.message}`);
+    return {
+      userMemory: '',
+      memoryTokenCount: 0,
+      geminiMdFileCount: 0,
+    };
+  }
+}
+
+/**
+ * 写入路由表（增量更新）
+ */
+async function saveProjectRoute(chatId: string, routeUpdate: Partial<FeishuProjectRoute>): Promise<void> {
   try {
     const routes = await loadProjectRoutes();
-    routes[chatId] = route;
+    const existing = routes[chatId] || {};
+    routes[chatId] = {
+      ...existing,
+      ...routeUpdate,
+    };
     fs.writeFileSync(ROUTE_CONFIG_FILE, JSON.stringify(routes, null, 2), 'utf8');
-    dlog(`[Router] Successfully bound Chat ID '${chatId}' to '${route.projectRoot}'`);
+    dlog(`[Router] Successfully updated Chat ID '${chatId}' info in feishu-projects.json`);
   } catch (e) {
     derror(`Failed to save feishu-projects.json: ${(e as Error).message}`);
   }
@@ -798,6 +886,121 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
 };
 
 /**
+ * 格式化精美的飞书端纯英文 /status 状态卡片内容
+ */
+async function formatStatusMessage(config: any, geminiClient: any, chatId?: string): Promise<string> {
+  const cliVersion = await getVersion().catch(() => 'unknown');
+  const currentModel = config?.getModel() || '未选择';
+  const cloudModelInfo = config?.getCloudModelInfo?.(currentModel);
+  const modelName = cloudModelInfo?.displayName || currentModel;
+
+  const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+
+  const proxyAuthManager = ProxyAuthManager.getInstance();
+  const userInfo = proxyAuthManager.getUserInfo();
+  const userName = userInfo?.name || 'Not Available';
+
+  const lastTokenUsage = chatId ? chatLastTokenUsage.get(chatId) : null;
+  const input = lastTokenUsage?.inputTokens || uiTelemetryService.getLastPromptTokenCount() || 0;
+  const output = lastTokenUsage?.outputTokens || 0;
+  const cacheRead = lastTokenUsage?.cacheReadInputTokens || 0;
+  const total = input + output;
+  const cacheHitRate = input > 0 ? ((cacheRead / input) * 100).toFixed(1) + '%' : '0.0%';
+
+  let remainingCredits = 'Not Available';
+  try {
+    const creditsInfo = await getCreditsService().getCreditsInfo(true);
+    if (creditsInfo) {
+      remainingCredits = creditsInfo.remainingCredits.toLocaleString();
+    }
+  } catch {
+    // ignore
+  }
+
+  const maxTokens = tokenLimit(currentModel, config || undefined);
+  const contextK = input > 0 ? (input / 1000).toFixed(1) + 'k' : '0k';
+  const maxM = maxTokens > 0 ? (maxTokens / 1000000).toFixed(1) + 'm' : 'Unknown';
+  const contextPct = maxTokens > 0 ? ((input / maxTokens) * 100).toFixed(0) + '%' : '0%';
+
+  return [
+    `Ⓥ **DeepV Code** v${cliVersion}`,
+    `🧠 **Model**: ${modelName}`,
+    `⚙️ **Auth**: ${userName}`,
+    `🧮 **Token Usage**`,
+    `  Input: ${input.toLocaleString()}`,
+    `  Cache Read: ${cacheRead.toLocaleString()}`,
+    `  Output: ${output.toLocaleString()}`,
+    `  Total: ${total.toLocaleString()}`,
+    `  Cache Hit Rate: ${cacheHitRate}`,
+    `  Credits: ${lastTokenUsage?.creditsUsage != null ? lastTokenUsage.creditsUsage : 0} / ${remainingCredits}`,
+    `📚 **Context**: ${contextK}/${maxM} (${contextPct})`,
+    `🧵 **Session**: feishu_${chatId || 'unknown'}`,
+    `⚙️ **Think**: ${currentConfig.effort || 'auto'} / ${currentConfig.mode}`,
+  ].join('\n');
+}
+
+/**
+ * 从当前状态生成 FeishuFooterMetrics。
+ * @param config 配置对象
+ * @param geminiClient Gemini 客户端
+ * @param lastRequestTokenUsage 最近一笔请求的真实 token 使用状况
+ * @returns FeishuFooterMetrics 对象
+ */
+async function getFeishuStatusMetrics(
+  config: any,
+  geminiClient: any,
+  lastRequestTokenUsage?: any,
+): Promise<FeishuFooterMetrics> {
+  const metrics: FeishuFooterMetrics = {};
+
+  try {
+    const currentModel = config?.getModel() || '未选择';
+    const cloudModelInfo = config?.getCloudModelInfo?.(currentModel);
+    metrics.model = cloudModelInfo?.displayName || currentModel;
+
+    const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
+    if (currentConfig.mode !== 'off') {
+      metrics.status = `思考级别: ${currentConfig.effort || 'auto'}`;
+    }
+
+    const maxTokens = tokenLimit(currentModel, config || undefined);
+
+    if (lastRequestTokenUsage) {
+      const input = lastRequestTokenUsage.inputTokens || 0;
+      const output = lastRequestTokenUsage.outputTokens || 0;
+      metrics.tokens = { input, output };
+
+      if (lastRequestTokenUsage.cacheReadInputTokens > 0) {
+        metrics.cacheRead = lastRequestTokenUsage.cacheReadInputTokens;
+        metrics.cacheHitRate = input > 0 ? (lastRequestTokenUsage.cacheReadInputTokens / input) * 100 : 0;
+      }
+      if (lastRequestTokenUsage.creditsUsage > 0) {
+        metrics.credits = lastRequestTokenUsage.creditsUsage;
+      }
+      if (input > 0 && maxTokens && maxTokens > 0) {
+        metrics.contextPercentage = (input / maxTokens) * 100;
+      }
+    } else {
+      const actualPromptTokens = uiTelemetryService.getLastPromptTokenCount();
+      metrics.tokens = {
+        input: actualPromptTokens || 0,
+        output: 0, // Output tokens are not directly available here without full stream completion
+      };
+
+      // Calculate context percentage if possible (assuming actualPromptTokens is current context size)
+      if (actualPromptTokens && maxTokens && maxTokens > 0) {
+        metrics.contextPercentage = (actualPromptTokens / maxTokens) * 100;
+      }
+    }
+
+  } catch (err: any) {
+    dwarn(`Failed to get Feishu status metrics: ${err.message}`);
+  }
+
+  return metrics;
+}
+
+/**
  * 处理飞书端的斜杠命令（不发给 LLM，本地执行）
  *
  * 返回 null 表示不是命令，应走 LLM agent 流程
@@ -857,38 +1060,8 @@ async function handleFeishuCommand(
 
     case '/status': {
       try {
-        const cliVersion = await getVersion().catch(() => 'unknown');
-
-        let creditsStr = '获取失败';
-        try {
-          const creditsInfo = await getCreditsService().getCreditsInfo(true);
-          if (creditsInfo) {
-            creditsStr = `${creditsInfo.remainingCredits.toLocaleString()} / ${creditsInfo.totalCredits.toLocaleString()} (已用: ${creditsInfo.usedCredits.toLocaleString()} Credits)`;
-          }
-        } catch (e) {
-          creditsStr = '未知';
-        }
-
-        const currentModel = config?.getModel() || '未选择';
-        const cloudModelInfo = config?.getCloudModelInfo?.(currentModel);
-        const modelDisplayName = cloudModelInfo?.displayName || currentModel;
-
-        const currentConfig = config?.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
-        const thinkingStr = `${currentConfig.mode === 'on' ? '开启' : currentConfig.mode === 'off' ? '关闭' : '自动'} (力度: ${currentConfig.effort || 'auto'})`;
-
-        const maxTokens = tokenLimit(currentModel, config || undefined);
-        const actualPromptTokens = uiTelemetryService.getLastPromptTokenCount();
-
-        return [
-          `📊 **DeepV Code CLI 状态面板**`,
-          `───────────────────────`,
-          `🤖 **当前模型**: ${modelDisplayName}`,
-          `💭 **思考模式**: ${thinkingStr}`,
-          `📦 **上下文大小**: ${actualPromptTokens ? `${actualPromptTokens.toLocaleString()}` : '0'} / ${maxTokens ? `${maxTokens.toLocaleString()}` : '未知'} tokens`,
-          `💰 **积分剩余量**: ${creditsStr}`,
-          `💻 **CLI 版本**: v${cliVersion}`,
-          `───────────────────────`,
-        ].join('\n');
+        const statusMsg = await formatStatusMessage(config, geminiClient, chatId);
+        return statusMsg;
       } catch (err: any) {
         return `❌ 获取状态信息失败: ${err.message}`;
       }
@@ -923,6 +1096,9 @@ async function handleFeishuCommand(
         };
         config?.setThinkingConfig?.(updated);
         globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        if (chatId) {
+          await saveProjectRoute(chatId, { thinking: updated });
+        }
         if (config) {
           appEvents.emit(AppEvent.ModelChanged, config.getModel() || '');
         }
@@ -936,6 +1112,9 @@ async function handleFeishuCommand(
         };
         config?.setThinkingConfig?.(updated);
         globalCommandContext?.services?.settings?.setValue?.(SettingScope.User, 'thinking', updated);
+        if (chatId) {
+          await saveProjectRoute(chatId, { thinking: updated });
+        }
         if (config) {
           appEvents.emit(AppEvent.ModelChanged, config.getModel() || '');
         }
@@ -981,7 +1160,12 @@ async function handleFeishuCommand(
         const actualModelName = exactMatch.name;
         settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
 
+        if (chatId) {
+          await saveProjectRoute(chatId, { model: actualModelName });
+        }
+
         if (config) {
+          config.setModel?.(actualModelName);
           const geminiClient = config.getGeminiClient();
           if (geminiClient) {
             await geminiClient.waitForChatInitialized();
@@ -1226,12 +1410,21 @@ async function handleStart(context?: CommandContext): Promise<string> {
         text: `🔍 [Router] 收到来自 Chat ID \`${msg.chatId}\` 的消息，解析工作目录为: \`${workspaceRoot}\` (绑定路由: ${route ? '有' : '无'})`
       }, Date.now());
 
-      dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${workspaceRoot}'`);
+      const settings = globalCommandContext?.services?.settings;
+
+      // 🚀 加载独立会话的项目级/全局指令记忆 (DEEPV.md / AGENTS.md)，确保 AI 在独立会话中继承完整的行为规范约束
+      const sessionMemory = await loadFeishuSessionMemory(workspaceRoot, settings);
+
+      dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${workspaceRoot}' with ${sessionMemory.geminiMdFileCount} memory file(s)`);
       const isolatedConfig = new Config({
         sessionId: `feishu-${msg.chatId}-${Date.now()}`,
         cwd: workspaceRoot,
         debugMode: config?.getDebugMode() || false,
         targetDir: workspaceRoot,
+        model: route?.model || settings?.merged?.preferredModel || 'auto',
+        userMemory: sessionMemory.userMemory,
+        memoryTokenCount: sessionMemory.memoryTokenCount,
+        geminiMdFileCount: sessionMemory.geminiMdFileCount,
       });
 
       try {
@@ -1240,6 +1433,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 从而引发“群聊工作目录依旧是 D:\projects\deepVcode\DeepCode”的安全状态漂移 Bug。
         dlog(`[Router] Initializing isolatedConfig on '${workspaceRoot}'...`);
         await isolatedConfig.initialize();
+
+        // 🚀 回放持久化的思考模式与力度
+        if (route?.thinking) {
+          dlog(`[Router] Replaying thinking config for chatId '${msg.chatId}': ${JSON.stringify(route.thinking)}`);
+          isolatedConfig.setThinkingConfig(route.thinking);
+        }
 
         // 主动 refreshAuth 初始化 GeminiClient
         const settings = globalCommandContext?.services?.settings;
@@ -1304,20 +1503,45 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const cmdResult = await handleFeishuCommand(messageText, currentClient, currentConfig, msg.chatId);
         if (cmdResult !== null) {
           tuiContext?.addItem({ type: 'info', text: cmdResult }, Date.now());
-          await gateway.sendMessage(msg.chatId, cmdResult, msg.messageId);
+
+          // 🚀 斜杠命令统一使用 CardKit 2.0 终态卡片规格发送，保证视觉完美统一
+          const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
+          const card = buildCardKitFinalCard(cmdResult, metrics, 'DeepV Code');
+          const cardId = await gateway.createCardKitCard(card);
+          if (cardId) {
+            await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
+          } else {
+            await gateway.sendMessage(msg.chatId, cmdResult, msg.messageId);
+          }
           return cmdResult;
         }
         // 如果是未知斜杠命令，给予友好提示，也是直接响应不排队
         if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
           const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
           tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
-          await gateway.sendMessage(msg.chatId, hint, msg.messageId);
+
+          const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
+          const card = buildCardKitFinalCard(hint, metrics, 'DeepV Code');
+          const cardId = await gateway.createCardKitCard(card);
+          if (cardId) {
+            await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
+          } else {
+            await gateway.sendMessage(msg.chatId, hint, msg.messageId);
+          }
           return hint;
         }
       } catch (err: any) {
         const errMsg = `❌ 执行命令出错：${err.message || err}`;
         tuiContext?.addItem({ type: 'info', text: errMsg }, Date.now());
-        await gateway.sendMessage(msg.chatId, errMsg, msg.messageId);
+
+        const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
+        const card = buildCardKitFinalCard(errMsg, metrics, 'DeepV Code (Error)');
+        const cardId = await gateway.createCardKitCard(card);
+        if (cardId) {
+          await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
+        } else {
+          await gateway.sendMessage(msg.chatId, errMsg, msg.messageId);
+        }
         return errMsg;
       }
     }
@@ -1364,6 +1588,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
       Date.now(),
     );
 
+    // 🎯 DEBUG: Log the raw messageText to understand image attachment format
+    dlog(`[Feishu Debug] Raw messageText from Feishu: "${messageText}"`);
+
     if (!geminiClient || !config) {
       const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
       // 🔬 DEBUG: 打印更多状态信息便于排查
@@ -1381,6 +1608,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     let activeCardId: string | null = null;
     let accumulatedMarkdown = '';
+    let lastRequestTokenUsage: any = null;
+    // CardKit 2.0 流式句柄。为 null 表示流式失败/未启用，会回退到 sendCard 静态卡。
+    let streaming: {
+      pushContent: (content: string) => Promise<boolean>;
+      pushFooter: (metrics: FeishuFooterMetrics) => Promise<boolean>;
+      finalize: (finalContent: string, finalFooterMetrics?: FeishuFooterMetrics) => Promise<boolean>;
+    } | null = null;
 
     try {
       // 确保 chat 已初始化
@@ -1416,6 +1650,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
       const MAX_TURNS = 100;
 
+      // Get initial footer metrics
+      const initialFooterMetrics = await getFeishuStatusMetrics(config, geminiClient);
+
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const stream = geminiClient.sendMessageStream(
           currentMessage,
@@ -1442,16 +1679,38 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (trimmed) {
                 const now = Date.now();
                 if (!activeCardId) {
-                  // 第一次发送，获取卡片消息 ID
-                  activeCardId = await gateway.sendCard(
+                  // 第一次发送：用 CardKit 2.0 创建一张流式卡片
+                  const handle = await gateway.sendStreamingCardWithFooter(
                     msg.chatId,
-                    'DeepV Code AI 助理',
                     trimmed,
-                    [],
+                    initialFooterMetrics,
                     msg.messageId,
                   );
+                  if (handle.messageId) {
+                    activeCardId = handle.messageId;
+                    streaming = {
+                      pushContent: handle.pushContent,
+                      pushFooter: handle.pushFooter,
+                      finalize: handle.finalize,
+                    };
+                  } else {
+                    // CardKit 创建失败，回退到老路径：发普通卡片
+                    activeCardId = await gateway.sendCard(
+                      msg.chatId,
+                      'DeepV Code AI 助理',
+                      trimmed,
+                      [],
+                      initialFooterMetrics,
+                      msg.messageId,
+                    );
+                  }
                   lastUpdateTime = now;
-                } else if (now - lastUpdateTime >= MIN_UPDATE_INTERVAL) {
+                } else if (streaming && now - lastUpdateTime >= MIN_UPDATE_INTERVAL) {
+                  // CardKit 流式：直接推增量正文，飞书自带打字机动画
+                  await streaming.pushContent(trimmed);
+                  lastUpdateTime = now;
+                } else if (!streaming && now - lastUpdateTime >= MIN_UPDATE_INTERVAL) {
+                  // 老路径回退（CardKit 创建失败时）：im.message.patch 整卡更新
                   await gateway.updateCard(activeCardId, 'DeepV Code AI 助理', trimmed);
                   lastUpdateTime = now;
                 }
@@ -1460,6 +1719,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
             case GeminiEventType.ToolCallRequest:
               toolCallRequests.push(event.value);
+              break;
+            case GeminiEventType.TokenUsage:
+              lastRequestTokenUsage = event.value;
               break;
             case GeminiEventType.ChatCompressed:
               tuiContext?.addItem({ type: 'info', text: t('feishu.tui.context_compressed') }, Date.now());
@@ -1478,7 +1740,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
 
         // 结束流式输出，做最终的、无中间提示的更新
-        if (activeCardId) {
+        if (activeCardId && streaming) {
+          // CardKit 流式中：只 pushContent 把最终文本推上去，footer 保持流式状态
+          await streaming.pushContent(accumulatedMarkdown || '（无回复）');
+        } else if (activeCardId && !streaming) {
+          // 老路径回退：整卡 patch
           const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown || '（无回复）');
           if (!success) {
             dwarn('[Feishu Stream] Failed to update final card with retry. Fallback to sending new card.');
@@ -1487,6 +1753,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               'DeepV Code AI 助理',
               accumulatedMarkdown || '（无回复）',
               [],
+              initialFooterMetrics,
               msg.messageId,
             );
           }
@@ -1499,13 +1766,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
           // 兜底：如果有些特别快的一轮或者流中由于某种原因没有触发 activeCardId 却有最终回复
           if (!activeCardId) {
+            const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+            finalFooterMetrics.status = '已完成';
+            // 兜底分支文本量不大，直接发个静态卡即可（不必再走 CardKit）
             activeCardId = await gateway.sendCard(
               msg.chatId,
               'DeepV Code AI 助理',
               accumulatedMarkdown || '（无回复）',
               [],
+              finalFooterMetrics,
               msg.messageId,
             );
+          } else if (streaming) {
+            // 已经走的 CardKit 流式：关闭 streaming_mode 并整卡更新到终态
+            const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+            finalFooterMetrics.status = '已完成';
+            await streaming.finalize(accumulatedMarkdown || '（无回复）', finalFooterMetrics);
+            streaming = null;
           }
 
           // 检测并发送文件（沙箱化到 projectRoot，扩展名白名单）
@@ -1530,15 +1807,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
         );
 
         // 发送/更新工具运行进度通知给飞书卡片
-        const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
-        if (activeCardId) {
+        // CardKit 2.0 流式：状态走 footer，正文不再加"运行工具中..."尾巴（loading 动画已表达进度）
+        if (activeCardId && streaming) {
+          const toolRunningFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+          toolRunningFooterMetrics.status = `运行工具中: ${toolNames}`;
+          await streaming.pushFooter(toolRunningFooterMetrics);
+        } else if (activeCardId && !streaming) {
+          // 老路径回退：没有 loading 动画，仍然把提示加在正文里
+          const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
           await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (运行工具中)', accumulatedMarkdown + toolRunningText);
-        } else {
+        } else if (!activeCardId) {
+          const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
           activeCardId = await gateway.sendCard(
             msg.chatId,
             'DeepV Code AI 助理 (运行工具中)',
             toolRunningText,
             [],
+            await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage),
             msg.messageId,
           );
         }
@@ -1588,7 +1873,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     // 节流更新飞书卡片上的控制台滚动输出
                     if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
                       const liveProgressMarkdown = formatToolCallWithBorder('run_shell_command', req.args, true, output, true);
-                      await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
+                      const shellFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      shellFooterMetrics.status = '执行命令中';
+                      if (streaming) {
+                        await streaming.pushContent(accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
+                        await streaming.pushFooter(shellFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
+                      }
                       lastCardUpdateTime = now;
                     }
                   }
@@ -1633,8 +1925,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
               // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)
               const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
-              if (activeCardId) {
-                await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行工具中)', accumulatedMarkdown + '\n\n' + liveToolProgress);
+              if (activeCardId && streaming) {
+                const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                toolInProgressFooterMetrics.status = `执行工具中: ${toolName}`;
+                await streaming.pushContent(accumulatedMarkdown + '\n\n' + liveToolProgress);
+                await streaming.pushFooter(toolInProgressFooterMetrics);
+              } else if (activeCardId && !streaming) {
+                await gateway.updateCard(activeCardId, `DeepV Code AI 助理 (执行工具中)`, accumulatedMarkdown + '\n\n' + liveToolProgress);
               }
               toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
             }
@@ -1655,7 +1952,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
             accumulatedMarkdown += `\n\n${toolReportMarkdown}`;
 
             // 最终无打字机光标的连贯卡片更新
-            if (activeCardId) {
+            if (activeCardId && streaming) {
+              const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+              toolDoneFooterMetrics.status = `工具已完成: ${toolName}`;
+              await streaming.pushContent(accumulatedMarkdown);
+              await streaming.pushFooter(toolDoneFooterMetrics);
+            } else if (activeCardId && !streaming) {
               await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown);
             }
 
@@ -1679,8 +1981,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
 
-        // 工具执行结束，更新状态
-        if (activeCardId) {
+        // 工具执行结束，更新状态。CardKit 2.0 流式有 loading 动画，正文不再加"思考中..."尾巴
+        if (activeCardId && streaming) {
+          const thinkingFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+          thinkingFooterMetrics.status = '思考中';
+          await streaming.pushFooter(thinkingFooterMetrics);
+        } else if (activeCardId && !streaming) {
+          // 老路径回退：没有 loading 动画，把提示加在正文里
           await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (思考中)', accumulatedMarkdown + `\n\n*(🧠 AI 正在结合工具结果继续思考...)*`);
         }
 
@@ -1689,21 +1996,39 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
 
       // 达到最大轮数
-      if (activeCardId) {
+      if (activeCardId && streaming) {
+        const interruptedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+        interruptedFooterMetrics.status = '已中断';
+        await streaming.finalize(accumulatedMarkdown + '\n\n*（工具调用次数已达到上限）*', interruptedFooterMetrics);
+        streaming = null;
+      } else if (activeCardId && !streaming) {
         await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中断)', accumulatedMarkdown + '\n\n*（工具调用次数已达到上限）*');
       } else {
         await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
       }
       return null;
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('canceled') || err.message?.includes('cancelled')) {
-        if (activeCardId) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('cancelled') || err.message?.includes('canceled')) {
+        if (activeCardId && streaming) {
+          const abortedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+          abortedFooterMetrics.status = '已中止';
+          await streaming.finalize(accumulatedMarkdown + '\n\n*🛑 任务已被用户中止。*', abortedFooterMetrics);
+          streaming = null;
+        } else if (activeCardId && !streaming) {
           await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中止)', accumulatedMarkdown + '\n\n*🛑 任务已被用户中止。*');
         }
         return null;
       }
       derror('Feishu Agent processing error:', err.message);
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
+      if (activeCardId && streaming) {
+        const errorFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+        errorFooterMetrics.status = '出错';
+        await streaming.finalize(accumulatedMarkdown + `\n\n❌ ${err.message}`, errorFooterMetrics);
+        streaming = null;
+      } else if (activeCardId && !streaming) {
+        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (出错)', accumulatedMarkdown + `\n\n❌ ${err.message}`);
+      }
       tuiContext?.addItem(
         { type: 'error', text: tp('feishu.tui.processing_error', { error: err.message }) },
         Date.now(),
@@ -1784,6 +2109,20 @@ async function handleStart(context?: CommandContext): Promise<string> {
       mainArg = args.absolute_path;
     } else if (toolName === 'replace' && args.file_path) {
       mainArg = args.file_path;
+    } else if (toolName === 'search_file_content' && args.pattern) {
+      mainArg = `'${args.pattern}'`;
+      if (args.glob) {
+        mainArg += ` in ${args.glob}`;
+      } else if (args.path) {
+        mainArg += ` in ${args.path}`;
+      }
+    } else if (toolName === 'todo_write') {
+      const todoCount = args.todos ? args.todos.length : 0;
+      mainArg = todoCount > 0 ? `Update ${todoCount} items` : 'Update list';
+    } else if (toolName === 'task') {
+      mainArg = args.description || args.prompt || '';
+    } else if (toolName === 'use_skill' && args.skillName) {
+      mainArg = args.skillName;
     } else if (args.path) {
       mainArg = args.path;
     } else if (args.pattern) {
@@ -1810,6 +2149,26 @@ async function handleStart(context?: CommandContext): Promise<string> {
     let branchLine = '';
     let contentBox = '';
 
+    let isSubAgentDisplay = false;
+    let subagentData: any = null;
+    let isTodoDisplay = false;
+    let todoData: any = null;
+
+    try {
+      if (output && typeof output === 'string') {
+        const parsed = JSON.parse(output);
+        if (parsed && parsed.type === 'subagent_display') {
+          isSubAgentDisplay = true;
+          subagentData = parsed;
+        } else if (parsed && parsed.type === 'todo_display') {
+          isTodoDisplay = true;
+          todoData = parsed;
+        }
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+
     if (toolName === 'run_shell_command') {
       const rawOutput = output || '';
       const lines = rawOutput.split('\n');
@@ -1830,9 +2189,108 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const limit = args.limit !== undefined ? args.limit : 'all';
       branchLine = `\n └ ( read lines: ${startLine}-${limit === 'all' ? 'end' : startLine + Number(limit) - 1} )`;
     } else if (toolName === 'replace') {
-      branchLine = `\n └ ( apply replacements completed )`;
+      const oldStr = args.old_string || '';
+      const newStr = args.new_string || '';
+      if (oldStr || newStr) {
+        const oldLines = oldStr.split('\n');
+        const newLines = newStr.split('\n');
+
+        // Compute line diff using LCS algorithm
+        const m = oldLines.length;
+        const n = newLines.length;
+        const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            if (oldLines[i - 1] === newLines[j - 1]) {
+              dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+              dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+          }
+        }
+
+        const diff: string[] = [];
+        let i = m;
+        let j = n;
+
+        while (i > 0 || j > 0) {
+          if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+            diff.unshift(`  ${oldLines[i - 1]}`);
+            i--;
+            j--;
+          } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            diff.unshift(`+ ${newLines[j - 1]}`);
+            j--;
+          } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+            diff.unshift(`- ${oldLines[i - 1]}`);
+            i--;
+          }
+        }
+
+        branchLine = `\n └ ( apply replacements completed )`;
+        contentBox = `\n\`\`\`diff\n${diff.join('\n')}\n\`\`\``;
+      } else {
+        branchLine = `\n └ ( apply replacements completed )`;
+      }
     } else if (toolName === 'write_file') {
-      branchLine = `\n └ ( file write completed )`;
+      const content = args.content || '';
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+      const maxLinesToShow = 15;
+      let displayedLines = lines;
+      if (lines.length > maxLinesToShow) {
+        displayedLines = lines.slice(0, maxLinesToShow);
+      }
+
+      branchLine = `\n └ ( file write completed, showing first ${displayedLines.length} lines of ${totalLines} total )`;
+
+      const filePath = args.file_path || args.absolute_path || '';
+      const ext = filePath.split('.').pop()?.toLowerCase() || '';
+      const lang = ['js', 'ts', 'jsx', 'tsx', 'py', 'json', 'md', 'html', 'css', 'yaml', 'yml', 'sh', 'bash'].includes(ext) ? ext : 'text';
+
+      contentBox = `\n\`\`\`${lang}\n${displayedLines.join('\n')}\n${lines.length > maxLinesToShow ? '...\n' : ''}\`\`\``;
+    } else if (toolName === 'todo_write' || isTodoDisplay) {
+      const todos = args?.todos || todoData?.items;
+      if (todos && Array.isArray(todos)) {
+        const todoLines = [
+          `📝 **${isLive ? '正在规划/更新任务清单' : '任务待办清单已更新'}**`,
+          `────────────────────────`,
+        ];
+        todos.forEach((t: any) => {
+          const statusIcon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '⏳' : '⬜';
+          todoLines.push(`${statusIcon} [${t.priority}] ${t.content}`);
+        });
+        todoLines.push(`────────────────────────`);
+        contentBox = `\n${todoLines.join('\n')}`;
+      }
+      branchLine = `\n └ ( update todo list completed )`;
+    } else if (toolName === 'task' || isSubAgentDisplay) {
+      if (subagentData) {
+        const stats = subagentData.stats || {};
+        const report = subagentData.report || '';
+        const statsLines = [
+          `📊 **子代理执行报告 (Sub-Agent Task Report)**`,
+          `────────────────────────`,
+          `• 任务状态: **${subagentData.status === 'success' ? '✅ 成功' : subagentData.status === 'failed' ? '❌ 失败' : '⏳ 运行中'}**`,
+          `• 任务描述: ${subagentData.taskDescription || args.description || '无'}`,
+          `• 执行轮数: ${subagentData.currentTurn || 0} / ${subagentData.maxTurns || args.max_turns || 10}`,
+          `• 工具调用: 成功 ${stats.successfulToolCalls || 0} 次 / 共 ${stats.totalToolCalls || 0} 次`,
+          stats.commandsRun && stats.commandsRun.length > 0 ? `• 运行命令: \`${stats.commandsRun.join(', ')}\`` : '',
+          stats.filesCreated && stats.filesCreated.length > 0 ? `• 创建文件: \`${stats.filesCreated.join(', ')}\`` : '',
+        ];
+        if (subagentData.error) {
+          statsLines.push(`• 错误信息: <font color='red'>${subagentData.error}</font>`);
+        }
+        statsLines.push(`────────────────────────`);
+        if (report) {
+          statsLines.push(`📝 **最终研究分析报告**:`, `\`\`\`markdown\n${report}\n\`\`\``);
+        }
+        contentBox = `\n${statsLines.filter(Boolean).join('\n')}`;
+      } else {
+        contentBox = args.prompt ? `\n\`\`\`markdown\n${args.prompt}\n\`\`\`` : '';
+      }
+      branchLine = isLive ? `\n └ ( sub-agent executing... )` : `\n └ ( sub-agent task completed )`;
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
       branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
