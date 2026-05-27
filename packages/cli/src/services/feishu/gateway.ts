@@ -1118,7 +1118,7 @@ export class FeishuGateway {
   ): Promise<string> {
     // WebSocket 长连接不支持卡片回调，直接使用文本选择模式
     dlog('WS long-connection mode: using text-choice fallback (card callbacks require HTTP webhook)');
-    return this.waitForTextChoice(chatId, title, buttons, defaultValue, timeoutMs);
+    return this.waitForTextChoice(chatId, title, content, buttons, defaultValue, timeoutMs);
   }
 
   /**
@@ -1133,12 +1133,19 @@ export class FeishuGateway {
   private waitForTextChoice(
     chatId: string,
     title: string,
+    content: string,
     buttons: Array<{ label: string; value: string }>,
     defaultValue: string,
     timeoutMs: number,
   ): Promise<string> {
     // 构建 markdown 格式的选项列表
     const lines = [`**${title || '请选择'}**\n`];
+
+    // 🎨 完美对齐：如果 LLM 给出了选项的详细描述/问题解析（content），必须要完整、清晰地展示给用户看，避免信息丢失！
+    if (content && content.trim()) {
+      lines.push(`${content.trim()}\n`);
+    }
+
     buttons.forEach((btn, i) => {
       lines.push(`> **${i + 1}**. ${btn.label}`);
     });
