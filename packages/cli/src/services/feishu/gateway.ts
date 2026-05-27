@@ -135,10 +135,6 @@ export function renderFooterMarkdown(metrics: FeishuFooterMetrics): string {
     parts.push(cacheText);
   }
 
-  if (metrics.credits != null && metrics.credits > 0) {
-    parts.push(`积分: ${metrics.credits.toLocaleString()}`);
-  }
-
   if (metrics.contextPercentage != null) {
     const remainingPercentage = Math.max(0, 100 - metrics.contextPercentage);
     parts.push(`上下文剩余 ${remainingPercentage.toFixed(0)}%`);
@@ -158,9 +154,11 @@ function buildFeishuFooterElements(metrics: FeishuFooterMetrics): any[] {
   if (!content) return [];
   return [
     {
+      tag: 'hr',
+    },
+    {
       tag: 'markdown',
       content,
-      text_size: 'notation',
     },
   ];
 }
