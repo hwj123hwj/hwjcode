@@ -840,12 +840,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const activeConfig = globalCommandContext?.services?.config || config;
     let activeClient: any = null;
     let initErrorMsg = '';
+    const debugTrail: string[] = [];
 
     if (activeConfig) {
       try {
         activeClient = activeConfig.getGeminiClient?.();
+        debugTrail.push(`step1=${activeClient ? 'gotClient' : 'nullClient'}`);
       } catch (e: any) {
         initErrorMsg = e.message || String(e);
+        debugTrail.push(`step1=threw:${initErrorMsg.slice(0, 80)}`);
         dwarn(`[Feishu] getGeminiClient threw: ${initErrorMsg}`);
       }
 
@@ -856,18 +859,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
         try {
           const settings = globalCommandContext?.services?.settings;
           const authType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
+          debugTrail.push(`step2=lazyRefreshAuth(${authType})`);
           dlog(`[Feishu] geminiClient is not initialized. Triggering lazy refreshAuth(${authType})...`);
           await activeConfig.refreshAuth(authType);
           activeClient = activeConfig.getGeminiClient?.();
+          debugTrail.push(`step3=${activeClient ? 'lazyOk' : 'lazyStillNull'}`);
           if (activeClient) {
             dlog(`[Feishu] Lazy refreshAuth succeeded; geminiClient is ready.`);
             initErrorMsg = '';
           }
         } catch (e: any) {
           initErrorMsg = `Lazy refreshAuth failed: ${e.message || String(e)}`;
+          debugTrail.push(`step2=threw:${(e.message || String(e)).slice(0, 80)}`);
           dwarn(`[Feishu] ${initErrorMsg}`);
         }
       }
+    } else {
+      debugTrail.push(`step0=noActiveConfig`);
     }
 
     // 🚀 多项目路由环境拦截
@@ -931,7 +939,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     return new Promise<string | null>((resolve, reject) => {
       queue!.push({ msg, resolve, reject });
-      processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, initErrorMsg);
+      const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
+      processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
     });
   };
 
