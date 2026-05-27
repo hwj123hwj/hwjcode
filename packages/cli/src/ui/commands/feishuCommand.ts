@@ -1823,6 +1823,62 @@ async function handleStart(context?: CommandContext): Promise<string> {
     });
   };
 
+  interface MarkdownBlock {
+    type: 'text' | 'tool';
+    content: string;
+  }
+
+  function renderBlocks(blocks: MarkdownBlock[]): string {
+    const toolBlocks = blocks.filter(b => b.type === 'tool');
+    const totalTools = toolBlocks.length;
+
+    if (totalTools <= 5) {
+      return blocks.map(b => b.content).join('\n\n').trim();
+    }
+
+    const collapsedCount = totalTools - 5;
+    const renderedParts: string[] = [];
+    let toolSeenCount = 0;
+    let collapsedHeaderAdded = false;
+
+    for (const block of blocks) {
+      if (block.type === 'tool') {
+        toolSeenCount++;
+        if (toolSeenCount <= collapsedCount) {
+          if (!collapsedHeaderAdded) {
+            renderedParts.push(`*（已折叠 ${collapsedCount} 个历史工具调用）*`);
+            collapsedHeaderAdded = true;
+          }
+          continue;
+        }
+      }
+      renderedParts.push(block.content);
+    }
+
+    return renderedParts.join('\n\n').trim();
+  }
+
+  function renderCurrentDisplay(
+    blocks: MarkdownBlock[],
+    activeResponseText: string = '',
+    inProgressToolMarkdown: string = '',
+  ): string {
+    const renderedPast = renderBlocks(blocks);
+    let display = renderedPast;
+
+    if (activeResponseText) {
+      const separator = display ? (display.endsWith('\n\n') ? '' : (display.endsWith('\n') ? '\n' : '\n\n')) : '';
+      display = display + separator + activeResponseText;
+    }
+
+    if (inProgressToolMarkdown) {
+      const separator = display ? (display.endsWith('\n\n') ? '' : (display.endsWith('\n') ? '\n' : '\n\n')) : '';
+      display = display + separator + inProgressToolMarkdown;
+    }
+
+    return display;
+  }
+
   async function handleSingleFeishuMessage(
     msg: FeishuMessage,
     gateway: FeishuGateway,
@@ -1863,7 +1919,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const promptId = `feishu-${Date.now()}`;
 
     let activeCardId: string | null = null;
-    let accumulatedMarkdown = '';
+    const blocks: MarkdownBlock[] = [];
     let lastRequestTokenUsage: any = null;
     // CardKit 2.0 流式句柄。为 null 表示流式失败/未启用，会回退到 sendCard 静态卡。
     let streaming: {
@@ -1925,12 +1981,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           switch (event.type) {
             case GeminiEventType.Content: {
               responseText += event.value;
-              // 确保两笔输出之间有安全的换行，避免大模型文本直接粘连在代码块的闭合标记 ``` 后面
-              let separator = '';
-              if (accumulatedMarkdown && !accumulatedMarkdown.endsWith('\n\n')) {
-                separator = accumulatedMarkdown.endsWith('\n') ? '\n' : '\n\n';
-              }
-              const currentTotalMarkdown = accumulatedMarkdown + separator + responseText;
+              const currentTotalMarkdown = renderCurrentDisplay(blocks, responseText);
               const trimmed = currentTotalMarkdown.trim();
               if (trimmed) {
                 const now = Date.now();
@@ -1990,27 +2041,26 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
 
-        // 把当前这轮回复合并进累计 Markdown 中
-        if (accumulatedMarkdown && responseText) {
-          const separator = accumulatedMarkdown.endsWith('\n\n') ? '' : (accumulatedMarkdown.endsWith('\n') ? '\n' : '\n\n');
-          accumulatedMarkdown += separator + responseText;
-        } else if (responseText) {
-          accumulatedMarkdown += responseText;
+        // 把当前这轮回复合并进 blocks 中
+        if (responseText) {
+          blocks.push({ type: 'text', content: responseText });
         }
+
+        const currentFinalMarkdown = renderCurrentDisplay(blocks);
 
         // 结束流式输出，做最终的、无中间提示的更新
         if (activeCardId && streaming) {
           // CardKit 流式中：只 pushContent 把最终文本推上去，footer 保持流式状态
-          await streaming.pushContent(accumulatedMarkdown || '（无回复）');
+          await streaming.pushContent(currentFinalMarkdown || '（无回复）');
         } else if (activeCardId && !streaming) {
           // 老路径回退：整卡 patch
-          const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown || '（无回复）');
+          const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', currentFinalMarkdown || '（无回复）');
           if (!success) {
             dwarn('[Feishu Stream] Failed to update final card with retry. Fallback to sending new card.');
             activeCardId = await gateway.sendCard(
               msg.chatId,
               'DeepV Code AI 助理',
-              accumulatedMarkdown || '（无回复）',
+              currentFinalMarkdown || '（无回复）',
               [],
               initialFooterMetrics,
               msg.messageId,
@@ -2031,7 +2081,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             activeCardId = await gateway.sendCard(
               msg.chatId,
               'DeepV Code AI 助理',
-              accumulatedMarkdown || '（无回复）',
+              currentFinalMarkdown || '（无回复）',
               [],
               finalFooterMetrics,
               msg.messageId,
@@ -2040,7 +2090,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             // 已经走的 CardKit 流式：关闭 streaming_mode 并整卡更新到终态
             const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
             finalFooterMetrics.status = '已完成';
-            await streaming.finalize(accumulatedMarkdown || '（无回复）', finalFooterMetrics);
+            await streaming.finalize(currentFinalMarkdown || '（无回复）', finalFooterMetrics);
             streaming = null;
           }
 
@@ -2074,7 +2124,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         } else if (activeCardId && !streaming) {
           // 老路径回退：没有 loading 动画，仍然把提示加在正文里
           const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
-          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (运行工具中)', accumulatedMarkdown + toolRunningText);
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (运行工具中)', renderCurrentDisplay(blocks, '', toolRunningText));
         } else if (!activeCardId) {
           const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
           activeCardId = await gateway.sendCard(
@@ -2135,10 +2185,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
                       const shellFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                       shellFooterMetrics.status = '执行命令中';
                       if (streaming) {
-                        await streaming.pushContent(accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
                         await streaming.pushFooter(shellFooterMetrics);
                       } else {
-                        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', accumulatedMarkdown + '\n\n' + liveProgressMarkdown);
+                        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行命令中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown));
                       }
                       lastCardUpdateTime = now;
                     }
@@ -2187,10 +2237,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (activeCardId && streaming) {
                 const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                 toolInProgressFooterMetrics.status = `执行工具中: ${toolName}`;
-                await streaming.pushContent(accumulatedMarkdown + '\n\n' + liveToolProgress);
+                await streaming.pushContent(renderCurrentDisplay(blocks, '', liveToolProgress));
                 await streaming.pushFooter(toolInProgressFooterMetrics);
               } else if (activeCardId && !streaming) {
-                await gateway.updateCard(activeCardId, `DeepV Code AI 助理 (执行工具中)`, accumulatedMarkdown + '\n\n' + liveToolProgress);
+                await gateway.updateCard(activeCardId, `DeepV Code AI 助理 (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress));
               }
               toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
             }
@@ -2200,24 +2250,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
               toolResponseParts.push(...(parts as Part[]));
             }
 
-            // 在 accumulatedMarkdown 后面追加当前工具的最终精美运行报告
+            // 在 blocks 后面追加当前工具的最终精美运行报告
             const finalDisplayOutput = typeof toolResponse.resultDisplay === 'string'
               ? toolResponse.resultDisplay
               : JSON.stringify(toolResponse.resultDisplay, null, 2);
 
             const toolReportMarkdown = formatToolCallWithBorder(toolName, req.args, true, finalDisplayOutput, false);
 
-            // 拼接进大卡片的 markdown
-            accumulatedMarkdown += `\n\n${toolReportMarkdown}`;
+            blocks.push({ type: 'tool', content: toolReportMarkdown });
 
             // 最终无打字机光标的连贯卡片更新
             if (activeCardId && streaming) {
               const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               toolDoneFooterMetrics.status = `工具已完成: ${toolName}`;
-              await streaming.pushContent(accumulatedMarkdown);
+              await streaming.pushContent(renderCurrentDisplay(blocks));
               await streaming.pushFooter(toolDoneFooterMetrics);
             } else if (activeCardId && !streaming) {
-              await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown);
+              await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', renderCurrentDisplay(blocks));
             }
 
             tuiContext?.addItem(
@@ -2227,9 +2276,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
           } catch (toolErr: any) {
             // 工具执行失败追加精美样式
             const failedReportMarkdown = formatToolCallWithBorder(toolName, req.args, false, toolErr.message || '未知错误', false);
-            accumulatedMarkdown += `\n\n${failedReportMarkdown}`;
+            blocks.push({ type: 'tool', content: failedReportMarkdown });
             if (activeCardId) {
-              await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行失败)', accumulatedMarkdown);
+              await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (执行失败)', renderCurrentDisplay(blocks));
             }
 
             tuiContext?.addItem(
@@ -2247,7 +2296,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           await streaming.pushFooter(thinkingFooterMetrics);
         } else if (activeCardId && !streaming) {
           // 老路径回退：没有 loading 动画，把提示加在正文里
-          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (思考中)', accumulatedMarkdown + `\n\n*(🧠 AI 正在结合工具结果继续思考...)*`);
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (思考中)', renderCurrentDisplay(blocks) + `\n\n*(🧠 AI 正在结合工具结果继续思考...)*`);
         }
 
         // 将工具结果作为下一轮输入
@@ -2258,10 +2307,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       if (activeCardId && streaming) {
         const interruptedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         interruptedFooterMetrics.status = '已中断';
-        await streaming.finalize(accumulatedMarkdown + '\n\n*（工具调用次数已达到上限）*', interruptedFooterMetrics);
+        await streaming.finalize(renderCurrentDisplay(blocks) + '\n\n*（工具调用次数已达到上限）*', interruptedFooterMetrics);
         streaming = null;
       } else if (activeCardId && !streaming) {
-        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中断)', accumulatedMarkdown + '\n\n*（工具调用次数已达到上限）*');
+        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中断)', renderCurrentDisplay(blocks) + '\n\n*（工具调用次数已达到上限）*');
       } else {
         await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
       }
@@ -2271,10 +2320,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
         if (activeCardId && streaming) {
           const abortedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           abortedFooterMetrics.status = '已中止';
-          await streaming.finalize(accumulatedMarkdown + '\n\n*🛑 任务已被用户中止。*', abortedFooterMetrics);
+          await streaming.finalize(renderCurrentDisplay(blocks) + '\n\n*🛑 任务已被用户中止。*', abortedFooterMetrics);
           streaming = null;
         } else if (activeCardId && !streaming) {
-          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中止)', accumulatedMarkdown + '\n\n*🛑 任务已被用户中止。*');
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中止)', renderCurrentDisplay(blocks) + '\n\n*🛑 任务已被用户中止。*');
         }
         return null;
       }
@@ -2283,10 +2332,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       if (activeCardId && streaming) {
         const errorFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         errorFooterMetrics.status = '出错';
-        await streaming.finalize(accumulatedMarkdown + `\n\n❌ ${err.message}`, errorFooterMetrics);
+        await streaming.finalize(renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
         streaming = null;
       } else if (activeCardId && !streaming) {
-        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (出错)', accumulatedMarkdown + `\n\n❌ ${err.message}`);
+        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (出错)', renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`);
       }
       tuiContext?.addItem(
         { type: 'error', text: tp('feishu.tui.processing_error', { error: err.message }) },
