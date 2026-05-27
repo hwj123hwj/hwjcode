@@ -1634,6 +1634,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
         userMemory: sessionMemory.userMemory,
         memoryTokenCount: sessionMemory.memoryTokenCount,
         geminiMdFileCount: sessionMemory.geminiMdFileCount,
+        customModels: activeConfig?.getCustomModels() || [],
+        cloudModels: activeConfig?.getCloudModels() || [],
+        proxy: activeConfig?.getProxy(),
+        customProxyServerUrl: activeConfig?.getCustomProxyServerUrl(),
+        mcpServers: activeConfig?.getMcpServers(),
       });
 
       try {
