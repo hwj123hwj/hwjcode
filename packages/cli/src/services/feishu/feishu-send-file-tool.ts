@@ -45,6 +45,11 @@ export interface SendFeishuFileParams {
    * rules upstream.
    */
   chat_id?: string;
+
+  /**
+   * Whether the user explicitly confirmed sending this file.
+   */
+  user_confirmed?: boolean;
 }
 
 /**
@@ -67,9 +72,9 @@ export class SendFeishuFileTool extends BaseTool<SendFeishuFileParams, ToolResul
       SendFeishuFileTool.Name,
       'SendFeishuFile',
       'Sends a local file from the current project directory to the active Feishu chat. ' +
-        'Path is sandboxed to the project root; size limited to 50 MiB; executable/script ' +
-        'extensions are rejected. You do NOT need to provide a chat_id — the file goes to ' +
-        "the user's current chat automatically.",
+        'CRITICAL RULE: DO NOT automatically call this tool just because you read, wrote, or modified a file. ' +
+        'Only use this tool when the user EXPLICITLY asks you to send, download, or transfer a file (e.g. "send me the file..."). ' +
+        'For standard file reading/writing operations, just report the completion in text, do NOT call this tool.',
       Icon.Globe,
       {
         properties: {
@@ -78,6 +83,11 @@ export class SendFeishuFileTool extends BaseTool<SendFeishuFileParams, ToolResul
               "Path to the file to send. Either an absolute path inside the project root " +
               "or a path relative to the project root (e.g. 'docs/report.pdf').",
             type: Type.STRING,
+          },
+          user_confirmed: {
+            description:
+              "Whether the user explicitly confirmed sending this file.",
+            type: Type.BOOLEAN,
           },
         },
         required: ['file_path'],
@@ -89,6 +99,9 @@ export class SendFeishuFileTool extends BaseTool<SendFeishuFileParams, ToolResul
   validateToolParams(params: SendFeishuFileParams): string | null {
     if (!params.file_path || typeof params.file_path !== 'string') {
       return 'file_path is required and must be a string';
+    }
+    if (!params.user_confirmed) {
+      return 'user_confirmed parameter must be true to send file. Ask user for confirmation and set this to true.';
     }
     return null;
   }
