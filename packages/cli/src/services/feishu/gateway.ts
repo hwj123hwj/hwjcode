@@ -995,6 +995,44 @@ export class FeishuGateway {
   }
 
   /**
+   * 飞书建群并拉人
+   * @param name 群名称
+   * @param userOpenId 要拉入群的用户 open_id
+   * @returns 新创建的群聊的 chat_id, 失败返回 null
+   */
+  async createGroupChat(name: string, userOpenId: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+
+      const body = {
+        name,
+        description: 'DeepV Code 自动创建的项目专属协作群',
+        user_id_list: [userOpenId],
+      };
+
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/chats?uuid=${Date.now()}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data: any = await res.json();
+      if (data.code === 0) {
+        dlog(`Successfully created group chat '${name}', chat_id: ${data.data?.chat_id}`);
+        return data.data?.chat_id || null;
+      }
+      dwarn(`Failed to create group chat: ${JSON.stringify(data)}`);
+      return null;
+    } catch (err) {
+      derror('Error creating group chat:', err);
+      return null;
+    }
+  }
+
+  /**
    * 更新已发送的交互式卡片内容（PATCH）
    *
    * 卡片 msg_type 为 interactive，PATCH 时也必须传 interactive 格式的 content。
