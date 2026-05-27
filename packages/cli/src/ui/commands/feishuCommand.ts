@@ -49,6 +49,7 @@ import {
   BaseTool,
   ToolResult,
   Icon,
+  AuthType,
 } from 'deepv-code-core';
 import { SettingScope } from '../../config/settings.js';
 import { getAvailableModels } from './modelCommand.js';
@@ -845,7 +846,27 @@ async function handleStart(context?: CommandContext): Promise<string> {
         activeClient = activeConfig.getGeminiClient?.();
       } catch (e: any) {
         initErrorMsg = e.message || String(e);
-        dwarn(`[Feishu] Failed to getGeminiClient: ${initErrorMsg}`);
+        dwarn(`[Feishu] getGeminiClient threw: ${initErrorMsg}`);
+      }
+
+      // 🚀 关键：CLI 启动延迟认证策略 — 用户首次在 TUI 发消息时才会 refreshAuth 初始化 geminiClient。
+      // 但飞书这边并不会等用户在 TUI 发消息，所以我们必须在这里主动 lazy 触发首次认证刷新，
+      // 拿到一个真正可用的 geminiClient 实例。
+      if (!activeClient) {
+        try {
+          const settings = globalCommandContext?.services?.settings;
+          const authType = settings?.merged?.selectedAuthType || AuthType.USE_PROXY_AUTH;
+          dlog(`[Feishu] geminiClient is not initialized. Triggering lazy refreshAuth(${authType})...`);
+          await activeConfig.refreshAuth(authType);
+          activeClient = activeConfig.getGeminiClient?.();
+          if (activeClient) {
+            dlog(`[Feishu] Lazy refreshAuth succeeded; geminiClient is ready.`);
+            initErrorMsg = '';
+          }
+        } catch (e: any) {
+          initErrorMsg = `Lazy refreshAuth failed: ${e.message || String(e)}`;
+          dwarn(`[Feishu] ${initErrorMsg}`);
+        }
       }
     }
 
