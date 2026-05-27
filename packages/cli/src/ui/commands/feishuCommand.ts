@@ -2264,6 +2264,53 @@ class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResu
       const welcomeMsg = `👋 您好！本群项目工作目录 \`${absPath}\` 已经成功就绪。现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！`;
       await this.gateway.sendMessage(newChatId, welcomeMsg);
 
+      // 🎯 5. 异步检测是否缺失 im:message.group_msg 权限，并在当前的私聊会话中进行提醒和卡片推送
+      if (activeChatId) {
+        const privateChatId = activeChatId;
+        void (async () => {
+          try {
+            const probe = await probeCredentials(
+              this.gateway.getAppId(),
+              this.gateway.getAppSecret(),
+              this.gateway.getDomain()
+            );
+            if (probe && (!probe.grantedScopes || !probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE))) {
+              const applyUrl = buildScopeApplyUrl({
+                appId: this.gateway.getAppId(),
+                scopes: [SENSITIVE_GROUP_MSG_SCOPE],
+                brand: this.gateway.getDomain() as any,
+                tokenType: 'tenant',
+              });
+              const eventSubUrl = buildEventSubUrl({
+                appId: this.gateway.getAppId(),
+                brand: this.gateway.getDomain() as any,
+              });
+              const permissionPageUrl = buildPermissionPageUrl({
+                appId: this.gateway.getAppId(),
+                brand: this.gateway.getDomain() as any,
+              });
+
+              const warningMsg = `💬 **【重要体验提示 — 免 @ 权限】**\n\n` +
+                `您刚才成功创建了项目群「${params.group_name}」。\n\n` +
+                `⚠️ **检测到您的 Bot 尚未开通「读取关联群聊内所有消息」敏感权限（\`${SENSITIVE_GROUP_MSG_SCOPE}\`）。**\n` +
+                `由于飞书平台限制，如果您不开通此权限，您在此群里提问时**每次消息都必须强制 @ 机器人**，体验较为繁琐。\n\n` +
+                `💡 **建议您一键申请开通此免 @ 权限（无需中断当前体验）：**\n` +
+                `  1️⃣ **第一步：一键申请权限（自动预选）**\n` +
+                `     👉 ${applyUrl}\n` +
+                `  2️⃣ **第二步：在事件订阅页确认订阅 \`im.message.receive_v1\`**\n` +
+                `     👉 ${eventSubUrl}\n` +
+                `  3️⃣ **第三步：在权限管理页申请发布一个版本**\n` +
+                `     👉 ${permissionPageUrl}\n\n` +
+                `开通后即可在群内直接对话，实现无缝协作！`;
+
+              await this.gateway.sendMessage(privateChatId, warningMsg);
+            }
+          } catch (err: any) {
+            dwarn(`[CreateProjectGroupTool] Check scopes or send warning failed: ${err.message}`);
+          }
+        })();
+      }
+
       return {
         llmContent: `Successfully created project directory at '${absPath}', and created dedicated Feishu group chat '${params.group_name}' with ID '${newChatId}'. Invited user and sent setup ready notification into the group successfully.`,
         returnDisplay: `Successfully created project and group chat ${params.group_name}`
