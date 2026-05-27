@@ -639,7 +639,19 @@ async function handleFeishuCommand(
           const geminiClient = config.getGeminiClient();
           if (geminiClient) {
             await geminiClient.waitForChatInitialized();
-            await geminiClient.switchModel(actualModelName, new AbortController().signal);
+            const switchResult = await geminiClient.switchModel(actualModelName, new AbortController().signal);
+
+            if (!switchResult.success) {
+              return `❌ 切换到模型 **${exactMatch.displayName}** 失败: ${switchResult.error || '可能由于上下文压缩失败'}`;
+            }
+
+            let responseMsg = `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
+            if (switchResult.compressionInfo) {
+              responseMsg += `\n📦 上下文已自动压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`;
+            } else if (switchResult.compressionSkipReason) {
+              responseMsg += `\n✓ ${switchResult.compressionSkipReason}`;
+            }
+            return responseMsg;
           }
         }
 
