@@ -837,7 +837,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     // 🎯 实时、动态拉取最新的 config 和 geminiClient，防止闭包在启动后变化而未感知
     const activeConfig = globalCommandContext?.services?.config || config;
-    const activeClient = activeConfig?.getGeminiClient?.();
+    let activeClient: any = null;
+    let initErrorMsg = '';
+
+    if (activeConfig) {
+      try {
+        activeClient = activeConfig.getGeminiClient?.();
+      } catch (e: any) {
+        initErrorMsg = e.message || String(e);
+        dwarn(`[Feishu] Failed to getGeminiClient: ${initErrorMsg}`);
+      }
+    }
 
     // 🚀 多项目路由环境拦截
     const routes = await loadProjectRoutes();
@@ -857,12 +867,19 @@ async function handleStart(context?: CommandContext): Promise<string> {
           debugMode: config?.getDebugMode() || false,
           targetDir: route.projectRoot,
         });
-        const isolatedClient = isolatedConfig.getGeminiClient();
-        session = { config: isolatedConfig, geminiClient: isolatedClient };
-        isolatedSessions.set(msg.chatId, session);
+        try {
+          const isolatedClient = isolatedConfig.getGeminiClient();
+          session = { config: isolatedConfig, geminiClient: isolatedClient };
+          isolatedSessions.set(msg.chatId, session);
+        } catch (e: any) {
+          initErrorMsg = e.message || String(e);
+          dwarn(`[Router] Failed to getGeminiClient for isolated session: ${initErrorMsg}`);
+        }
       }
-      currentConfig = session.config;
-      currentClient = session.geminiClient;
+      if (session) {
+        currentConfig = session.config;
+        currentClient = session.geminiClient;
+      }
     } else {
       // 未绑定。如果当前是群聊消息，提示去单聊由 AI 自助建群，或在群内 /bind 绑定
       if (msg.chatType === 'group') {
@@ -893,7 +910,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     return new Promise<string | null>((resolve, reject) => {
       queue!.push({ msg, resolve, reject });
-      processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId);
+      processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, initErrorMsg);
     });
   };
 
@@ -903,6 +920,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     config: any,
     geminiClient: any,
     creds: FeishuCredentials,
+    initErrorMsg?: string,
   ): Promise<string | null> {
     const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
 
@@ -932,7 +950,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
 
     if (!geminiClient || !config) {
-      const noLlmReply = '⚠️ LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。' +
+      const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
+      const noLlmReply = `⚠️ **LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。**${errorDetail}` +
         '\n\n💡 **提示**: 即便在 AI 未配置时，您也可以通过发送斜杠命令进行本地控制操作（如输入 `/help` 查看指令，或直接在群聊中发送 `/bind <本地工作区绝对路径>` 强行进行项目手动绑定哦！）';
       tuiContext?.addItem({ type: 'info', text: noLlmReply }, Date.now());
       return noLlmReply;
@@ -1384,7 +1403,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     config: any,
     geminiClient: any,
     creds: FeishuCredentials,
-    chatId: string
+    chatId: string,
+    initErrorMsg?: string
   ) {
     if (isProcessingQueues.get(chatId)) return;
     isProcessingQueues.set(chatId, true);
@@ -1397,7 +1417,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         const { msg, resolve, reject } = item;
         try {
-          const result = await handleSingleFeishuMessage(msg, gateway, config, geminiClient, creds);
+          const result = await handleSingleFeishuMessage(msg, gateway, config, geminiClient, creds, initErrorMsg);
           resolve(result);
         } catch (err) {
           reject(err);
