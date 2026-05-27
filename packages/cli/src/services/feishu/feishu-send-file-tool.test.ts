@@ -77,7 +77,7 @@ describe('SendFeishuFileTool — parameter validation', () => {
 
   it('validateToolParams accepts a string file_path', () => {
     const tool = makeTool();
-    expect(tool.validateToolParams({ file_path: 'a.txt' })).toBeNull();
+    expect(tool.validateToolParams({ file_path: 'a.txt', user_confirmed: true })).toBeNull();
   });
 });
 
