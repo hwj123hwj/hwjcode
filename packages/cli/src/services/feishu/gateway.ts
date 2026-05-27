@@ -923,7 +923,7 @@ export class FeishuGateway {
     }
 
     const cardContent: Record<string, any> = {
-      config: { wide_screen_mode: true },
+      config: { wide_screen_mode: true, streaming: true },
       elements,
     };
     if (title) {
@@ -1020,7 +1020,7 @@ export class FeishuGateway {
       }
 
       const cardContent = {
-        config: { wide_screen_mode: true },
+        config: { wide_screen_mode: true, streaming: true },
         header: title
           ? {
               template: 'green',

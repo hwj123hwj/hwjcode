@@ -56,6 +56,23 @@ let tuiContext: CommandContext['ui'] | null = null;
 let activeChatId: string | null = null;
 let activeReplyToMessageId: string | null = null;
 
+interface QueuedMessage {
+  msg: FeishuMessage;
+  resolve: (value: any) => void;
+  reject: (err: any) => void;
+}
+
+const messageQueue: QueuedMessage[] = [];
+let isProcessingQueue = false;
+
+function clearMessageQueue() {
+  for (const item of messageQueue) {
+    item.resolve(null);
+  }
+  messageQueue.length = 0;
+  isProcessingQueue = false;
+}
+
 /**
  * Wrapper around loadCredentials that surfaces decryption / parse errors
  * as a typed result instead of throwing — handlers can produce a friendly
@@ -550,6 +567,28 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return reply;
     }
 
+    // 如果当前正在处理，或者队列中已有消息，则提示用户排队
+    if (isProcessingQueue || messageQueue.length > 0) {
+      const queuePosition = messageQueue.length + 1;
+      const queueTip = `⏳ *当前任务正在处理中，您的消息已加入排队队列（当前处于第 ${queuePosition} 位）...*`;
+      await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+    }
+
+    return new Promise<string | null>((resolve, reject) => {
+      messageQueue.push({ msg, resolve, reject });
+      processMessageQueue(gateway, config, geminiClient, creds);
+    });
+  };
+
+  async function handleSingleFeishuMessage(
+    msg: FeishuMessage,
+    gateway: FeishuGateway,
+    config: any,
+    geminiClient: any,
+    creds: FeishuCredentials,
+  ): Promise<string | null> {
+    const messageText = typeof msg.text === 'string' ? msg.text.trim() : '';
+
     // 🎯 保存当前会话上下文（供 send_feishu_file 工具使用）
     activeChatId = msg.chatId;
     activeReplyToMessageId = msg.messageId;
@@ -593,6 +632,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
       let currentMessage: PartListUnion = messageText;
       const MAX_TURNS = 100;
 
+      let activeCardId: string | null = null;
+      let accumulatedMarkdown = '';
+
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const stream = geminiClient.sendMessageStream(
           currentMessage,
@@ -601,13 +643,35 @@ async function handleStart(context?: CommandContext): Promise<string> {
         );
 
         let responseText = '';
+        let lastUpdateTime = 0;
+        const MIN_UPDATE_INTERVAL = 1500; // 节流控制，1.5 秒更新一次
         const toolCallRequests: ToolCallRequestInfo[] = [];
 
         for await (const event of stream) {
           switch (event.type) {
-            case GeminiEventType.Content:
+            case GeminiEventType.Content: {
               responseText += event.value;
+              const currentTotalMarkdown = accumulatedMarkdown + responseText;
+              const trimmed = currentTotalMarkdown.trim();
+              if (trimmed) {
+                const now = Date.now();
+                if (!activeCardId) {
+                  // 第一次发送，获取卡片消息 ID
+                  activeCardId = await gateway.sendCard(
+                    msg.chatId,
+                    'DeepV Code AI 助理',
+                    trimmed,
+                    [],
+                    msg.messageId,
+                  );
+                  lastUpdateTime = now;
+                } else if (now - lastUpdateTime >= MIN_UPDATE_INTERVAL) {
+                  await gateway.updateCard(activeCardId, 'DeepV Code AI 助理', trimmed);
+                  lastUpdateTime = now;
+                }
+              }
               break;
+            }
             case GeminiEventType.ToolCallRequest:
               toolCallRequests.push(event.value);
               break;
@@ -619,13 +683,39 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
 
+        // 把当前这轮回复合并进累计 Markdown 中
+        accumulatedMarkdown += responseText;
+
+        // 结束流式输出，做最终的、无中间提示的更新
+        if (activeCardId) {
+          const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown || '（无回复）');
+          if (!success) {
+            dwarn('[Feishu Stream] Failed to update final card with retry. Fallback to sending new card.');
+            activeCardId = await gateway.sendCard(
+              msg.chatId,
+              'DeepV Code AI 助理',
+              accumulatedMarkdown || '（无回复）',
+              [],
+              msg.messageId,
+            );
+          }
+        }
+
         // 无工具调用 → 最终回复
         if (toolCallRequests.length === 0) {
           const replyText = responseText || '（无回复）';
           tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
 
-          // 直接发送最终回复到飞书（使用 post 格式，支持 markdown 渲染）
-          await gateway.sendMarkdown(msg.chatId, replyText, msg.messageId);
+          // 兜底：如果有些特别快的一轮或者流中由于某种原因没有触发 activeCardId 却有最终回复
+          if (!activeCardId) {
+            activeCardId = await gateway.sendCard(
+              msg.chatId,
+              'DeepV Code AI 助理',
+              accumulatedMarkdown || '（无回复）',
+              [],
+              msg.messageId,
+            );
+          }
 
           // 检测并发送文件（沙箱化到 projectRoot，扩展名白名单）
           const projectRoot: string =
@@ -635,18 +725,32 @@ async function handleStart(context?: CommandContext): Promise<string> {
             gateway,
             msg.chatId,
             msg.messageId,
-            replyText,
+            accumulatedMarkdown,
             projectRoot,
           );
           return null; // 自己已发送，不触发 gateway 自动回复
         }
 
-        // 工具执行
+        // 有工具执行
         const toolNames = toolCallRequests.map(r => r.name || 'unknown').join(', ');
         tuiContext?.addItem(
           { type: 'info', text: tp('feishu.tui.tool_running', { names: toolNames }) },
           Date.now(),
         );
+
+        // 发送/更新工具运行进度通知给飞书卡片
+        const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
+        if (activeCardId) {
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (运行工具中)', accumulatedMarkdown + toolRunningText);
+        } else {
+          activeCardId = await gateway.sendCard(
+            msg.chatId,
+            'DeepV Code AI 助理 (运行工具中)',
+            toolRunningText,
+            [],
+            msg.messageId,
+          );
+        }
 
         // 执行工具调用，收集 functionResponse
         const toolResponseParts: Part[] = [];
@@ -693,18 +797,24 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
 
+        // 工具执行结束，更新状态
+        if (activeCardId) {
+          await gateway.updateCard(activeCardId, 'DeepV Code AI 助理', accumulatedMarkdown + `\n\n*(✅ 工具运行完成，正在继续思考...)*`);
+        }
+
         // 将工具结果作为下一轮输入
         currentMessage = toolResponseParts;
       }
 
       // 达到最大轮数
-      await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
+      if (activeCardId) {
+        await gateway.updateCard(activeCardId, 'DeepV Code AI 助理 (已中断)', accumulatedMarkdown + '\n\n*（工具调用次数已达到上限）*');
+      } else {
+        await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
+      }
       return null;
     } catch (err: any) {
       derror('Feishu Agent processing error:', err.message);
-      // The reply going back to the Feishu user stays in Chinese (chat-side
-      // language is independent of dvcode TUI locale). The TUI display uses
-      // the user's configured locale.
       const errorReply = `❌ 处理消息时出错: ${err.message}`;
       tuiContext?.addItem(
         { type: 'error', text: tp('feishu.tui.processing_error', { error: err.message }) },
@@ -712,7 +822,53 @@ async function handleStart(context?: CommandContext): Promise<string> {
       );
       return errorReply;
     }
-  };
+  }
+
+  async function safeUpdateCardWithRetry(
+    gateway: FeishuGateway,
+    messageId: string,
+    title: string,
+    content: string,
+    retries = 3,
+    delayMs = 1000
+  ): Promise<boolean> {
+    for (let i = 0; i < retries; i++) {
+      const success = await gateway.updateCard(messageId, title, content);
+      if (success) {
+        return true;
+      }
+      dlog(`[Feishu Card Stream] Update failed, retrying ${i + 1}/${retries} in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    return false;
+  }
+
+  async function processMessageQueue(
+    gateway: FeishuGateway,
+    config: any,
+    geminiClient: any,
+    creds: FeishuCredentials,
+  ) {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+
+    try {
+      while (messageQueue.length > 0) {
+        const item = messageQueue.shift();
+        if (!item) continue;
+
+        const { msg, resolve, reject } = item;
+        try {
+          const result = await handleSingleFeishuMessage(msg, gateway, config, geminiClient, creds);
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      }
+    } finally {
+      isProcessingQueue = false;
+    }
+  }
 
   gateway.onReady = () => {
     dlog('Feishu Bot ready');
@@ -785,6 +941,8 @@ async function handleStop(context?: CommandContext): Promise<string> {
       dwarn('Failed to unregister Feishu tool:', toolErr.message);
     }
   }
+
+  clearMessageQueue();
 
   await activeGateway.disconnect();
   activeGateway = null;
