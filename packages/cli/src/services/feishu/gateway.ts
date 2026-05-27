@@ -140,7 +140,8 @@ export function renderFooterMarkdown(metrics: FeishuFooterMetrics): string {
   }
 
   if (metrics.contextPercentage != null) {
-    parts.push(`上下文 ${metrics.contextPercentage.toFixed(0)}%`);
+    const remainingPercentage = Math.max(0, 100 - metrics.contextPercentage);
+    parts.push(`上下文剩余 ${remainingPercentage.toFixed(0)}%`);
   }
 
   if (parts.length === 0) return '';
