@@ -1264,9 +1264,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
     activeChatId = msg.chatId;
     activeReplyToMessageId = msg.messageId;
 
-    // 同步显示飞书消息到 TUI
+    // 同步显示飞书消息到 TUI (格式规范化：[feishu_chatId][sender:openId])
+    const prefix = `[feishu_${msg.chatId}][sender:${msg.senderOpenId}] `;
     tuiContext?.addItem(
-      { type: 'user', text: tp('feishu.tui.incoming_prefix', { text: messageText }) },
+      { type: 'user', text: `${prefix}${messageText}` },
       Date.now(),
     );
 
