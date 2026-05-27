@@ -18,6 +18,8 @@
  */
 
 import qrcodeTerminal from 'qrcode-terminal';
+import { createRequire } from 'node:module';
+const requireFn = createRequire(import.meta.url);
 import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
 import { MessageType } from '../types.js';
 import {
@@ -236,11 +238,26 @@ async function handleSetup(args: string, ctx?: CommandContext): Promise<string> 
 function renderQrCode(text: string): string | null {
   try {
     let output = '';
-    const generator = (qrcodeTerminal as any).generate || (qrcodeTerminal as any).default?.generate;
+    let qt: any = qrcodeTerminal;
+
+    // 1. 尝试使用 ESM 各种 interop 形式获取 generate 方法
+    let generator = qt?.generate || qt?.default?.generate || qt?.default?.default?.generate;
+
+    // 2. 如果因为打包/编译原因无法直接取到，尝试用 node 底层 require 兜底加载，以达到 100% 成功率
+    if (typeof generator !== 'function') {
+      try {
+        const cjsQt = requireFn('qrcode-terminal');
+        generator = cjsQt?.generate || cjsQt?.default?.generate || cjsQt;
+      } catch {
+        // 忽略 require 失败，依靠外层校验
+      }
+    }
+
     if (typeof generator !== 'function') {
       dwarn('[Feishu] qrcodeTerminal.generate is not a function');
       return null;
     }
+
     generator(text, { small: true }, (qr: string) => {
       output = qr;
     });
