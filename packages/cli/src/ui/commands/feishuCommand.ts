@@ -972,8 +972,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     if (!geminiClient || !config) {
       const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
-      const noLlmReply = `⚠️ **LLM 未初始化，无法回答。请先在 dvcode 中配置好模型。**${errorDetail}` +
-        '\n\n💡 **提示**: 即便在 AI 未配置时，您也可以通过发送斜杠命令进行本地控制操作（如输入 `/help` 查看指令，或直接在群聊中发送 `/bind <本地工作区绝对路径>` 强行进行项目手动绑定哦！）';
+      // 🔬 DEBUG: 打印更多状态信息便于排查
+      const debugInfo = `[hasConfig=${!!config}, hasClient=${!!geminiClient}, hasGlobalCtx=${!!globalCommandContext}, hasGlobalCfg=${!!globalCommandContext?.services?.config}]`;
+      const noLlmReply = `⚠️ **LLM 未初始化，无法回答。**${errorDetail}\n\n🔬 **调试信息**: \`${debugInfo}\`` +
+        '\n\n💡 **提示**: 请在 dvcode TUI 大厅里先发送一条消息（例如「hi」）让认证流程完整初始化，然后再回到飞书重试。';
       tuiContext?.addItem({ type: 'info', text: noLlmReply }, Date.now());
       return noLlmReply;
     }
