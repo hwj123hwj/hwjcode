@@ -32,7 +32,7 @@ export type LarkBrand = FeishuCredentials['domain'];
 // ---------------------------------------------------------------------------
 
 /**
- * dvcode 飞书 Bot 运行所必需的应用 scope。
+ * dvcode 飞书 Bot 运行所必需的应用 scope（**全部免审**）。
  *
  * 对齐 openclaw-lark `tool-scopes.ts` 的 REQUIRED_APP_SCOPES，但**精简**到 dvcode 实际用到：
  * - 收发消息：im:message:*
@@ -40,12 +40,16 @@ export type LarkBrand = FeishuCredentials['domain'];
  * - 资源（文件/图片）：im:resource
  * - 卡片：cardkit:card:*
  * - 应用自身权限查询（让 dvcode 能 probe 已开通的 scope）：application:application:self_manage
+ *
+ * ⚠️ 关于"群消息免 @"：这里的 `im:message.group_at_msg:readonly` 只能让 bot 收到
+ * 群里**@bot 的消息**。如果要在群里**无需 @ 直接响应所有用户消息**，必须额外申请
+ * `im:message.group_msg`（敏感权限，需飞书人工审核）—— 见下方 SENSITIVE_GROUP_MSG_SCOPE。
  */
 export const REQUIRED_APP_SCOPES = [
-  // 消息接收
+  // 消息接收（群里 @bot 触发 + 私聊全收）
   'im:message.group_at_msg:readonly', // 接收群中 @bot 的消息
   'im:message.p2p_msg:readonly',      // 接收私聊消息
-  'im:message:readonly',              // 读取消息内容（多维消息引用、回溯历史）
+  'im:message:readonly',              // 通过 API 主动读取消息内容（不是事件触发，是查询权限）
 
   // 消息发送 / 编辑 / 撤回
   'im:message:send_as_bot',           // 以 bot 身份发消息
@@ -76,6 +80,24 @@ export const REQUIRED_APP_SCOPES = [
 ] as const;
 
 export type RequiredAppScope = (typeof REQUIRED_APP_SCOPES)[number];
+
+/**
+ * 「群消息免 @」敏感权限。
+ *
+ * dvcode 飞书 Bot 默认在群里**只在被 @ 时**才响应（飞书事件层硬规则：
+ * `im.message.receive_v1` 在群聊场景默认只推送 @bot 的消息）。
+ *
+ * 如果用户希望 bot 在专属项目群里**无需 @ 自动响应所有消息**，必须额外申请
+ * 这个**敏感权限**。它需要飞书开放平台**人工审核**（一般 1~3 天，要在
+ * 申请页面填写"使用场景说明"）。
+ *
+ * 一旦此权限审核通过并发布版本：
+ *  - `im.message.receive_v1` 事件会推送群里**所有**用户消息（不含其他 bot）
+ *  - dvcode 应用层无需做改动，gateway 会自动收到所有事件
+ *
+ * 文档：https://open.feishu.cn/document/server-docs/im-v1/message/events/receive
+ */
+export const SENSITIVE_GROUP_MSG_SCOPE = 'im:message.group_msg' as const;
 
 // ---------------------------------------------------------------------------
 // 「一键申请权限」链接生成

@@ -36,6 +36,7 @@ import { FeishuGateway, FeishuMessage } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
 import {
   REQUIRED_APP_SCOPES,
+  SENSITIVE_GROUP_MSG_SCOPE,
   buildScopeApplyUrl,
   buildEventSubUrl,
   buildPermissionPageUrl,
@@ -348,6 +349,29 @@ function appendPostSetupGuidance(
   lines.push('     在权限管理页申请版本发布，让 scope 生效：');
   lines.push(`     👉 ${buildPermissionPageUrl({ appId: creds.appId, brand: creds.domain })}`);
   lines.push('');
+
+  // 🔔 重要提示：群里免 @ 必须额外申请敏感权限
+  const hasGroupMsgScope = grantedScopes?.includes(SENSITIVE_GROUP_MSG_SCOPE) ?? false;
+  if (!hasGroupMsgScope) {
+    const sensitiveApplyUrl = buildScopeApplyUrl({
+      appId: creds.appId,
+      scopes: [SENSITIVE_GROUP_MSG_SCOPE],
+      brand: creds.domain,
+      tokenType: 'tenant',
+    });
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('💬 **想让 Bot 在群里"免 @ 直接响应所有消息"？**');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('  默认：群里只有 @bot 时才会收到事件（飞书平台层硬规则）。');
+    lines.push('  要免 @ 直接响应，必须额外申请「敏感权限」：');
+    lines.push(`     👉 ${sensitiveApplyUrl}`);
+    lines.push(`     权限：\`${SENSITIVE_GROUP_MSG_SCOPE}\` —— "读取关联群聊内所有消息"`);
+    lines.push('  ⚠️ 这是飞书的敏感权限，需要人工审核（一般 1-3 天）。');
+    lines.push('  在申请页填写"使用场景说明"时，可以参考填写：');
+    lines.push('     用于 AI 编程助手在专属项目协作群中无需 @ 即可响应团队成员的');
+    lines.push('     编程请求和问题，提升协作效率。');
+    lines.push('');
+  }
   lines.push('  💡 步骤 1-3 完成后，回到 dvcode 执行 `/feishu start` 即可使用！');
 }
 
@@ -1704,6 +1728,22 @@ async function handleStatus(): Promise<string> {
         if (missing.length <= 8) {
           for (const s of missing) lines.push(`       - ${s}`);
         }
+      }
+
+      // 检测「群免 @」敏感权限是否已开
+      const hasGroupMsgScope = probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE);
+      lines.push('');
+      if (hasGroupMsgScope) {
+        lines.push('  ✅ 群消息免 @：已开通（群里所有消息都会推送给 bot）');
+      } else {
+        const sensitiveUrl = buildScopeApplyUrl({
+          appId: creds.appId,
+          scopes: [SENSITIVE_GROUP_MSG_SCOPE],
+          brand: creds.domain,
+          tokenType: 'tenant',
+        });
+        lines.push('  ℹ️ 群消息免 @：未开通（群里仅 @bot 才响应）');
+        lines.push(`     如需"无需 @ 直接响应"功能，申请敏感权限：${sensitiveUrl}`);
       }
     } else {
       // 应用还没开通 application:application:self_manage，无法 probe scope
