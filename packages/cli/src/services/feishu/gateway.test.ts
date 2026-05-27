@@ -264,7 +264,7 @@ describe('CardKit 2.0 builders', () => {
     expect(text).toContain('claude-opus-4-7');
     expect(text).toContain('↑12,345');
     expect(text).toContain('↓6,789');
-    expect(text).toContain('43%'); // 42.7 toFixed(0) === '43'
+    expect(text).toContain('上下文剩余 57%'); // 100 - 42.7 = 57.3 -> 57%
     expect(text).toContain('·'); // separator
   });
 
