@@ -1295,6 +1295,33 @@ async function handleStart(context?: CommandContext): Promise<string> {
       currentClient = session.geminiClient;
     }
 
+    // 🚀 斜杠命令（/help, /new, /stop, /bind 等）高优先级快速通道拦截：
+    // 这些命令完全由系统控制或脚本程序处理，不进入 LLM 上下文，也不存在长耗时。
+    // 为了极致的用户体验，它们应该完全绕过异步消息队列，直接高优先级秒速执行响应，绝不参与排队！
+    if (messageText.startsWith('/')) {
+      dlog(`[Router] High-priority slash command matched: ${messageText}`);
+      try {
+        const cmdResult = await handleFeishuCommand(messageText, currentClient, currentConfig, msg.chatId);
+        if (cmdResult !== null) {
+          tuiContext?.addItem({ type: 'info', text: cmdResult }, Date.now());
+          await gateway.sendMessage(msg.chatId, cmdResult, msg.messageId);
+          return cmdResult;
+        }
+        // 如果是未知斜杠命令，给予友好提示，也是直接响应不排队
+        if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
+          const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
+          tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
+          await gateway.sendMessage(msg.chatId, hint, msg.messageId);
+          return hint;
+        }
+      } catch (err: any) {
+        const errMsg = `❌ 执行命令出错：${err.message || err}`;
+        tuiContext?.addItem({ type: 'info', text: errMsg }, Date.now());
+        await gateway.sendMessage(msg.chatId, errMsg, msg.messageId);
+        return errMsg;
+      }
+    }
+
     // 2. 获取或创建 Chat 专属队列并排队
     let queue = messageQueues.get(msg.chatId);
     if (!queue) {
@@ -1336,21 +1363,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
       { type: 'user', text: `${prefix}${messageText}` },
       Date.now(),
     );
-
-    // 拦截斜杠命令（/new, /compress, /help 等），不发给 LLM
-    if (messageText.startsWith('/')) {
-      const cmdResult = await handleFeishuCommand(messageText, geminiClient, config);
-      if (cmdResult !== null) {
-        tuiContext?.addItem({ type: 'info', text: cmdResult }, Date.now());
-        return cmdResult;
-      }
-      // 未知斜杠命令 — 提示可用命令，不要当普通消息发给 LLM（避免 LLM 幻觉回复）
-      if (!FEISHU_SLASH_COMMANDS[messageText.split(/\s+/)[0].toLowerCase()]) {
-        const hint = `❓ 未知命令: ${messageText.split(/\s+/)[0]}\n\n输入 /help 查看可用命令`;
-        tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
-        return hint;
-      }
-    }
 
     if (!geminiClient || !config) {
       const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
