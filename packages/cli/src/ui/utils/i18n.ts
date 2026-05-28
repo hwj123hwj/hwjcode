@@ -373,11 +373,14 @@ export const translations = {
     'tool.findfiles': 'FindFiles',
     'tool.readfolder': 'ReadFolder',
     'tool.readmanyfiles': 'ReadManyFiles',
-    'tool.shell': 'Shell',
+    'tool.shell': 'Bash',
     'tool.webfetch': 'WebFetch',
     'tool.websearch': 'Web Search',
     'tool.savememory': 'Save Memory',
     'tool.task': 'Task',
+
+    // Aggregated read_file group header (Claude-Code style "Reading N files…")
+    'tool.aggregate.reading_files': 'Reading {count} files…',
 
     // Shell output
     'shell.output.truncated': '... (showing last {maxLines} lines, {totalLines} lines total)',
@@ -1578,6 +1581,7 @@ export const translations = {
     // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[Feishu] {text}',
     'feishu.tui.context_compressed': '📦 Context auto-compressed',
+    'feishu.tui.agent_working': '🤖 Agent is working...',
     'feishu.tui.tool_running': '🔧 Running tool: {names}',
     'feishu.tui.tool_running_with_args': '🔧 Running tool: {name} {args}',
     'feishu.tui.tool_user_answered': '✅ User answered',
@@ -2003,11 +2007,14 @@ export const translations = {
     'tool.findfiles': '查找文件',
     'tool.readfolder': '读取文件夹',
     'tool.readmanyfiles': '批量读取',
-    'tool.shell': '命令行',
+    'tool.shell': 'Bash',
     'tool.webfetch': '网页获取',
     'tool.websearch': '网络搜索',
     'tool.savememory': '保存记忆',
     'tool.task': '任务',
+
+    // Aggregated read_file group header (Claude-Code style "Reading N files…")
+    'tool.aggregate.reading_files': '读取 {count} 个文件…',
 
     // Shell output
     'shell.output.truncated': '... (显示最新 {maxLines} 行，共 {totalLines} 行)',
@@ -3204,6 +3211,7 @@ export const translations = {
     // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[飞书] {text}',
     'feishu.tui.context_compressed': '📦 上下文已自动压缩',
+    'feishu.tui.agent_working': '🤖 有Agent工作中...',
     'feishu.tui.tool_running': '🔧 执行工具: {names}',
     'feishu.tui.tool_running_with_args': '🔧 执行工具: {name} {args}',
     'feishu.tui.tool_user_answered': '✅ 用户已回答问题',
@@ -3480,7 +3488,7 @@ export function getLocalizedToolName(toolName: string): string {
     'FindFiles': 'tool.findfiles',
     'ReadFolder': 'tool.readfolder',
     'ReadManyFiles': 'tool.readmanyfiles',
-    'Shell': 'tool.shell',
+    'Bash': 'tool.shell',
     'WebFetch': 'tool.webfetch',
     'Web Search': 'tool.websearch',
     'Save Memory': 'tool.savememory',

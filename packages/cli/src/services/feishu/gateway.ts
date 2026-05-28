@@ -23,11 +23,20 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { dlog, dwarn, derror } from './logger.js';
 import { optimizeMarkdownStyle } from './markdown-style.js';
+import { detectImageExtension } from './image-type.js';
 
 const API_BASE_URLS: Record<string, string> = {
   feishu: 'https://open.feishu.cn',
   lark: 'https://open.larksuite.com',
 };
+
+/**
+ * 卡片交互（等待用户点击/提交）的默认超时时间（毫秒）。
+ *
+ * 飞书侧无法像 CLI 终端那样真正无限期等待用户（常驻 Promise 会占内存、上游
+ * AI 任务会僵死），因此给一个很长但有限的默认值：30 分钟。调用方可按需覆盖。
+ */
+const DEFAULT_CARD_ACTION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface FeishuMessage {
   text: string;
@@ -51,9 +60,36 @@ export interface CardActionData {
   openId: string;
   /** 触发回调的消息 message_id */
   messageId: string;
+  /**
+   * 表单提交时（form_action.type = 'submit'）携带的所有具名组件的值。
+   * 键为组件的 `name`，值为单选选中的 value（string）、复选选中的 value 数组（string[]）或输入框文本（string）。
+   * 非表单（普通按钮点击）时为 undefined。
+   */
+  formValue?: Record<string, string | string[]>;
 }
 
 export type OnCardActionCallback = (data: CardActionData) => void;
+
+/** 单个问题的选项 */
+export interface FeishuQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** 提交给表单卡片的单个问题 */
+export interface FeishuQuestion {
+  /** 问题正文 */
+  question: string;
+  /** 短标题（可选，显示在下拉框 label 上） */
+  header?: string;
+  /** 候选项（2-4 个） */
+  options: FeishuQuestionOption[];
+  /** 是否允许多选（保留字段，当前下拉为单选 + 自定义填空） */
+  multiSelect?: boolean;
+}
+
+/** 表单卡片回答结果：key 为问题文本，value 为用户的最终答案文本 */
+export type FeishuQuestionAnswers = Record<string, string>;
 
 /** 飞书卡片页脚指标 */
 export interface FeishuFooterMetrics {
@@ -360,7 +396,7 @@ export class FeishuGateway {
    * key = 卡片 message_id, value = { resolve, timer }
    */
   private cardCallbacks = new Map<string, {
-    resolve: (value: string) => void;
+    resolve: (data: CardActionData) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
@@ -441,12 +477,16 @@ export class FeishuGateway {
       if (!res.ok) return null;
 
       const buffer = await res.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
 
       const fs = await import('node:fs');
       const os = await import('node:os');
       const path = await import('node:path');
       const tempDir = os.tmpdir();
-      const localPath = path.join(tempDir, `feishu-image-${imageKey}.png`);
+      // 🎯 按真实类型落盘（字节头优先，Content-Type 兜底），避免一律 .png
+      // 导致下游 mime.lookup 推断出错误的 media_type，触发供应商 400 报错。
+      const ext = detectImageExtension(bytes, res.headers.get('content-type'));
+      const localPath = path.join(tempDir, `feishu-image-${imageKey}${ext}`);
       fs.writeFileSync(localPath, Buffer.from(buffer));
       return localPath;
     } catch (e: any) {
@@ -474,11 +514,15 @@ export class FeishuGateway {
       if (!res.ok) return null;
 
       const buffer = await res.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
 
       const fs = await import('node:fs');
       const path = await import('node:path');
       fs.mkdirSync(targetDir, { recursive: true });
-      const localPath = path.join(targetDir, `feishu-image-${imageKey}.png`);
+      // 🎯 按真实类型落盘（字节头优先，Content-Type 兜底），避免一律 .png
+      // 导致下游 mime.lookup 推断出错误的 media_type，触发供应商 400 报错。
+      const ext = detectImageExtension(bytes, res.headers.get('content-type'));
+      const localPath = path.join(targetDir, `feishu-image-${imageKey}${ext}`);
       fs.writeFileSync(localPath, Buffer.from(buffer));
       return localPath;
     } catch (e: any) {
@@ -708,6 +752,8 @@ export class FeishuGateway {
             || '';
           const messageId = data?.event?.context?.open_message_id
             || data?.event?.message_id
+            || data?.context?.open_message_id
+            || data?.message_id
             || '';
           const rawValue = action?.value ?? action?.option ?? '';
           // action.value 是对象 { choice: "xxx" }，需要提取实际值
@@ -716,10 +762,27 @@ export class FeishuGateway {
             : rawValue;
           const strValue = String(choiceValue ?? '');
 
-          dlog(`Parsed: openId=${openId}, messageId=${messageId}, strValue=${strValue}`);
+          // 🎯 表单提交（form_action.type='submit'）：飞书把所有具名组件的值放在
+          // action.form_value 里，键为组件 name，值为下拉选中的 value（或复选组件选中值数组）或输入框文本。
+          let formValue: Record<string, string | string[]> | undefined;
+          const rawFormValue = action?.form_value;
+          if (rawFormValue && typeof rawFormValue === 'object') {
+            formValue = {};
+            for (const [k, v] of Object.entries(rawFormValue)) {
+              if (Array.isArray(v)) {
+                formValue[k] = v.map(item => String(item ?? ''));
+              } else {
+                formValue[k] = String(v ?? '');
+              }
+            }
+          }
+
+          dlog(`Parsed: openId=${openId}, messageId=${messageId}, strValue=${strValue}, formValue=${JSON.stringify(formValue)}`);
+
+          const actionData: CardActionData = { value: strValue, openId, messageId, formValue };
 
           if (messageId && this.onCardAction) {
-            this.onCardAction({ value: strValue, openId, messageId });
+            this.onCardAction(actionData);
           }
 
           // 查找是否有等待中的 Promise
@@ -728,7 +791,7 @@ export class FeishuGateway {
             dlog(`Matched pending callback, resolving with: ${strValue}`);
             clearTimeout(pending.timer);
             this.cardCallbacks.delete(messageId);
-            pending.resolve(strValue);
+            pending.resolve(actionData);
           } else {
             dlog(`No matching pending callback for messageId=${messageId}`);
           }
@@ -1839,12 +1902,251 @@ export class FeishuGateway {
   }
 
   /**
+   * 🎯 用一张「表单卡片」一次性收集多个问题的答案（飞书 schema 2.0 form）。
+   *
+   * 每个问题渲染为：
+   *   - 一个下拉单选框（select_static），选项含各候选项 + 一个「✏️ 其他（填空）」
+   *   - 一个单行输入框（input），当用户在下拉里选「其他」时填写自定义答案
+   * 卡片底部是一个统一的「提交」按钮（form_action.type='submit'）。
+   *
+   * 用户点提交后，飞书通过长连接推送 card.action.trigger，action.form_value
+   * 一次带回所有具名组件的值。我们按 name（q{idx} / q{idx}_other）解析回每个问题。
+   *
+   * 飞书 WS 长连接**支持**卡片回调（card.action.trigger 是官方推荐方式），
+   * 因此这是主路径。仅当卡片发送失败时，调用方应回退到文本序号模式。
+   *
+   * @returns 成功返回 { ok: true, answers }；卡片发送失败返回 { ok: false }。
+   *          超时则 answers 里对应问题为空字符串，交由调用方判定"未回答"。
+   */
+  async askQuestionsViaForm(
+    chatId: string,
+    questions: FeishuQuestion[],
+    timeoutMs: number = DEFAULT_CARD_ACTION_TIMEOUT_MS,
+    replyToMessageId?: string,
+  ): Promise<{ ok: boolean; answers?: FeishuQuestionAnswers }> {
+    if (!questions || questions.length === 0) {
+      return { ok: true, answers: {} };
+    }
+
+    const OTHER_VALUE = '__other__';
+    const formName = `aq_form_${Date.now()}`;
+
+    // 构建表单内部元素
+    const formElements: any[] = [];
+    questions.forEach((q, idx) => {
+      const title = q.header ? `${q.header}: ${q.question}` : q.question;
+
+      // 问题标题（markdown，作为下拉框上方的说明）
+      formElements.push({
+        tag: 'markdown',
+        content: `**${idx + 1}. ${title}**`,
+      });
+
+      // 下拉选项：候选项 + "其他（填空）"
+      const options = (q.options || []).map((opt, oi) => ({
+        text: {
+          tag: 'plain_text',
+          content: opt.description ? `${opt.label} — ${opt.description}` : opt.label,
+        },
+        value: `opt_${oi}`,
+      }));
+      options.push({
+        text: { tag: 'plain_text', content: '✏️ 其他（在下方填空）' },
+        value: OTHER_VALUE,
+      });
+
+      if (q.multiSelect) {
+        formElements.push({
+          tag: 'multi_select_static',
+          name: `q${idx}`,
+          placeholder: { tag: 'plain_text', content: '请选择选项（可多选）' },
+          options,
+          width: 'fill',
+        });
+      } else {
+        formElements.push({
+          tag: 'select_static',
+          name: `q${idx}`,
+          placeholder: { tag: 'plain_text', content: '请选择一个选项' },
+          options,
+          width: 'fill',
+        });
+      }
+
+      // 自定义填空（选择"其他"时填写；其它情况留空即可）
+      formElements.push({
+        tag: 'input',
+        name: `q${idx}_other`,
+        placeholder: { tag: 'plain_text', content: '如选「其他」，请在此填写自定义答案' },
+      });
+    });
+
+    // 提交按钮
+    formElements.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '提交' },
+      type: 'primary',
+      width: 'default',
+      name: 'submit_btn',
+      action_type: 'form_submit',
+    });
+
+    const card: Record<string, any> = {
+      schema: '2.0',
+      config: { update_multi: true, wide_screen_mode: true },
+      header: {
+        template: 'blue',
+        title: { tag: 'plain_text', content: '请回答以下问题' },
+      },
+      body: {
+        elements: [
+          {
+            tag: 'form',
+            name: formName,
+            elements: formElements,
+          },
+        ],
+      },
+    };
+
+    // 发送卡片
+    const messageId = await this.sendRawInteractiveCard(chatId, card, replyToMessageId);
+    if (!messageId) {
+      dwarn('askQuestionsViaForm: failed to send form card, caller should fallback');
+      return { ok: false };
+    }
+    this.lastCardMessageId = messageId;
+
+    // 等待用户提交（card.action.trigger -> form_value）
+    const actionData = await new Promise<CardActionData>((resolve) => {
+      const timer = setTimeout(() => {
+        this.cardCallbacks.delete(messageId);
+        resolve({ value: '', openId: '', messageId });
+      }, timeoutMs);
+      this.cardCallbacks.set(messageId, { resolve, timer });
+    });
+
+    // 解析 form_value → 每个问题的答案
+    const formValue = actionData.formValue || {};
+    const answers: FeishuQuestionAnswers = {};
+    questions.forEach((q, idx) => {
+      const selectedRaw = formValue[`q${idx}`];
+      const otherRaw = formValue[`q${idx}_other`] || '';
+      const otherText = (typeof otherRaw === 'string' ? otherRaw : '').trim();
+
+      let answer = '';
+      if (q.multiSelect) {
+        const selectedArr = Array.isArray(selectedRaw)
+          ? selectedRaw
+          : selectedRaw
+          ? [selectedRaw]
+          : [];
+
+        const subAnswers: string[] = [];
+        selectedArr.forEach(sel => {
+          if (sel === OTHER_VALUE) {
+            if (otherText) {
+              subAnswers.push(otherText);
+            }
+          } else if (sel.startsWith('opt_')) {
+            const oi = parseInt(sel.slice(4), 10);
+            const label = q.options[oi]?.label;
+            if (label) {
+              subAnswers.push(label);
+            }
+          }
+        });
+
+        // 兜底：如果没在复选框选任何东西，但在输入框填了字，作为填空答案
+        if (subAnswers.length === 0 && otherText) {
+          subAnswers.push(otherText);
+        }
+
+        answer = subAnswers.join(', ');
+      } else {
+        const selected = typeof selectedRaw === 'string' ? selectedRaw : (selectedRaw?.[0] ?? '');
+        if (selected === OTHER_VALUE) {
+          answer = otherText; // 用户选了"其他"，取填空内容
+        } else if (selected.startsWith('opt_')) {
+          const oi = parseInt(selected.slice(4), 10);
+          answer = q.options[oi]?.label ?? '';
+        }
+        // 兜底：没选下拉但填了空，也采纳填空内容
+        if (!answer && otherText) {
+          answer = otherText;
+        }
+      }
+      answers[q.question] = answer;
+    });
+
+    return { ok: true, answers };
+  }
+
+  /**
+   * 发送一张原始 interactive 卡片（card JSON 直传），返回 message_id。
+   * 与 sendCard 不同，这里直接发送调用方构造好的完整 card 对象（含 schema 2.0）。
+   */
+  async sendRawInteractiveCard(
+    chatId: string,
+    card: Record<string, any>,
+    replyToMessageId?: string,
+  ): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      const contentStr = JSON.stringify(card);
+
+      // 优先直接发送
+      const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
+      const res = await fetch(directUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          receive_id: chatId,
+          msg_type: 'interactive',
+          content: contentStr,
+        }),
+      });
+      const data: any = await res.json();
+      if (data.code === 0) {
+        dlog('Feishu sendRawInteractiveCard ok, message_id:', data.data?.message_id);
+        return data.data?.message_id || null;
+      }
+
+      dwarn(`Feishu sendRawInteractiveCard direct failed (code=${data.code}): ${data.msg}`);
+      // reply 兜底
+      if (replyToMessageId) {
+        const replyUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages/${replyToMessageId}/reply`;
+        const replyRes = await fetch(replyUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ msg_type: 'interactive', content: contentStr }),
+        });
+        const replyData: any = await replyRes.json();
+        if (replyData.code === 0) {
+          dlog('Feishu sendRawInteractiveCard(reply) ok, message_id:', replyData.data?.message_id);
+          return replyData.data?.message_id || null;
+        }
+        derror('Feishu sendRawInteractiveCard reply also failed:', JSON.stringify(replyData));
+      }
+      return null;
+    } catch (err: any) {
+      derror('Feishu sendRawInteractiveCard error:', err?.message || err);
+      return null;
+    }
+  }
+
+  /**
    * 发送卡片并等待用户点击按钮
    *
-   * **重要**：飞书 WebSocket 长连接模式不支持卡片回调（card.action.trigger），
-   * 卡片回调需要 HTTP Webhook 地址。因此在 WS 模式下直接使用文本选择模式。
-   *
-   * 如果后续配置了 HTTP Webhook 卡片回调，可以改为先发卡片再等待回调。
+   * 飞书 WS 长连接**支持**卡片回调（card.action.trigger 是官方推荐方式）。
+   * 本方法先发交互卡片，再在 cardCallbacks 注册等待点击；超时或卡片发送失败
+   * 时回退到文本序号选择模式，保证在任何情况下都能拿到用户输入。
    *
    * @returns 用户选择的按钮 value，超时返回 defaultValue
    */
@@ -1854,12 +2156,36 @@ export class FeishuGateway {
     content: string,
     buttons: Array<{ label: string; value: string }>,
     defaultValue: string,
-    timeoutMs: number = 60000,
-    _replyToMessageId?: string,
+    timeoutMs: number = DEFAULT_CARD_ACTION_TIMEOUT_MS,
+    replyToMessageId?: string,
   ): Promise<string> {
-    // WebSocket 长连接不支持卡片回调，直接使用文本选择模式
-    dlog('WS long-connection mode: using text-choice fallback (card callbacks require HTTP webhook)');
-    return this.waitForTextChoice(chatId, title, content, buttons, defaultValue, timeoutMs);
+    // 1) 先尝试发交互卡片
+    const messageId = await this.sendCard(
+      chatId,
+      title,
+      content,
+      buttons,
+      undefined,
+      replyToMessageId,
+    );
+
+    // 2) 卡片发送失败 → 回退文本序号模式
+    if (!messageId) {
+      dwarn('waitForCardAction: sendCard failed, falling back to text-choice mode');
+      return this.waitForTextChoice(chatId, title, content, buttons, defaultValue, timeoutMs);
+    }
+    this.lastCardMessageId = messageId;
+
+    // 3) 注册等待点击
+    const actionData = await new Promise<CardActionData>((resolve) => {
+      const timer = setTimeout(() => {
+        this.cardCallbacks.delete(messageId);
+        resolve({ value: defaultValue, openId: '', messageId });
+      }, timeoutMs);
+      this.cardCallbacks.set(messageId, { resolve, timer });
+    });
+
+    return actionData.value || defaultValue;
   }
 
   /**
@@ -1934,10 +2260,10 @@ export class FeishuGateway {
    * 断开连接
    */
   async disconnect(): Promise<void> {
-    // 清理所有等待中的卡片回调
+    // 清理所有等待中的卡片回调（以空数据 resolve，让等待方走"未回答"分支）
     for (const [, pending] of this.cardCallbacks) {
       clearTimeout(pending.timer);
-      pending.resolve('');
+      pending.resolve({ value: '', openId: '', messageId: '' });
     }
     this.cardCallbacks.clear();
 
