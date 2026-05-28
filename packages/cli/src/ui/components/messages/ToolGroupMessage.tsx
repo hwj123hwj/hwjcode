@@ -9,7 +9,6 @@ import { Box, Text } from 'ink';
 import { IndividualToolCallDisplay, ToolCallStatus } from '../../types.js';
 import { ToolMessage } from './ToolMessage.js';
 import { ToolConfirmationMessage } from './ToolConfirmationMessage.js';
-import { Colors } from '../../colors.js';
 import { Config } from 'deepv-code-core';
 import { SHELL_COMMAND_NAME } from '../../constants.js';
 import { t } from '../../utils/i18n.js';
@@ -22,6 +21,25 @@ interface ToolGroupMessageProps {
   config?: Config;
   isFocused?: boolean;
 }
+
+/**
+ * 🎨 隐形边框：所有边框字符都是空格。
+ *
+ * 之所以不直接 borderStyle={undefined}（即彻底去掉边框），是为了保持原有的
+ * 区域占位逻辑完全不变 —— boxWidth / innerWidth / staticHeight 等计算都依赖
+ * “有边框时左右各占 1 列、上下各占 1 行”这一前提。改用全空格的自定义 BoxStyle
+ * 后，布局尺寸和对齐一字不差，只是边框在视觉上隐形了。
+ */
+const INVISIBLE_BORDER = {
+  topLeft: ' ',
+  top: ' ',
+  topRight: ' ',
+  right: ' ',
+  bottomRight: ' ',
+  bottom: ' ',
+  bottomLeft: ' ',
+  left: ' ',
+} as const;
 
 // Main component renders the border and maps the tools using ToolMessage
 export const ToolGroupMessage: React.FC<ToolGroupMessageProps> = ({
@@ -46,9 +64,6 @@ export const ToolGroupMessage: React.FC<ToolGroupMessageProps> = ({
   // 原因：即使在执行完成后，长输出也会导致边框与终端滚动冲突，引发闪烁
   // 解决方案：Shell命令始终不显示边框，保持简洁且避免闪烁
   const shouldShowBorder = !isShellCommand;
-
-  // 🎨 边框颜色更暗淡，减少视觉干扰
-  const borderColor = Colors.Gray;
 
   // 根据是否显示边框调整静态高度和内部宽度
   const staticHeight = shouldShowBorder ? (/* border */ 2 + /* marginBottom */ 1) : (/* marginBottom */ 1);
@@ -109,17 +124,17 @@ export const ToolGroupMessage: React.FC<ToolGroupMessageProps> = ({
   return (
     <Box
       flexDirection="column"
-      borderStyle={shouldShowBorder ? "single" : undefined}
+      borderStyle={shouldShowBorder ? INVISIBLE_BORDER : undefined}
       /*
         🔧 修复闪屏问题：
         1. 执行中的shell命令禁用边框，避免滚动输出时与终端边界冲突
         2. 使用精确宽度计算，确保流式和非流式输出的对齐一致
         3. boxWidth = terminalWidth - marginLeft(1) - border(0或2)
+        🎨 非 Shell 工具改用 INVISIBLE_BORDER（全空格边框）：保留原有的区域占位
+           与对齐逻辑，但边框在视觉上隐形，去掉之前那一圈灰色矩形框。
       */
       width={boxWidth}
       marginLeft={1}
-      borderDimColor={shouldShowBorder ? true : undefined}
-      borderColor={shouldShowBorder ? borderColor : undefined}
     >
       {toolCalls.map((tool, index) => {
         const isCurrentToolAwaitingApproval = toolAwaitingApproval?.callId === tool.callId;
