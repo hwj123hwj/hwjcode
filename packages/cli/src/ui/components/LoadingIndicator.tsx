@@ -19,6 +19,7 @@ import { isChineseLocale } from '../utils/i18n.js';
 import { useSmallWindowOptimization, shouldSkipAnimation } from '../hooks/useSmallWindowOptimization.js';
 import { useLEDMarquee } from '../hooks/useLEDMarquee.js';
 import { createGradientColorSet } from '../utils/color-brightness.js';
+import { TokenUsageInfo } from './TokenUsageDisplay.js';
 
 interface LoadingIndicatorProps {
   currentLoadingPhrase?: string;
@@ -27,6 +28,7 @@ interface LoadingIndicatorProps {
   thought?: ThoughtSummary | null;
   estimatedInputTokens?: number;
   isExecutingTools?: boolean; // 🎯 新增：是否正在执行工具
+  lastTokenUsage?: TokenUsageInfo | null; // 🎯 新增：最新token使用情况
 }
 
 // 格式化token数字，大于1000时用k单位显示
@@ -35,6 +37,15 @@ const formatTokenCount = (count: number): string => {
     return `${(count / 1000).toFixed(1)}k`;
   }
   return count.toLocaleString();
+};
+
+// 精简格式化token数字，大于1000时用k单位显示，保留两位小数
+const formatTokenCompact = (count: number | undefined): string => {
+  if (count === undefined || count === null) return '0';
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(2)}k`;
+  }
+  return count.toString();
 };
 
 // 动画token增长组件
@@ -98,6 +109,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   thought,
   estimatedInputTokens,
   isExecutingTools = false, // 🎯 新增参数
+  lastTokenUsage, // 🎯 新增：最新token使用情况
 }) => {
   const streamingState = useStreamingContext();
   const realTimeToken = useRealTimeToken();
@@ -222,7 +234,15 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
             <Text color={Colors.Gray}>
               {streamingState === StreamingState.WaitingForConfirmation
                 ? ''
-                : ` (${getCancelKeyHint()} to cancel, ${elapsedTime < 60 ? `${elapsedTime}s` : formatDuration(elapsedTime * 1000)})`}
+                : (() => {
+                    const cancelText = `${getCancelKeyHint()} to cancel, ${elapsedTime < 60 ? `${elapsedTime}s` : formatDuration(elapsedTime * 1000)}`;
+                    if (lastTokenUsage && (lastTokenUsage.input_tokens > 0 || lastTokenUsage.output_tokens > 0)) {
+                      const inputStr = formatTokenCompact(lastTokenUsage.input_tokens);
+                      const outputStr = formatTokenCompact(lastTokenUsage.output_tokens);
+                      return ` (${cancelText} | ↑ ${inputStr} ↓ ${outputStr})`;
+                    }
+                    return ` (${cancelText})`;
+                  })()}
               {/* Token 计数已隐藏 - 不再显示 ↑ 和 🪓 符号 */}
             </Text>
           </Text>

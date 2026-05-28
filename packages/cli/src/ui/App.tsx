@@ -1357,6 +1357,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     submitQueryForGoalRef.current = submitQuery;
   }, [submitQuery]);
 
+  // 当进入响应状态（工作中时），重置 token 使用状态，避免在刚开始时显示旧的数据
+  useEffect(() => {
+    if (streamingState === StreamingState.Responding) {
+      setLastTokenUsage(null);
+    }
+  }, [streamingState]);
+
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
   const currentTitleIcon = useAnimatedTitleIcon(streamingState);
   useEffect(() => {
@@ -1509,6 +1516,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         setLogoShows(false);
       }
       setCumulativeCredits(0);
+      setLastTokenUsage(null);
 
       // 如果需要暂停队列直到响应开始
       if (pauseQueueUntilResponse) {
@@ -2748,6 +2756,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                     : currentLoadingPhrase
                 }
                 elapsedTime={elapsedTime}
+                lastTokenUsage={lastTokenUsage}
               />
 
 
