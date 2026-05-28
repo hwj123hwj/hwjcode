@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { StreamingState } from '../types.js';
 
-const BUSY_ICONS = ['✦', '𝑉', '𝐕', '𝗩', '✌️', '🆅', 'Ⓥ'];
+const BUSY_ICONS = ['○', '●'];
 const IDLE_ICON = '🚀';
 const ANIMATION_INTERVAL_MS = 500;
 
