@@ -205,43 +205,111 @@ ${tp('update.command.line', { command: String(data.updateCommand) })}`;
   }
 }
 
-// 执行自动更新命令
-export async function executeUpdateCommand(updateCommand: string): Promise<boolean> {
+// 内部使用的命令执行辅助函数
+async function runSingleCommand(commandStr: string): Promise<{ code: number | null; error?: Error }> {
   return new Promise((resolve) => {
-    console.log(t('update.auto.exec.start'));
-    console.log(tp('update.command.line', { command: updateCommand }));
-
-    // 解析命令（使用更健壮的方式分割）
-    const parts = updateCommand.trim().split(/\s+/);
+    const parts = commandStr.trim().split(/\s+/);
     const command = parts[0];
     const args = parts.slice(1);
 
-    // 确定使用 cmd.exe 还是直接执行
-    // npm install -g xxx 在 Windows 上需要通过 cmd /c 执行
     const isWindows = process.platform === 'win32';
     const actualCommand = isWindows ? 'cmd.exe' : command;
     const actualArgs = isWindows ? ['/c', command, ...args] : args;
 
-    const updateProcess = spawn(actualCommand, actualArgs, {
+    const proc = spawn(actualCommand, actualArgs, {
       stdio: 'inherit',
       shell: false
     });
 
-    updateProcess.on('close', (code) => {
-      if (code === 0) {
-        console.log(t('update.completed'));
-        resolve(true);
-      } else {
-        console.error(tp('update.failed.code', { code: String(code) }));
-        console.error(t('update.manual.run.hint'));
-        resolve(false);
-      }
+    proc.on('close', (code) => {
+      resolve({ code });
     });
 
-    updateProcess.on('error', (error) => {
-      console.error(tp('update.exec.command.error', { error: error.message }));
-      console.error(t('update.manual.run.hint'));
-      resolve(false);
+    proc.on('error', (error) => {
+      resolve({ code: null, error });
     });
   });
+}
+
+// 执行自动更新命令
+export async function executeUpdateCommand(updateCommand: string): Promise<boolean> {
+  console.log(t('update.auto.exec.start'));
+  console.log(tp('update.command.line', { command: updateCommand }));
+
+  const result = await runSingleCommand(updateCommand);
+
+  if (result.code === 0) {
+    console.log(t('update.completed'));
+    return true;
+  }
+
+  // 检查是否为全局 npm 安装包命令
+  const isNpmGlobalInstall = updateCommand.includes('npm install -g') || updateCommand.includes('npm i -g');
+  if (isNpmGlobalInstall) {
+    const isZH = isChineseLocale();
+    console.log(isZH
+      ? '\n⚠️ 检测到更新失败，可能是由于原全局文件被占用（如 ENOTEMPTY/EPERM 错误）。\n正在尝试通过“先安全卸载旧版本，再重新安装”的 Fallback 重试策略...'
+      : '\n⚠️ Update failed, possibly due to locked/busy global files (e.g., ENOTEMPTY/EPERM error).\nAttempting fallback strategy: "safely uninstall old version first, then reinstall"...'
+    );
+
+    // 提取包名（例如从 "npm install -g deepv-code" 提取 "deepv-code"）
+    let packageName = 'deepv-code';
+    const match = updateCommand.match(/(?:npm\s+(?:install|i)\s+-g\s+|npm\s+-g\s+(?:install|i)\s+)([^\s@]+)/);
+    if (match && match[1]) {
+      packageName = match[1];
+    }
+
+    const uninstallCommand = `npm uninstall -g ${packageName}`;
+    console.log(isZH
+      ? `正在执行卸载命令：${uninstallCommand}`
+      : `Executing uninstall command: ${uninstallCommand}`
+    );
+
+    const uninstallResult = await runSingleCommand(uninstallCommand);
+    if (uninstallResult.code === 0) {
+      console.log(isZH
+        ? '卸载成功！正在重新执行安装...'
+        : 'Uninstall succeeded! Re-executing install command...'
+      );
+
+      const reinstallResult = await runSingleCommand(updateCommand);
+      if (reinstallResult.code === 0) {
+        console.log(t('update.completed'));
+        return true;
+      }
+    } else {
+      console.warn(isZH
+        ? '⚠️ 卸载失败，正在尝试使用 --force 参数强制覆盖安装...'
+        : '⚠️ Uninstall failed, attempting to force install with --force flag...'
+      );
+
+      const forceInstallCommand = `${updateCommand} --force`;
+      console.log(isZH
+        ? `正在执行强制安装命令：${forceInstallCommand}`
+        : `Executing force install command: ${forceInstallCommand}`
+      );
+
+      const forceResult = await runSingleCommand(forceInstallCommand);
+      if (forceResult.code === 0) {
+        console.log(t('update.completed'));
+        return true;
+      }
+    }
+  }
+
+  if (result.error) {
+    console.error(tp('update.exec.command.error', { error: result.error.message }));
+  } else {
+    console.error(tp('update.failed.code', { code: String(result.code) }));
+  }
+
+  const isZH = isChineseLocale();
+  const cleanPackageName = updateCommand.includes('deepv-code') ? 'deepv-code' : 'deepv-code-cli';
+
+  console.error(isZH
+    ? `\n❌ 自动更新失败。您可以尝试手动执行以下命令进行安全更新：\n👉 npm uninstall -g ${cleanPackageName} && npm install -g ${cleanPackageName}\n`
+    : `\n❌ Automatic update failed. You can try manually executing the following command for a safe update:\n👉 npm uninstall -g ${cleanPackageName} && npm install -g ${cleanPackageName}\n`
+  );
+
+  return false;
 }
