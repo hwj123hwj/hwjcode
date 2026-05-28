@@ -71,6 +71,11 @@ const MAX_DESCRIPTION_LENGTH = 10000;
  * The model can then call this tool with the local image path; we offload the
  * vision work to a cheap Gemini Flash chat created via `createTemporaryChat`,
  * and return the resulting textual description.
+ *
+ * This is a PASSIVE fallback only. Multimodal models that can already see the
+ * image must answer directly and must NOT call this tool. The tool description
+ * is intentionally worded to discourage proactive invocation; the real trigger
+ * is the server-side filter marker shown above.
  */
 export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult> {
   static readonly Name: string = 'image_reader';
@@ -79,11 +84,14 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
     super(
       ImageReaderTool.Name,
       'ImageReader',
-      'Reads an image file and returns a detailed textual description by ' +
-        'delegating to a cheap vision-capable model (gemini-2.5-flash). ' +
-        'Use this tool when an image was filtered by the server (e.g. you saw ' +
-        '"[Image Content was filtered. ... Try using image_reader tool to assist.]") ' +
-        'or when the active model cannot natively understand images. ' +
+      'Fallback tool for text-only models that cannot natively view images. ' +
+        'It offloads the vision work to a cheap model (gemini-2.5-flash) and ' +
+        'returns a textual description. Do NOT call this tool proactively: ' +
+        'only use it when the server has replaced an image with a filter ' +
+        'marker explicitly instructing you to (e.g. "[Image Content was ' +
+        'filtered. ... Try using image_reader tool to assist.]"). If you can ' +
+        'already see and understand the image content yourself, just answer ' +
+        'directly and do NOT call this tool. ' +
         'Supports PNG / JPG / JPEG / GIF / WEBP / BMP / SVG.',
       Icon.FileSearch,
       {

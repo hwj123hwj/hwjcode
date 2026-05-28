@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   FeishuGateway,
   buildCardKitStreamingCard,
@@ -422,3 +422,319 @@ describe('FeishuGateway.sendStreamingCardWithFooter (CardKit 2.0)', () => {
     expect(ok).toBe(false); // 速率限制返回 false 但不抛异常
   });
 });
+
+describe('FeishuGateway - image download saves with real extension', () => {
+  let gateway: FeishuGateway;
+  let tmpDir: string;
+
+  // 各类图片的字节头样本（足够触发 magic number 探测）
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+  const GIF = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00, 0x00]);
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  const mockImageResponse = (bytes: Uint8Array, contentType: string | null) =>
+    ({
+      ok: true,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'content-type' ? contentType : null,
+      },
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    }) as unknown as Response;
+
+  beforeEach(async () => {
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs');
+    tmpDir = path.join(os.tmpdir(), `feishu-img-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    const fs = await import('node:fs');
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('downloadImageToDir saves JPEG bytes with .jpg (not .png) via magic number', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockImageResponse(JPEG, 'image/png')));
+    const localPath = await gateway.downloadImageToDir('om_1', 'img_key_1', tmpDir);
+    expect(localPath).toBeTruthy();
+    expect(localPath!.endsWith('.jpg')).toBe(true);
+  });
+
+  it('downloadImageToDir saves GIF bytes with .gif', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockImageResponse(GIF, null)));
+    const localPath = await gateway.downloadImageToDir('om_2', 'img_key_2', tmpDir);
+    expect(localPath!.endsWith('.gif')).toBe(true);
+  });
+
+  it('downloadImageToDir keeps .png for real PNG bytes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockImageResponse(PNG, 'image/png')));
+    const localPath = await gateway.downloadImageToDir('om_3', 'img_key_3', tmpDir);
+    expect(localPath!.endsWith('.png')).toBe(true);
+  });
+
+  it('downloadImageResource saves JPEG bytes with .jpg in temp dir', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockImageResponse(JPEG, null)));
+    const localPath = await gateway.downloadImageResource('om_4', 'img_key_4');
+    expect(localPath).toBeTruthy();
+    expect(localPath!.endsWith('.jpg')).toBe(true);
+    const fs = await import('node:fs');
+    try {
+      fs.rmSync(localPath!, { force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Card callbacks over WS long-connection: form card + card.action.trigger
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
+  let gateway: FeishuGateway;
+  let cardActionHandler: any;
+
+  const mockFetchOk = (body: any) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+
+    cardActionHandler = null;
+    mockRegister.mockImplementation((handlers: any) => {
+      if (handlers['card.action.trigger']) {
+        cardActionHandler = handlers['card.action.trigger'];
+      }
+    });
+  });
+
+  it('connect() registers a card.action.trigger handler (WS supports card callbacks)', async () => {
+    await gateway.connect();
+    expect(cardActionHandler).toBeTypeOf('function');
+  });
+
+  it('builds a schema 2.0 form card with select_static + input + submit button', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_1' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 不等待提交，先验证发出的卡片结构。给极短超时让它尽快 resolve。
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_1',
+      [
+        {
+          question: 'Pick a framework',
+          header: 'Framework',
+          options: [
+            { label: 'React', description: 'UI lib' },
+            { label: 'Vue' },
+          ],
+        },
+      ],
+      50, // 50ms 超时
+    );
+
+    // 等卡片真正发出（sendRawInteractiveCard 是异步的）
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    // 验证发出的卡片 JSON
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/open-apis/im/v1/messages');
+    const body = JSON.parse(init?.body as string);
+    expect(body.msg_type).toBe('interactive');
+    const card = JSON.parse(body.content);
+    expect(card.schema).toBe('2.0');
+
+    const form = card.body.elements[0];
+    expect(form.tag).toBe('form');
+    const tags = form.elements.map((e: any) => e.tag);
+    expect(tags).toContain('select_static');
+    expect(tags).toContain('input');
+    expect(tags).toContain('button');
+
+    const select = form.elements.find((e: any) => e.tag === 'select_static');
+    expect(select.name).toBe('q0');
+    // options = 2 候选 + 1 "其他"
+    expect(select.options).toHaveLength(3);
+    expect(select.options[0].value).toBe('opt_0');
+    expect(select.options[2].value).toBe('__other__');
+
+    const submit = form.elements.find((e: any) => e.tag === 'button');
+    expect(submit.form_action.type).toBe('submit');
+
+    // 让超时触发，避免悬挂
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    // 超时 → 答案为空
+    expect(result.answers!['Pick a framework']).toBe('');
+  });
+
+  it('resolves selected option label from form_value', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_2' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_2',
+      [
+        {
+          question: 'Pick a framework',
+          options: [{ label: 'React' }, { label: 'Vue' }],
+        },
+      ],
+      5000,
+    );
+
+    // 等卡片发出后，模拟用户提交（选第二项 Vue = opt_1）
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await cardActionHandler({
+      event: {
+        context: { open_message_id: 'om_form_2' },
+        operator: { open_id: 'ou_user_1' },
+        action: {
+          tag: 'button',
+          value: { action: 'submit_answers' },
+          form_value: { q0: 'opt_1', q0_other: '' },
+        },
+      },
+    });
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(result.answers!['Pick a framework']).toBe('Vue');
+  });
+
+  it('resolves custom "other" text when user picks the fill-in option', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_3' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_3',
+      [{ question: 'Your choice?', options: [{ label: 'A' }, { label: 'B' }] }],
+      5000,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await cardActionHandler({
+      event: {
+        context: { open_message_id: 'om_form_3' },
+        action: {
+          form_value: { q0: '__other__', q0_other: 'My custom answer' },
+        },
+      },
+    });
+
+    const result = await promise;
+    expect(result.answers!['Your choice?']).toBe('My custom answer');
+  });
+
+  it('returns ok:false when card send fails (caller should fallback to text)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockFetchOk({ code: 99991663, msg: 'send failed' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await gateway.askQuestionsViaForm(
+      'oc_chat_4',
+      [{ question: 'Q?', options: [{ label: 'A' }, { label: 'B' }] }],
+      5000,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.answers).toBeUndefined();
+  });
+});
+
+describe('FeishuGateway - waitForCardAction (button card with real callback)', () => {
+  let gateway: FeishuGateway;
+  let cardActionHandler: any;
+
+  const mockFetchOk = (body: any) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+    cardActionHandler = null;
+    mockRegister.mockImplementation((handlers: any) => {
+      if (handlers['card.action.trigger']) {
+        cardActionHandler = handlers['card.action.trigger'];
+      }
+    });
+  });
+
+  it('sends a button card and resolves with the clicked value', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_btn_1' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.waitForCardAction(
+      'oc_chat_1',
+      'Choose',
+      'body',
+      [
+        { label: 'Yes', value: 'yes' },
+        { label: 'No', value: 'no' },
+      ],
+      '__timeout__',
+      5000,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    // 用户点击 "yes" 按钮，value 是 { choice: 'yes' }
+    await cardActionHandler({
+      event: {
+        context: { open_message_id: 'om_btn_1' },
+        action: { tag: 'button', value: { choice: 'yes' } },
+      },
+    });
+
+    const choice = await promise;
+    expect(choice).toBe('yes');
+  });
+
+  it('falls back to text-choice mode when card send fails', async () => {
+    await gateway.connect();
+    // sendCard 失败 → waitForTextChoice → sendMarkdown 成功
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 99991663, msg: 'fail' })) // sendCard direct fail
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_txt_1' } })); // sendMarkdown
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.waitForCardAction(
+      'oc_chat_2',
+      'Choose',
+      'body',
+      [{ label: 'Yes', value: 'yes' }],
+      '__timeout__',
+      50, // 短超时，触发文本模式超时返回默认值
+    );
+
+    const choice = await promise;
+    expect(choice).toBe('__timeout__');
+    // 第二次 fetch 应是 markdown 文本消息（文本兜底）
+    const secondCall = fetchMock.mock.calls[1];
+    expect(secondCall).toBeTruthy();
+  });
+});
+
