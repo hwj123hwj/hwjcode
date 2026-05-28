@@ -17,10 +17,7 @@ const DEFAULT_MAX_PENDING = 6;
 export interface TodoPanelView {
   isEmpty: boolean;
   allDone: boolean;
-  /** The most recently completed item (last completed in list order), if any. */
-  recentCompleted: TodoItem | null;
-  /** Completed items not shown (everything except `recentCompleted`). */
-  hiddenCompletedCount: number;
+  completed: TodoItem[];
   inProgress: TodoItem[];
   pending: TodoItem[];
   /** Pending items not shown due to the cap. */
@@ -42,18 +39,13 @@ export function selectTodoPanelView(
   const inProgress = todos.filter((t) => t.status === 'in_progress');
   const pendingAll = todos.filter((t) => t.status === 'pending');
 
-  const recentCompleted =
-    completed.length > 0 ? completed[completed.length - 1] : null;
-  const hiddenCompletedCount = recentCompleted ? completed.length - 1 : 0;
-
   const pending = pendingAll.slice(0, maxPending);
   const hiddenPendingCount = pendingAll.length - pending.length;
 
   return {
     isEmpty: todos.length === 0,
     allDone: todos.length > 0 && completed.length === todos.length,
-    recentCompleted,
-    hiddenCompletedCount,
+    completed,
     inProgress,
     pending,
     hiddenPendingCount,
@@ -101,8 +93,6 @@ export const TodoPanel: React.FC<TodoPanelProps> = ({ todos, maxPending }) => {
 
   const zh = isChineseLocale();
   const header = zh ? '任务' : 'Tasks';
-  const completedLabel = (n: number) =>
-    zh ? `… +${n} 已完成` : `… +${n} completed`;
   const moreLabel = (n: number) => (zh ? `… 还有 ${n} 项` : `… +${n} more`);
 
   return (
@@ -117,24 +107,17 @@ export const TodoPanel: React.FC<TodoPanelProps> = ({ todos, maxPending }) => {
         </Text>
       </Box>
 
-      {/* Most recent completed item (rolled-up count for the rest) */}
-      {view.recentCompleted ? (
+      {/* Completed items (rendered with checkmark and strikethrough in order) */}
+      {view.completed.map((t) => (
         <ItemRow
+          key={t.id}
           symbol="✓"
           symbolColor={Colors.AccentGreen}
-          content={view.recentCompleted.content}
+          content={t.content}
           textColor={Colors.Gray}
           strikethrough
         />
-      ) : null}
-      {view.hiddenCompletedCount > 0 ? (
-        <Box>
-          <Text color={Colors.Gray}>
-            {'  '}
-            {completedLabel(view.hiddenCompletedCount)}
-          </Text>
-        </Box>
-      ) : null}
+      ))}
 
       {/* In-progress items (the focus) */}
       {view.inProgress.map((t) => (
