@@ -1578,6 +1578,7 @@ export const translations = {
     // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[Feishu] {text}',
     'feishu.tui.context_compressed': '📦 Context auto-compressed',
+    'feishu.tui.agent_working': '🤖 Agent is working...',
     'feishu.tui.tool_running': '🔧 Running tool: {names}',
     'feishu.tui.tool_running_with_args': '🔧 Running tool: {name} {args}',
     'feishu.tui.tool_user_answered': '✅ User answered',
@@ -3204,6 +3205,7 @@ export const translations = {
     // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[飞书] {text}',
     'feishu.tui.context_compressed': '📦 上下文已自动压缩',
+    'feishu.tui.agent_working': '🤖 有Agent工作中...',
     'feishu.tui.tool_running': '🔧 执行工具: {names}',
     'feishu.tui.tool_running_with_args': '🔧 执行工具: {name} {args}',
     'feishu.tui.tool_user_answered': '✅ 用户已回答问题',
