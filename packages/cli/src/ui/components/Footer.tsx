@@ -33,6 +33,7 @@ interface FooterProps {
   ideConnectionStatus?: IDEConnectionStatus;
   config?: Config;
   terminalWidth?: number;
+  isFeishuProcessing?: boolean;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -52,6 +53,7 @@ export const Footer: React.FC<FooterProps> = ({
   ideConnectionStatus,
   config,
   terminalWidth = 80,
+  isFeishuProcessing = false,
 }) => {
   const limit = tokenLimit(model, config);
   const percentage = promptTokenCount / limit;
@@ -138,17 +140,19 @@ export const Footer: React.FC<FooterProps> = ({
         {versionDisplay ? (
           <Box>
             <Text color={Colors.Gray}>{versionDisplay}</Text>
-            <Text color={Colors.Gray}> | </Text>
+            {!isFeishuProcessing && (contextDisplay || model) ? (
+              <Text color={Colors.Gray}> | </Text>
+            ) : null}
           </Box>
         ) : null}
-        {contextDisplay ? (
+        {contextDisplay && !isFeishuProcessing ? (
           <Text color={Colors.Gray}>
             {contextDisplay}
           </Text>
         ) : null}
 
         {/* Current Model Display */}
-        {model ? (
+        {model && !isFeishuProcessing ? (
           <Box>
             {contextDisplay ? <Text color={Colors.Gray}> | </Text> : null}
             <Text color={Colors.Gray}>
