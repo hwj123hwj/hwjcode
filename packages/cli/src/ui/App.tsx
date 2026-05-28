@@ -1237,20 +1237,31 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const completionSummaryCounterRef = useRef(0);
 
   // 智能主区域和输入框宽度计算：
-  // - 宽终端（≥ 80）：仅保留左右各 2 个字符的边距（共 4 字符），完美撑满屏幕，充分利用空间。
-  // - 窄终端（< 80）：使用 95% 的比例，并确保最小宽度不小于 20。
+  // 为了让输入框、边线和历史消息在宽终端下能够绝对顶头、完美撑满屏幕：
+  // - 宽终端（≥ 80）：
+  //   主区域直接占满全宽并仅在左右预留各 1 字符的边距（即 terminalWidth - 2）。
+  //   输入框内容分配至最宽限度：terminalWidth - 4（扣除 2 字符 Box Padding 和 2 字符前缀符号）。
+  //   这样在 InputPrompt 中，`inputWidth + 2` 的边线字符长度恰好为 `terminalWidth - 2`。
+  //   加上 1 字符左 Padding 和 1 字符右 Padding，边线和内容将完美顶格在 column 1 和 column terminalWidth - 1 上，
+  //   与右上角的 "YOLO mode" 提示符在视觉上达到完美的顶头对齐！
+  // - 窄终端（< 80）：使用 95% 比例。
   const mainAreaWidth = useMemo(() => {
     return Math.max(
       20,
       terminalWidth >= 80
-        ? terminalWidth - 4
+        ? terminalWidth - 2
         : Math.floor(terminalWidth * 0.95)
     );
   }, [terminalWidth]);
 
   const inputWidth = useMemo(() => {
-    return Math.max(20, mainAreaWidth - 3);
-  }, [mainAreaWidth]);
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 4
+        : mainAreaWidth - 3
+    );
+  }, [terminalWidth, mainAreaWidth]);
 
   const inputViewportHeight = useMemo(() => {
     return Math.max(

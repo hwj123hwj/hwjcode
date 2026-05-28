@@ -185,7 +185,7 @@ export const enUS: Translations = {
     toolNames: {
       write_file: 'Write File',
       read_file: 'Read File',
-      bash: 'Command Line',
+      bash: 'Bash',
       terminal: 'Terminal',
       web_search: 'Web Search',
       grep: 'Text Search',
