@@ -94,6 +94,15 @@ describe('ImageReaderTool', () => {
       expect(tool.validateToolParams(params)).toBeNull();
     });
 
+    it('cleans up quotes and whitespace from absolute_path', () => {
+      const tool = new ImageReaderTool(mockConfig);
+      const params: ImageReaderToolParams = {
+        absolute_path: `  "${path.join(tempRootDir, 'pic.png')}"  `,
+      };
+      expect(tool.validateToolParams(params)).toBeNull();
+      expect(params.absolute_path).toBe(path.join(tempRootDir, 'pic.png'));
+    });
+
     it('rejects relative paths', () => {
       const tool = new ImageReaderTool(mockConfig);
       const params = { absolute_path: 'pic.png' } as ImageReaderToolParams;
