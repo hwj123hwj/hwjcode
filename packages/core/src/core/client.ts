@@ -24,7 +24,7 @@ import { Config } from '../config/config.js';
 import { UserTierId } from '../code_assist/types.js';
 import { AgentContext } from '../telemetry/types.js';
 import { getCoreSystemPrompt, CustomModelInfo } from './prompts.js';
-import { isCustomModel } from '../types/customModel.js';
+import { isCustomModel, generateCustomModelId } from '../types/customModel.js';
 import { SceneType, SceneManager } from './sceneManager.js';
 import { checkNextSpeaker } from '../utils/nextSpeakerChecker.js';
 import { reportError } from '../utils/errorReporting.js';
@@ -301,7 +301,37 @@ export class GeminiClient {
     options?: { disableSystemPrompt?: boolean; emptySystemPrompt?: boolean }
   ): Promise<GeminiChat> {
     const sceneModel = SceneManager.getModelForScene(scene);
-    const modelToUse = model || sceneModel || this.config.getModel();
+    let modelToUse = model || sceneModel || this.config.getModel();
+
+    const currentModel = this.config.getModel();
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+
+    if (isUsingCustomModel) {
+      const isSystemScene = [
+        SceneType.COMPRESSION,
+        SceneType.CONTENT_SUMMARY,
+        SceneType.EDIT_CORRECTION,
+        SceneType.JSON_GENERATION
+      ].includes(scene);
+
+      if (isSystemScene || model === 'gemini-2.5-flash' || model === 'gemini-2.5-flash-lite') {
+        const customModels = this.config.getCustomModels() || [];
+        const geminiFlashModel = customModels.find(m => {
+          if (m.enabled === false) return false;
+          const modelIdLower = (m.modelId || '').toLowerCase();
+          const displayNameLower = (m.displayName || '').toLowerCase();
+          return (modelIdLower.includes('gemini') && modelIdLower.includes('flash')) ||
+                 (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
+        });
+
+        if (geminiFlashModel) {
+          modelToUse = generateCustomModelId(geminiFlashModel);
+        } else {
+          // Fallback to the main custom model for system scenes
+          modelToUse = currentModel;
+        }
+      }
+    }
 
     // 选择合适的内容生成器
     const contentGenerator = await this.getContentGeneratorForModel(modelToUse);

@@ -246,5 +246,83 @@ describe('ImageReaderTool', () => {
 
       expect(result.llmContent).toMatch(/Error describing image.*upstream boom/);
     });
+
+    it('selects custom Gemini Flash model when custom models are used', async () => {
+      const getModelMock = vi.fn().mockReturnValue('custom:openai:gpt-4o@hash');
+      const getCustomModelsMock = vi.fn().mockReturnValue([
+        {
+          displayName: 'My Custom Flash',
+          provider: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKey: 'key',
+          modelId: 'gemini-2.5-flash',
+          enabled: true,
+        },
+        {
+          displayName: 'Some Other Model',
+          provider: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKey: 'key',
+          modelId: 'gpt-4o',
+          enabled: true,
+        }
+      ]);
+
+      const testConfig = {
+        ...mockConfig,
+        getModel: getModelMock,
+        getCustomModels: getCustomModelsMock,
+      } as unknown as Config;
+
+      const tool = new ImageReaderTool(testConfig);
+      const filePath = path.join(tempRootDir, 'pic.png');
+      await fsp.writeFile(filePath, ONE_PIXEL_PNG);
+
+      const result = await tool.execute(
+        { absolute_path: filePath },
+        abortSignal,
+      );
+
+      // Verify that createTemporaryChat was called with the generated custom model ID
+      expect(createTemporaryChatMock).toHaveBeenCalledWith(
+        'image_reader',
+        'custom:openai:gemini-2.5-flash@yomiri',
+        expect.any(Object),
+        expect.any(Object)
+      );
+      expect(result.llmContent).toContain('via custom model');
+    });
+
+    it('returns tool unavailable when custom models are used but no custom Gemini Flash is found', async () => {
+      const getModelMock = vi.fn().mockReturnValue('custom:openai:gpt-4o@hash');
+      const getCustomModelsMock = vi.fn().mockReturnValue([
+        {
+          displayName: 'Some Other Model',
+          provider: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKey: 'key',
+          modelId: 'gpt-4o',
+          enabled: true,
+        }
+      ]);
+
+      const testConfig = {
+        ...mockConfig,
+        getModel: getModelMock,
+        getCustomModels: getCustomModelsMock,
+      } as unknown as Config;
+
+      const tool = new ImageReaderTool(testConfig);
+      const filePath = path.join(tempRootDir, 'pic.png');
+      await fsp.writeFile(filePath, ONE_PIXEL_PNG);
+
+      const result = await tool.execute(
+        { absolute_path: filePath },
+        abortSignal,
+      );
+
+      expect(result.llmContent).toContain('is currently unavailable because you are using custom models');
+      expect(result.returnDisplay).toBe('Tool unavailable: Gemini Flash required');
+    });
   });
 });
