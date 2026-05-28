@@ -187,4 +187,69 @@ describe('<ToolMessage />', () => {
     // We can at least ensure it doesn't have the high emphasis indicator.
     expect(sanitizeOutput(lowEmphasisFrame())).not.toContain('←');
   });
+
+  describe('completed read/search result collapsing', () => {
+    it('hides the result body for a completed read_file (one-line summary)', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          description="src/app.ts"
+          resultDisplay="(42 lines)"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      // Title stays visible...
+      expect(output).toContain('ReadFile');
+      expect(output).toContain('src/app.ts');
+      // ...but the result body is collapsed away.
+      expect(output).not.toContain('(42 lines)');
+      expect(output).not.toContain('└ (42 lines)');
+    });
+
+    it('still shows the body while a read_file is executing', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          resultDisplay="partial body"
+          status={ToolCallStatus.Executing}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('partial body');
+    });
+
+    it('keeps the error message visible for a failed read_file', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          resultDisplay="File not found."
+          status={ToolCallStatus.Error}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('File not found.');
+    });
+
+    it('does not collapse a non-read tool result', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="run_shell_command"
+          name="Shell"
+          resultDisplay="build output here"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('build output here');
+    });
+  });
 });

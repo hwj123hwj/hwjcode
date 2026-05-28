@@ -159,6 +159,7 @@ vi.mock('deepv-code-core', async (importOriginal) => {
         getCloudModelInfo: vi.fn(() => undefined),
         getCloudModels: vi.fn(() => []),
         getAgentStyle: vi.fn(() => 'default'),
+        getThinkingConfig: vi.fn(() => ({ mode: 'auto', effort: 'auto' })),
         getGeminiMdFilePaths: vi.fn(() => []),
         getHealthyUseEnabled: vi.fn(() => opts.healthyUse ?? false),
         getIdeClient: vi.fn(() => undefined),

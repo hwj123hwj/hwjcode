@@ -115,4 +115,44 @@ describe('feishuCommand', () => {
       allowlist: [],
     }));
   });
+
+  it('should handle stop correctly and reset state', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      ownerOpenId: 'ou_owner',
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const startCmd = feishuCommand.subCommands?.find(c => c.name === 'start');
+    await startCmd?.action!(context, '');
+
+    const stopCmd = feishuCommand.subCommands?.find(c => c.name === 'stop');
+    const stopResult = await stopCmd?.action!(context, '');
+    expect(stopResult?.type).toBe('message');
+    expect(stopResult?.content).toMatch(/stopped|停止|🛑/i);
+  });
+
+  it('should emit FeishuBotProcessingEnd when stopping feishu bot', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      ownerOpenId: 'ou_owner',
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const startCmd = feishuCommand.subCommands?.find(c => c.name === 'start');
+    await startCmd?.action!(context, '');
+
+    const { appEvents, AppEvent } = await import('../../utils/events.js');
+    const endSpy = vi.fn();
+    appEvents.on(AppEvent.FeishuBotProcessingEnd, endSpy);
+
+    const stopCmd = feishuCommand.subCommands?.find(c => c.name === 'stop');
+    await stopCmd?.action!(context, '');
+
+    appEvents.off(AppEvent.FeishuBotProcessingEnd, endSpy);
+  });
 });

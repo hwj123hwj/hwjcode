@@ -39,6 +39,7 @@ import { RemoteSession } from './remoteSession.js';
 import { remoteLogger } from './remoteLogger.js';
 import { CloudClient } from './cloudClient.js';
 import { getAvailableModels } from '../ui/commands/modelCommand.js';
+import { detectImageExtension } from '../services/feishu/image-type.js';
 
 /**
  * 从指定端口开始查找可用端口
@@ -525,15 +526,29 @@ export class RemoteServer {
     const clipboardDir = path.resolve(process.cwd(), '.deepvcode', 'clipboard');
     await fs.mkdir(clipboardDir, { recursive: true });
 
-    const safeFileName = (message.payload.fileName || 'feishu-image').replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filePath = path.resolve(clipboardDir, safeFileName);
-
     const response = await fetch(message.payload.imageUrl);
     if (!response.ok) {
       throw new Error(`下载飞书图片失败: ${response.status} ${response.statusText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // 🎯 按真实类型确定扩展名（字节头优先，Content-Type/原文件名兜底），
+    // 避免落盘扩展名与实际格式不符导致下游 media_type 推断错误、触发供应商 400。
+    const ext = detectImageExtension(
+      bytes,
+      response.headers.get('content-type') || message.payload.mimeType,
+    );
+
+    // 取原文件名的基名（去掉原扩展名），无名时回退 feishu-image，再拼上探测出的真实扩展名。
+    const rawBase = (message.payload.fileName || 'feishu-image').replace(
+      /\.[a-zA-Z0-9]+$/,
+      '',
+    );
+    const safeBase = (rawBase || 'feishu-image').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.resolve(clipboardDir, `${safeBase}${ext}`);
+
     await fs.writeFile(filePath, Buffer.from(arrayBuffer));
     return filePath;
   }
