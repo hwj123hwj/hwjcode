@@ -133,6 +133,7 @@ export * from './tools/local-time.js';
 export * from './tools/goal-achieved.js';
 export * from './tools/mcp-client.js';
 export * from './tools/mcp-tool.js';
+export * from './tools/todo-store.js';
 
 // PPT tools
 export * from './tools/ppt/index.js';

@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from '../config/config.js';
 import { TodoWriteTool, type TodoWriteParams } from './todo-write.js';
+import { todoStore } from './todo-store.js';
 
 describe('TodoWriteTool', () => {
   it('describes the number of todo items', () => {
@@ -44,5 +45,35 @@ describe('TodoWriteTool', () => {
     expect(
       tool.getDescription({ todos: undefined } as unknown as TodoWriteParams),
     ).toBe('Update todo list with 0 item');
+  });
+
+  it('publishes the todo list to the shared store on execute', async () => {
+    const tool = new TodoWriteTool({} as Config);
+    todoStore.clear();
+
+    await tool.execute(
+      {
+        todos: [
+          {
+            id: 'task_1',
+            content: 'Write regression test',
+            status: 'in_progress',
+            priority: 'high',
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+
+    expect(todoStore.getTodos()).toEqual([
+      {
+        id: 'task_1',
+        content: 'Write regression test',
+        status: 'in_progress',
+        priority: 'high',
+      },
+    ]);
+
+    todoStore.clear();
   });
 });
