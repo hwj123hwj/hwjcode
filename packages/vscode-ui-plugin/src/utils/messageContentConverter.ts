@@ -5,7 +5,7 @@
 
 import { Part, PartListUnion } from '@google/genai';
 import { processFileToPartsList, processFolderToPartsList, FileContentItem } from './fileContentProcessor.js';
-import { processImageToPart, ImageContent } from './imageProcessor.js';
+import { processImageToPart, ImageContent, ensureImageFilePath } from './imageProcessor.js';
 import { MessageContent, MessageContentPart } from '../types/messages.js';
 
 export interface ConversionResult {
@@ -40,6 +40,20 @@ export async function convertMessageContentToParts(
     console.log(`  [${index}] type: ${item.type}`, item.value);
   });
 
+  // 🎯 预处理：为所有图片引用确保有可访问的文件路径（统一落盘到 .deepvcode/clipboard/）
+  for (const item of content) {
+    if (item.type === 'image_reference') {
+      try {
+        const imageContent = item.value as ImageContent;
+        const projectRoot = workspaceRoot || process.cwd();
+        ensureImageFilePath(imageContent, projectRoot);
+        console.log(`🔍 [MessageConverter] 图片已落盘: ${imageContent.filePath}`);
+      } catch (err) {
+        console.warn(`⚠️ [MessageConverter] 无法保存图片: ${(item.value as ImageContent).fileName}`, err);
+      }
+    }
+  }
+
   // 🎯 第一步：生成完整的拼装文本（用户意图的完整表达）
   const assembledText = content.map(item => {
     switch (item.type) {
@@ -50,7 +64,11 @@ export async function convertMessageContentToParts(
       case 'folder_reference':  // 🎯 文件夹引用
         return `@[${item.value.folderName}]`;
       case 'image_reference':
-        return `[IMAGE:${item.value.fileName}]`;
+        // 🎯 包含本地文件路径，让非多模态模型和工具也能访问图片
+        const imgPath = (item.value as ImageContent).filePath || '';
+        return imgPath
+          ? `[IMAGE:${item.value.fileName} (${imgPath})]`
+          : `[IMAGE:${item.value.fileName}]`;
       case 'code_reference':  // 🎯 代码引用
         return `@[${item.value.fileName} (${item.value.startLine}-${item.value.endLine})]`;
       case 'text_file_content':  // ✨ 新增
@@ -180,8 +198,12 @@ export function messageContentToString(content: any): string {
         return part.value;
       case 'file_reference':
         return `@[${part.value.fileName}]`;
-      case 'image_reference':
-        return `[IMAGE:${part.value.fileName}]`;
+      case 'image_reference': {
+        const imgPath = (part.value as ImageContent).filePath || '';
+        return imgPath
+          ? `[IMAGE:${part.value.fileName} (${imgPath})]`
+          : `[IMAGE:${part.value.fileName}]`;
+      }
       case 'code_reference':  // 🎯 代码引用
         return `@[${part.value.fileName} (${part.value.startLine}-${part.value.endLine})]`;
       case 'text_file_content':  // ✨ 新增

@@ -1937,32 +1937,70 @@ async function handleStart(context?: CommandContext): Promise<string> {
       // 确保 chat 已初始化
       await geminiClient.waitForChatInitialized();
 
-      // Agent 循环：和 TUI 共享同一个会话，走 geminiClient.sendMessageStream
-      let currentMessage: PartListUnion = messageText;
+      // 🎯 下载飞书消息中的图片到项目 .deepvcode/clipboard/ 目录
+      // 图片路径以纯文本绝对路径形式拼接到消息中，由 read_many_files 工具自动接管读取
+      let messageTextForAI = messageText;
+      let currentMessage: PartListUnion = messageTextForAI;
 
-      // 🎨 完美多模态对齐：检测输入消息中是否带有由飞书网关自动下载的本地图片标记 ![image](path)
-      // 如果存在，我们将该图片读取为 Base64 并构造成 Gemini 兼容的多模态 `inlineData` Part 共同投喂！
-      const imageMatch = messageText.match(/!\[image\]\(([^)]+)\)/);
-      if (imageMatch) {
-        const localImagePath = imageMatch[1];
-        try {
-          if (fs.existsSync(localImagePath)) {
-            const ext = path.extname(localImagePath).toLowerCase();
-            const mimeType = ext === '.png' ? 'image/png' :
-                             ext === '.gif' ? 'image/gif' :
-                             ext === '.webp' ? 'image/webp' : 'image/jpeg';
-            const base64Data = fs.readFileSync(localImagePath).toString('base64');
-            const strippedText = messageText.replace(/!\[image\]\([^)]+\)/g, '').trim();
+      if (msg.pendingImages && msg.pendingImages.length > 0) {
+        const projectRoot = config?.getProjectRoot?.() || process.cwd();
+        const fs = await import('node:fs');
+        const pathModule = await import('node:path');
+        const clipboardDir = pathModule.join(projectRoot, '.deepvcode', 'clipboard');
+        fs.mkdirSync(clipboardDir, { recursive: true });
 
-            currentMessage = [
-              { inlineData: { mimeType, data: base64Data } },
-              { text: strippedText || '请帮我阅读分析这张图片。' }
-            ];
-            dlog(`[Feishu] Multimodal image part successfully constructed from: ${localImagePath}`);
+        const imagePaths: string[] = [];
+        for (const img of msg.pendingImages) {
+          const localPath = await gateway.downloadImageToDir(msg.messageId, img.imageKey, clipboardDir);
+          if (localPath) {
+            imagePaths.push(localPath);
+            dlog(`[Feishu] Image downloaded to clipboard: ${localPath}`);
+          } else {
+            dwarn(`[Feishu] Failed to download image key: ${img.imageKey}`);
+            imagePaths.push(`[图片下载失败: ${img.imageKey}]`);
           }
-        } catch (e: any) {
-          dwarn(`[Feishu] Failed to convert local image to inlineData: ${e?.message || e}`);
         }
+
+        // 重建消息文本：把占位符替换为实际绝对路径
+        let reconstructedText = msg.text;
+        for (let i = 0; i < msg.pendingImages.length; i++) {
+          reconstructedText = reconstructedText.replace(msg.pendingImages[i].placeholder, imagePaths[i]);
+        }
+        msg.text = reconstructedText;
+        messageTextForAI = reconstructedText.trim();
+        dlog(`[Feishu] Reconstructed message with image paths: "${messageTextForAI}"`);
+
+        // 🎯 完美多模态对齐：既保留文本绝对路径，又在消息中附加实际图片的 base64 作为 inlineData Part
+        // 这可以让支持多模态的模型直接读取图片提高效率，同时让非多模态模型依然能利用路径通过工具访问图片，实现自适应！
+        const messageParts: Part[] = [{ text: messageTextForAI }];
+        for (const localPath of imagePaths) {
+          if (localPath && !localPath.startsWith('[图片下载失败') && fs.existsSync(localPath)) {
+            try {
+              const ext = pathModule.extname(localPath).toLowerCase();
+              const mimeType = ext === '.png' ? 'image/png' :
+                               ext === '.gif' ? 'image/gif' :
+                               ext === '.webp' ? 'image/webp' : 'image/jpeg';
+              const base64Data = fs.readFileSync(localPath).toString('base64');
+              messageParts.push({
+                inlineData: {
+                  mimeType,
+                  data: base64Data,
+                }
+              });
+              dlog(`[Feishu] Multimodal image part successfully appended for AI from: ${localPath}`);
+            } catch (e: any) {
+              dwarn(`[Feishu] Failed to convert local image to inlineData for AI: ${e?.message || e}`);
+            }
+          }
+        }
+
+        if (messageParts.length > 1) {
+          currentMessage = messageParts;
+        } else {
+          currentMessage = messageTextForAI;
+        }
+      } else {
+        currentMessage = messageTextForAI;
       }
 
       const MAX_TURNS = 100;
