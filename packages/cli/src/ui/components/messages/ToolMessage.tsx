@@ -188,7 +188,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
     renderOutputAsMarkdown = false;
   }
 
-  const childWidth = terminalWidth - 3; // account for padding.
+  const childWidth = terminalWidth - 2; // account for right padding and safety.
 
   // Special handling for Sequential thinking - convert to mcp_thinking_display
   const normalizedToolName = name?.toLowerCase().replace(/[_-]/g, '');
@@ -227,7 +227,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
     }
   }
   return (
-    <Box paddingX={1} paddingY={0} flexDirection="column" width={terminalWidth}>
+    <Box paddingLeft={0} paddingRight={1} paddingY={0} flexDirection="column" width={terminalWidth}>
       <Box minHeight={1} width="100%">
         <ToolStatusIndicator status={status} />
         <ToolInfo
@@ -235,7 +235,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
           status={status}
           description={description}
           emphasis={emphasis}
-          terminalWidth={terminalWidth - 2} // 减去 paddingX={1} 的两列
+          terminalWidth={terminalWidth - 1} // 减去 paddingRight={1} 的一列
         />
         {emphasis === 'high' ? <TrailingIndicator /> : null}
       </Box>
