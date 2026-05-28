@@ -415,7 +415,7 @@ const TOOL_DISPLAY_NAME_MAP: Record<string, string> = {
   'replace': 'Edit',
   'multiedit': 'MultiEdit',
   'delete_file': 'DeleteFile',
-  'run_shell_command': 'Shell',
+  'run_shell_command': 'Bash',
   'search_file_content': 'SearchText',
   'glob': 'FindFiles',
   'list_directory': 'ReadFolder',

@@ -61,6 +61,8 @@ import { CustomModelWizard } from './components/CustomModelWizard.js';
 import { DebateWizard } from './components/DebateWizard.js';
 import { GoalWizard } from './components/GoalWizard.js';
 import { DebateIndicator } from './components/DebateIndicator.js';
+import { TodoPanel } from './components/TodoPanel.js';
+import { useTodos } from './hooks/useTodos.js';
 import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
 import { LoginDialog } from './components/LoginDialog.js';
@@ -79,7 +81,7 @@ import { ConsolePatcher } from './utils/ConsolePatcher.js';
 import { registerCleanup } from '../utils/cleanup.js';
 import { DetailedMessagesDisplay } from './components/DetailedMessagesDisplay.js';
 import { TokenUsageDisplay, type TokenUsageInfo } from './components/TokenUsageDisplay.js';
-import { tokenUsageEventManager, IDEConnectionStatus, type BackgroundTask, getBackgroundTaskManager } from 'deepv-code-core';
+import { tokenUsageEventManager, IDEConnectionStatus, type BackgroundTask, getBackgroundTaskManager, todoStore } from 'deepv-code-core';
 import { HistoryItemDisplay } from './components/HistoryItemDisplay.js';
 import { ImagePollingSpinner } from './components/ImagePollingSpinner.js';
 import { StreamRecoverySpinner } from './components/StreamRecoverySpinner.js';
@@ -329,6 +331,41 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   // 飞书服务器端口状态
   const [feishuServerPort, setFeishuServerPort] = useState<number | undefined>(undefined);
+
+  // 飞书消息处理状态
+  const [isFeishuProcessing, setIsFeishuProcessing] = useState(false);
+  const [isFeishuBotRunning, setIsFeishuBotRunning] = useState(false);
+
+  // 监听飞书消息处理与Bot运行状态事件
+  useEffect(() => {
+    const handleFeishuProcessingStart = () => {
+      setIsFeishuProcessing(true);
+    };
+
+    const handleFeishuProcessingEnd = () => {
+      setIsFeishuProcessing(false);
+    };
+
+    const handleFeishuBotStarted = () => {
+      setIsFeishuBotRunning(true);
+    };
+
+    const handleFeishuBotStopped = () => {
+      setIsFeishuBotRunning(false);
+    };
+
+    appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+    appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+    appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+    appEvents.on(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+
+    return () => {
+      appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+      appEvents.off(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+      appEvents.off(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+      appEvents.off(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+    };
+  }, []);
 
   // 监听飞书服务器事件
   useEffect(() => {
@@ -1199,16 +1236,43 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const isInitialMount = useRef(true);
   const completionSummaryCounterRef = useRef(0);
 
-  const widthFraction = 0.9;
-  const inputWidth = Math.max(
-    20,
-    Math.floor(terminalWidth * widthFraction) - 3,
-  );
-  const inputViewportHeight = Math.max(
-    1,
-    Math.min(15, Math.floor(inputWidth / 10)),
-  );
-  const suggestionsWidth = Math.max(60, Math.floor(terminalWidth * 0.8));
+  // 智能主区域和输入框宽度计算：
+  // 为了让输入框、边线和历史消息在宽终端下能够绝对顶头、完美撑满屏幕：
+  // - 宽终端（≥ 80）：
+  //   主区域直接占满全宽并仅在左右预留各 1 字符的边距（即 terminalWidth - 2）。
+  //   输入框内容分配至最宽限度：terminalWidth - 4（扣除 2 字符 Box Padding 和 2 字符前缀符号）。
+  //   这样在 InputPrompt 中，`inputWidth + 2` 的边线字符长度恰好为 `terminalWidth - 2`。
+  //   加上 1 字符左 Padding 和 1 字符右 Padding，边线和内容将完美顶格在 column 1 和 column terminalWidth - 1 上，
+  //   与右上角的 "YOLO mode" 提示符在视觉上达到完美的顶头对齐！
+  // - 窄终端（< 80）：使用 95% 比例。
+  const mainAreaWidth = useMemo(() => {
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 2
+        : Math.floor(terminalWidth * 0.95)
+    );
+  }, [terminalWidth]);
+
+  const inputWidth = useMemo(() => {
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 4
+        : mainAreaWidth - 3
+    );
+  }, [terminalWidth, mainAreaWidth]);
+
+  const inputViewportHeight = useMemo(() => {
+    return Math.max(
+      1,
+      Math.min(15, Math.floor(inputWidth / 10)),
+    );
+  }, [inputWidth]);
+
+  const suggestionsWidth = useMemo(() => {
+    return Math.max(60, Math.floor(mainAreaWidth * 0.9));
+  }, [mainAreaWidth]);
 
   // Utility callbacks
   const isValidPath = useCallback((filePath: string): boolean => {
@@ -1320,11 +1384,22 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     submitQueryForGoalRef.current = submitQuery;
   }, [submitQuery]);
 
+  // 当进入响应状态（工作中时），重置 token 使用状态，避免在刚开始时显示旧的数据
+  useEffect(() => {
+    if (streamingState === StreamingState.Responding) {
+      setLastTokenUsage(null);
+    }
+  }, [streamingState]);
+
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
   const currentTitleIcon = useAnimatedTitleIcon(streamingState);
   useEffect(() => {
-    updateWindowTitleIcon(currentTitleIcon);
-  }, [currentTitleIcon]);
+    if (!isFeishuBotRunning) {
+      updateWindowTitleIcon(currentTitleIcon);
+    } else {
+      process.stdout.write(`\x1b]2;Feishu Gateway Mode |  DeepV Code\x07`);
+    }
+  }, [currentTitleIcon, isFeishuBotRunning]);
 
   // 🎯 监听后台任务完成事件
   useBackgroundTaskNotifications({
@@ -1468,6 +1543,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         setLogoShows(false);
       }
       setCumulativeCredits(0);
+      setLastTokenUsage(null);
 
       // 如果需要暂停队列直到响应开始
       if (pauseQueueUntilResponse) {
@@ -1731,6 +1807,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   const { elapsedTime, currentLoadingPhrase, estimatedInputTokens: loadingEstimatedTokens } =
     useLoadingIndicator(streamingState, estimatedInputTokens);
+
+  // 🎯 当前待办列表（响应式）：用于在输入框上方原地渲染固定的任务面板，
+  //    避免 todo_write 每次更新都在滚动区重复出现一整块列表。
+  const todos = useTodos();
 
   // When transitioning from Responding to Idle, capture the elapsed time for printing
   const lastElapsedTimeBeforeIdleRef = useRef<number>(0);
@@ -2119,11 +2199,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     fetchUserMessages();
   }, [history, logger]);
 
-  const shouldRenderInputPrompt = !refineResult && !initError;
+  const shouldRenderInputPrompt = !refineResult && !initError && !isFeishuProcessing;
 
   const handleClearScreen = useCallback(() => {
     clearItems();
     clearConsoleMessagesState();
+    todoStore.clear(); // 同步清空固定任务面板
     refreshStatic(true);
   }, [clearItems, clearConsoleMessagesState, refreshStatic]);
 
@@ -2165,8 +2246,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     [terminalHeight, footerHeight],
   );
 
-  // Linus fix: 移动变量定义到useMemo之前，避免使用未定义变量的错误
-  const mainAreaWidth = Math.floor(terminalWidth * 0.9);
+  // mainAreaWidth 已在组件顶层定义为基于终端宽度的智能响应式 useMemo，此处无需重复定义。
 
   // 🔧 优化：根据终端大小智能调整最大高度
   // - 小窗口（≤30 行）：使用 60% 可用高度，避免撑破布局
@@ -2409,7 +2489,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   return (
     <StreamingContext.Provider value={streamingState}>
-      <Box flexDirection="column" width="90%" ref={rootUiRef}>
+      <Box flexDirection="column" width="100%" ref={rootUiRef}>
         {/* Move UpdateNotification outside Static so it can re-render when updateMessage changes */}
         {updateMessage ? <UpdateNotification message={updateMessage} /> : null}
 
@@ -2702,6 +2782,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                     : currentLoadingPhrase
                 }
                 elapsedTime={elapsedTime}
+                lastTokenUsage={lastTokenUsage}
               />
 
 
@@ -2892,6 +2973,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 </Box>
               ) : null}
 
+              {/* 📋 固定任务面板：常驻输入框上方，随 todo_write 原地更新，
+                   空列表或全部完成时自动隐藏（见 TodoPanel 内部逻辑）。 */}
+              <TodoPanel todos={todos} />
+
               {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
                    相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
                    React 18 批处理或流式响应覆盖，任何时候都能看清当前状态。 */}
@@ -2921,6 +3006,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}
                 />
+              ) : null}
+
+              {!shouldRenderInputPrompt && isFeishuProcessing ? (
+                <Box borderStyle="round" borderColor={Colors.AccentYellow} paddingX={1} marginBottom={1}>
+                  <Text color={Colors.AccentYellow} bold>
+                    {t('feishu.tui.agent_working')}
+                  </Text>
+                </Box>
               ) : null}
 
               {/* 🎯 后台任务提示 - 显示在输入框下方 */}
@@ -2989,6 +3082,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
             ideConnectionStatus={ideConnectionStatus}
             config={config}
             terminalWidth={terminalWidth}
+            isFeishuProcessing={isFeishuProcessing}
           />
         </Box>
       </Box>
