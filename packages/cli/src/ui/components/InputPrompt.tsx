@@ -1066,7 +1066,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     <>
       {/* Top border line */}
       <Box paddingX={1} marginTop={1}>
-        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth - 2, 20))}</Text>
+        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth + 2, 20))}</Text>
       </Box>
       {/* Input content */}
       <Box paddingX={1} minHeight={dynamicInputHeight}>
@@ -1090,7 +1090,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       </Box>
       {/* Bottom border line */}
       <Box paddingX={1}>
-        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth - 2, 20))}</Text>
+        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth + 2, 20))}</Text>
       </Box>
 
       {/* 长文本粘贴提示 */}

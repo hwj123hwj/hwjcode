@@ -44,6 +44,12 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
   };
 });
 
+// Mock loadProcessedMessages and saveProcessedMessages to isolate tests from real disk
+vi.spyOn(FeishuGateway.prototype as any, 'loadProcessedMessages').mockImplementation(function(this: any) {
+  this.processedMessages = new Set();
+});
+vi.spyOn(FeishuGateway.prototype as any, 'saveProcessedMessages').mockImplementation(() => {});
+
 describe('FeishuGateway - Message Parsing', () => {
   let gateway: FeishuGateway;
   let messageCallback: any;
@@ -572,7 +578,8 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     expect(select.options[2].value).toBe('__other__');
 
     const submit = form.elements.find((e: any) => e.tag === 'button');
-    expect(submit.form_action.type).toBe('submit');
+    expect(submit.form_action_type).toBe('submit');
+    expect(submit.name).toBe('submit_btn');
 
     // 让超时触发，避免悬挂
     const result = await promise;
@@ -643,6 +650,90 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
 
     const result = await promise;
     expect(result.answers!['Your choice?']).toBe('My custom answer');
+  });
+
+  it('builds a card with tag:multi_select_static when multiSelect is true and parses multiple choices', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_multi' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_multi',
+      [
+        {
+          question: 'Select multiple technologies',
+          options: [{ label: 'Node.js' }, { label: 'Python' }, { label: 'Go' }],
+          multiSelect: true,
+        },
+      ],
+      5000,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    // Verify card generation
+    const [url, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init?.body as string);
+    const card = JSON.parse(body.content);
+    const form = card.body.elements[0];
+    const multiSelectStatic = form.elements.find((e: any) => e.tag === 'multi_select_static');
+
+    expect(multiSelectStatic).toBeDefined();
+    expect(multiSelectStatic.options).toHaveLength(4); // 3 options + 1 "other"
+
+    // Simulate submission with multiple selections: Node.js (opt_0) and Go (opt_2) + custom filling (other)
+    await cardActionHandler({
+      event: {
+        context: { open_message_id: 'om_form_multi' },
+        action: {
+          form_value: { q0: ['opt_0', 'opt_2', '__other__'], q0_other: 'Rust' },
+        },
+      },
+    });
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(result.answers!['Select multiple technologies']).toBe('Node.js, Go, Rust');
+  });
+
+  it('resolves answers from unwrapped trigger payload (no event wrapper)', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_unwrapped' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_unwrapped',
+      [
+        {
+          question: 'Pick a framework',
+          options: [{ label: 'React' }, { label: 'Vue' }],
+        },
+      ],
+      5000,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await cardActionHandler({
+      schema: '2.0',
+      operator: { open_id: 'ou_user_1' },
+      action: {
+        tag: 'button',
+        form_value: { q0: 'opt_1', q0_other: '' },
+      },
+      host: 'im_message',
+      context: {
+        open_message_id: 'om_form_unwrapped',
+        open_chat_id: 'oc_chat_unwrapped',
+      },
+    });
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    expect(result.answers!['Pick a framework']).toBe('Vue');
   });
 
   it('returns ok:false when card send fails (caller should fallback to text)', async () => {

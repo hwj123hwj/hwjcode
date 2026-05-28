@@ -62,10 +62,10 @@ export interface CardActionData {
   messageId: string;
   /**
    * 表单提交时（form_action.type = 'submit'）携带的所有具名组件的值。
-   * 键为组件的 `name`，值为下拉框选中的 value（string）或输入框文本（string）。
+   * 键为组件的 `name`，值为单选选中的 value（string）、复选选中的 value 数组（string[]）或输入框文本（string）。
    * 非表单（普通按钮点击）时为 undefined。
    */
-  formValue?: Record<string, string>;
+  formValue?: Record<string, string | string[]>;
 }
 
 export type OnCardActionCallback = (data: CardActionData) => void;
@@ -752,6 +752,8 @@ export class FeishuGateway {
             || '';
           const messageId = data?.event?.context?.open_message_id
             || data?.event?.message_id
+            || data?.context?.open_message_id
+            || data?.message_id
             || '';
           const rawValue = action?.value ?? action?.option ?? '';
           // action.value 是对象 { choice: "xxx" }，需要提取实际值
@@ -761,14 +763,17 @@ export class FeishuGateway {
           const strValue = String(choiceValue ?? '');
 
           // 🎯 表单提交（form_action.type='submit'）：飞书把所有具名组件的值放在
-          // action.form_value 里，键为组件 name，值为下拉选中的 value 或输入框文本。
-          let formValue: Record<string, string> | undefined;
+          // action.form_value 里，键为组件 name，值为下拉选中的 value（或复选组件选中值数组）或输入框文本。
+          let formValue: Record<string, string | string[]> | undefined;
           const rawFormValue = action?.form_value;
           if (rawFormValue && typeof rawFormValue === 'object') {
             formValue = {};
             for (const [k, v] of Object.entries(rawFormValue)) {
-              // 下拉单选回传 string；个别组件可能回传数组，取首项兜底
-              formValue[k] = Array.isArray(v) ? String(v[0] ?? '') : String(v ?? '');
+              if (Array.isArray(v)) {
+                formValue[k] = v.map(item => String(item ?? ''));
+              } else {
+                formValue[k] = String(v ?? '');
+              }
             }
           }
 
@@ -1950,13 +1955,23 @@ export class FeishuGateway {
         value: OTHER_VALUE,
       });
 
-      formElements.push({
-        tag: 'select_static',
-        name: `q${idx}`,
-        placeholder: { tag: 'plain_text', content: '请选择一个选项' },
-        options,
-        width: 'fill',
-      });
+      if (q.multiSelect) {
+        formElements.push({
+          tag: 'multi_select_static',
+          name: `q${idx}`,
+          placeholder: { tag: 'plain_text', content: '请选择选项（可多选）' },
+          options,
+          width: 'fill',
+        });
+      } else {
+        formElements.push({
+          tag: 'select_static',
+          name: `q${idx}`,
+          placeholder: { tag: 'plain_text', content: '请选择一个选项' },
+          options,
+          width: 'fill',
+        });
+      }
 
       // 自定义填空（选择"其他"时填写；其它情况留空即可）
       formElements.push({
@@ -1972,11 +1987,8 @@ export class FeishuGateway {
       text: { tag: 'plain_text', content: '提交' },
       type: 'primary',
       width: 'default',
-      form_action: {
-        tag: 'form_action',
-        type: 'submit',
-        value: { action: 'submit_answers' },
-      },
+      name: 'submit_btn',
+      form_action_type: 'submit',
     });
 
     const card: Record<string, any> = {
@@ -2018,19 +2030,51 @@ export class FeishuGateway {
     const formValue = actionData.formValue || {};
     const answers: FeishuQuestionAnswers = {};
     questions.forEach((q, idx) => {
-      const selected = formValue[`q${idx}`] || '';
-      const otherText = (formValue[`q${idx}_other`] || '').trim();
+      const selectedRaw = formValue[`q${idx}`];
+      const otherRaw = formValue[`q${idx}_other`] || '';
+      const otherText = (typeof otherRaw === 'string' ? otherRaw : '').trim();
 
       let answer = '';
-      if (selected === OTHER_VALUE) {
-        answer = otherText; // 用户选了"其他"，取填空内容
-      } else if (selected.startsWith('opt_')) {
-        const oi = parseInt(selected.slice(4), 10);
-        answer = q.options[oi]?.label ?? '';
-      }
-      // 兜底：没选下拉但填了空，也采纳填空内容
-      if (!answer && otherText) {
-        answer = otherText;
+      if (q.multiSelect) {
+        const selectedArr = Array.isArray(selectedRaw)
+          ? selectedRaw
+          : selectedRaw
+          ? [selectedRaw]
+          : [];
+
+        const subAnswers: string[] = [];
+        selectedArr.forEach(sel => {
+          if (sel === OTHER_VALUE) {
+            if (otherText) {
+              subAnswers.push(otherText);
+            }
+          } else if (sel.startsWith('opt_')) {
+            const oi = parseInt(sel.slice(4), 10);
+            const label = q.options[oi]?.label;
+            if (label) {
+              subAnswers.push(label);
+            }
+          }
+        });
+
+        // 兜底：如果没在复选框选任何东西，但在输入框填了字，作为填空答案
+        if (subAnswers.length === 0 && otherText) {
+          subAnswers.push(otherText);
+        }
+
+        answer = subAnswers.join(', ');
+      } else {
+        const selected = typeof selectedRaw === 'string' ? selectedRaw : (selectedRaw?.[0] ?? '');
+        if (selected === OTHER_VALUE) {
+          answer = otherText; // 用户选了"其他"，取填空内容
+        } else if (selected.startsWith('opt_')) {
+          const oi = parseInt(selected.slice(4), 10);
+          answer = q.options[oi]?.label ?? '';
+        }
+        // 兜底：没选下拉但填了空，也采纳填空内容
+        if (!answer && otherText) {
+          answer = otherText;
+        }
       }
       answers[q.question] = answer;
     });
