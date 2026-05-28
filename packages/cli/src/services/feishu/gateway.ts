@@ -18,6 +18,9 @@
  * 收到消息 → 调 onMessage 回调 → 发回复走 REST API
  */
 
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import { dlog, dwarn, derror } from './logger.js';
 import { optimizeMarkdownStyle } from './markdown-style.js';
 
@@ -34,6 +37,8 @@ export interface FeishuMessage {
   senderOpenId: string;
   mentions: Array<{ key: string; openId: string }>;
   messageType: string;
+  /** 待下载的图片信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/clipboard/） */
+  pendingImages?: Array<{ imageKey: string; placeholder: string }>;
 }
 
 export type OnMessageCallback = (msg: FeishuMessage) => Promise<string | null>;
@@ -294,9 +299,51 @@ export class FeishuGateway {
   private _onReady: (() => void) | null = null;
   private _onDisconnect: ((error?: Error) => void) | null = null;
 
-  /** 消息去重：记录已处理的消息 ID（LRU 缓存，最多保留 1000 条） */
+  /** 消息去重：记录已处理的消息 ID（LRU 缓存，最多保留 500 条） */
   private processedMessages: Set<string> = new Set();
-  private readonly maxProcessedMessages = 1000;
+  private readonly maxProcessedMessages = 500;
+
+  /** 获取去重文件的绝对路径 */
+  private getProcessedMessagesFilePath(): string {
+    const homeDir = os.homedir();
+    const geminiDir = path.join(homeDir, '.deepv');
+    return path.join(geminiDir, 'feishu-processed-messages.json');
+  }
+
+  /** 从文件加载已处理的消息 ID */
+  private loadProcessedMessages(): void {
+    try {
+      const filePath = this.getProcessedMessagesFilePath();
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const ids = JSON.parse(content);
+        if (Array.isArray(ids)) {
+          this.processedMessages = new Set(ids.filter(id => typeof id === 'string' && id.startsWith('om_')));
+          dlog(`[Feishu] Loaded ${this.processedMessages.size} processed message IDs from persistent cache.`);
+          return;
+        }
+      }
+    } catch (e: any) {
+      dwarn(`[Feishu] Failed to load processed messages: ${e?.message || e}`);
+    }
+    this.processedMessages = new Set();
+  }
+
+  /** 保存已处理的消息 ID 到文件 */
+  private saveProcessedMessages(): void {
+    try {
+      const filePath = this.getProcessedMessagesFilePath();
+      const dirPath = path.dirname(filePath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      const ids = Array.from(this.processedMessages);
+      fs.writeFileSync(filePath, JSON.stringify(ids, null, 2), 'utf8');
+      dlog(`[Feishu] Saved ${ids.length} processed message IDs to persistent cache.`);
+    } catch (e: any) {
+      dwarn(`[Feishu] Failed to save processed messages: ${e?.message || e}`);
+    }
+  }
 
   /** 内容去重：key 为 "chatId:text"，value 为首次处理时间戳（5 秒窗口内相同内容视为重复） */
   private recentContents: Map<string, number> = new Map();
@@ -349,6 +396,7 @@ export class FeishuGateway {
     this.appId = appId;
     this.appSecret = appSecret;
     this.domain = domain;
+    this.loadProcessedMessages();
   }
 
   private get apiBaseUrl(): string {
@@ -408,6 +456,38 @@ export class FeishuGateway {
   }
 
   /**
+   * 下载飞书 IM 消息中的图片资源到指定目录。
+   *
+   * @param messageId 飞书消息 ID
+   * @param imageKey  飞书图片资源 key
+   * @param targetDir 目标目录（会自动创建）
+   * @returns 本地绝对路径，失败返回 null
+   */
+  async downloadImageToDir(messageId: string, imageKey: string, targetDir: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return null;
+
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/resources/${imageKey}?type=image`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+
+      const buffer = await res.arrayBuffer();
+
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.mkdirSync(targetDir, { recursive: true });
+      const localPath = path.join(targetDir, `feishu-image-${imageKey}.png`);
+      fs.writeFileSync(localPath, Buffer.from(buffer));
+      return localPath;
+    } catch (e: any) {
+      dlog(`[Feishu] downloadImageToDir failed: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /**
    * 连接飞书 WS 事件订阅（通过 SDK WSClient）
    *
    * SDK 自动：
@@ -443,6 +523,8 @@ export class FeishuGateway {
         // 解析文本内容，确保始终返回字符串
         let text = '';
         const msgType = message.message_type || 'text';
+        // 收集待下载的图片元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
+        const pendingImages: Array<{ imageKey: string; placeholder: string }> = [];
 
         if (msgType === 'text') {
           try {
@@ -456,14 +538,8 @@ export class FeishuGateway {
             const content = JSON.parse(message.content || '{}');
             const imageKey = content.image_key;
             if (imageKey) {
-              dlog(`[Feishu] Downloading incoming image key: ${imageKey}...`);
-              const localPath = await this.downloadImageResource(message.message_id, imageKey);
-              if (localPath) {
-                text = `![image](${localPath})`;
-                dlog(`[Feishu] Incoming image downloaded successfully to local path: ${localPath}`);
-              } else {
-                text = `[图片消息: ${imageKey}]`;
-              }
+              text = '[图片消息]';
+              pendingImages.push({ imageKey, placeholder: '[图片消息]' });
             } else {
               text = '[图片消息]';
             }
@@ -508,14 +584,9 @@ export class FeishuGateway {
                 } else if (element.tag === 'img') {
                   const imageKey = element.image_key;
                   if (imageKey) {
-                    dlog(`[Feishu] Downloading post image key: ${imageKey}...`);
-                    const localPath = await this.downloadImageResource(message.message_id, imageKey);
-                    if (localPath) {
-                      paragraphText += ` ![image](${localPath}) `;
-                      dlog(`[Feishu] Post image downloaded successfully to local path: ${localPath}`);
-                    } else {
-                      paragraphText += ` [图片: ${imageKey}] `;
-                    }
+                    const placeholder = `[图片_${pendingImages.length + 1}]`;
+                    pendingImages.push({ imageKey, placeholder });
+                    paragraphText += placeholder;
                   }
                 }
               }
@@ -555,12 +626,15 @@ export class FeishuGateway {
             openId: m.open_id || '',
           })),
           messageType: message.message_type || 'text',
+          pendingImages: pendingImages.length > 0 ? pendingImages : undefined,
         };
 
         // 消息去重：先按 messageId，再按内容+时间窗口兜底
-        if (this.processedMessages.has(feishuMsg.messageId)) {
-          dlog(`Skipped duplicate message (messageId): ${feishuMsg.messageId}`);
-          return { code: 0 };
+        if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+          if (this.processedMessages.has(feishuMsg.messageId)) {
+            dlog(`Skipped duplicate message (messageId): ${feishuMsg.messageId}`);
+            return { code: 0 };
+          }
         }
 
         const contentKey = `${feishuMsg.chatId}:${feishuMsg.text}`;
@@ -572,13 +646,16 @@ export class FeishuGateway {
         }
 
         // 记录已处理的消息
-        this.processedMessages.add(feishuMsg.messageId);
-        this.recentContents.set(contentKey, now);
-        if (this.processedMessages.size > this.maxProcessedMessages) {
-          const iterator = this.processedMessages.values();
-          const oldest = iterator.next().value;
-          if (oldest) this.processedMessages.delete(oldest);
+        if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+          this.processedMessages.add(feishuMsg.messageId);
+          if (this.processedMessages.size > this.maxProcessedMessages) {
+            const iterator = this.processedMessages.values();
+            const oldest = iterator.next().value;
+            if (oldest) this.processedMessages.delete(oldest);
+          }
+          this.saveProcessedMessages(); // ✨ 持久化到磁盘
         }
+        this.recentContents.set(contentKey, now);
         // 清理过期的内容去重记录
         for (const [key, ts] of this.recentContents) {
           if (now - ts > this.dedupWindowMs * 2) this.recentContents.delete(key);
