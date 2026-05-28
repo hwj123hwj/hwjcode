@@ -149,10 +149,10 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.messageType).toBe('post');
   });
 
-  it('correctly parses post message with embedded images and downloads them', async () => {
+  it('correctly parses post message with embedded images and defers download', async () => {
     await gateway.connect();
 
-    // Mock downloadImageResource to return a local path
+    // Mock downloadImageResource — should NOT be called (download now deferred)
     const downloadSpy = vi.spyOn(gateway, 'downloadImageResource')
       .mockResolvedValue('/tmp/mock-local-image.png');
 
@@ -193,10 +193,16 @@ describe('FeishuGateway - Message Parsing', () => {
 
     await messageCallback(mockEvent);
 
-    expect(downloadSpy).toHaveBeenCalledWith('om_post_img_123', 'img_v2_123');
+    // Image download is DEFERRED — not called in gateway anymore
+    expect(downloadSpy).not.toHaveBeenCalled();
     expect(receivedMsg).not.toBeNull();
     expect(receivedMsg.text).toContain('Please analyze this');
-    expect(receivedMsg.text).toContain('![image](/tmp/mock-local-image.png)');
+    expect(receivedMsg.text).toContain('[图片_1]');
+    // pendingImages should carry the image metadata for later download
+    expect(receivedMsg.pendingImages).toBeDefined();
+    expect(receivedMsg.pendingImages).toHaveLength(1);
+    expect(receivedMsg.pendingImages[0].imageKey).toBe('img_v2_123');
+    expect(receivedMsg.pendingImages[0].placeholder).toBe('[图片_1]');
   });
 });
 
