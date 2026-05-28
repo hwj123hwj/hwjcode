@@ -21,6 +21,7 @@ import { SceneType } from '../core/sceneManager.js';
 import { convert } from 'html-to-text';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { proxyAuthManager } from '../core/proxyAuth.js';
+import { isCustomModel, generateCustomModelId } from '../types/customModel.js';
 
 const URL_FETCH_TIMEOUT_MS = 10000;
 // 最大内容长度限制（10K字符），防止token爆炸
@@ -96,6 +97,7 @@ export class WebFetchTool extends BaseTool<WebFetchToolParams, ToolResult> {
   private async executeFallback(
     params: WebFetchToolParams,
     signal: AbortSignal,
+    resolvedModel?: string,
   ): Promise<ToolResult> {
     const urls = extractUrls(params.prompt);
     if (urls.length === 0) {
@@ -146,7 +148,7 @@ ${textContent}
       // 创建临时Chat获得完整的API日志、Token统计、错误处理等功能
       const temporaryChat = await geminiClient.createTemporaryChat(
         SceneType.WEB_FETCH,
-        undefined, // 使用场景推荐的模型
+        resolvedModel, // 使用场景推荐的模型 or 自定义 Gemini Flash 模型
         { type: 'sub', agentId: 'WebFetchFallback' }
       );
 
@@ -260,13 +262,37 @@ ${textContent}
       };
     }
 
+    // Check if using a custom model
+    const currentModel = typeof this.config.getModel === 'function' ? this.config.getModel() : undefined;
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+    let resolvedModel: string | undefined = undefined;
+
+    if (isUsingCustomModel && typeof this.config.getCustomModels === 'function') {
+      const customModels = this.config.getCustomModels() || [];
+      const geminiFlashModel = customModels.find(m => {
+        if (m.enabled === false) return false;
+        const modelIdLower = (m.modelId || '').toLowerCase();
+        const displayNameLower = (m.displayName || '').toLowerCase();
+        return (modelIdLower.includes('gemini') && modelIdLower.includes('flash')) ||
+               (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
+      });
+
+      if (!geminiFlashModel) {
+        return {
+          llmContent: `This tool (${WebFetchTool.Name}) is currently unavailable because you are using custom models, but no custom Gemini Flash model (e.g., gemini-2.5-flash) was found in your custom models list to execute this tool. Please configure a custom Gemini Flash model to use this feature.`,
+          returnDisplay: `Tool unavailable: Gemini Flash required`
+        };
+      }
+      resolvedModel = generateCustomModelId(geminiFlashModel);
+    }
+
     const userPrompt = params.prompt;
     const urls = extractUrls(userPrompt);
     const url = urls[0];
     const isPrivate = isPrivateIp(url);
 
     if (isPrivate) {
-      return this.executeFallback(params, signal);
+      return this.executeFallback(params, signal, resolvedModel);
     }
 
     try {
@@ -278,7 +304,7 @@ ${textContent}
       // 创建临时Chat获得完整的API日志、Token统计、错误处理等功能
       const temporaryChat = await geminiClient.createTemporaryChat(
         SceneType.WEB_FETCH,
-        undefined, // 使用场景推荐的模型
+        resolvedModel, // 使用场景推荐的模型 or 自定义 Gemini Flash 模型
         { type: 'sub', agentId: 'WebFetch' }
       );
 
@@ -342,7 +368,7 @@ ${textContent}
       }
 
       if (processingError) {
-        return this.executeFallback(params, signal);
+        return this.executeFallback(params, signal, resolvedModel);
       }
 
       const sourceListFormatted: string[] = [];
