@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { HistoryItem } from '../types.js';
+import { appEvents, AppEvent } from '../../utils/events.js';
 
 // Type for the updater function passed to updateHistoryItem
 type HistoryItemUpdater = (
@@ -36,6 +37,24 @@ export interface UseHistoryOptions {
 export function useHistory(options?: UseHistoryOptions): UseHistoryManagerReturn {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const messageIdCounterRef = useRef(0);
+  const isFeishuModeRef = useRef(false);
+
+  useEffect(() => {
+    const handleStart = () => {
+      isFeishuModeRef.current = true;
+    };
+    const handleStop = () => {
+      isFeishuModeRef.current = false;
+    };
+
+    appEvents.on(AppEvent.FeishuBotStarted, handleStart);
+    appEvents.on(AppEvent.FeishuBotStopped, handleStop);
+
+    return () => {
+      appEvents.off(AppEvent.FeishuBotStarted, handleStart);
+      appEvents.off(AppEvent.FeishuBotStopped, handleStop);
+    };
+  }, []);
 
   // Generates a unique message ID based on a timestamp and a counter.
   const getNextMessageId = useCallback((baseTimestamp: number): number => {
@@ -66,7 +85,11 @@ export function useHistory(options?: UseHistoryOptions): UseHistoryManagerReturn
             return prevHistory; // Don't add the duplicate user message
           }
         }
-        return [...prevHistory, newItem];
+        const updated = [...prevHistory, newItem];
+        if (isFeishuModeRef.current && updated.length > 100) {
+          return updated.slice(updated.length - 100);
+        }
+        return updated;
       });
       return id; // Return the generated ID (even if not added, to keep signature)
     },
