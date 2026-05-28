@@ -332,6 +332,41 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 飞书服务器端口状态
   const [feishuServerPort, setFeishuServerPort] = useState<number | undefined>(undefined);
 
+  // 飞书消息处理状态
+  const [isFeishuProcessing, setIsFeishuProcessing] = useState(false);
+  const [isFeishuBotRunning, setIsFeishuBotRunning] = useState(false);
+
+  // 监听飞书消息处理与Bot运行状态事件
+  useEffect(() => {
+    const handleFeishuProcessingStart = () => {
+      setIsFeishuProcessing(true);
+    };
+
+    const handleFeishuProcessingEnd = () => {
+      setIsFeishuProcessing(false);
+    };
+
+    const handleFeishuBotStarted = () => {
+      setIsFeishuBotRunning(true);
+    };
+
+    const handleFeishuBotStopped = () => {
+      setIsFeishuBotRunning(false);
+    };
+
+    appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+    appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+    appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+    appEvents.on(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+
+    return () => {
+      appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+      appEvents.off(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+      appEvents.off(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+      appEvents.off(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+    };
+  }, []);
+
   // 监听飞书服务器事件
   useEffect(() => {
     const handleFeishuServerStarted = (port: number) => {
@@ -1325,8 +1360,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
   const currentTitleIcon = useAnimatedTitleIcon(streamingState);
   useEffect(() => {
-    updateWindowTitleIcon(currentTitleIcon);
-  }, [currentTitleIcon]);
+    if (!isFeishuBotRunning) {
+      updateWindowTitleIcon(currentTitleIcon);
+    } else {
+      process.stdout.write(`\x1b]2;Feishu Gateway Mode |  DeepV Code\x07`);
+    }
+  }, [currentTitleIcon, isFeishuBotRunning]);
 
   // 🎯 监听后台任务完成事件
   useBackgroundTaskNotifications({
@@ -2125,7 +2164,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     fetchUserMessages();
   }, [history, logger]);
 
-  const shouldRenderInputPrompt = !refineResult && !initError;
+  const shouldRenderInputPrompt = !refineResult && !initError && !isFeishuProcessing;
 
   const handleClearScreen = useCallback(() => {
     clearItems();
@@ -2934,6 +2973,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 />
               ) : null}
 
+              {!shouldRenderInputPrompt && isFeishuProcessing ? (
+                <Box borderStyle="round" borderColor={Colors.AccentYellow} paddingX={1} marginBottom={1}>
+                  <Text color={Colors.AccentYellow} bold>
+                    {t('feishu.tui.agent_working')}
+                  </Text>
+                </Box>
+              ) : null}
+
               {/* 🎯 后台任务提示 - 显示在输入框下方 */}
               <BackgroundTaskHint />
             </>
@@ -3000,6 +3047,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
             ideConnectionStatus={ideConnectionStatus}
             config={config}
             terminalWidth={terminalWidth}
+            isFeishuProcessing={isFeishuProcessing}
           />
         </Box>
       </Box>
