@@ -1988,7 +1988,7 @@ export class FeishuGateway {
       type: 'primary',
       width: 'default',
       name: 'submit_btn',
-      form_action_type: 'submit',
+      action_type: 'form_submit',
     });
 
     const card: Record<string, any> = {
