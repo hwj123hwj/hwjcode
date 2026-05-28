@@ -1236,16 +1236,32 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const isInitialMount = useRef(true);
   const completionSummaryCounterRef = useRef(0);
 
-  const widthFraction = 0.9;
-  const inputWidth = Math.max(
-    20,
-    Math.floor(terminalWidth * widthFraction) - 3,
-  );
-  const inputViewportHeight = Math.max(
-    1,
-    Math.min(15, Math.floor(inputWidth / 10)),
-  );
-  const suggestionsWidth = Math.max(60, Math.floor(terminalWidth * 0.8));
+  // 智能主区域和输入框宽度计算：
+  // - 宽终端（≥ 80）：仅保留左右各 2 个字符的边距（共 4 字符），完美撑满屏幕，充分利用空间。
+  // - 窄终端（< 80）：使用 95% 的比例，并确保最小宽度不小于 20。
+  const mainAreaWidth = useMemo(() => {
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 4
+        : Math.floor(terminalWidth * 0.95)
+    );
+  }, [terminalWidth]);
+
+  const inputWidth = useMemo(() => {
+    return Math.max(20, mainAreaWidth - 3);
+  }, [mainAreaWidth]);
+
+  const inputViewportHeight = useMemo(() => {
+    return Math.max(
+      1,
+      Math.min(15, Math.floor(inputWidth / 10)),
+    );
+  }, [inputWidth]);
+
+  const suggestionsWidth = useMemo(() => {
+    return Math.max(60, Math.floor(mainAreaWidth * 0.9));
+  }, [mainAreaWidth]);
 
   // Utility callbacks
   const isValidPath = useCallback((filePath: string): boolean => {
@@ -2219,8 +2235,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     [terminalHeight, footerHeight],
   );
 
-  // Linus fix: 移动变量定义到useMemo之前，避免使用未定义变量的错误
-  const mainAreaWidth = Math.floor(terminalWidth * 0.9);
+  // mainAreaWidth 已在组件顶层定义为基于终端宽度的智能响应式 useMemo，此处无需重复定义。
 
   // 🔧 优化：根据终端大小智能调整最大高度
   // - 小窗口（≤30 行）：使用 60% 可用高度，避免撑破布局
@@ -2463,7 +2478,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   return (
     <StreamingContext.Provider value={streamingState}>
-      <Box flexDirection="column" width="90%" ref={rootUiRef}>
+      <Box flexDirection="column" width="100%" ref={rootUiRef}>
         {/* Move UpdateNotification outside Static so it can re-render when updateMessage changes */}
         {updateMessage ? <UpdateNotification message={updateMessage} /> : null}
 

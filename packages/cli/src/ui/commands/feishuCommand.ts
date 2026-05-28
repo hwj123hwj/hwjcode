@@ -843,14 +843,55 @@ async function handleAskUserQuestionViaCard(
   },
   callId: string,
 ): Promise<Part> {
-  const questions = args.questions || [];
+  // 🚀 数据容错与自愈：处理 questions 数组中可能出现的字符串或非标准对象
+  const normalizedQuestions = (args.questions || []).map((item: any) => {
+    if (!item) return { question: 'Question', options: [] };
+    if (typeof item === 'string') {
+      return {
+        question: item,
+        header: 'Question',
+        options: [],
+      };
+    }
+    const question = String(item.question || '').trim() || 'Question';
+    let header = String(item.header || 'Question').trim();
+    if (header.length > 12) {
+      header = header.substring(0, 12);
+    }
+    let options = item.options || [];
+    if (Array.isArray(options)) {
+      options = options.map((opt: any) => {
+        if (typeof opt === 'string') {
+          return { label: opt, description: '' };
+        }
+        if (opt && typeof opt === 'object') {
+          const rawLabel = opt.label || opt.value || 'Option';
+          return {
+            ...opt,
+            label: String(rawLabel).trim() || 'Option',
+            description: opt.description ? String(opt.description).trim() : '',
+          };
+        }
+        return { label: 'Option', description: '' };
+      });
+    } else {
+      options = [];
+    }
+    return {
+      ...item,
+      question,
+      header,
+      options,
+    };
+  });
+
   const answers: Record<string, string> = {};
 
   // 过滤出有选项的问题（无选项的无法用卡片收集）
-  const answerableQuestions = questions.filter(
+  const answerableQuestions = normalizedQuestions.filter(
     (q) => (q.options || []).length > 0,
   );
-  for (const q of questions) {
+  for (const q of normalizedQuestions) {
     if ((q.options || []).length === 0) {
       answers[q.question] = '(无选项)';
     }
@@ -2569,7 +2610,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
   function getToolShortName(name: string): string {
     switch (name) {
-      case 'run_shell_command': return 'Shell';
+      case 'run_shell_command': return 'Bash';
       case 'read_file': return 'ReadFile';
       case 'read_many_files': return 'ReadManyFiles';
       case 'write_file': return 'WriteFile';
