@@ -224,4 +224,21 @@ describe('<LoadingIndicator />', () => {
     expect(output).toContain('This should be displayed');
     expect(output).not.toContain('This should not be displayed');
   });
+
+  it('should display compact token usage when lastTokenUsage is provided', () => {
+    const props = {
+      currentLoadingPhrase: 'Loading...',
+      elapsedTime: 5,
+      lastTokenUsage: {
+        input_tokens: 12220,
+        output_tokens: 1230,
+      },
+    };
+    const { lastFrame } = renderWithContext(
+      <LoadingIndicator {...props} />,
+      StreamingState.Responding,
+    );
+    const output = sanitizeOutput(lastFrame());
+    expect(output).toContain('(esc to cancel, 5s | ↑ 12.22k ↓ 1.23k)');
+  });
 });
