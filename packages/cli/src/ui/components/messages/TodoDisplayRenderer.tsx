@@ -9,6 +9,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../../colors.js';
+import { isChineseLocale } from '../../utils/i18n.js';
 import type { TodoDisplay } from 'deepv-code-core';
 
 /**
@@ -56,6 +57,50 @@ export const TodoDisplayRenderer: React.FC<{ data: TodoDisplay } & { titleEmphas
           );
         })}
       </Box>
+    </Box>
+  );
+};
+
+/**
+ * One-line collapsed summary of a todo update for the scrollback.
+ *
+ * The live, full list now lives in the pinned TodoPanel above the input, so
+ * each `todo_write` call only leaves a compact breadcrumb here (progress +
+ * current task) instead of repeating the whole list on every update.
+ */
+export const TodoSummaryLine: React.FC<{ data: TodoDisplay }> = ({ data }) => {
+  const items = data.items || [];
+  const total = items.length;
+  const completed = items.filter((t) => t.status === 'completed').length;
+  const current = items.find((t) => t.status === 'in_progress');
+  const zh = isChineseLocale();
+
+  const label = zh ? '任务' : 'Tasks';
+  let detail: string;
+  if (total === 0) {
+    detail = zh ? '已清空' : 'cleared';
+  } else if (completed === total) {
+    detail = zh ? '全部完成' : 'all done';
+  } else if (current) {
+    detail = current.content;
+  } else {
+    detail = zh ? '已更新' : 'updated';
+  }
+
+  return (
+    <Box>
+      <Text color={Colors.AccentGreen}>• </Text>
+      <Text>
+        {label}{' '}
+      </Text>
+      <Text color={Colors.Gray}>
+        ({completed}/{total}){total > 0 ? ' · ' : ''}
+      </Text>
+      {total > 0 ? (
+        <Text wrap="truncate-end">{detail}</Text>
+      ) : (
+        <Text color={Colors.Gray}>{detail}</Text>
+      )}
     </Box>
   );
 };

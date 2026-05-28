@@ -8,7 +8,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { IndividualToolCallDisplay, ToolCallStatus } from '../../types.js';
 import { DiffRenderer } from './DiffRenderer.js';
-import { TodoDisplayRenderer } from './TodoDisplayRenderer.js';
+import { TodoSummaryLine } from './TodoDisplayRenderer.js';
 import { SubAgentDisplayRenderer } from './SubAgentDisplayRenderer.js';
 import { McpThinkingDisplayRenderer } from './McpThinkingDisplayRenderer.js';
 import { GoalAchievedDisplayRenderer } from './GoalAchievedDisplayRenderer.js';
@@ -363,7 +363,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
               <Box flexDirection="row">
                 <Text color={Colors.Gray}>└ </Text>
                 <Box flexGrow={1}>
-                  <TodoDisplayRenderer data={resultDisplay as any} />
+                  <TodoSummaryLine data={resultDisplay as any} />
                 </Box>
               </Box>
             ) : null}

@@ -12,26 +12,22 @@ import { Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { logger } from '../utils/enhancedLogger.js';
+import {
+  todoStore,
+  type TodoItem,
+  type TodoStatus,
+  type TodoPriority,
+} from './todo-store.js';
 
-// Todo数据模型
-export interface TodoItem {
-  id: string;                    // 唯一标识符
-  content: string;               // 待办事项内容
-  status: 'pending' | 'in_progress' | 'completed';
-  priority: 'high' | 'medium' | 'low';
-}
-
-export type TodoStatus = TodoItem['status'];
-export type TodoPriority = TodoItem['priority'];
-
-// 内存中的todo列表
-let memoryTodos: TodoItem[] = [];
+// Re-export the shared todo types so existing importers keep working.
+export type { TodoItem, TodoStatus, TodoPriority } from './todo-store.js';
 
 /**
  * 获取内存中的todos列表
+ * @deprecated Prefer subscribing to `todoStore` for reactive updates.
  */
 export function getMemoryTodos(): TodoItem[] {
-  return [...memoryTodos];
+  return todoStore.getTodos();
 }
 
 // TodoWrite工具参数接口
@@ -195,8 +191,8 @@ Each todo object must have:
         priority: todo.priority,
       }));
 
-      // 直接替换内存中的todo列表
-      memoryTodos = todoItems;
+      // 直接替换内存中的todo列表（通过响应式 store 通知 UI 原地更新）
+      todoStore.setTodos(todoItems);
       logger.info(`[TodoWriteTool] Updated todo list in memory, new count: ${todoItems.length}`);
 
       const stats = {
