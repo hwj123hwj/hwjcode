@@ -21,6 +21,7 @@ import { getLocalizedToolName, isChineseLocale, t } from '../../utils/i18n.js';
 import { useSmallWindowOptimization, WindowSizeLevel } from '../../hooks/useSmallWindowOptimization.js';
 import stringWidth from 'string-width';
 import { truncateText } from '../../utils/textTruncator.js';
+import { shouldCollapseToolResult } from './toolResultCollapse.js';
 
 const STATIC_HEIGHT = 1;
 const RESERVED_LINE_COUNT = 5; // for tool name, status, padding etc.
@@ -168,6 +169,10 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
   const shouldSimplifyDiff = smallWindowConfig.sizeLevel === WindowSizeLevel.SMALL ||
     smallWindowConfig.sizeLevel === WindowSizeLevel.TINY;
 
+  // 🎯 已完成的读取/搜索/列目录类工具：标题行已说明动作+目标，
+  //    结果体（行数、文件清单等）是冗余确认，完成后收起，只保留标题一行。
+  const collapseResult = shouldCollapseToolResult({ toolId, status, resultDisplay });
+
   const availableHeight = availableTerminalHeight
     ? Math.max(
       availableTerminalHeight - STATIC_HEIGHT - RESERVED_LINE_COUNT,
@@ -281,7 +286,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
         </Box>
       ) : null}
       {/* Show regular resultDisplay if no thinking display and NOT background running */}
-      {!thinkingDisplayData && resultDisplay && status !== ToolCallStatus.BackgroundRunning ? (
+      {!thinkingDisplayData && resultDisplay && status !== ToolCallStatus.BackgroundRunning && !collapseResult ? (
         <Box paddingLeft={RESULT_DISPLAY_INDENT} width="100%">
           <Box flexDirection="column">
             {typeof resultDisplay === 'string' && renderOutputAsMarkdown ? (
