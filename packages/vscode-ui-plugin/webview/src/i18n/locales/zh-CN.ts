@@ -185,7 +185,7 @@ export const zhCN: Translations = {
     toolNames: {
       write_file: '写入文件',
       read_file: '读取文件',
-      bash: '命令行',
+      bash: 'Bash',
       terminal: '终端',
       web_search: '网络搜索',
       grep: '文本搜索',

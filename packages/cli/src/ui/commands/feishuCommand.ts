@@ -939,50 +939,111 @@ async function handleAskUserQuestionViaCard(
       const options = q.options || [];
 
       // 构建卡片正文：列出选项及其描述
-      const contentLines = options.map((opt) => {
+      const contentLines = options.map((opt: any) => {
         const line = `**${opt.label}**`;
         return opt.description ? `${line}: ${opt.description}` : line;
       });
-      const content = contentLines.join('\n\n');
 
-      // 构建按钮
-      const buttons = options.map((opt) => ({
-        label: opt.label,
-        value: opt.label,
-      }));
-      buttons.push({ label: '⏭ 跳过', value: '__skip__' });
+      if (q.multiSelect) {
+        let selectedLabels: string[] = [];
+        let done = false;
 
-      const title = q.header ? `${q.header}: ${q.question}` : q.question;
+        while (!done) {
+          const currentSelectionsStr = selectedLabels.length > 0
+            ? `当前已选: **${selectedLabels.join(', ')}**`
+            : '（尚未选择任何选项，请点击下方选项进行选择）';
+          const content = `${contentLines.join('\n\n')}\n\n💡 **${currentSelectionsStr}**`;
 
-      const userChoice = await gateway.waitForCardAction(
-        chatId,
-        title,
-        content,
-        buttons,
-        '__timeout__',
-        FEISHU_ASK_QUESTION_TIMEOUT_MS,
-        replyToMessageId,
-      );
+          // 构建按钮
+          const buttons = options.map((opt: any) => ({
+            label: selectedLabels.includes(opt.label) ? `✅ ${opt.label}` : opt.label,
+            value: opt.label,
+          }));
+          buttons.push({ label: '🆗 确定提交', value: '__submit__' });
+          buttons.push({ label: '⏭ 跳过', value: '__skip__' });
 
-      // 发送新消息提示用户的选择结果
-      {
-        let feedbackText: string;
-        if (userChoice === '__timeout__') {
-          feedbackText = '⏰ 等待超时 — 未收到回答';
-        } else if (userChoice === '__skip__') {
-          feedbackText = '⏭ 已跳过';
-        } else {
-          feedbackText = `✅ 已选择: ${userChoice}`;
+          const title = q.header ? `[多选] ${q.header}: ${q.question}` : `[多选] ${q.question}`;
+
+          const userChoice = await gateway.waitForCardAction(
+            chatId,
+            title,
+            content,
+            buttons,
+            '__timeout__',
+            FEISHU_ASK_QUESTION_TIMEOUT_MS,
+            replyToMessageId,
+          );
+
+          if (userChoice === '__timeout__') {
+            await gateway.sendMessage(chatId, '⏰ 等待超时 — 未收到回答');
+            answers[q.question] = '用户未在规定时间内回答，请自行决策';
+            done = true;
+          } else if (userChoice === '__skip__') {
+            await gateway.sendMessage(chatId, '⏭ 已跳过');
+            answers[q.question] = '用户选择跳过，请自行决策';
+            done = true;
+          } else if (userChoice === '__submit__') {
+            if (selectedLabels.length === 0) {
+              await gateway.sendMessage(chatId, '⚠️ 你尚未选择任何选项，请先选择至少一个选项，或点击“跳过”。');
+              // 继续循环，不退出
+            } else {
+              const resultStr = selectedLabels.join(', ');
+              await gateway.sendMessage(chatId, `✅ 已选择: ${resultStr}`);
+              answers[q.question] = resultStr;
+              done = true;
+            }
+          } else {
+            // 点击了选项按钮
+            if (selectedLabels.includes(userChoice)) {
+              selectedLabels = selectedLabels.filter(l => l !== userChoice);
+            } else {
+              selectedLabels.push(userChoice);
+            }
+            // 继续循环
+          }
         }
-        await gateway.sendMessage(chatId, feedbackText);
-      }
-
-      if (userChoice === '__timeout__') {
-        answers[q.question] = '用户未在规定时间内回答，请自行决策';
-      } else if (userChoice === '__skip__') {
-        answers[q.question] = '用户选择跳过，请自行决策';
       } else {
-        answers[q.question] = userChoice;
+        const content = contentLines.join('\n\n');
+
+        // 构建按钮
+        const buttons = options.map((opt: any) => ({
+          label: opt.label,
+          value: opt.label,
+        }));
+        buttons.push({ label: '⏭ 跳过', value: '__skip__' });
+
+        const title = q.header ? `${q.header}: ${q.question}` : q.question;
+
+        const userChoice = await gateway.waitForCardAction(
+          chatId,
+          title,
+          content,
+          buttons,
+          '__timeout__',
+          FEISHU_ASK_QUESTION_TIMEOUT_MS,
+          replyToMessageId,
+        );
+
+        // 发送新消息提示用户的选择结果
+        {
+          let feedbackText: string;
+          if (userChoice === '__timeout__') {
+            feedbackText = '⏰ 等待超时 — 未收到回答';
+          } else if (userChoice === '__skip__') {
+            feedbackText = '⏭ 已跳过';
+          } else {
+            feedbackText = `✅ 已选择: ${userChoice}`;
+          }
+          await gateway.sendMessage(chatId, feedbackText);
+        }
+
+        if (userChoice === '__timeout__') {
+          answers[q.question] = '用户未在规定时间内回答，请自行决策';
+        } else if (userChoice === '__skip__') {
+          answers[q.question] = '用户选择跳过，请自行决策';
+        } else {
+          answers[q.question] = userChoice;
+        }
       }
     }
   }
@@ -2356,6 +2417,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 执行工具调用，收集 functionResponse
         const toolResponseParts: Part[] = [];
+        let hasUserAnswered = false;
         for (const req of toolCallRequests) {
           const toolName = req.name || 'unknown';
           const toolArgsDesc = req.args ? JSON.stringify(req.args).slice(0, 100) : '';
@@ -2379,6 +2441,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 { type: 'info', text: t('feishu.tui.tool_user_answered') },
                 Date.now(),
               );
+              hasUserAnswered = true;
               continue;
             }
 
@@ -2526,6 +2589,18 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 将工具结果作为下一轮输入
         currentMessage = toolResponseParts;
+
+        // 🎯 体验优化：如果用户回答了交互式问题，重置卡片状态，迫使下一轮回复创建全新卡片，避免用户看不到老卡片的更新
+        if (hasUserAnswered) {
+          if (streaming) {
+            const thinkingFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+            thinkingFooterMetrics.status = '等待新输入';
+            await streaming.finalize(renderCurrentDisplay(blocks), thinkingFooterMetrics);
+            streaming = null;
+          }
+          activeCardId = null;
+          blocks.length = 0;
+        }
       }
 
       // 达到最大轮数
@@ -3382,16 +3457,16 @@ export const feishuCommand: SlashCommand = {
 
   subCommands: [
     {
-      name: 'setup',
-      description: t('feishu.subcmd.setup.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (ctx, args) => msg(await handleSetup(args, ctx)),
-    },
-    {
       name: 'start',
       description: t('feishu.subcmd.start.description'),
       kind: CommandKind.BUILT_IN,
       action: async (ctx) => msg(await handleStart(ctx)),
+    },
+    {
+      name: 'setup',
+      description: t('feishu.subcmd.setup.description'),
+      kind: CommandKind.BUILT_IN,
+      action: async (ctx, args) => msg(await handleSetup(args, ctx)),
     },
     {
       name: 'stop',

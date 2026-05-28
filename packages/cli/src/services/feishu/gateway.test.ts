@@ -578,7 +578,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     expect(select.options[2].value).toBe('__other__');
 
     const submit = form.elements.find((e: any) => e.tag === 'button');
-    expect(submit.form_action_type).toBe('submit');
+    expect(submit.action_type).toBe('form_submit');
     expect(submit.name).toBe('submit_btn');
 
     // 让超时触发，避免悬挂

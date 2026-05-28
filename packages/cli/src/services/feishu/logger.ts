@@ -21,10 +21,15 @@
  */
 
 const DEBUG_ENABLED = (() => {
+  if (process.env['VITEST'] || process.env['NODE_ENV'] === 'test') {
+    return false;
+  }
   const v = process.env['DEEPV_DEBUG_FEISHU'];
-  if (!v) return false;
-  const lower = v.toLowerCase();
-  return lower !== '' && lower !== '0' && lower !== 'false' && lower !== 'no';
+  if (v !== undefined) {
+    const lower = v.toLowerCase();
+    return lower !== '0' && lower !== 'false' && lower !== 'no' && lower !== '';
+  }
+  return true; // 🚀 飞书模式下默认开启所有日志打印，方便用户调试卡片回调
 })();
 
 function ts(): string {
