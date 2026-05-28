@@ -19,6 +19,7 @@ import { makeRelative, shortenPath } from '../utils/paths.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
 import { SceneType } from '../core/sceneManager.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { isCustomModel, generateCustomModelId } from '../types/customModel.js';
 
 /**
  * Parameters for the ImageReader tool
@@ -223,6 +224,30 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
       };
     }
 
+    // Check if using a custom model
+    const currentModel = typeof this.config.getModel === 'function' ? this.config.getModel() : undefined;
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+    let resolvedModel: string | undefined = undefined;
+
+    if (isUsingCustomModel && typeof this.config.getCustomModels === 'function') {
+      const customModels = this.config.getCustomModels() || [];
+      const geminiFlashModel = customModels.find(m => {
+        if (m.enabled === false) return false;
+        const modelIdLower = (m.modelId || '').toLowerCase();
+        const displayNameLower = (m.displayName || '').toLowerCase();
+        return (modelIdLower.includes('gemini') && modelIdLower.includes('flash')) ||
+               (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
+      });
+
+      if (!geminiFlashModel) {
+        return {
+          llmContent: `This tool (${ImageReaderTool.Name}) is currently unavailable because you are using custom models, but no custom Gemini Flash model (e.g., gemini-2.5-flash) was found in your custom models list to execute this tool. Please configure a custom Gemini Flash model to use this feature.`,
+          returnDisplay: `Tool unavailable: Gemini Flash required`
+        };
+      }
+      resolvedModel = generateCustomModelId(geminiFlashModel);
+    }
+
     const filePath = params.absolute_path;
 
     // Verify it's an image file by content (mime-type) before doing anything
@@ -317,7 +342,7 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
       const geminiClient = this.config.getGeminiClient();
       const temporaryChat = await geminiClient.createTemporaryChat(
         SceneType.IMAGE_READER,
-        undefined, // use scene-recommended model (gemini-2.5-flash)
+        resolvedModel, // use scene-recommended model (gemini-2.5-flash) or custom Gemini Flash model
         { type: 'sub', agentId: 'ImageReader' },
         { disableSystemPrompt: true },
       );
@@ -351,7 +376,7 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
       }
 
       const relative = makeRelative(filePath, this.config.getTargetDir());
-      const header = `Image description for ${shortenPath(relative)} (via gemini-2.5-flash):`;
+      const header = `Image description for ${shortenPath(relative)} (via ${isUsingCustomModel ? 'custom model' : 'gemini-2.5-flash'}):`;
 
       return {
         llmContent: `${header}\n\n${description}`,
