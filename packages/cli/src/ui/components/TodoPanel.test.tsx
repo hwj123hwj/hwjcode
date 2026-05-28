@@ -44,25 +44,14 @@ describe('selectTodoPanelView', () => {
     expect(view.pending.map((t) => t.id)).toEqual(['c', 'd']);
   });
 
-  it('shows the most recent completed item and hides the rest', () => {
+  it('returns all completed items without hiding them', () => {
     const view = selectTodoPanelView([
       todo('done1', 'completed'),
       todo('done2', 'completed'),
       todo('done3', 'completed'),
       todo('cur', 'in_progress'),
     ]);
-    // Only the last completed (by list order) is surfaced.
-    expect(view.recentCompleted?.id).toBe('done3');
-    expect(view.hiddenCompletedCount).toBe(2);
-  });
-
-  it('has no hidden completed when there is a single completed item', () => {
-    const view = selectTodoPanelView([
-      todo('done1', 'completed'),
-      todo('cur', 'in_progress'),
-    ]);
-    expect(view.recentCompleted?.id).toBe('done1');
-    expect(view.hiddenCompletedCount).toBe(0);
+    expect(view.completed.map((t) => t.id)).toEqual(['done1', 'done2', 'done3']);
   });
 
   it('caps the number of visible pending items', () => {
