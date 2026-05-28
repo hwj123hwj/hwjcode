@@ -61,6 +61,8 @@ import { CustomModelWizard } from './components/CustomModelWizard.js';
 import { DebateWizard } from './components/DebateWizard.js';
 import { GoalWizard } from './components/GoalWizard.js';
 import { DebateIndicator } from './components/DebateIndicator.js';
+import { TodoPanel } from './components/TodoPanel.js';
+import { useTodos } from './hooks/useTodos.js';
 import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
 import { LoginDialog } from './components/LoginDialog.js';
@@ -79,7 +81,7 @@ import { ConsolePatcher } from './utils/ConsolePatcher.js';
 import { registerCleanup } from '../utils/cleanup.js';
 import { DetailedMessagesDisplay } from './components/DetailedMessagesDisplay.js';
 import { TokenUsageDisplay, type TokenUsageInfo } from './components/TokenUsageDisplay.js';
-import { tokenUsageEventManager, IDEConnectionStatus, type BackgroundTask, getBackgroundTaskManager } from 'deepv-code-core';
+import { tokenUsageEventManager, IDEConnectionStatus, type BackgroundTask, getBackgroundTaskManager, todoStore } from 'deepv-code-core';
 import { HistoryItemDisplay } from './components/HistoryItemDisplay.js';
 import { ImagePollingSpinner } from './components/ImagePollingSpinner.js';
 import { StreamRecoverySpinner } from './components/StreamRecoverySpinner.js';
@@ -1732,6 +1734,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const { elapsedTime, currentLoadingPhrase, estimatedInputTokens: loadingEstimatedTokens } =
     useLoadingIndicator(streamingState, estimatedInputTokens);
 
+  // 🎯 当前待办列表（响应式）：用于在输入框上方原地渲染固定的任务面板，
+  //    避免 todo_write 每次更新都在滚动区重复出现一整块列表。
+  const todos = useTodos();
+
   // When transitioning from Responding to Idle, capture the elapsed time for printing
   const lastElapsedTimeBeforeIdleRef = useRef<number>(0);
   useEffect(() => {
@@ -2124,6 +2130,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const handleClearScreen = useCallback(() => {
     clearItems();
     clearConsoleMessagesState();
+    todoStore.clear(); // 同步清空固定任务面板
     refreshStatic(true);
   }, [clearItems, clearConsoleMessagesState, refreshStatic]);
 
@@ -2891,6 +2898,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   </Box>
                 </Box>
               ) : null}
+
+              {/* 📋 固定任务面板：常驻输入框上方，随 todo_write 原地更新，
+                   空列表或全部完成时自动隐藏（见 TodoPanel 内部逻辑）。 */}
+              <TodoPanel todos={todos} />
 
               {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
                    相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
