@@ -118,6 +118,17 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
   }
 
   override validateToolParams(params: ImageReaderToolParams): string | null {
+    if (params && typeof params.absolute_path === 'string') {
+      let cleaned = params.absolute_path.trim();
+      if (
+        (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+        (cleaned.startsWith("'") && cleaned.endsWith("'"))
+      ) {
+        cleaned = cleaned.slice(1, -1).trim();
+      }
+      params.absolute_path = cleaned;
+    }
+
     const errors = SchemaValidator.validate(
       this.schema.parameters,
       params,
@@ -161,6 +172,16 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
   }
 
   override getDescription(params: ImageReaderToolParams): string {
+    if (params && typeof params.absolute_path === 'string') {
+      let cleaned = params.absolute_path.trim();
+      if (
+        (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+        (cleaned.startsWith("'") && cleaned.endsWith("'"))
+      ) {
+        cleaned = cleaned.slice(1, -1).trim();
+      }
+      params.absolute_path = cleaned;
+    }
     if (
       !params ||
       typeof params.absolute_path !== 'string' ||
@@ -176,6 +197,16 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
   }
 
   override toolLocations(params: ImageReaderToolParams): ToolLocation[] {
+    if (params && typeof params.absolute_path === 'string') {
+      let cleaned = params.absolute_path.trim();
+      if (
+        (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+        (cleaned.startsWith("'") && cleaned.endsWith("'"))
+      ) {
+        cleaned = cleaned.slice(1, -1).trim();
+      }
+      params.absolute_path = cleaned;
+    }
     if (!params?.absolute_path) return [];
     return [{ path: params.absolute_path }];
   }
