@@ -5,6 +5,7 @@
  */
 
 import { render } from 'ink-testing-library';
+import { Text } from 'ink';
 import { describe, it, expect, vi } from 'vitest';
 import { HistoryItemDisplay } from './HistoryItemDisplay.js';
 import { HistoryItem, MessageType } from '../types.js';
@@ -32,7 +33,11 @@ vi.mock('../hooks/useSmallWindowOptimization.js', () => ({
 
 // Mock child components
 vi.mock('./messages/ToolGroupMessage.js', () => ({
-  ToolGroupMessage: () => <div />,
+  ToolGroupMessage: ({ toolCalls }: { toolCalls: any[] }) => (
+    <Text>
+      {toolCalls.map((t) => `MockTool:${t.toolId}`).join('|')}
+    </Text>
+  ),
 }));
 
 describe('<HistoryItemDisplay />', () => {
@@ -141,5 +146,61 @@ describe('<HistoryItemDisplay />', () => {
     });
 
     expect(result).toContain(expectedText.en);
+  });
+
+  it('renders ToolGroupMessage for other tools but filters out todo_write', () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'tool_group',
+      tools: [
+        {
+          callId: 'call-1',
+          name: 'ReadFile',
+          toolId: 'read_file',
+          description: 'test.txt',
+          resultDisplay: 'hello',
+          status: 'success' as any,
+          confirmationDetails: undefined,
+        },
+        {
+          callId: 'call-2',
+          name: 'TodoWrite',
+          toolId: 'todo_write',
+          description: 'update',
+          resultDisplay: 'done',
+          status: 'success' as any,
+          confirmationDetails: undefined,
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    const output = sanitizeOutput(lastFrame());
+    expect(output).toContain('MockTool:read_file');
+    expect(output).not.toContain('MockTool:todo_write');
+  });
+
+  it('renders nothing when all tools in the group are todo_write', () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'tool_group',
+      tools: [
+        {
+          callId: 'call-1',
+          name: 'TodoWrite',
+          toolId: 'todo_write',
+          description: 'update',
+          resultDisplay: 'done',
+          status: 'success' as any,
+          confirmationDetails: undefined,
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    const output = sanitizeOutput(lastFrame());
+    expect(output).toBe('');
   });
 });
