@@ -155,4 +155,61 @@ describe('feishuCommand', () => {
 
     appEvents.off(AppEvent.FeishuBotProcessingEnd, endSpy);
   });
+
+  it('should emit FeishuBotStarted with botName and platform payload', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      domain: 'feishu',
+      botName: 'MyTestBot',
+      ownerOpenId: 'ou_owner',
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const { appEvents, AppEvent } = await import('../../utils/events.js');
+    const startedSpy = vi.fn();
+    appEvents.on(AppEvent.FeishuBotStarted, startedSpy);
+
+    const startCmd = feishuCommand.subCommands?.find(c => c.name === 'start');
+    await startCmd?.action!(context, '');
+
+    appEvents.off(AppEvent.FeishuBotStarted, startedSpy);
+
+    expect(startedSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ botName: 'MyTestBot', platform: 'feishu' }),
+    );
+
+    // cleanup running gateway
+    const stopCmd = feishuCommand.subCommands?.find(c => c.name === 'stop');
+    await stopCmd?.action!(context, '');
+  });
+
+  it('should emit FeishuBotStarted with lark platform when domain is lark', async () => {
+    const mockCreds: any = {
+      appId: 'cli_456',
+      appSecret: 'sec_456',
+      domain: 'lark',
+      botName: 'LarkBot',
+      ownerOpenId: 'ou_owner',
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const { appEvents, AppEvent } = await import('../../utils/events.js');
+    const startedSpy = vi.fn();
+    appEvents.on(AppEvent.FeishuBotStarted, startedSpy);
+
+    const startCmd = feishuCommand.subCommands?.find(c => c.name === 'start');
+    await startCmd?.action!(context, '');
+
+    appEvents.off(AppEvent.FeishuBotStarted, startedSpy);
+
+    expect(startedSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ botName: 'LarkBot', platform: 'lark' }),
+    );
+
+    const stopCmd = feishuCommand.subCommands?.find(c => c.name === 'stop');
+    await stopCmd?.action!(context, '');
+  });
 });

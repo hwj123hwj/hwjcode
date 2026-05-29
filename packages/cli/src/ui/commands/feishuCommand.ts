@@ -86,21 +86,121 @@ import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { t, tp } from '../utils/i18n.js';
 import { Part, PartListUnion, Type } from '@google/genai';
 
+/**
+ * 工具名 → 飞书展示用短名。模块级纯函数，便于单测。
+ */
+export function feishuGetToolShortName(name: string): string {
+  switch (name) {
+    case 'run_shell_command': return 'Bash';
+    case 'read_file': return 'ReadFile';
+    case 'read_many_files': return 'ReadManyFiles';
+    case 'write_file': return 'WriteFile';
+    case 'delete_file': return 'DeleteFile';
+    case 'replace': return 'Replace';
+    case 'glob': return 'Glob';
+    case 'grep': return 'Grep';
+    case 'search_file_content': return 'SearchContent';
+    case 'web_search': return 'WebSearch';
+    case 'web_fetch': return 'WebFetch';
+    case 'todo_write': return 'TodoWrite';
+    case 'task': return 'SubAgentTask';
+    case 'use_skill': return 'UseSkill';
+    default: {
+      return name.split(/[-_]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+    }
+  }
+}
+
+/**
+ * 构建子代理（task 工具）在飞书卡片中的进度/结果展示框。
+ *
+ * 对齐主 CLI/TUI 行为：展示任务状态、轮次、工具调用次数、当前执行工具，
+ * 任务结束后展示最终摘要。
+ *
+ * 安全约束：**绝不展示 taskDescription（其实为完整 prompt，含子代理系统规则）
+ * 或 args.prompt**，仅使用简短的 description。
+ *
+ * @param subagentData 解析自 subagent_update / subagent_display 的 SubAgentDisplay 对象，可能为空
+ * @param args task 工具调用参数（description / prompt / max_turns）
+ * @param isLive 是否运行中（true 时不展示最终摘要，避免刷屏）
+ */
+export function buildSubAgentDisplayBox(
+  subagentData: any,
+  args: any,
+  isLive: boolean,
+): string {
+  if (!subagentData) {
+    // 尚无结构化进度数据（task 刚启动）：显示占位进度，绝不显示 prompt。
+    const desc = (args && args.description) || '无';
+    return `\n📊 **子代理任务 (Sub-Agent Task)**\n────────────────────────\n• 任务状态: **🔄 启动中**\n• 任务描述: ${desc}\n────────────────────────`;
+  }
+
+  const stats = subagentData.stats || {};
+  // ⚠️ taskDescription 实为完整 prompt（含子代理系统规则），绝不展示；
+  //    仅用简短的 description（3-5 词）。对齐主 CLI/TUI 行为。
+  const desc = subagentData.description || (args && args.description) || '无';
+  // status 取值: starting | running | completed | failed | cancelled
+  const status = subagentData.status;
+  const statusText =
+    status === 'completed' ? '✅ 成功'
+    : status === 'failed' ? '❌ 失败'
+    : status === 'cancelled' ? '🚫 已取消'
+    : status === 'starting' ? '🔄 启动中'
+    : '⏳ 运行中';
+  // 运行中时，找出当前正在执行的子工具，给出"实时感"
+  const toolCalls: any[] = Array.isArray(subagentData.toolCalls) ? subagentData.toolCalls : [];
+  const executing = toolCalls.find(
+    (tc) => tc.status === 'Executing' || tc.status === 'Pending' || tc.status === 'SubAgentRunning',
+  );
+
+  const statsLines = [
+    `📊 **子代理执行报告 (Sub-Agent Task Report)**`,
+    `────────────────────────`,
+    `• 任务状态: **${statusText}**`,
+    `• 任务描述: ${desc}`,
+    `• 执行轮数: ${subagentData.currentTurn || 0} / ${subagentData.maxTurns || (args && args.max_turns) || 10}`,
+    `• 工具调用: 成功 ${stats.successfulToolCalls || 0} 次 / 共 ${stats.totalToolCalls || 0} 次`,
+    executing ? `• 当前工具: ⏳ ${feishuGetToolShortName(executing.toolName)}${executing.description ? ` (${executing.description})` : ''}` : '',
+    stats.commandsRun && stats.commandsRun.length > 0 ? `• 运行命令: \`${stats.commandsRun.join(', ')}\`` : '',
+    stats.filesCreated && stats.filesCreated.length > 0 ? `• 创建文件: \`${stats.filesCreated.join(', ')}\`` : '',
+  ];
+  if (subagentData.error) {
+    statsLines.push(`• 错误信息: <font color='red'>${subagentData.error}</font>`);
+  }
+  statsLines.push(`────────────────────────`);
+  // 最终摘要存于 summary（非 report）；仅在任务结束时展示，运行中不刷屏。
+  const summary = subagentData.summary || '';
+  if (!isLive && summary) {
+    statsLines.push(`📝 **最终研究分析报告**:`, `\`\`\`markdown\n${summary}\n\`\`\``);
+  }
+  return `\n${statsLines.filter(Boolean).join('\n')}`;
+}
+
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
 
 /** 正在处理的飞书消息计数器 */
 let activeProcessingCount = 0;
+/** 当前正在处理的群组 Chat ID 集合 */
+const processingChatIds = new Set<string>();
 
-function incrementProcessingCount() {
+function incrementProcessingCount(chatId?: string) {
   activeProcessingCount++;
+  if (chatId && !processingChatIds.has(chatId)) {
+    processingChatIds.add(chatId);
+    appEvents.emit(AppEvent.FeishuGroupProcessingStart, chatId);
+  }
   if (activeProcessingCount === 1) {
     appEvents.emit(AppEvent.FeishuBotProcessingStart);
   }
 }
 
-function decrementProcessingCount() {
+function decrementProcessingCount(chatId?: string) {
   activeProcessingCount = Math.max(0, activeProcessingCount - 1);
+  if (chatId && processingChatIds.has(chatId)) {
+    processingChatIds.delete(chatId);
+    appEvents.emit(AppEvent.FeishuGroupProcessingEnd, chatId);
+  }
   if (activeProcessingCount === 0) {
     appEvents.emit(AppEvent.FeishuBotProcessingEnd);
   }
@@ -108,9 +208,28 @@ function decrementProcessingCount() {
 
 function resetProcessingCount() {
   if (activeProcessingCount > 0) {
+    // 通知所有活跃群处理结束
+    for (const chatId of processingChatIds) {
+      appEvents.emit(AppEvent.FeishuGroupProcessingEnd, chatId);
+    }
+    processingChatIds.clear();
     activeProcessingCount = 0;
     appEvents.emit(AppEvent.FeishuBotProcessingEnd);
   }
+}
+
+/** 发送飞书消息日志到仪表板 */
+function emitFeishuMessageLog(chatId: string, text: string, direction: 'in' | 'out' | 'tool') {
+  appEvents.emit(AppEvent.FeishuMessageLog, chatId, text, direction, Date.now());
+}
+
+/** 发送项目路由更新事件 */
+function emitFeishuProjectRoutesUpdated() {
+  loadProjectRoutes().then(routes => {
+    appEvents.emit(AppEvent.FeishuProjectRoutesUpdated, routes);
+  }).catch(() => {
+    // 静默失败
+  });
 }
 
 /**
@@ -1714,6 +1833,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
           fs.mkdirSync(absPath, { recursive: true });
         }
         await saveProjectRoute(msg.chatId, { projectRoot: absPath });
+        // 📡 通知仪表板路由已更新
+        emitFeishuProjectRoutesUpdated();
         return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
       } catch (e: any) {
         return `❌ 绑定目录失败: ${e.message}`;
@@ -1864,6 +1985,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           () => activeSenderOpenIds.get(msg.chatId),
           async (newChatId, path) => {
             await saveProjectRoute(newChatId, { projectRoot: path });
+            emitFeishuProjectRoutesUpdated();
           }
         ));
 
@@ -2081,12 +2203,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     activeChatId = msg.chatId;
     activeReplyToMessageId = msg.messageId;
 
-    // 同步显示飞书消息到 TUI (格式规范化：[feishu_chatId][sender:openId])
-    const prefix = `[feishu_${msg.chatId}][sender:${msg.senderOpenId}] `;
-    tuiContext?.addItem(
-      { type: 'user', text: `${prefix}${messageText}` },
-      Date.now(),
-    );
+    // 注：飞书消息不再回显到主 TUI history —— 已由飞书仪表板的 message log 区域
+    // 实时展示（emitFeishuMessageLog(...'in')），避免主屏与仪表板重复刷屏。
 
     // 🎯 DEBUG: Log the raw messageText to understand image attachment format
     dlog(`[Feishu Debug] Raw messageText from Feishu: "${messageText}"`);
@@ -2116,8 +2234,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
       finalize: (finalContent: string, finalFooterMetrics?: FeishuFooterMetrics) => Promise<boolean>;
     } | null = null;
 
+    // 🎯 发送消息日志到仪表板
+    emitFeishuMessageLog(msg.chatId, messageText, 'in');
+
     try {
-      incrementProcessingCount();
+      incrementProcessingCount(msg.chatId);
       // 确保 chat 已初始化
       await geminiClient.waitForChatInitialized();
 
@@ -2378,7 +2499,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 无工具调用 → 最终回复
         if (toolCallRequests.length === 0) {
           const replyText = responseText || '（无回复）';
-          tuiContext?.addItem({ type: 'gemini', text: replyText }, Date.now());
+          // 注：AI 回复不再回显主 TUI，改由飞书仪表板 message log 展示。
+          emitFeishuMessageLog(msg.chatId, replyText.slice(0, 120), 'out');
 
           // 兜底：如果有些特别快的一轮或者流中由于某种原因没有触发 activeCardId 却有最终回复
           if (!activeCardId) {
@@ -2417,10 +2539,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 有工具执行
         const toolNames = toolCallRequests.map(r => r.name || 'unknown').join(', ');
-        tuiContext?.addItem(
-          { type: 'info', text: tp('feishu.tui.tool_running', { names: toolNames }) },
-          Date.now(),
-        );
+        // 注：工具调用不再回显主 TUI，改由飞书仪表板 message log 展示。
+        emitFeishuMessageLog(msg.chatId, `🔧 ${toolNames}`, 'tool');
 
         // 发送/更新工具运行进度通知给飞书卡片
         // CardKit 2.0 流式：状态走 footer，正文不再加"运行工具中..."尾巴（loading 动画已表达进度）
@@ -2452,10 +2572,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         for (const req of toolCallRequests) {
           const toolName = req.name || 'unknown';
           const toolArgsDesc = req.args ? JSON.stringify(req.args).slice(0, 100) : '';
-          tuiContext?.addItem(
-            { type: 'info', text: tp('feishu.tui.tool_running_with_args', { name: toolName, args: toolArgsDesc }) },
-            Date.now(),
-          );
+          emitFeishuMessageLog(msg.chatId, `🔧 ${toolName} ${toolArgsDesc}`, 'tool');
 
           try {
             // 🎯 飞书模式：拦截 ask_user_question，用交互卡片让用户回答
@@ -2477,7 +2594,65 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
 
             let toolResponse;
-            if (toolName === 'run_shell_command') {
+            if (toolName === 'task') {
+              // 🎯 子代理任务：与主 CLI/TUI 对齐，实时展示轮次/工具调用次数/当前工具，
+              //    而非阻塞执行后才出结果。通过 updateOutput 回调消费 subagent_update 流。
+              const taskTool = toolRegistry.getTool('task');
+              if (taskTool) {
+                const startTime = Date.now();
+                let lastCardUpdateTime = 0;
+                const SUBAGENT_UPDATE_THROTTLE_MS = 2000;
+
+                const toolResult = await taskTool.execute(
+                  req.args,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    // 节流刷新（子代理更新非常频繁），避免触发飞书 API 限流
+                    if (activeCardId && now - lastCardUpdateTime >= SUBAGENT_UPDATE_THROTTLE_MS) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('task', req.args, true, output, true);
+                      const taskFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      taskFooterMetrics.status = `子代理执行中: ${req.args?.description || ''}`;
+                      if (streaming) {
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
+                        await streaming.pushFooter(taskFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'DeepV Code (子代理执行中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), taskFooterMetrics);
+                      }
+                      lastCardUpdateTime = now;
+                    }
+                  }
+                );
+
+                const durationMs = Date.now() - startTime;
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'task',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: typeof toolResult.llmContent === 'string'
+                    ? toolResult.llmContent.length
+                    : JSON.stringify(toolResult.llmContent).length,
+                });
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [{
+                    functionResponse: {
+                      id: req.callId,
+                      name: 'task',
+                      response: { output: toolResult.llmContent },
+                    }
+                  }],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+              } else {
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
+            } else if (toolName === 'run_shell_command') {
               // 精细捕获 run_shell_command 的滚动输出！
               const shellTool = toolRegistry.getTool('run_shell_command');
               if (shellTool) {
@@ -2592,10 +2767,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
             }
 
-            tuiContext?.addItem(
-              { type: 'info', text: tp('feishu.tui.tool_done', { name: toolName }) },
-              Date.now(),
-            );
+            emitFeishuMessageLog(msg.chatId, `✅ ${toolName}`, 'tool');
           } catch (toolErr: any) {
             // 工具执行失败追加精美样式
             const failedReportMarkdown = formatToolCallWithBorder(toolName, req.args, false, toolErr.message || '未知错误', false);
@@ -2606,10 +2778,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               await gateway.updateCard(activeCardId, 'DeepV Code (执行失败)', renderCurrentDisplay(blocks), failedFooterMetrics);
             }
 
-            tuiContext?.addItem(
-              { type: 'error', text: tp('feishu.tui.tool_failed', { name: toolName, error: toolErr.message }) },
-              Date.now(),
-            );
+            emitFeishuMessageLog(msg.chatId, `❌ ${toolName}: ${toolErr.message}`, 'tool');
             throw toolErr;
           }
         }
@@ -2682,14 +2851,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
         errorFooterMetrics.status = '出错';
         await gateway.updateCard(activeCardId, 'DeepV Code (出错)', renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
       }
-      tuiContext?.addItem(
-        { type: 'error', text: tp('feishu.tui.processing_error', { error: err.message }) },
-        Date.now(),
-      );
+      // 注：错误信息改由飞书仪表板 message log 展示，不再回显主 TUI。
+      emitFeishuMessageLog(msg.chatId, `❌ ${err.message}`, 'tool');
       return errorReply;
     } finally {
       activeAbortControllers.delete(msg.chatId);
-      decrementProcessingCount();
+      decrementProcessingCount(msg.chatId);
     }
   }
 
@@ -2723,25 +2890,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
   }
 
   function getToolShortName(name: string): string {
-    switch (name) {
-      case 'run_shell_command': return 'Bash';
-      case 'read_file': return 'ReadFile';
-      case 'read_many_files': return 'ReadManyFiles';
-      case 'write_file': return 'WriteFile';
-      case 'delete_file': return 'DeleteFile';
-      case 'replace': return 'Replace';
-      case 'glob': return 'Glob';
-      case 'grep': return 'Grep';
-      case 'search_file_content': return 'SearchContent';
-      case 'web_search': return 'WebSearch';
-      case 'web_fetch': return 'WebFetch';
-      case 'todo_write': return 'TodoWrite';
-      case 'task': return 'SubAgentTask';
-      case 'use_skill': return 'UseSkill';
-      default: {
-        return name.split(/[-_]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
-      }
-    }
+    return feishuGetToolShortName(name);
   }
 
   function formatToolCallWithBorder(
@@ -2775,7 +2924,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const todoCount = args.todos ? args.todos.length : 0;
       mainArg = todoCount > 0 ? `Update ${todoCount} items` : 'Update list';
     } else if (toolName === 'task') {
-      mainArg = args.description || args.prompt || '';
+      // 仅显示简短任务描述，绝不显示完整 prompt（含子代理系统规则，过长且泄露内部细节）
+      mainArg = args.description || '';
     } else if (toolName === 'use_skill' && args.skillName) {
       mainArg = args.skillName;
     } else if (args.path) {
@@ -2812,7 +2962,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
     try {
       if (output && typeof output === 'string') {
         const parsed = JSON.parse(output);
-        if (parsed && parsed.type === 'subagent_display') {
+        // 实时态：task 工具通过 updateOutput 推送 { type:'subagent_update', data:{...} }
+        // 最终态：task 工具的 returnDisplay 直接是 { type:'subagent_display', ... }
+        // 两者都要识别，data 内层即 SubAgentDisplay 对象。
+        if (parsed && parsed.type === 'subagent_update' && parsed.data) {
+          isSubAgentDisplay = true;
+          subagentData = parsed.data;
+        } else if (parsed && parsed.type === 'subagent_display') {
           isSubAgentDisplay = true;
           subagentData = parsed;
         } else if (parsed && parsed.type === 'todo_display') {
@@ -2921,30 +3077,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
       branchLine = `\n └ ( update todo list completed )`;
     } else if (toolName === 'task' || isSubAgentDisplay) {
-      if (subagentData) {
-        const stats = subagentData.stats || {};
-        const report = subagentData.report || '';
-        const statsLines = [
-          `📊 **子代理执行报告 (Sub-Agent Task Report)**`,
-          `────────────────────────`,
-          `• 任务状态: **${subagentData.status === 'success' ? '✅ 成功' : subagentData.status === 'failed' ? '❌ 失败' : '⏳ 运行中'}**`,
-          `• 任务描述: ${subagentData.taskDescription || args.description || '无'}`,
-          `• 执行轮数: ${subagentData.currentTurn || 0} / ${subagentData.maxTurns || args.max_turns || 10}`,
-          `• 工具调用: 成功 ${stats.successfulToolCalls || 0} 次 / 共 ${stats.totalToolCalls || 0} 次`,
-          stats.commandsRun && stats.commandsRun.length > 0 ? `• 运行命令: \`${stats.commandsRun.join(', ')}\`` : '',
-          stats.filesCreated && stats.filesCreated.length > 0 ? `• 创建文件: \`${stats.filesCreated.join(', ')}\`` : '',
-        ];
-        if (subagentData.error) {
-          statsLines.push(`• 错误信息: <font color='red'>${subagentData.error}</font>`);
-        }
-        statsLines.push(`────────────────────────`);
-        if (report) {
-          statsLines.push(`📝 **最终研究分析报告**:`, `\`\`\`markdown\n${report}\n\`\`\``);
-        }
-        contentBox = `\n${statsLines.filter(Boolean).join('\n')}`;
-      } else {
-        contentBox = args.prompt ? `\n\`\`\`markdown\n${args.prompt}\n\`\`\`` : '';
-      }
+      contentBox = buildSubAgentDisplayBox(subagentData, args, isLive);
       branchLine = isLive ? `\n └ ( sub-agent executing... )` : `\n └ ( sub-agent task completed )`;
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
@@ -2996,7 +3129,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
   try {
     await gateway.connect();
     activeGateway = gateway;
-    appEvents.emit(AppEvent.FeishuBotStarted);
+    // 📡 携带 botName / platform，供 TUI 仪表板显示（否则 Bot 名显示为 unknown）
+    appEvents.emit(AppEvent.FeishuBotStarted, {
+      botName: creds.botName,
+      platform: creds.domain,
+    });
+    // 📡 发射初始路由表（已绑定的项目列表）
+    emitFeishuProjectRoutesUpdated();
 
     // 🎯 动态注册 send_feishu_file 工具，让 Agent 可以直接发送文件到飞书
     if (config && geminiClient) {
@@ -3018,6 +3157,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           () => activeSenderOpenId ?? undefined,
           async (chatId, path) => {
             await saveProjectRoute(chatId, { projectRoot: path });
+            emitFeishuProjectRoutesUpdated();
           }
         ));
 
@@ -3032,7 +3172,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       ? t('feishu.start.platform.lark')
       : t('feishu.start.platform.feishu');
     return [
-      t('feishu.start.success_title'),
+      t('feishu.dashboard.welcome_title'),
       tp('feishu.start.success_bot', { name: creds.botName || t('feishu.start.bot_unknown') }),
       tp('feishu.start.success_platform', { platform }),
       '',
