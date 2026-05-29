@@ -52,8 +52,8 @@ git push origin ls-dev
 
 ### 步骤 3. 创建 MR 并合并至主线
 由于主线分支（如 `master`）是保护分支，无法直接推送：
-1. 使用本地 `glab` 命令（或在 GitLab 网页端）为 `ls-dev` 创建一个 Merge Request（MR）。
-2. 在 GitLab 上审核并执行 Merge，将改动合并至主线 `master` 分支。
+1. **优先使用本地 `glab` 命令**创建一个 Merge Request（MR）。如果本地环境未安装或配置 `glab` 命令行工具，则引导用户在 GitLab 网页端手动创建。
+2. 优先通过 `glab` 执行 Merge 合并；在无 `glab` 环境下由用户在网页端审核并执行合并，将改动合并至主线 `master` 分支。
 
 ### 步骤 4. 切换主线，拉取并再次验证 (双重全绿校验)
 为了彻底防范任何由于分支合并产生的冲突或缺陷，合并至主线后**必须在 master 上拉取并再次本地编译**：
