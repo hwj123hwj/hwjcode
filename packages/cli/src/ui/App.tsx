@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Box,
   DOMElement,
@@ -96,6 +96,7 @@ import { ContextSummaryDisplay } from './components/ContextSummaryDisplay.js';
 import { IDEContextDetailDisplay } from './components/IDEContextDetailDisplay.js';
 import { ReasoningDisplay } from './components/ReasoningDisplay.js';
 import { HealthyUseReminder } from './components/HealthyUseReminder.js';
+import { FeishuStatusDashboard, type FeishuProjectRoute, type FeishuMessageLogEntry } from './components/FeishuStatusDashboard.js';
 import { useHistoryCleanup } from './hooks/useHistoryCleanup.js';
 import { HistoryCleanupDialog } from './components/HistoryCleanupDialog.js';
 import { useHistory } from './hooks/useHistoryManager.js';
@@ -336,6 +337,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const [isFeishuProcessing, setIsFeishuProcessing] = useState(false);
   const [isFeishuBotRunning, setIsFeishuBotRunning] = useState(false);
 
+  // 飞书仪表板状态
+  const [feishuRoutes, setFeishuRoutes] = useState<Record<string, FeishuProjectRoute>>({});
+  const [feishuActiveGroupChatId, setFeishuActiveGroupChatId] = useState<string | null>(null);
+  const [feishuGroupLogs, setFeishuGroupLogs] = useState<Record<string, FeishuMessageLogEntry[]>>({});
+  const [feishuBotName, setFeishuBotName] = useState<string>('');
+  const [feishuPlatform, setFeishuPlatform] = useState<string>('feishu');
+
   // 监听飞书消息处理与Bot运行状态事件
   useEffect(() => {
     const handleFeishuProcessingStart = () => {
@@ -346,24 +354,64 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       setIsFeishuProcessing(false);
     };
 
-    const handleFeishuBotStarted = () => {
+    const handleFeishuBotStarted = (payload?: { botName?: string; platform?: string }) => {
       setIsFeishuBotRunning(true);
+      if (payload?.botName !== undefined) {
+        setFeishuBotName(payload.botName);
+      }
+      if (payload?.platform !== undefined) {
+        setFeishuPlatform(payload.platform);
+      }
     };
 
     const handleFeishuBotStopped = () => {
       setIsFeishuBotRunning(false);
     };
 
+    // 仪表板事件：群处理开始
+    const handleFeishuGroupProcessingStart = (chatId: string) => {
+      setFeishuActiveGroupChatId(chatId);
+    };
+
+    // 仪表板事件：群处理结束
+    const handleFeishuGroupProcessingEnd = (chatId: string) => {
+      setFeishuActiveGroupChatId(prev => prev === chatId ? null : prev);
+    };
+
+    // 仪表板事件：消息日志
+    const handleFeishuMessageLog = (chatId: string, text: string, direction: 'in' | 'out' | 'tool', timestamp: number) => {
+      setFeishuGroupLogs(prev => {
+        const existing = prev[chatId] ?? [];
+        const entry: FeishuMessageLogEntry = { chatId, text, direction, timestamp };
+        // 最多保留 50 条日志
+        const updated = [...existing, entry].slice(-50);
+        return { ...prev, [chatId]: updated };
+      });
+    };
+
+    // 仪表板事件：路由更新
+    const handleFeishuProjectRoutesUpdated = (routes: Record<string, FeishuProjectRoute>) => {
+      setFeishuRoutes(routes);
+    };
+
     appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
     appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
     appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
     appEvents.on(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+    appEvents.on(AppEvent.FeishuGroupProcessingStart, handleFeishuGroupProcessingStart);
+    appEvents.on(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
+    appEvents.on(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
+    appEvents.on(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
 
     return () => {
       appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
       appEvents.off(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
       appEvents.off(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
       appEvents.off(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+      appEvents.off(AppEvent.FeishuGroupProcessingStart, handleFeishuGroupProcessingStart);
+      appEvents.off(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
+      appEvents.off(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
+      appEvents.off(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
     };
   }, []);
 
@@ -2787,13 +2835,27 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
 
 
-              <Box
-                marginTop={1}
-                marginBottom={1}
-                display="flex"
-                justifyContent="space-between"
-                width="100%"
-              >
+              {/* 飞书 Bot 运行中 → 显示状态仪表板 */}
+              {isFeishuBotRunning ? (
+                <FeishuStatusDashboard
+                  routes={feishuRoutes}
+                  activeGroupChatId={feishuActiveGroupChatId}
+                  groupLogs={feishuGroupLogs}
+                  botName={feishuBotName}
+                  platform={feishuPlatform}
+                  isConnected={true}
+                  terminalWidth={terminalWidth}
+                />
+              ) : (
+                <React.Fragment>
+                  {/* 正常模式下的内容区域 */}
+                  <Box
+                    marginTop={1}
+                    marginBottom={1}
+                    display="flex"
+                    justifyContent="space-between"
+                    width="100%"
+                  >
                 <Box>
                   {process.env.GEMINI_SYSTEM_MD ? (
                     <Text color={Colors.AccentRed}>|⌐■_■| </Text>
@@ -2841,7 +2903,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 <IDEContextDetailDisplay openFiles={openFiles} />
               ) : null}
 
-              {/* 图片生成轮询动画 - 显示在 ContextSummaryDisplay 上方 */}
+              {/* 图片生成轮询动画 */}
               {imagePolling.isVisible ? (
                 <Box marginY={0} marginBottom={1}>
                   <ImagePollingSpinner
@@ -2862,7 +2924,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 </Box>
               ) : null}
 
-              {/* Token Usage Display - 显示在输入框上方 */}
+              {/* Token Usage Display - 飞书模式下隐藏 */}
               {lastTokenUsage && streamingState !== StreamingState.Responding ? (
                 <TokenUsageDisplay
                   tokenUsage={lastTokenUsage}
@@ -2870,6 +2932,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   cumulativeCredits={cumulativeCredits}
                 />
               ) : null}
+            </React.Fragment>
+          )}
 
               {/* 队列消息显示 - 简洁模式（无Queued标签） */}
               {queuedPrompts.length > 0 && !initError ? (

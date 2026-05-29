@@ -48,6 +48,8 @@ export interface FeishuMessage {
   messageType: string;
   /** 待下载的图片信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/clipboard/） */
   pendingImages?: Array<{ imageKey: string; placeholder: string }>;
+  /** 待下载的文件信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/inbound/） */
+  pendingFiles?: Array<{ fileKey: string; fileName: string; placeholder: string }>;
 }
 
 export type OnMessageCallback = (msg: FeishuMessage) => Promise<string | null>;
@@ -339,6 +341,9 @@ export class FeishuGateway {
   private processedMessages: Set<string> = new Set();
   private readonly maxProcessedMessages = 500;
 
+  /** 内存中的 in-flight 消息集合，用于在长耗时处理期间拦截飞书并发重试 */
+  private inFlightMessages: Set<string> = new Set();
+
   /** 获取去重文件的绝对路径 */
   private getProcessedMessagesFilePath(): string {
     const homeDir = os.homedir();
@@ -532,6 +537,54 @@ export class FeishuGateway {
   }
 
   /**
+   * 下载飞书 IM 消息中的文件资源并保存到指定目录。
+   *
+   * @param messageId 飞书消息 ID
+   * @param fileKey   飞书文件资源 key
+   * @param fileName  原始文件名
+   * @param targetDir 目标目录（会自动创建）
+   * @returns 本地绝对路径，失败返回 null
+   */
+  async downloadFileToDir(messageId: string, fileKey: string, fileName: string, targetDir: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return null;
+
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/resources/${fileKey}?type=file`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+
+      const buffer = await res.arrayBuffer();
+
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      // 净化文件名，防止路径穿越和非法字符
+      const ext = path.extname(fileName);
+      const base = path.basename(fileName, ext);
+      const safeBase = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+      let safeFileName = `${safeBase}${ext}`;
+
+      // 如果文件已存在，自动重命名以防止冲突覆盖
+      let localPath = path.join(targetDir, safeFileName);
+      let counter = 1;
+      while (fs.existsSync(localPath)) {
+        safeFileName = `${safeBase}_${counter}${ext}`;
+        localPath = path.join(targetDir, safeFileName);
+        counter++;
+      }
+
+      fs.writeFileSync(localPath, Buffer.from(buffer));
+      return localPath;
+    } catch (e: any) {
+      dlog(`[Feishu] downloadFileToDir failed: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /**
    * 连接飞书 WS 事件订阅（通过 SDK WSClient）
    *
    * SDK 自动：
@@ -569,6 +622,8 @@ export class FeishuGateway {
         const msgType = message.message_type || 'text';
         // 收集待下载的图片元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
         const pendingImages: Array<{ imageKey: string; placeholder: string }> = [];
+        // 收集待下载的文件元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
+        const pendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }> = [];
 
         if (msgType === 'text') {
           try {
@@ -589,6 +644,51 @@ export class FeishuGateway {
             }
           } catch {
             text = '[图片消息]';
+          }
+        } else if (msgType === 'file') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            const fileName = content.file_name || 'unnamed_file';
+            if (fileKey) {
+              const placeholder = `[文件消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = `[文件消息: ${fileName}]`;
+            }
+          } catch {
+            text = '[文件消息]';
+          }
+        } else if (msgType === 'audio') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            if (fileKey) {
+              const fileName = `audio_${message.message_id || 'unnamed'}.opus`;
+              const placeholder = `[音频消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = '[音频消息]';
+            }
+          } catch {
+            text = '[音频消息]';
+          }
+        } else if (msgType === 'media') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            if (fileKey) {
+              const fileName = `video_${message.message_id || 'unnamed'}.mp4`;
+              const placeholder = `[视频消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = '[视频消息]';
+            }
+          } catch {
+            text = '[视频消息]';
           }
         } else if (msgType === 'post') {
           try {
@@ -671,10 +771,15 @@ export class FeishuGateway {
           })),
           messageType: message.message_type || 'text',
           pendingImages: pendingImages.length > 0 ? pendingImages : undefined,
+          pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         };
 
-        // 消息去重：先按 messageId，再按内容+时间窗口兜底
+        // 消息去重：先按 messageId (包括正在执行的和已成功执行的)，再按内容+时间窗口兜底
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+          if (this.inFlightMessages.has(feishuMsg.messageId)) {
+            dlog(`Skipped in-flight message (messageId): ${feishuMsg.messageId}`);
+            return { code: 0 };
+          }
           if (this.processedMessages.has(feishuMsg.messageId)) {
             dlog(`Skipped duplicate message (messageId): ${feishuMsg.messageId}`);
             return { code: 0 };
@@ -689,44 +794,65 @@ export class FeishuGateway {
           return { code: 0 };
         }
 
-        // 记录已处理的消息
+        // 标记为正在处理
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
-          this.processedMessages.add(feishuMsg.messageId);
-          if (this.processedMessages.size > this.maxProcessedMessages) {
-            const iterator = this.processedMessages.values();
-            const oldest = iterator.next().value;
-            if (oldest) this.processedMessages.delete(oldest);
-          }
-          this.saveProcessedMessages(); // ✨ 持久化到磁盘
+          this.inFlightMessages.add(feishuMsg.messageId);
         }
+
         this.recentContents.set(contentKey, now);
         // 清理过期的内容去重记录
         for (const [key, ts] of this.recentContents) {
           if (now - ts > this.dedupWindowMs * 2) this.recentContents.delete(key);
         }
 
-        // 文本选择模式：如果正在等待用户文本回复选项，优先处理
-        if (this.textChoiceCallback) {
-          const consumed = this.textChoiceCallback(feishuMsg);
-          if (consumed) {
-            // 该消息已被文本选择器消费，不触发 onMessage
-            return { code: 0 };
-          }
-        }
-
-        if (this.onMessage) {
-          // 添加"思考中"表情，让用户知道 Bot 正在处理
-          const reactionId = await this.addReaction(feishuMsg.messageId, 'THINKING');
-          try {
-            const reply = await this.onMessage(feishuMsg);
-            if (reply) {
-              await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
+        try {
+          // 文本选择模式：如果正在等待用户文本回复选项，优先处理
+          if (this.textChoiceCallback) {
+            const consumed = this.textChoiceCallback(feishuMsg);
+            if (consumed) {
+              // 该消息已被文本选择器消费，不触发 onMessage
+              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+                this.processedMessages.add(feishuMsg.messageId);
+                if (this.processedMessages.size > this.maxProcessedMessages) {
+                  const iterator = this.processedMessages.values();
+                  const oldest = iterator.next().value;
+                  if (oldest) this.processedMessages.delete(oldest);
+                }
+                this.saveProcessedMessages();
+              }
+              return { code: 0 };
             }
-          } catch (err) {
-            derror('feishu onMessage handler error:', err);
-          } finally {
-            // 处理完成，移除"思考中"表情
-            await this.removeReaction(feishuMsg.messageId, reactionId);
+          }
+
+          if (this.onMessage) {
+            // 添加"思考中"表情，让用户知道 Bot 正在处理
+            const reactionId = await this.addReaction(feishuMsg.messageId, 'THINKING');
+            try {
+              const reply = await this.onMessage(feishuMsg);
+              if (reply) {
+                await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
+              }
+              // 🎯 处理成功，记录已成功处理的消息并持久化
+              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+                this.processedMessages.add(feishuMsg.messageId);
+                if (this.processedMessages.size > this.maxProcessedMessages) {
+                  const iterator = this.processedMessages.values();
+                  const oldest = iterator.next().value;
+                  if (oldest) this.processedMessages.delete(oldest);
+                }
+                this.saveProcessedMessages(); // ✨ 持久化到磁盘
+              }
+            } catch (err) {
+              derror('feishu onMessage handler error:', err);
+            } finally {
+              // 处理完成，移除"思考中"表情
+              await this.removeReaction(feishuMsg.messageId, reactionId);
+            }
+          }
+        } finally {
+          // 无论成功还是失败，只要该消息处理流程结束，就从 in-flight 集合中移除
+          if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+            this.inFlightMessages.delete(feishuMsg.messageId);
           }
         }
 

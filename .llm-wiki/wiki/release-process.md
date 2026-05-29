@@ -70,7 +70,7 @@ git push origin ls-dev
    npm run build
    ```
 
-### 步骤 5. 在主线打 Tag 重新发版 (砸板)
+### 步骤 5. 在主线打 Tag 重新发版
 只有在步骤 4 验证主线完全无冲突且本地构建全绿后，才可以开始发版：
 1. 列出远程最新的 release tag 列表：
    ```bash
