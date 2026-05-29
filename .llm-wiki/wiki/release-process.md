@@ -29,49 +29,66 @@ tags: [release, git, tag, ci-cd, npm, workflow]
 
 ## 规范发布步骤
 
-请严格按照以下标准化顺序执行代码修改和版本发布：
+请严格按照以下标准化顺序执行代码修改、主线合并和版本发布：
 
-### 步骤 1. 代码修改与就地验证
-在修改完业务代码后，严禁直接推送。必须执行以下验证：
-- **运行单元测试**：使用单文件测试命令来节省资源。
+### 步骤 1. 本地代码修改与就地验证
+在修改完业务代码后，严禁直接推送。必须首先执行本地验证：
+- **运行单元测试**：使用单文件测试命令验证业务逻辑。
   ```bash
   npx vitest run <test-file-path>
-  # 示例：
-  npx vitest run packages/core/src/tools/shell.test.ts
   ```
-- **完整构建编译**：确保 TypeScript 编译器类型校验没有引入任何错误。
+- **全量构建编译**：本地运行全量编译，确保类型校验没有引入任何错误。
   ```bash
   npm run build
   ```
 
-### 步骤 2. 本地代码提交
-将修改提交至 `git`：
+### 步骤 2. 提交并推送开发分支
+将代码改动提交到本地，并推送到远程开发分支 `ls-dev`：
 ```bash
 git add <modified-files>
 git commit -m "feat(module): your clear message"
+git push origin ls-dev
 ```
 
-### 步骤 3. 获取最新 Release Tag 并计算下一版
-列出远程最新的 release tag 列表：
-```bash
-git tag -l "cli-release-v*" --sort=-v:refname
-```
-- *假设*：当前列出的最新 tag 是 `cli-release-v1.0.357`。
-- *计算*：下一个 tag 应该向上递增，即为 `cli-release-v1.0.358`。
-- 确认本地 `package.json` 中的版本号小于此版本。
+### 步骤 3. 创建 MR 并合并至主线
+由于主线分支（如 `master`）是保护分支，无法直接推送：
+1. 使用本地 `glab` 命令（或在 GitLab 网页端）为 `ls-dev` 创建一个 Merge Request（MR）。
+2. 在 GitLab 上审核并执行 Merge，将改动合并至主线 `master` 分支。
 
-### 步骤 4. 推送代码与 Tag
-1. 首先将本地分支推送至远程：
+### 步骤 4. 切换主线，拉取并再次验证 (双重全绿校验)
+为了彻底防范任何由于分支合并产生的冲突或缺陷，合并至主线后**必须在 master 上拉取并再次本地编译**：
+1. 本地切换到主线分支：
    ```bash
-   git push origin ls-dev
+   git checkout master
    ```
-2. 本地创建递增后的新 Tag：
+2. 从远程拉取最新代码（获取主线合并后的最终提交）：
    ```bash
-   git tag cli-release-v1.0.358
+   git pull origin master
    ```
-3. 将此 Tag 单独推送到远程，触发 CI/CD 自动化流水线：
+3. **至关重要：在本地 master 上再次运行构建**，确保最终合并后的代码 100% 全绿通过：
    ```bash
-   git push origin cli-release-v1.0.358
+   npm run build
+   ```
+
+### 步骤 5. 在主线打 Tag 重新发版 (砸板)
+只有在步骤 4 验证主线完全无冲突且本地构建全绿后，才可以开始发版：
+1. 列出远程最新的 release tag 列表：
+   ```bash
+   git tag -l "cli-release-v*" --sort=-v:refname
+   ```
+   *计算*：假设最新 tag 为 `cli-release-v1.0.360`，递增后下一版为 `cli-release-v1.0.361`。
+2. 确认本地 `package.json` 中的版本号严格小于（<）此版本号。
+3. 在本地 `master` 分支创建此递增的新 Tag：
+   ```bash
+   git tag cli-release-v1.0.361
+   ```
+4. 将此 Tag 推送到远程，触发 CI/CD 自动化流水线：
+   ```bash
+   git push origin cli-release-v1.0.361
+   ```
+5. 发版结束后，切回 `ls-dev` 继续开展日常开发工作：
+   ```bash
+   git checkout ls-dev
    ```
 
 ---
