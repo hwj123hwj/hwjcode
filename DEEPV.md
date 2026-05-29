@@ -73,6 +73,7 @@ DeepV Code (Monorepo)
    - 例如：`npx vitest run packages/cli/src/ui/hooks/useCompletion.test.ts`
    - 全量测试由 CI/CD 自动运行，本地开发节省时间
 6. **Git 提交规范**: 在解决同一个任务或修复同一个问题的过程中，应优先使用 `git commit --amend` 将多次修改合并为一笔提交，避免产生大量琐碎的提交记录。只有在完成一个逻辑独立的阶段性功能时，才创建新的提交。
+7. **发版流程规范**: 在执行任何代码提交推送和发版流程前，**必须在主线分支上拉取最终代码并双重执行 `npm run build` 确保本地构建 100% 全绿**！创建与合并 Merge Request 时，应**优先使用本地 `glab` 命令行工具**。严禁“带病发版”或越过本地编译，详情请务必主动阅读并查阅发版指南 Wiki [`.llm-wiki/wiki/release-process.md`](.llm-wiki/wiki/release-process.md)。
 
 #### 代码规范
 1. **i18n 国际化**: 所有面向最终用户的 UI 文案必须国际化
