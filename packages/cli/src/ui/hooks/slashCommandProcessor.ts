@@ -72,7 +72,6 @@ export const useSlashCommandProcessor = (
   openDebateWizard?: () => void, // 🎭 接收 openDebateWizard
   resumeDebate?: () => void, // 🎭 接收 resumeDebate (由 /debate continue 触发)
   openGoalWizard?: () => void, // 🎯 接收 openGoalWizard (由 /goal 触发)
-  openEffortWizard?: () => void, // ⚙️ 接收 openEffortWizard (由 /effort 触发)
 ) => {
   const session = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
@@ -425,12 +424,6 @@ export const useSlashCommandProcessor = (
                       setShowHelp(false);
                       if (openGoalWizard) {
                         openGoalWizard();
-                      }
-                      return { type: 'handled' };
-                    case 'effort-wizard':
-                      setShowHelp(false);
-                      if (openEffortWizard) {
-                        openEffortWizard();
                       }
                       return { type: 'handled' };
                     default: {
