@@ -99,16 +99,20 @@ export const HistoryItemDisplay = memo(({
       />
     ) : null}
     {item.type === 'quit' ? <SessionSummaryDisplay duration={item.duration} credits={item.credits} config={config} /> : null}
-    {item.type === 'tool_group' ? (
-      <ToolGroupMessage
-        toolCalls={item.tools}
-        groupId={item.id}
-        availableTerminalHeight={availableTerminalHeight}
-        terminalWidth={terminalWidth}
-        config={config}
-        isFocused={isFocused}
-      />
-    ) : null}
+    {item.type === 'tool_group' ? (() => {
+      const filteredTools = item.tools.filter((t) => t.toolId !== 'todo_write');
+      if (filteredTools.length === 0) return null;
+      return (
+        <ToolGroupMessage
+          toolCalls={filteredTools}
+          groupId={item.id}
+          availableTerminalHeight={availableTerminalHeight}
+          terminalWidth={terminalWidth}
+          config={config}
+          isFocused={isFocused}
+        />
+      );
+    })() : null}
     {item.type === 'compression' ? (
       <CompressionMessage compression={item.compression} />
     ) : null}
