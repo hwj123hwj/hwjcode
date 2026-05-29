@@ -32,7 +32,7 @@ export interface ThinkingConfig {
   /** 启用模式 */
   mode: 'on' | 'off' | 'auto';
   /** 思考力度，可选 */
-  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'auto';
+  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'ultracode' | 'auto';
   /**
    * 直接指定 budget tokens（覆盖 effort）
    * 仅 Anthropic 3.7 / Gemini 2.5 生效
@@ -63,6 +63,7 @@ export function effortToAnthropicBudget(
     case 'high':
     case 'max':
     case 'xhigh':
+    case 'ultracode':
       return 31999;
     case 'auto':
     default:
@@ -81,6 +82,9 @@ export function effortToAnthropicEffort(
 ): 'low' | 'medium' | 'high' | 'max' | 'xhigh' | undefined {
   if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max' || effort === 'xhigh') {
     return effort;
+  }
+  if (effort === 'ultracode') {
+    return 'xhigh';
   }
   return undefined;
 }
@@ -116,8 +120,8 @@ export function effortToOpenAIEffort(
   if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
     return effort;
   }
-  if (effort === 'max') {
-    return 'xhigh'; // 🌟 max 映射为 OpenAI 的极致性能级别 xhigh (支持 o1/gpt-5.5)
+  if (effort === 'max' || effort === 'ultracode') {
+    return 'xhigh'; // 🌟 max/ultracode 映射为 OpenAI 的极致性能级别 xhigh (支持 o1/gpt-5.5)
   }
   // 'auto' 或 undefined：交给 OpenAI 默认值
   return undefined;
@@ -138,6 +142,7 @@ export function effortToGeminiLevel(
     case 'high':
     case 'max':
     case 'xhigh':
+    case 'ultracode':
       return 'high';
     case 'auto':
     default:
@@ -159,6 +164,7 @@ export function effortToGeminiBudget(
     case 'high':
     case 'max':
     case 'xhigh':
+    case 'ultracode':
       return 16384;
     case 'auto':
       return -1; // 🌟 setting thinkingBudget to -1 turns on dynamic thinking (Gemini 2.5 官方推荐默认值)

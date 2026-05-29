@@ -47,6 +47,7 @@ const getEffortLabel = (effort: string | undefined): string => {
     case 'high': return t('thinking.effort.high');
     case 'max': return t('thinking.effort.max');
     case 'xhigh': return t('thinking.effort.xhigh');
+    case 'ultracode': return t('thinking.effort.ultracode');
     case 'auto':
     default: return t('thinking.effort.auto');
   }
