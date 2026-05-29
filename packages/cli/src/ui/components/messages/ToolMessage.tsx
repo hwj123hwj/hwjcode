@@ -173,6 +173,65 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
   //    结果体（行数、文件清单等）是冗余确认，完成后收起，只保留标题一行。
   const collapseResult = shouldCollapseToolResult({ toolId, status, resultDisplay });
 
+  // 🎯 为折叠成功的工具提取精简结果，优化用户界面展示
+  let compactResultText = '';
+  if (collapseResult && status === ToolCallStatus.Success && resultDisplay) {
+    const isZh = isChineseLocale();
+    if (toolId === 'read_file') {
+      const lineCount = typeof resultDisplay === 'string' ? resultDisplay.split('\n').length : 0;
+      compactResultText = isZh ? `(读了 ${lineCount} 行)` : `(${lineCount} lines read)`;
+    } else if (toolId === 'search_file_content') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Found (\d+) matches/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(匹配到 ${count} 个)` : `(${count} matches found)`;
+        } else if (resultDisplay.includes('No matches found')) {
+          compactResultText = isZh ? `(未找到匹配)` : `(No matches found)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'read_many_files') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/content from \*\*(\d+) file/i) ||
+                      resultDisplay.match(/content from \*\*(\d+)\*\* file/i) ||
+                      resultDisplay.match(/Successfully read and concatenated content from \*\*(\d+) file/i) ||
+                      resultDisplay.match(/(\d+) file\(s\)/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(读取了 ${count} 个文件)` : `(${count} files read)`;
+        } else {
+          compactResultText = isZh ? `(多文件读取完成)` : `(Files read completed)`;
+        }
+      }
+    } else if (toolId === 'glob') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Found (\d+) matching/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(找到 ${count} 个匹配文件)` : `(${count} matching files found)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'list_directory') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Listed (\d+) item/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(列出 ${count} 个子项)` : `(${count} items listed)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'web_search' || toolId === 'web_fetch') {
+      if (typeof resultDisplay === 'string') {
+        compactResultText = `(${resultDisplay})`;
+      }
+    }
+  }
+
   const availableHeight = availableTerminalHeight
     ? Math.max(
       availableTerminalHeight - STATIC_HEIGHT - RESERVED_LINE_COUNT,
@@ -236,6 +295,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
           description={description}
           emphasis={emphasis}
           terminalWidth={terminalWidth - 1} // 减去 paddingRight={1} 的一列
+          compactResultText={compactResultText} // 🎯 传递精简结果
         />
         {emphasis === 'high' ? <TrailingIndicator /> : null}
       </Box>
@@ -450,6 +510,7 @@ type ToolInfoProps = {
   status: ToolCallStatus;
   emphasis: TextEmphasis;
   terminalWidth: number;
+  compactResultText?: string; // 🎯 新增：精简结果文本
 };
 const ToolInfo: React.FC<ToolInfoProps> = ({
   name,
@@ -457,6 +518,7 @@ const ToolInfo: React.FC<ToolInfoProps> = ({
   status,
   emphasis,
   terminalWidth,
+  compactResultText, // 🎯 新增：接收精简结果文本
 }) => {
   // Special handling for Sequential thinking tool - show summary instead of full thought
   let displayDescription = description;
@@ -509,6 +571,11 @@ const ToolInfo: React.FC<ToolInfoProps> = ({
           {getLocalizedToolName(name)}
         </Text>{' '}
         {displayDescription}
+        {compactResultText ? (
+          <Text color={Colors.AccentGreen} bold={false}>
+            {' '}{compactResultText}
+          </Text>
+        ) : null}
       </Text>
     </Box>
   );
