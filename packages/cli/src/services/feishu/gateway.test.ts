@@ -139,6 +139,80 @@ describe('FeishuGateway - Message Parsing', () => {
     ]);
   });
 
+  it('correctly parses audio message', async () => {
+    await gateway.connect();
+    expect(messageCallback).toBeTypeOf('function');
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_audio_123',
+          message_type: 'audio',
+          content: JSON.stringify({ file_key: 'file_v2_audio', duration: 12000 }),
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.text).toBe('[音频消息: audio_om_audio_123.opus]');
+    expect(receivedMsg.messageType).toBe('audio');
+    expect(receivedMsg.pendingFiles).toEqual([
+      { fileKey: 'file_v2_audio', fileName: 'audio_om_audio_123.opus', placeholder: '[音频消息: audio_om_audio_123.opus]' }
+    ]);
+  });
+
+  it('correctly parses media message', async () => {
+    await gateway.connect();
+    expect(messageCallback).toBeTypeOf('function');
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_media_123',
+          message_type: 'media',
+          content: JSON.stringify({ file_key: 'file_v2_video', duration: 34000 }),
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.text).toBe('[视频消息: video_om_media_123.mp4]');
+    expect(receivedMsg.messageType).toBe('media');
+    expect(receivedMsg.pendingFiles).toEqual([
+      { fileKey: 'file_v2_video', fileName: 'video_om_media_123.mp4', placeholder: '[视频消息: video_om_media_123.mp4]' }
+    ]);
+  });
+
   it('correctly parses post message (rich text) with title and paragraphs', async () => {
     await gateway.connect();
     expect(messageCallback).toBeTypeOf('function');
