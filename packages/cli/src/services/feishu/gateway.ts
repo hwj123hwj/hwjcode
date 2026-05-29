@@ -657,6 +657,36 @@ export class FeishuGateway {
           } catch {
             text = '[文件消息]';
           }
+        } else if (msgType === 'audio') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            if (fileKey) {
+              const fileName = `audio_${message.message_id || 'unnamed'}.opus`;
+              const placeholder = `[音频消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = '[音频消息]';
+            }
+          } catch {
+            text = '[音频消息]';
+          }
+        } else if (msgType === 'media') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            if (fileKey) {
+              const fileName = `video_${message.message_id || 'unnamed'}.mp4`;
+              const placeholder = `[视频消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = '[视频消息]';
+            }
+          } catch {
+            text = '[视频消息]';
+          }
         } else if (msgType === 'post') {
           try {
             const content = JSON.parse(message.content || '{}');
