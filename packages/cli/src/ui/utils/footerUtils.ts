@@ -114,12 +114,14 @@ export function getContextDisplay(percentage: number | string, simplified: boole
  */
 export function getThinkingEffortLabel(thinkingConfig?: {
   mode?: 'on' | 'off' | 'auto';
-  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'auto';
+  effort?: 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'ultracode' | 'auto';
 }): string {
   if (!thinkingConfig || thinkingConfig.mode === 'off') return '';
   // Effort takes precedence — if a concrete effort is set, that's what's
   // actually being sent to the provider, regardless of the abstract `mode`.
   switch (thinkingConfig.effort) {
+    case 'ultracode':
+      return 'ultra';
     case 'max':
       return 'max';
     case 'xhigh':
