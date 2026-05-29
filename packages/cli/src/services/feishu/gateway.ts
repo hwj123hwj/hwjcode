@@ -341,6 +341,9 @@ export class FeishuGateway {
   private processedMessages: Set<string> = new Set();
   private readonly maxProcessedMessages = 500;
 
+  /** 内存中的 in-flight 消息集合，用于在长耗时处理期间拦截飞书并发重试 */
+  private inFlightMessages: Set<string> = new Set();
+
   /** 获取去重文件的绝对路径 */
   private getProcessedMessagesFilePath(): string {
     const homeDir = os.homedir();
@@ -771,8 +774,12 @@ export class FeishuGateway {
           pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         };
 
-        // 消息去重：先按 messageId，再按内容+时间窗口兜底
+        // 消息去重：先按 messageId (包括正在执行的和已成功执行的)，再按内容+时间窗口兜底
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+          if (this.inFlightMessages.has(feishuMsg.messageId)) {
+            dlog(`Skipped in-flight message (messageId): ${feishuMsg.messageId}`);
+            return { code: 0 };
+          }
           if (this.processedMessages.has(feishuMsg.messageId)) {
             dlog(`Skipped duplicate message (messageId): ${feishuMsg.messageId}`);
             return { code: 0 };
@@ -787,44 +794,65 @@ export class FeishuGateway {
           return { code: 0 };
         }
 
-        // 记录已处理的消息
+        // 标记为正在处理
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
-          this.processedMessages.add(feishuMsg.messageId);
-          if (this.processedMessages.size > this.maxProcessedMessages) {
-            const iterator = this.processedMessages.values();
-            const oldest = iterator.next().value;
-            if (oldest) this.processedMessages.delete(oldest);
-          }
-          this.saveProcessedMessages(); // ✨ 持久化到磁盘
+          this.inFlightMessages.add(feishuMsg.messageId);
         }
+
         this.recentContents.set(contentKey, now);
         // 清理过期的内容去重记录
         for (const [key, ts] of this.recentContents) {
           if (now - ts > this.dedupWindowMs * 2) this.recentContents.delete(key);
         }
 
-        // 文本选择模式：如果正在等待用户文本回复选项，优先处理
-        if (this.textChoiceCallback) {
-          const consumed = this.textChoiceCallback(feishuMsg);
-          if (consumed) {
-            // 该消息已被文本选择器消费，不触发 onMessage
-            return { code: 0 };
-          }
-        }
-
-        if (this.onMessage) {
-          // 添加"思考中"表情，让用户知道 Bot 正在处理
-          const reactionId = await this.addReaction(feishuMsg.messageId, 'THINKING');
-          try {
-            const reply = await this.onMessage(feishuMsg);
-            if (reply) {
-              await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
+        try {
+          // 文本选择模式：如果正在等待用户文本回复选项，优先处理
+          if (this.textChoiceCallback) {
+            const consumed = this.textChoiceCallback(feishuMsg);
+            if (consumed) {
+              // 该消息已被文本选择器消费，不触发 onMessage
+              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+                this.processedMessages.add(feishuMsg.messageId);
+                if (this.processedMessages.size > this.maxProcessedMessages) {
+                  const iterator = this.processedMessages.values();
+                  const oldest = iterator.next().value;
+                  if (oldest) this.processedMessages.delete(oldest);
+                }
+                this.saveProcessedMessages();
+              }
+              return { code: 0 };
             }
-          } catch (err) {
-            derror('feishu onMessage handler error:', err);
-          } finally {
-            // 处理完成，移除"思考中"表情
-            await this.removeReaction(feishuMsg.messageId, reactionId);
+          }
+
+          if (this.onMessage) {
+            // 添加"思考中"表情，让用户知道 Bot 正在处理
+            const reactionId = await this.addReaction(feishuMsg.messageId, 'THINKING');
+            try {
+              const reply = await this.onMessage(feishuMsg);
+              if (reply) {
+                await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
+              }
+              // 🎯 处理成功，记录已成功处理的消息并持久化
+              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+                this.processedMessages.add(feishuMsg.messageId);
+                if (this.processedMessages.size > this.maxProcessedMessages) {
+                  const iterator = this.processedMessages.values();
+                  const oldest = iterator.next().value;
+                  if (oldest) this.processedMessages.delete(oldest);
+                }
+                this.saveProcessedMessages(); // ✨ 持久化到磁盘
+              }
+            } catch (err) {
+              derror('feishu onMessage handler error:', err);
+            } finally {
+              // 处理完成，移除"思考中"表情
+              await this.removeReaction(feishuMsg.messageId, reactionId);
+            }
+          }
+        } finally {
+          // 无论成功还是失败，只要该消息处理流程结束，就从 in-flight 集合中移除
+          if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
+            this.inFlightMessages.delete(feishuMsg.messageId);
           }
         }
 
