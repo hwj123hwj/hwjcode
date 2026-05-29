@@ -2121,11 +2121,42 @@ async function handleStart(context?: CommandContext): Promise<string> {
       // 确保 chat 已初始化
       await geminiClient.waitForChatInitialized();
 
-      // 🎯 下载飞书消息中的图片到项目 .deepvcode/clipboard/ 目录
-      // 图片路径以纯文本绝对路径形式拼接到消息中，由 read_many_files 工具自动接管读取
+      // 🎯 下载飞书消息中的图片/文件到项目的相应目录下
+      // 路径以纯文本绝对路径形式拼接到消息中，由工具（如 read_many_files）自动接管读取
       let messageTextForAI = messageText;
       let currentMessage: PartListUnion = messageTextForAI;
 
+      // 1. 处理文件下载 (落盘至 .deepvcode/inbound/)
+      if (msg.pendingFiles && msg.pendingFiles.length > 0) {
+        const projectRoot = config?.getProjectRoot?.() || process.cwd();
+        const fs = await import('node:fs');
+        const pathModule = await import('node:path');
+        const inboundDir = pathModule.join(projectRoot, '.deepvcode', 'inbound');
+        fs.mkdirSync(inboundDir, { recursive: true });
+
+        const filePaths: string[] = [];
+        for (const file of msg.pendingFiles) {
+          const localPath = await gateway.downloadFileToDir(msg.messageId, file.fileKey, file.fileName, inboundDir);
+          if (localPath) {
+            filePaths.push(localPath);
+            dlog(`[Feishu] File downloaded to inbound: ${localPath}`);
+          } else {
+            dwarn(`[Feishu] Failed to download file key: ${file.fileKey}`);
+            filePaths.push(`[文件下载失败: ${file.fileName}]`);
+          }
+        }
+
+        // 重建消息文本：把占位符替换为实际绝对路径
+        let reconstructedText = msg.text;
+        for (let i = 0; i < msg.pendingFiles.length; i++) {
+          reconstructedText = reconstructedText.replace(msg.pendingFiles[i].placeholder, filePaths[i]);
+        }
+        msg.text = reconstructedText;
+        messageTextForAI = reconstructedText.trim();
+        dlog(`[Feishu] Reconstructed message with file paths: "${messageTextForAI}"`);
+      }
+
+      // 2. 处理图片下载 (落盘至 .deepvcode/clipboard/)
       if (msg.pendingImages && msg.pendingImages.length > 0) {
         const projectRoot = config?.getProjectRoot?.() || process.cwd();
         const fs = await import('node:fs');

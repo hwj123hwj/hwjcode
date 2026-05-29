@@ -101,6 +101,44 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.messageType).toBe('text');
   });
 
+  it('correctly parses file message', async () => {
+    await gateway.connect();
+    expect(messageCallback).toBeTypeOf('function');
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_file_123',
+          message_type: 'file',
+          content: JSON.stringify({ file_key: 'file_v2_abc', file_name: 'test.pdf' }),
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    // Trigger callback
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.text).toBe('[文件消息: test.pdf]');
+    expect(receivedMsg.messageType).toBe('file');
+    expect(receivedMsg.pendingFiles).toEqual([
+      { fileKey: 'file_v2_abc', fileName: 'test.pdf', placeholder: '[文件消息: test.pdf]' }
+    ]);
+  });
+
   it('correctly parses post message (rich text) with title and paragraphs', async () => {
     await gateway.connect();
     expect(messageCallback).toBeTypeOf('function');
@@ -498,6 +536,25 @@ describe('FeishuGateway - image download saves with real extension', () => {
     } catch {
       /* ignore */
     }
+  });
+
+  it('downloadFileToDir saves files with safe file names and handles duplicate names correctly', async () => {
+    const fileBytes = new Uint8Array([1, 2, 3, 4]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockImageResponse(fileBytes, 'application/pdf')));
+
+    // 1. 正常保存，过滤非法字符
+    const localPath1 = await gateway.downloadFileToDir('om_file_1', 'file_key_1', 'my-test-file*?!.pdf', tmpDir);
+    expect(localPath1).toBeTruthy();
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    expect(path.basename(localPath1!)).toBe('my-test-file___.pdf');
+    expect(fs.readFileSync(localPath1!)).toEqual(Buffer.from(fileBytes));
+
+    // 2. 模拟重名时自动递增
+    const localPath2 = await gateway.downloadFileToDir('om_file_2', 'file_key_2', 'my-test-file*?!.pdf', tmpDir);
+    expect(localPath2).toBeTruthy();
+    expect(path.basename(localPath2!)).toBe('my-test-file____1.pdf');
+    expect(fs.readFileSync(localPath2!)).toEqual(Buffer.from(fileBytes));
   });
 });
 

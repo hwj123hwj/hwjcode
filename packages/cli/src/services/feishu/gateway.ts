@@ -48,6 +48,8 @@ export interface FeishuMessage {
   messageType: string;
   /** 待下载的图片信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/clipboard/） */
   pendingImages?: Array<{ imageKey: string; placeholder: string }>;
+  /** 待下载的文件信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/inbound/） */
+  pendingFiles?: Array<{ fileKey: string; fileName: string; placeholder: string }>;
 }
 
 export type OnMessageCallback = (msg: FeishuMessage) => Promise<string | null>;
@@ -532,6 +534,54 @@ export class FeishuGateway {
   }
 
   /**
+   * 下载飞书 IM 消息中的文件资源并保存到指定目录。
+   *
+   * @param messageId 飞书消息 ID
+   * @param fileKey   飞书文件资源 key
+   * @param fileName  原始文件名
+   * @param targetDir 目标目录（会自动创建）
+   * @returns 本地绝对路径，失败返回 null
+   */
+  async downloadFileToDir(messageId: string, fileKey: string, fileName: string, targetDir: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return null;
+
+      const res = await fetch(`${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}/resources/${fileKey}?type=file`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+
+      const buffer = await res.arrayBuffer();
+
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      // 净化文件名，防止路径穿越和非法字符
+      const ext = path.extname(fileName);
+      const base = path.basename(fileName, ext);
+      const safeBase = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+      let safeFileName = `${safeBase}${ext}`;
+
+      // 如果文件已存在，自动重命名以防止冲突覆盖
+      let localPath = path.join(targetDir, safeFileName);
+      let counter = 1;
+      while (fs.existsSync(localPath)) {
+        safeFileName = `${safeBase}_${counter}${ext}`;
+        localPath = path.join(targetDir, safeFileName);
+        counter++;
+      }
+
+      fs.writeFileSync(localPath, Buffer.from(buffer));
+      return localPath;
+    } catch (e: any) {
+      dlog(`[Feishu] downloadFileToDir failed: ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /**
    * 连接飞书 WS 事件订阅（通过 SDK WSClient）
    *
    * SDK 自动：
@@ -569,6 +619,8 @@ export class FeishuGateway {
         const msgType = message.message_type || 'text';
         // 收集待下载的图片元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
         const pendingImages: Array<{ imageKey: string; placeholder: string }> = [];
+        // 收集待下载的文件元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
+        const pendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }> = [];
 
         if (msgType === 'text') {
           try {
@@ -589,6 +641,21 @@ export class FeishuGateway {
             }
           } catch {
             text = '[图片消息]';
+          }
+        } else if (msgType === 'file') {
+          try {
+            const content = JSON.parse(message.content || '{}');
+            const fileKey = content.file_key;
+            const fileName = content.file_name || 'unnamed_file';
+            if (fileKey) {
+              const placeholder = `[文件消息: ${fileName}]`;
+              text = placeholder;
+              pendingFiles.push({ fileKey, fileName, placeholder });
+            } else {
+              text = `[文件消息: ${fileName}]`;
+            }
+          } catch {
+            text = '[文件消息]';
           }
         } else if (msgType === 'post') {
           try {
@@ -671,6 +738,7 @@ export class FeishuGateway {
           })),
           messageType: message.message_type || 'text',
           pendingImages: pendingImages.length > 0 ? pendingImages : undefined,
+          pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
         };
 
         // 消息去重：先按 messageId，再按内容+时间窗口兜底
