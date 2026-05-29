@@ -304,7 +304,7 @@ function sanitizeShellOutput(text: string): string {
 
 
 
-const DEFAULT_SHELL_TIMEOUT_MS = 120000; // 120 seconds default timeout
+const DEFAULT_SHELL_TIMEOUT_MS = 300000; // 300 seconds default timeout (5 minutes)
 
 export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   static Name: string = 'run_shell_command';
