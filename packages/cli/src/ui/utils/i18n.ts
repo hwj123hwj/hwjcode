@@ -1593,6 +1593,20 @@ export const translations = {
     'feishu.tui.processing_error': '❌ Error processing message: {error}',
     'feishu.tui.unauthorized_log': '🛡️ Rejected unauthorized message: openId={openId} text="{text}"',
 
+    // Feishu Dashboard
+    'feishu.dashboard.connected': 'Connected',
+    'feishu.dashboard.disconnected': 'Disconnected',
+    'feishu.dashboard.bot_name': 'Bot',
+    'feishu.dashboard.bound_projects': 'Bound Projects',
+    'feishu.dashboard.no_projects': 'No projects bound yet. Send /bind <path> in group chat to link a workspace.',
+    'feishu.dashboard.active': '🟢 Active',
+    'feishu.dashboard.message_log': 'Message Log',
+    'feishu.dashboard.waiting': '⏳ Waiting for message...',
+    'feishu.dashboard.idle': '💤 No active tasks',
+    'feishu.dashboard.hint_stop': '/feishu stop — Stop the Bot',
+    'feishu.dashboard.welcome_title': '🚀 Feishu Bot Ready!',
+    'feishu.dashboard.welcome_message': 'WebSocket connected to Feishu. Send messages to your Bot in Feishu client to start.',
+
     // Error messages
     'error.config.not.loaded': 'Configuration not loaded.',
     'error.tool.registry.unavailable': 'Unable to retrieve tool registry.',
@@ -3225,6 +3239,20 @@ export const translations = {
     'feishu.tui.tool_failed': '❌ 工具失败: {name} — {error}',
     'feishu.tui.processing_error': '❌ 处理消息时出错: {error}',
     'feishu.tui.unauthorized_log': '🛡️ 拒绝未授权消息: openId={openId} text="{text}"',
+
+    // Feishu Dashboard（飞书仪表板）
+    'feishu.dashboard.connected': '已连接',
+    'feishu.dashboard.disconnected': '已断开',
+    'feishu.dashboard.bot_name': 'Bot',
+    'feishu.dashboard.bound_projects': '已绑定项目',
+    'feishu.dashboard.no_projects': '暂无绑定项目。在群聊中发送 /bind <路径> 绑定工作区。',
+    'feishu.dashboard.active': '🟢 活跃中',
+    'feishu.dashboard.message_log': '消息日志',
+    'feishu.dashboard.waiting': '⏳ 等待消息中...',
+    'feishu.dashboard.idle': '💤 无活跃任务',
+    'feishu.dashboard.hint_stop': '/feishu stop — 停止 Bot',
+    'feishu.dashboard.welcome_title': '🚀 飞书 Bot 已就绪！',
+    'feishu.dashboard.welcome_message': 'WebSocket 已连接飞书。现在去飞书客户端给 Bot 发送消息吧。',
 
     // Error messages
     'error.config.not.loaded': '配置未加载。',

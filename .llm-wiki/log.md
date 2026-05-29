@@ -2,6 +2,13 @@
 
 > Chronological record of wiki operations.
 
+## [2026-05-30] fix | Corrected oral error in Release Process Guide
+
+### Pages Updated
+- `wiki/release-process.md` — 将步骤 5 中的口音错误字样“砸板”修改为规范词“发版”。
+
+---
+
 ## [2026-05-29] feat | Release Process Guide
 
 ### Pages Added
