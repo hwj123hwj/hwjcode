@@ -572,7 +572,7 @@ const ToolInfo: React.FC<ToolInfoProps> = ({
         </Text>{' '}
         {displayDescription}
         {compactResultText ? (
-          <Text color={Colors.AccentGreen} bold={false}>
+          <Text color={Colors.Gray} bold={false}>
             {' '}{compactResultText}
           </Text>
         ) : null}
