@@ -1442,7 +1442,6 @@ export const translations = {
     'thinking.effort.high': 'High',
     'thinking.effort.max': 'Max',
     'thinking.effort.xhigh': 'Extended High',
-    'thinking.effort.ultracode': 'Ultracode',
     'thinking.effort.auto': 'Auto',
 
     // Feishu Bot Integration
@@ -3080,7 +3079,6 @@ export const translations = {
     'thinking.effort.high': '高强度',
     'thinking.effort.max': '最大强度',
     'thinking.effort.xhigh': '超高强度',
-    'thinking.effort.ultracode': '极速智解 (Ultracode)',
     'thinking.effort.auto': '自动',
 
     // Feishu Bot Integration
