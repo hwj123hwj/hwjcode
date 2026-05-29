@@ -178,7 +178,20 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
   if (collapseResult && status === ToolCallStatus.Success && resultDisplay) {
     const isZh = isChineseLocale();
     if (toolId === 'read_file') {
-      const lineCount = typeof resultDisplay === 'string' ? resultDisplay.split('\n').length : 0;
+      let lineCount = 0;
+      if (typeof resultDisplay === 'string') {
+        const linesMatch = resultDisplay.match(/\b(\d+)\s+lines\b/i);
+        const rangeMatch = resultDisplay.match(/read\s+lines:\s*(\d+)-(\d+)/i);
+        if (linesMatch) {
+          lineCount = parseInt(linesMatch[1], 10);
+        } else if (rangeMatch) {
+          const start = parseInt(rangeMatch[1], 10);
+          const end = parseInt(rangeMatch[2], 10);
+          lineCount = Math.max(0, end - start + 1);
+        } else {
+          lineCount = resultDisplay.split('\n').length;
+        }
+      }
       compactResultText = isZh ? `(读了 ${lineCount} 行)` : `(${lineCount} lines read)`;
     } else if (toolId === 'search_file_content') {
       if (typeof resultDisplay === 'string') {
