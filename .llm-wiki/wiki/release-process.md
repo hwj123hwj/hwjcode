@@ -21,6 +21,10 @@ tags: [release, git, tag, ci-cd, npm, workflow]
 - ⚠️ **核心红线限制**：**`package.json` 里的版本号必须严格低于（<）发布的 release tag 版本号**。
   - *示例*：如果 release tag 为 `cli-release-v1.0.358`，则 `package.json` 的版本必须小于 `1.0.358`（例如项目内维持在 `1.0.319` 便能完美通过 CI）。
 
+### 3. ⚠️ 打 Tag 前本地必须构建全绿 (防远程挂掉)
+- **硬性红线要求**：在执行任何打 Tag 动作并推送到远程之前，**必须首先在本地运行 `npm run build` 确保整个 Monorepo 编译完完全全全绿通过**！
+- 严禁“先打 Tag 推送，再本地验证”或者“带病（编译类型报错）上远程”，否则 CI/CD 流水线将会因 TypeScript 编译错误而立即失败，导致版本号废损。
+
 ---
 
 ## 规范发布步骤
