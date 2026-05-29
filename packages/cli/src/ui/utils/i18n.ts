@@ -822,6 +822,9 @@ export const translations = {
     // Slash command descriptions
     'command.help.description': 'Get deepv-code help',
     'command.clear.description': 'Clear terminal screen (keeps conversation context)',
+    'command.todo.description': 'Clear or hide the pinned tasks (todo list) panel',
+    'command.todo.cleared': 'Tasks panel has been successfully cleared and hidden.',
+    'command.todo.unknown': 'Unknown subcommand. Use "/todo clear" to hide current tasks.',
     'command.queue.description': 'Manage prompt queue',
     'command.queue.clear.description': 'Clear all queued prompts',
     'command.quit.description': 'Exit command line interface',
@@ -2455,6 +2458,9 @@ export const translations = {
     // Slash command descriptions
     'command.help.description': '获取 deepv-code 帮助',
     'command.clear.description': '清除终端屏幕（保留对话上下文）',
+    'command.todo.description': '清除并隐藏当前的任务面板 (Todo List)',
+    'command.todo.cleared': '任务面板已成功清空并隐藏。',
+    'command.todo.unknown': '未知的子命令。使用 "/todo clear" 可以隐藏当前任务面板。',
     'command.queue.description': '管理提示队列',
     'command.queue.clear.description': '清空所有排队的提示',
     'command.quit.description': '退出命令行界面',

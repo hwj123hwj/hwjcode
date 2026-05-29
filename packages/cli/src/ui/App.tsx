@@ -2975,7 +2975,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
               {/* 📋 固定任务面板：常驻输入框上方，随 todo_write 原地更新，
                    空列表或全部完成时自动隐藏（见 TodoPanel 内部逻辑）。 */}
-              <TodoPanel todos={todos} />
+              <TodoPanel todos={todos} isActive={streamingState !== StreamingState.Idle} />
 
               {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
                    相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
