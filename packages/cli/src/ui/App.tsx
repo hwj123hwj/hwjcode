@@ -55,7 +55,6 @@ import { InputPrompt } from './components/InputPrompt.js';
 import { Footer } from './components/Footer.js';
 import { truncateText, getDefaultMaxRows } from './utils/textTruncator.js';
 import { ThemeDialog } from './components/ThemeDialog.js';
-import { EffortWizard } from './components/EffortWizard.js';
 import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
@@ -76,7 +75,7 @@ import { Colors } from './colors.js';
 import { Help } from './components/Help.js';
 import { loadHierarchicalGeminiMemory } from '../config/config.js';
 import { updateWindowTitleIcon } from '../gemini.js';
-import { LoadedSettings, SettingScope } from '../config/settings.js';
+import { LoadedSettings } from '../config/settings.js';
 import { Tips } from './components/Tips.js';
 import { ConsolePatcher } from './utils/ConsolePatcher.js';
 import { registerCleanup } from '../utils/cleanup.js';
@@ -954,70 +953,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     },
   });
 
-  // ⚙️ 思考力度调控向导
-  const [isEffortWizardOpen, setIsEffortWizardOpen] = useState(false);
-  const openEffortWizard = useCallback(() => {
-    setIsEffortWizardOpen(true);
-  }, []);
-
-  const handleEffortSelect = useCallback((level: string | undefined) => {
-    // 延迟关闭对话框，避免回车键被 InputPrompt 再次处理
-    setImmediate(() => {
-      setIsEffortWizardOpen(false);
-    });
-
-    if (level === undefined) {
-      addItem({
-        type: MessageType.INFO,
-        text: 'Effort adjustment cancelled.',
-      }, Date.now());
-      return;
-    }
-
-    if (config && settings) {
-      const currentConfig = config.getThinkingConfig() || { mode: 'auto', effort: 'auto' };
-      const newMode: 'on' | 'auto' | 'off' = (level === 'auto') ? 'auto' : 'on';
-      const updated = {
-        mode: newMode,
-        effort: level as any,
-        ...(currentConfig.budgetTokens !== undefined ? { budgetTokens: currentConfig.budgetTokens } : {}),
-      };
-
-      config.setThinkingConfig(updated);
-      settings.setValue(SettingScope.User, 'thinking', updated);
-
-      let desc = '';
-      switch (level) {
-        case 'low':
-          desc = 'low effort';
-          break;
-        case 'medium':
-          desc = 'medium effort';
-          break;
-        case 'high':
-          desc = 'high effort';
-          break;
-        case 'xhigh':
-          desc = 'xhigh effort';
-          break;
-        case 'max':
-          desc = 'max effort';
-          break;
-        case 'ultracode':
-          desc = 'xhigh + dynamic workflow orchestration';
-          break;
-        default:
-          desc = 'auto effort';
-          break;
-      }
-
-      addItem({
-        type: MessageType.INFO,
-        text: `Set effort level to ${level} (this session only): ${desc}`,
-      }, Date.now());
-    }
-  }, [config, settings, addItem]);
-
   const {
     isSettingsMenuDialogOpen,
     openSettingsMenuDialog,
@@ -1409,7 +1344,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openDebateWizard, // 🎭 传递 openDebateWizard
     handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
     openGoalWizard, // 🎯 传递 openGoalWizard
-    openEffortWizard, // ⚙️ 传递 openEffortWizard
   );
 
   const {
@@ -2692,14 +2626,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onCancel={handleGoalWizardCancel}
               />
             </Box>
-          ) : isEffortWizardOpen ? (
-            <Box flexDirection="column">
-              <EffortWizard
-                currentEffort={config?.getThinkingConfig()?.effort || 'auto'}
-                onSelect={handleEffortSelect}
-                terminalWidth={mainAreaWidth}
-              />
-            </Box>
           ) : isPluginInstallDialogOpen ? (
             <Box flexDirection="column">
               <PluginInstallDialog
@@ -3075,7 +3001,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isEffortWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}
