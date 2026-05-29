@@ -67,6 +67,7 @@
 | Page | Description |
 |------|-------------|
 | [adding-builtin-tool-checklist](wiki/adding-builtin-tool-checklist.md) | Checklist & pitfalls when adding a built-in tool to `core/src/tools/` (derived from `local_time` debugging) |
+| [release-process](wiki/release-process.md) | Standardized release process guide for deepv-code client, including strict tag and commit rules |
 
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->
