@@ -472,7 +472,7 @@ const ToolStatusIndicator: React.FC<ToolStatusIndicatorProps> = ({
 }) => (
   <Box minWidth={STATUS_INDICATOR_WIDTH}>
     {status === ToolCallStatus.Pending ? (
-      <Text color={Colors.AccentGreen}>o</Text>
+      <Text color={Colors.Gray}>o</Text>
     ) : null}
     {status === ToolCallStatus.Executing ? (
       <GeminiRespondingSpinner
@@ -486,7 +486,7 @@ const ToolStatusIndicator: React.FC<ToolStatusIndicatorProps> = ({
       <Text color={Colors.AccentYellow}>▸</Text>
     ) : null}
     {status === ToolCallStatus.Success ? (
-      <Text color={Colors.AccentGreen}>•</Text>
+      <Text color={Colors.Gray}>•</Text>
     ) : null}
     {status === ToolCallStatus.Confirming ? (
       <Text color={Colors.AccentYellow}>?</Text>
