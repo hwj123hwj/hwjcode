@@ -2,6 +2,20 @@
 
 > Chronological record of wiki operations.
 
+## [2026-05-29] feat | Release Process Guide
+
+### Pages Added
+- `wiki/release-process.md` — 详细记录了 DeepV Code 项目的规范化发布流程和核心校验规则。
+  - 核心限制：已推送的提交禁止 Amend 机制。
+  - 核心红线：`package.json` 中的版本号必须严格低于 release tag 里的版本号，否则 CI/CD 编译发布必将失败。
+  - 检索最新 Tag：使用 `git tag -l "cli-release-v*" --sort=-v:refname` 查询最新 tag 并以此计算递增下一个版本号。
+  - 标准发版步骤：修改 -> 本地验证(单元测试+构建) -> Git Commit -> 检索计算新 tag -> 推送 ls-dev 分支 -> 打 tag 并推送触发 CI/CD 流程。
+
+### Index Updated
+- 在 "Guides & Checklists" 区域追加了 `release-process` 的索引，指向 `wiki/release-process.md`。
+
+---
+
 ## [2026-05-22] feat | Built-in Tool Checklist (from local_time debugging)
 
 ### Pages Added
