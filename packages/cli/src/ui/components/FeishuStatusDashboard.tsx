@@ -140,41 +140,26 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
           <Box flexDirection="column" marginTop={0}>
             {routeEntries.map(([chatId, route]) => {
               const isActive = chatId === activeGroupChatId;
+              // 屏幕足够宽时（>= 85 字符），显示完整的 chatId，否则使用短 chatId 截断，保证不换行
+              const isWide = terminalWidth >= 85;
+              const chatIdToShow = isWide ? chatId : shortChatId(chatId);
               return (
-                <Box
-                  key={chatId}
-                  marginTop={1}
-                  borderStyle={isActive ? 'round' : undefined}
-                  borderColor={isActive ? Colors.AccentGreen : undefined}
-                  paddingX={1}
-                  paddingY={0}
-                  flexDirection="column"
-                >
-                  <Box justifyContent="space-between">
-                    <Box>
-                      {isActive ? (
-                        <Text color={Colors.AccentGreen} bold>
-                          {'🟢 '}{shortChatId(chatId)}
-                        </Text>
-                      ) : (
-                        <Text dimColor>
-                          {'  '}{shortChatId(chatId)}
-                        </Text>
-                      )}
-                      {isActive ? (
-                        <Text color={Colors.AccentGreen} bold>
-                          {' '}{t('feishu.dashboard.active')}
-                        </Text>
-                      ) : null}
-                    </Box>
-                    <Text dimColor>{chatId}</Text>
+                <Box key={chatId} justifyContent="space-between" marginTop={0}>
+                  <Box>
+                    {isActive ? (
+                      <Text color={Colors.AccentGreen} bold>
+                        🟢 {chatIdToShow} <Text color={Colors.AccentGreen} dimColor>({t('feishu.dashboard.active').replace('🟢 ', '')})</Text>
+                      </Text>
+                    ) : (
+                      <Text dimColor>
+                        {'   '}{chatIdToShow}
+                      </Text>
+                    )}
                   </Box>
                   {route.projectRoot ? (
-                    <Box marginLeft={1}>
-                      <Text dimColor>
-                        📂 {shortPath(route.projectRoot)}
-                      </Text>
-                    </Box>
+                    <Text color={isActive ? Colors.AccentGreen : Colors.Gray} dimColor={!isActive}>
+                      📂 {shortPath(route.projectRoot)}
+                    </Text>
                   ) : null}
                 </Box>
               );
