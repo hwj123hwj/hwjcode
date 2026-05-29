@@ -325,6 +325,161 @@ describe('FeishuGateway - Message Parsing', () => {
 });
 
 // ---------------------------------------------------------------------------
+// FeishuGateway - Message Deduplication Suite
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway - Message Deduplication', () => {
+  let gateway: FeishuGateway;
+  let messageCallback: any;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    messageCallback = null;
+
+    mockRegister.mockImplementation((handlers: any) => {
+      if (handlers['im.message.receive_v1']) {
+        messageCallback = handlers['im.message.receive_v1'];
+      }
+    });
+
+    const mockFetchOk = (body: any) => ({
+      ok: true,
+      json: async () => body,
+      arrayBuffer: async () => new ArrayBuffer(0),
+      headers: new Headers(),
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(mockFetchOk({
+      tenant_access_token: 'mock-tenant-token',
+      expire: 7200,
+      code: 0,
+      data: { reaction_id: 'mock-reaction-id' }
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await gateway.connect();
+  });
+
+  it('deduplicates concurrent in-flight messages and handles success/failure lifecycle', async () => {
+    let callCount = 0;
+    let finishMessagePromise: (() => void) | null = null;
+    let shouldFail = false;
+
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return new Promise((resolve, reject) => {
+        finishMessagePromise = () => {
+          if (shouldFail) {
+            reject(new Error('simulated error'));
+          } else {
+            resolve('reply');
+          }
+        };
+      });
+    };
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_test_dedup_123',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'Hello' }),
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: { open_id: 'ou_789' },
+        },
+      },
+    };
+
+    // 1. Send first message (starts processing and blocks waiting for finishMessagePromise)
+    const firstCallPromise = messageCallback(mockEvent);
+
+    // Give it a microtask tick to ensure the handler is invoked and in-flight is registered
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(callCount).toBe(1);
+    expect((gateway as any).inFlightMessages.has('om_test_dedup_123')).toBe(true);
+
+    // 2. Send second message with same message_id (retry) while first is in-flight
+    const secondCallResult = await messageCallback(mockEvent);
+    // Since it's in-flight, it should be skipped immediately and return { code: 0 } without incrementing callCount
+    expect(secondCallResult).toEqual({ code: 0 });
+    expect(callCount).toBe(1);
+
+    // 3. Let the first call finish successfully
+    finishMessagePromise!();
+    await firstCallPromise;
+
+    // After success, it should be removed from in-flight and added to processedMessages
+    expect((gateway as any).inFlightMessages.has('om_test_dedup_123')).toBe(false);
+    expect((gateway as any).processedMessages.has('om_test_dedup_123')).toBe(true);
+
+    // 4. Send third message with same message_id (should be skipped as duplicate)
+    const thirdCallResult = await messageCallback(mockEvent);
+    expect(thirdCallResult).toEqual({ code: 0 });
+    expect(callCount).toBe(1);
+  });
+
+  it('keeps message out of processedMessages if processing fails, allowing retry', async () => {
+    let callCount = 0;
+    let finishMessagePromise: (() => void) | null = null;
+
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return new Promise((resolve, reject) => {
+        finishMessagePromise = () => {
+          reject(new Error('simulated error'));
+        };
+      });
+    };
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_test_failure_123',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'Hello' }),
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: { open_id: 'ou_789' },
+        },
+      },
+    };
+
+    // 1. Send message (starts processing)
+    const callPromise = messageCallback(mockEvent);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(callCount).toBe(1);
+    expect((gateway as any).inFlightMessages.has('om_test_failure_123')).toBe(true);
+
+    // 2. Let it fail
+    finishMessagePromise!();
+    await callPromise;
+
+    // After failure, it should be removed from in-flight and NOT added to processedMessages
+    expect((gateway as any).inFlightMessages.has('om_test_failure_123')).toBe(false);
+    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(false);
+
+    // 3. Since it was not added to processedMessages, sending it again should trigger processing again!
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'success';
+    };
+
+    (gateway as any).recentContents.clear(); // 绕过内容去重（因为内容和聊天室相同且两次发送时间太接近）
+    await messageCallback(mockEvent);
+    expect(callCount).toBe(2);
+    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CardKit 2.0 streaming card builders & footer rendering
 // ---------------------------------------------------------------------------
 
