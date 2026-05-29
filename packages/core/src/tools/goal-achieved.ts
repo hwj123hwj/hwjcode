@@ -8,6 +8,7 @@ import { Type } from '@google/genai';
 import { BaseTool, Icon, ToolResult } from './tools.js';
 import { Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
+import { todoStore } from './todo-store.js';
 
 /**
  * Parameters for the GoalAchievedTool.
@@ -154,6 +155,7 @@ export class GoalAchievedTool extends BaseTool<GoalAchievedParams, ToolResult> {
         hadActiveGoal = !!client.getGoalContext();
         if (hadActiveGoal) {
           client.clearGoalContext();
+          todoStore.clear(); // 🎯 妙计：当 Goal 完成时，自动清除悬挂的任务面板
         }
       }
     } catch {

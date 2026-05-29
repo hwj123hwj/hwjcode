@@ -96,5 +96,22 @@ describe('TodoPanel rendering', () => {
     // Progress count is shown.
     expect(frame).toContain('(1/3)');
   });
+
+  it('renders only header in collapsed mode when isActive is false', () => {
+    const { lastFrame } = render(
+      <TodoPanel
+        todos={[
+          todo('done', 'completed', 'Finished setup'),
+          todo('cur', 'in_progress', 'Build the gallery'),
+          todo('next', 'pending', 'Wire the home page'),
+        ]}
+        isActive={false}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('Build the gallery');
+    expect(frame).not.toContain('Wire the home page');
+    expect(frame).toContain('Tasks (1/3)'); // 进度 Header 依然展示
+  });
 });
 
