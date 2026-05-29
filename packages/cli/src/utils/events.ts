@@ -15,6 +15,14 @@ export enum AppEvent {
   FeishuBotStopped = 'feishu-bot-stopped',
   FeishuBotProcessingStart = 'feishu-bot-processing-start',
   FeishuBotProcessingEnd = 'feishu-bot-processing-end',
+  /** 飞书仪表板：指定群（chatId）开始处理消息 */
+  FeishuGroupProcessingStart = 'feishu-group-processing-start',
+  /** 飞书仪表板：指定群（chatId）处理完毕 */
+  FeishuGroupProcessingEnd = 'feishu-group-processing-end',
+  /** 飞书仪表板：实时消息日志（用于滚动窗口） */
+  FeishuMessageLog = 'feishu-message-log',
+  /** 飞书仪表板：项目路由表已更新 */
+  FeishuProjectRoutesUpdated = 'feishu-project-routes-updated',
   AuthenticationSuccessful = 'authentication-successful',
   AuthenticationFailed = 'authentication-failed',
   AuthenticationRequired = 'authentication-required',
