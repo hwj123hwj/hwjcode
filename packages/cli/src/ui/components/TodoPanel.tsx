@@ -74,6 +74,7 @@ const ItemRow: React.FC<{
 interface TodoPanelProps {
   todos: TodoItem[];
   maxPending?: number;
+  isActive?: boolean; // 🆕 接收 AI 是否活动
 }
 
 /**
@@ -83,7 +84,7 @@ interface TodoPanelProps {
  * decision). Mirrors the Claude Code style: ✓ struck-through done, ■ current,
  * □ pending, with a "+N completed" roll-up.
  */
-export const TodoPanel: React.FC<TodoPanelProps> = ({ todos, maxPending }) => {
+export const TodoPanel: React.FC<TodoPanelProps> = ({ todos, maxPending, isActive = true }) => {
   const view = selectTodoPanelView(todos, { maxPending });
 
   // Auto-hide: nothing to track, or all work is finished.
@@ -94,6 +95,22 @@ export const TodoPanel: React.FC<TodoPanelProps> = ({ todos, maxPending }) => {
   const zh = isChineseLocale();
   const header = zh ? '任务' : 'Tasks';
   const moreLabel = (n: number) => (zh ? `… 还有 ${n} 项` : `… +${n} more`);
+
+  // 🎯 智能折叠：当 AI 响应结束（isActive === false）时，自动将复杂的 Todo 项折叠为简洁的一行
+  if (!isActive) {
+    return (
+      <Box flexDirection="column" marginTop={1}>
+        <Box>
+          <Text color={Colors.AccentOrange}>▶ </Text>
+          <Text bold>{header}</Text>
+          <Text color={Colors.Gray}>
+            {' '}
+            ({view.completedCount}/{view.total})
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" marginTop={1}>
