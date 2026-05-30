@@ -339,10 +339,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   // 飞书仪表板状态
   const [feishuRoutes, setFeishuRoutes] = useState<Record<string, FeishuProjectRoute>>({});
-  const [feishuActiveGroupChatId, setFeishuActiveGroupChatId] = useState<string | null>(null);
+  // 「当前正在干活（Agent 仍在处理）」的群集合，可同时多个。
+  const [feishuActiveGroupChatIds, setFeishuActiveGroupChatIds] = useState<Set<string>>(new Set());
   const [feishuGroupLogs, setFeishuGroupLogs] = useState<Record<string, FeishuMessageLogEntry[]>>({});
   const [feishuBotName, setFeishuBotName] = useState<string>('');
   const [feishuPlatform, setFeishuPlatform] = useState<string>('feishu');
+  const [feishuChatNames, setFeishuChatNames] = useState<Record<string, string>>({});
 
   // 监听飞书消息处理与Bot运行状态事件
   useEffect(() => {
@@ -368,14 +370,24 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       setIsFeishuBotRunning(false);
     };
 
-    // 仪表板事件：群处理开始
+    // 仪表板事件：群处理开始 —— 加入「正在干活」集合（可同时多个群）
     const handleFeishuGroupProcessingStart = (chatId: string) => {
-      setFeishuActiveGroupChatId(chatId);
+      setFeishuActiveGroupChatIds(prev => {
+        if (prev.has(chatId)) return prev;
+        const next = new Set(prev);
+        next.add(chatId);
+        return next;
+      });
     };
 
-    // 仪表板事件：群处理结束
+    // 仪表板事件：群处理结束 —— 从「正在干活」集合移除
     const handleFeishuGroupProcessingEnd = (chatId: string) => {
-      setFeishuActiveGroupChatId(prev => prev === chatId ? null : prev);
+      setFeishuActiveGroupChatIds(prev => {
+        if (!prev.has(chatId)) return prev;
+        const next = new Set(prev);
+        next.delete(chatId);
+        return next;
+      });
     };
 
     // 仪表板事件：消息日志
@@ -394,6 +406,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       setFeishuRoutes(routes);
     };
 
+    // 仪表板事件：群名解析完成（chatId → 群名）。合并进已有映射，避免覆盖。
+    const handleFeishuChatNamesResolved = (chatNames: Record<string, string>) => {
+      setFeishuChatNames(prev => ({ ...prev, ...chatNames }));
+    };
+
     appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
     appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
     appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
@@ -402,6 +419,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     appEvents.on(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
     appEvents.on(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
     appEvents.on(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
+    appEvents.on(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
 
     return () => {
       appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
@@ -412,6 +430,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       appEvents.off(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
       appEvents.off(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
       appEvents.off(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
+      appEvents.off(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
     };
   }, []);
 
@@ -2839,12 +2858,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
               {isFeishuBotRunning ? (
                 <FeishuStatusDashboard
                   routes={feishuRoutes}
-                  activeGroupChatId={feishuActiveGroupChatId}
+                  activeGroupChatIds={feishuActiveGroupChatIds}
                   groupLogs={feishuGroupLogs}
                   botName={feishuBotName}
                   platform={feishuPlatform}
                   isConnected={true}
                   terminalWidth={terminalWidth}
+                  chatNames={feishuChatNames}
                 />
               ) : (
                 <React.Fragment>

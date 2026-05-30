@@ -1115,3 +1115,100 @@ describe('FeishuGateway - waitForCardAction (button card with real callback)', (
   });
 });
 
+// ---------------------------------------------------------------------------
+// getChatName — 解析群名（无权限/失败时 fallback 到 null）
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway - getChatName', () => {
+  let gateway: FeishuGateway;
+
+  const mockFetchOk = (body: any) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+  });
+
+  it('returns the chat name on success and calls the correct endpoint', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: '我的项目协作群' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('oc_abc123');
+    expect(name).toBe('我的项目协作群');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/open-apis/im/v1/chats/oc_abc123');
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect((init?.headers as any)?.Authorization).toBe('Bearer mock-token');
+  });
+
+  it('caches the resolved name and does not re-request on second call', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: 'Cached Group' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await gateway.getChatName('oc_cache');
+    const second = await gateway.getChatName('oc_cache');
+    expect(first).toBe('Cached Group');
+    expect(second).toBe('Cached Group');
+    // 仅请求一次（第二次命中缓存）
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when the API responds with a non-zero error code (e.g. no permission)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 99991672, msg: 'no permission' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('oc_noperm');
+    expect(name).toBeNull();
+  });
+
+  it('returns null when the chat name is empty (p2p chats have no name)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: '' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('oc_p2p');
+    expect(name).toBeNull();
+  });
+
+  it('returns null and does not throw when fetch rejects', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network down'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('oc_neterr');
+    expect(name).toBeNull();
+  });
+
+  it('returns null for empty chatId without making a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('');
+    expect(name).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not cache failures, allowing a later retry to succeed', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 99991672, msg: 'no permission' }))
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: 'Now Visible' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await gateway.getChatName('oc_retry');
+    const second = await gateway.getChatName('oc_retry');
+    expect(first).toBeNull();
+    expect(second).toBe('Now Visible');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
