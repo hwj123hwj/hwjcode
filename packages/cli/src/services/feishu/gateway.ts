@@ -390,6 +390,9 @@ export class FeishuGateway {
   private recentContents: Map<string, number> = new Map();
   private readonly dedupWindowMs = 5000;
 
+  /** 群名缓存：key 为 chatId，value 为解析出的群名（成功才缓存，失败/空名不缓存以便后续重试） */
+  private chatNameCache: Map<string, string> = new Map();
+
   /** 外部注入的消息处理回调 */
   onMessage: OnMessageCallback | null = null;
 
@@ -466,6 +469,62 @@ export class FeishuGateway {
     this.tenantToken = data.tenant_access_token;
     this.tokenExpiresAt = Date.now() + (data.expire || 7200) * 1000;
     return this.tenantToken;
+  }
+
+  /**
+   * 解析飞书群（或会话）的名称。
+   *
+   * 调用 `GET /open-apis/im/v1/chats/:chat_id`，返回 `data.name` 作为群名。
+   * 需要应用开通 `im:chat:read`（或 `im:chat`）权限——此权限属于 dvcode
+   * 的 REQUIRED_APP_SCOPES，正常 setup 流程已引导用户开通。
+   *
+   * 设计为「尽力而为」：
+   *  - 成功且群名非空 → 返回群名，并写入进程内缓存（同一 chatId 不再重复请求）。
+   *  - 无权限 / 接口报错 / 网络异常 / 群名为空（如私聊会话本就没有名字）
+   *    → 一律返回 `null`，由调用方 fallback 到展示 chatId。
+   *  - 失败**不写缓存**，以便用户补齐权限后下次重试能成功。
+   *
+   * @param chatId 飞书会话 ID（oc_ 开头）
+   * @returns 群名字符串；无法解析时返回 null
+   */
+  async getChatName(chatId: string): Promise<string | null> {
+    if (!chatId) return null;
+
+    const cached = this.chatNameCache.get(chatId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return null;
+
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/chats/${encodeURIComponent(chatId)}`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+      const data: any = await res.json();
+
+      if (data.code !== 0) {
+        dlog(`[Feishu] getChatName(${chatId}) failed: ${JSON.stringify(data)}`);
+        return null;
+      }
+
+      const name = typeof data.data?.name === 'string' ? data.data.name.trim() : '';
+      if (!name) {
+        // 私聊会话或无名群：没有可展示的群名，交给调用方 fallback。
+        return null;
+      }
+
+      this.chatNameCache.set(chatId, name);
+      return name;
+    } catch (e: any) {
+      dlog(`[Feishu] getChatName(${chatId}) threw: ${e?.message || e}`);
+      return null;
+    }
   }
 
   /**
