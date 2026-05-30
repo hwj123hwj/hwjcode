@@ -11,3 +11,4 @@ vi.mock('fs', async (importOriginal) => {
         appendFileSync: vi.fn(),
     };
 });
+//# sourceMappingURL=test-setup.js.map
