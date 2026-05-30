@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
 import { getCoreSystemPrompt, isGemini3Model, formatCompactSummary } from './prompts.js';
 
 describe('prompts', () => {
@@ -122,6 +123,73 @@ describe('prompts', () => {
 
       // 不应该包含空的 Skills section
       expect(prompt).not.toContain('# Available Skills');
+    });
+  });
+
+  describe('getCoreSystemPrompt - LLM Wiki Context Injection', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    // 仅当探测到 .llm-wiki/index.md 时返回 true，其它路径透传真实结果
+    function mockWikiPresent(present: boolean) {
+      const actual = fs.existsSync.bind(fs);
+      vi.spyOn(fs, 'existsSync').mockImplementation(((p: fs.PathLike) => {
+        const s = String(p);
+        if (s.includes('.llm-wiki') && s.includes('index.md')) {
+          return present;
+        }
+        return actual(p);
+      }) as typeof fs.existsSync);
+    }
+
+    // 提取 "# LLM Wiki" 段落本身，避免被整段 prompt 的其它文字干扰断言
+    function extractWikiSection(prompt: string): string {
+      const start = prompt.indexOf('# LLM Wiki');
+      if (start < 0) return '';
+      return prompt.slice(start);
+    }
+
+    it('should inject the LLM Wiki section when .llm-wiki/index.md exists', () => {
+      mockWikiPresent(true);
+      const prompt = getCoreSystemPrompt(undefined, false);
+      expect(prompt).toContain('# LLM Wiki');
+      expect(prompt).toContain('.llm-wiki/');
+    });
+
+    it('should NOT inject the LLM Wiki section when the wiki is absent', () => {
+      mockWikiPresent(false);
+      const prompt = getCoreSystemPrompt(undefined, false);
+      expect(prompt).not.toContain('# LLM Wiki');
+    });
+
+    it('should proactively guide the AI to consult the wiki before exploring', () => {
+      mockWikiPresent(true);
+      const section = extractWikiSection(getCoreSystemPrompt(undefined, false));
+      // 核心诉求：wiki 段落内必须出现"主动消费"语义，而非仅被动等待用户要求
+      expect(section.toLowerCase()).toContain('consult');
+      expect(section.toLowerCase()).toContain('before');
+      // 必须明确建议优先查阅 index，而不是直接盲目搜索代码库
+      expect(section).toContain('.llm-wiki/index.md');
+      expect(section).toMatch(/consult[\s\S]*index\.md/i);
+    });
+
+    it('should still retain the wiki maintenance instructions', () => {
+      mockWikiPresent(true);
+      const section = extractWikiSection(getCoreSystemPrompt(undefined, false));
+      // 不能丢失原有的写入/维护指引
+      expect(section).toContain('save to wiki');
+      expect(section).toContain('.llm-wiki/raw/');
+      expect(section).toContain('/wiki');
+    });
+
+    it('should place the LLM Wiki section after the dynamic boundary (cache-safe)', () => {
+      mockWikiPresent(true);
+      const prompt = getCoreSystemPrompt(undefined, false);
+      const boundaryIdx = prompt.indexOf('__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__');
+      const wikiIdx = prompt.indexOf('# LLM Wiki');
+      expect(boundaryIdx).toBeGreaterThanOrEqual(0);
+      expect(wikiIdx).toBeGreaterThan(boundaryIdx);
     });
   });
 
