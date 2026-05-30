@@ -691,6 +691,112 @@ describe('customModelAdapter - Anthropic API Compatibility', () => {
       expect(capturedBody.messages[2].content[0].cache_control).toBeUndefined();
       expect(capturedBody.messages[2].content[1].cache_control).toEqual({ type: 'ephemeral' });
     });
+
+    it('should discard empty or whitespace-only text blocks from user and system messages', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          content: [{ type: 'text', text: 'Response' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 100, output_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'anthropic' as const,
+        modelId: 'claude-3-sonnet',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-ant-test',
+        displayName: 'Claude 3 Sonnet',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: 'system',
+            parts: [
+              { text: '  ' }, // Empty system block
+              { text: 'Valid system message' },
+              { text: '' }, // Empty system block
+            ],
+          },
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [
+              { text: '   \n  ' }, // Whitespace only text block
+              { text: 'Hello' },
+              { text: '' }, // Empty text block
+            ],
+          },
+        ],
+      };
+
+      await callAnthropicModel(modelConfig as any, request);
+
+      // System should have only 1 block, and its cache_control is set
+      expect(capturedBody.system).toHaveLength(1);
+      expect(capturedBody.system[0].text).toBe('Valid system message');
+      expect(capturedBody.system[0].cache_control).toEqual({ type: 'ephemeral' });
+
+      // Messages user part should only contain 1 block
+      expect(capturedBody.messages[0].content).toHaveLength(1);
+      expect(capturedBody.messages[0].content[0].text).toBe('Hello');
+      expect(capturedBody.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
+    });
+
+    it('should auto-add cache_control to other non-text block types if no text block is present in user message', async () => {
+      let capturedBody: any;
+      const mockResponse = {
+        ok: true,
+        json: async () => ({
+          content: [{ type: 'text', text: 'Response' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 100, output_tokens: 10 },
+        }),
+      };
+
+      global.fetch = vi.fn().mockImplementation(async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return mockResponse;
+      });
+
+      const modelConfig = {
+        provider: 'anthropic' as const,
+        modelId: 'claude-3-sonnet',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-ant-test',
+        displayName: 'Claude 3 Sonnet',
+      };
+
+      const request = {
+        contents: [
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: 'iVBORw0KGgoAAAANS',
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+      await callAnthropicModel(modelConfig as any, request);
+
+      // Should be 1 image block with cache_control added
+      expect(capturedBody.messages[0].content).toHaveLength(1);
+      expect(capturedBody.messages[0].content[0].type).toBe('image');
+      expect(capturedBody.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
+    });
   });
 
   describe('Extended thinking support', () => {
