@@ -33,6 +33,10 @@ export interface ProjectSettings {
   hooks?: { [K in HookEventName]?: HookDefinition[] };  // Hook配置
   agentStyle?: AgentStyle;  // Agent 风格：default（Claude）或 codex
   thinking?: ThinkingConfig;  // 思考模式开关与强度（用于 /thinking 命令的会话级覆盖）
+  feishu?: {
+    recommend?: boolean;      // 是否仅申请推荐级（免审）权限
+    excludeScopes?: string[]; // 需要显式排除的敏感权限列表（例如 ["im:message.send_as_user"]）
+  };
 }
 
 
@@ -98,6 +102,10 @@ export class ProjectSettingsManager {
         hooks: parsed.hooks ? JSON.parse(JSON.stringify(parsed.hooks)) : undefined,
         agentStyle: validAgentStyles.includes(parsed.agentStyle as any) ? parsed.agentStyle : undefined,
         thinking: this.validateThinkingConfig(parsed.thinking),
+        feishu: parsed.feishu ? {
+          recommend: typeof parsed.feishu.recommend === 'boolean' ? parsed.feishu.recommend : undefined,
+          excludeScopes: Array.isArray(parsed.feishu.excludeScopes) ? parsed.feishu.excludeScopes.filter((s) => typeof s === 'string') : undefined,
+        } : undefined,
       };
 
       return this.settings;
