@@ -1036,6 +1036,74 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     expect(result.ok).toBe(false);
     expect(result.answers).toBeUndefined();
   });
+
+  it('renders the "other ideas" button as a schema 2.0 callback button OUTSIDE the form (never tag:action)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_other' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_other',
+      [{ question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] }],
+      50,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init?.body as string);
+    const card = JSON.parse(body.content);
+    expect(card.schema).toBe('2.0');
+
+    // 🚫 schema 2.0 严禁出现 tag:'action' 容器——它是 1.0 写法，会让整卡校验失败
+    const allTags = card.body.elements.map((e: any) => e.tag);
+    expect(allTags).not.toContain('action');
+
+    // ✅ 第二个元素应是直接位于 body.elements 的 callback 按钮（在 form 之外）
+    expect(card.body.elements[0].tag).toBe('form');
+    const otherBtn = card.body.elements[1];
+    expect(otherBtn.tag).toBe('button');
+    expect(otherBtn.behaviors).toBeDefined();
+    expect(otherBtn.behaviors[0].type).toBe('callback');
+    expect(otherBtn.behaviors[0].value.choice).toBe('other_ideas');
+
+    await promise; // 让超时收尾，避免悬挂
+  });
+
+  it('returns { ok:true, otherIdeas:true } when user clicks the "other ideas" callback button', async () => {
+    await gateway.connect();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_oi' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askQuestionsViaForm(
+      'oc_chat_oi',
+      [{ question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] }],
+      5000,
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    // 模拟用户点击「我有其他想法」：value 为对象 { choice: 'other_ideas' }
+    await cardActionHandler({
+      event: {
+        context: { open_message_id: 'om_form_oi' },
+        operator: { open_id: 'ou_user_1' },
+        action: {
+          tag: 'button',
+          value: { choice: 'other_ideas' },
+        },
+      },
+    });
+
+    const result = (await promise) as any;
+    expect(result.ok).toBe(true);
+    expect(result.otherIdeas).toBe(true);
+    // 走 otherIdeas 分支时不应附带 answers
+    expect(result.answers).toBeUndefined();
+  });
 });
 
 describe('FeishuGateway - waitForCardAction (button card with real callback)', () => {
