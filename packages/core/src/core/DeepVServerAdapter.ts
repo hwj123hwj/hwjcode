@@ -466,10 +466,19 @@ export class DeepVServerAdapter implements ContentGenerator {
     let accumulatedReasoning: any[] = [];
 
     for (const content of contents) {
-      // 深度拷贝消息以防修改原始历史
+      // 深度拷贝消息，同时过滤掉无效的空文本/空白字符块，防止传给服务端后转换为大模型格式（如 Anthropic）时报错
+      const clonedParts = content.parts
+        ? content.parts.filter((p: any) => {
+            if (p && p.text !== undefined) {
+              return typeof p.text === 'string' && p.text.trim() !== '';
+            }
+            return p !== null && p !== undefined;
+          })
+        : [];
+
       const clonedContent = {
         role: content.role,
-        parts: content.parts ? [...content.parts] : []
+        parts: clonedParts
       };
 
       if (clonedContent.role === MESSAGE_ROLES.MODEL) {

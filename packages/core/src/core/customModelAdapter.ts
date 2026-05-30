@@ -596,7 +596,7 @@ const AnthropicConverter = {
       if (content.role === 'system') {
         // 转换为 Anthropic system 数组格式
         for (const p of parts) {
-          if (p.text) {
+          if (p.text && p.text.trim() !== '') {
             const block: any = { type: 'text', text: p.text };
             // 🆕 自动添加 cache_control（与 Claude Code 行为一致）
             block.cache_control = p.cache_control || { type: 'ephemeral' };
@@ -610,7 +610,7 @@ const AnthropicConverter = {
       const anthropicParts: any[] = [];
 
       for (const part of parts) {
-        if (part.text) {
+        if (part.text && part.text.trim() !== '') {
           const textBlock: any = { type: 'text', text: part.text };
           // 透传已有的 cache_control（后续会为最后一个文本块自动添加）
           if (part.cache_control) {
@@ -669,17 +669,42 @@ const AnthropicConverter = {
       }
     }
 
-    // 🆕 为最后一条用户消息的最后一个文本块添加 cache_control
+    // 🆕 为最后一条用户消息的最后一个块添加 cache_control
     // 与 Claude Code 行为一致，利用 prompt caching 减少 token 消耗
+    // 优先寻找非空/非空白文本块，若无，则寻找其他有效内容块（如 image 或 tool_result），彻底杜绝空 text 块的注入
     for (let i = merged.length - 1; i >= 0; i--) {
       if (merged[i].role === 'user' && Array.isArray(merged[i].content)) {
         const content = merged[i].content;
-        // 找到最后一个文本块
+        let targetBlock = null;
+
+        // 1. 优先寻找最后一个非空非空白的文本块
         for (let j = content.length - 1; j >= 0; j--) {
-          if (content[j].type === 'text' && !content[j].cache_control) {
-            content[j].cache_control = { type: 'ephemeral' };
+          const block = content[j];
+          if (
+            block.type === 'text' &&
+            typeof block.text === 'string' &&
+            block.text.trim() !== '' &&
+            !block.cache_control
+          ) {
+            targetBlock = block;
             break;
           }
+        }
+
+        // 2. 如果没找到符合条件的文本块，则附加到最后一个任意类型的有效块上（如 image 或 tool_result）
+        if (!targetBlock) {
+          for (let j = content.length - 1; j >= 0; j--) {
+            const block = content[j];
+            if (block && !block.cache_control) {
+              targetBlock = block;
+              break;
+            }
+          }
+        }
+
+        // 3. 注入 cache_control
+        if (targetBlock) {
+          targetBlock.cache_control = { type: 'ephemeral' };
         }
         break; // 只处理最后一条用户消息
       }
