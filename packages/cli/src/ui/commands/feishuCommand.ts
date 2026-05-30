@@ -112,6 +112,95 @@ export function feishuGetToolShortName(name: string): string {
 }
 
 /**
+ * 把项目路径缩短为「.../<父目录>/<目录>」，跨平台（兼容 Windows 反斜杠）。
+ *
+ * 路径段 <= 2 时原样返回；空输入返回空串。模块级纯函数，便于单测，
+ * 同时供 /feishu status 文本与 TUI Dashboard 复用同一套缩短逻辑。
+ */
+export function shortenProjectPath(p?: string): string {
+  if (!p) return '';
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : p;
+}
+
+/**
+ * 渲染 /feishu status 里的「绑定项目」段落（纯文本行数组）。
+ *
+ * 设计为模块级纯函数，便于单测，且不依赖运行时网关/凭证状态。群名解析
+ * 由调用方提前完成后通过 `chatNames` 传入：
+ *  - 有群名 → 主显示群名，并在括号内补充 chatId 方便排查；
+ *  - 无群名（无权限 / 私聊 / 未解析）→ 直接显示 chatId（fallback）。
+ *
+ * 活跃语义 = 「当前正在干活（Agent 仍在处理）」的群，可同时有多个。通过
+ * `activeChatIds` 集合传入，命中的群以 🟢 前缀 + (Active) 后缀高亮。
+ *
+ * @param routes      feishu-projects.json 的路由表（chatId → { projectRoot }）
+ * @param options.activeChatIds 当前正在干活的群 chatId 集合（Set 或数组，可空）
+ * @param options.chatNames    chatId → 群名 的解析结果（可空）
+ * @returns 可直接 join('\n') 的文本行数组
+ */
+export function buildBoundProjectsLines(
+  routes: Record<string, { projectRoot?: string }>,
+  options?: {
+    activeChatIds?: Set<string> | string[] | null;
+    chatNames?: Record<string, string>;
+  },
+): string[] {
+  const entries = Object.entries(routes || {});
+  const activeSet =
+    options?.activeChatIds instanceof Set
+      ? options.activeChatIds
+      : new Set(options?.activeChatIds ?? []);
+  const chatNames = options?.chatNames ?? {};
+
+  const lines: string[] = [tp('feishu.status.bound_projects_title', { count: entries.length })];
+
+  if (entries.length === 0) {
+    lines.push(t('feishu.status.bound_projects_none'));
+    return lines;
+  }
+
+  for (const [chatId, route] of entries) {
+    const isActive = activeSet.has(chatId);
+    const name = chatNames[chatId];
+    // 主显示名：优先群名（附带 chatId 便于排查），否则直接 chatId。
+    const display = name ? `${name} (${chatId})` : chatId;
+    const prefix = isActive ? '🟢 ' : '   ';
+    const suffix = isActive ? ` ${t('feishu.status.bound_active_suffix')}` : '';
+    const pathPart = route?.projectRoot
+      ? `  📂 ${shortenProjectPath(route.projectRoot)}`
+      : '';
+    lines.push(`${prefix}${display}${suffix}${pathPart}`);
+  }
+
+  return lines;
+}
+
+/**
+ * 拦截飞书侧发来的 `/feishu start` 和 `/feishu stop` 生命周期命令。
+ *
+ * 这两个命令管理的是「本地终端里那个正在转发飞书消息的网关进程」本身：
+ *  - `/feishu stop` 会停掉转发当前消息的网关 → 自断连接，且无法再从飞书侧重启；
+ *  - `/feishu start` 在已运行时无意义，且飞书端拿不到扫码 / TUI 交互。
+ *
+ * 因此它们只应在 **本地 dvcode 终端** 执行。在飞书里收到时直接拦截并给友好提示，
+ * 不透传给 CLI 命令处理器真正执行。
+ *
+ * 命中（start/stop）返回提示文本；否则（含 `/feishu status` 等其它子命令）返回 null。
+ *
+ * @param messageText 已剥除 @bot 提及前缀的消息文本
+ * @returns 友好提示字符串；非生命周期命令时为 null
+ */
+export function interceptFeishuLifecycleCommand(messageText: string): string | null {
+  const m = messageText.trim().match(/^\/(?:feishu|飞书)\s+(start|stop)\b/i);
+  if (!m) return null;
+  const sub = m[1].toLowerCase();
+  return sub === 'stop'
+    ? t('feishu.lifecycle.stop_blocked')
+    : t('feishu.lifecycle.start_blocked');
+}
+
+/**
  * 构建子代理（task 工具）在飞书卡片中的进度/结果展示框。
  *
  * 对齐主 CLI/TUI 行为：展示任务状态、轮次、工具调用次数、当前执行工具，
@@ -223,13 +312,36 @@ function emitFeishuMessageLog(chatId: string, text: string, direction: 'in' | 'o
   appEvents.emit(AppEvent.FeishuMessageLog, chatId, text, direction, Date.now());
 }
 
-/** 发送项目路由更新事件 */
+/** 发送项目路由更新事件，并异步解析群名后发送群名事件 */
 function emitFeishuProjectRoutesUpdated() {
   loadProjectRoutes().then(routes => {
     appEvents.emit(AppEvent.FeishuProjectRoutesUpdated, routes);
+    // 🔗 异步解析群名（Bot 运行中才有 token），解析完成后通知 Dashboard 用群名替代 chatId。
+    // 失败/无权限不影响主流程，Dashboard 自动 fallback 到 chatId 展示。
+    void resolveAndEmitChatNames(Object.keys(routes));
   }).catch(() => {
     // 静默失败
   });
+}
+
+/**
+ * 批量解析飞书群名并通过 FeishuChatNamesResolved 事件推给 TUI Dashboard。
+ *
+ * 仅在 Bot 运行中（activeGateway 存在）时执行；getChatName 自带进程内缓存，
+ * 重复调用开销极小。单个群解析失败被 allSettled 吞掉，不影响其它群。
+ */
+async function resolveAndEmitChatNames(chatIds: string[]): Promise<void> {
+  if (!activeGateway || chatIds.length === 0) return;
+  const chatNames: Record<string, string> = {};
+  await Promise.allSettled(
+    chatIds.map(async (chatId) => {
+      const name = await activeGateway!.getChatName(chatId);
+      if (name) chatNames[chatId] = name;
+    }),
+  );
+  if (Object.keys(chatNames).length > 0) {
+    appEvents.emit(AppEvent.FeishuChatNamesResolved, chatNames);
+  }
 }
 
 /**
@@ -1818,6 +1930,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return reply;
     }
 
+    // 🚫 拦截飞书侧的 /feishu start | /feishu stop 生命周期命令：
+    // 这两个命令管理的是本地正在转发消息的网关进程本身，只能在本地终端执行，
+    // 在飞书里执行会自断连接或无意义。给友好提示后直接返回，不透传给 CLI 处理器。
+    const lifecycleHint = interceptFeishuLifecycleCommand(messageText);
+    if (lifecycleHint) {
+      return lifecycleHint;
+    }
+
     // 拦截群内自助绑定的 `/bind` 命令
     if (messageText.startsWith('/bind')) {
       const parts = messageText.split(/\s+/);
@@ -3258,6 +3378,38 @@ async function handleStatus(): Promise<string> {
     ? t('feishu.status.bot_status_running')
     : t('feishu.status.bot_status_stopped');
   lines.push(tp('feishu.status.bot_status_label', { status }));
+
+  // 🔗 绑定项目列表：展示「群名(或 chatId) → 本地工作区路径」的转写绑定关系。
+  // 群名解析尽力而为：Bot 运行中（有 activeGateway）时调用 getChatName 批量解析，
+  // 无权限 / 未运行时自动 fallback 到展示 chatId。
+  try {
+    const routes = await loadProjectRoutes();
+    const chatIds = Object.keys(routes);
+    const chatNames: Record<string, string> = {};
+
+    if (activeGateway && chatIds.length > 0) {
+      // 并发解析所有群名，单个失败不影响整体；整体加 5s 超时上限，避免 /feishu status 卡住。
+      const resolveAll = Promise.allSettled(
+        chatIds.map(async (chatId) => {
+          const name = await activeGateway!.getChatName(chatId);
+          if (name) chatNames[chatId] = name;
+        }),
+      );
+      const timeout = new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      await Promise.race([resolveAll.then(() => undefined), timeout]);
+    }
+
+    lines.push('');
+    lines.push(
+      ...buildBoundProjectsLines(routes, {
+        // 活跃 = 当前正在干活（Agent 仍在处理）的群集合，可同时多个。
+        activeChatIds: processingChatIds,
+        chatNames,
+      }),
+    );
+  } catch (e) {
+    dwarn(`[Feishu] Failed to render bound projects in status: ${(e as Error).message}`);
+  }
 
   // ✨ Mini-doctor：检测 scope 健康度，给出修复建议
   try {
