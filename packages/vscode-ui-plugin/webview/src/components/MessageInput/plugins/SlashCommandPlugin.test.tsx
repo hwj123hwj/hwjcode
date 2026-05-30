@@ -308,8 +308,7 @@ describe('SlashCommandPlugin', () => {
       const { slashCommandHandler } = require('../../../services/slashCommandHandler');
 
       let searchResults: any[] = [];
-      slashCommandHandler.searchCommandsWithDebounce('!@#
-, (results) => {
+      slashCommandHandler.searchCommandsWithDebounce('!@#', (results) => {
         searchResults = results;
       });
 
