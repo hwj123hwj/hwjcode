@@ -88,8 +88,8 @@ prompt = "请重构以下代码为纯函数：{{args}}"
 **A:** 在 `settings.json` 中配置 `mcpServers` 字段：
 
 **位置选择：**
-- 全局命令：`~/.deepv/`（所有项目可用）
-- 项目命令：`<项目根目录>/.deepv/`（仅当前项目）
+- 全局配置：`~/.deepv/settings.json`（所有项目可用）
+- 项目配置：`<项目根目录>/.deepvcode/settings.json`（仅当前项目）
 
 #### 方式一：标准模式（通过命令启动）
 
@@ -426,783 +426,41 @@ set ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 ---
 
-## 📖 斜杠命令完整列表 (Slash Commands `/`)
-1. 输入斜杠则可以看到所有支持的斜杠命令
+### Q12: 如何启动和使用飞书 (Feishu) / Lark 机器人接入？
+**A:** 使用 `/feishu` 子命令系列，可以将 DeepV Code 直接作为一个智能群聊或私聊 Bot 接入到你的飞书工作区：
+1. **启动配置：** 输入 `/feishu`，选择 QR 扫码自动建应用或手动配置。
+2. **凭据安全：** 凭证经过 AES-256-GCM 高强度加密并存放在 `~/.deepv/` 全局目录下，自动采用 0o600 权限锁闭。
+3. **日常管控：**
+   - 启动网关：`/feishu start` （免内网穿透，直接利用 WebSocket 双向长连接，安全且免配置 webhook）
+   - 查看状态与审批：`/feishu status` （实时展示 bound 工作区、机器人名称、及缺少的授权权限申请链接）
+   - 关闭连接：`/feishu stop`
+   - 清理登录：`/feishu logout`
 
 ---
 
-
-### `/clear` - 清空屏幕
-清空终端显示，包括可见的会话历史和滚动缓冲区。
-
-**用法：** `/clear`
-
-**快捷键：** `Ctrl+L`
-
-**注意：** 上下文数据会保留，仅清除视觉显示。
+### Q13: 什么是目标驱动模式 (/goal)，如何控制它的执行？
+**A:** `/goal` 是一个承诺机制，它将 Agent 锁定在“达成特定目标”的强契约中，直到所有验收指标都被客观达成。
+1. **开启契约：** 输入 `/goal` 或 `/goal new` 调出表单，指定目标描述、禁止操作（如禁止 Force Push）、达标判定条件和最少工时。
+2. **看门狗守护（Watchdog）：** 在运行中，如果 AI 遭遇逻辑阻塞或陷入盲目空转，系统内嵌的空闲看门狗将自动触发并提示 `[GOAL WATCHDOG]`，强制 AI 评估障碍、寻找备用方案，而不是无限期卡死。
+3. **达成与销毁：**
+   - 结束契约：目标全量达成时，AI 会自主调用 `goal_achieved` 验证工具并自动宣告 `/goal clear` 销毁契约，后续压缩将不再向上下文残留旧目标。
+   - 主动清理：用户可以使用 `/goal clear` 手动提前释放当前契约约束。
 
 ---
 
-### `/compress` - 压缩上下文
-用摘要替换整个聊天上下文，节省 token 用量。
-当上下文不足 20% 时，CLI也会自动执行压缩。
-
-**用法：** `/compress`
-
-**作用：**
-- 保留高层次摘要
-- 大幅减少 token 消耗
-- 适用于长时间会话
-
-**注意：** 会丢失详细的历史记录，不可逆操作。
+### Q14: 如何使用多模型对决/对审模式 (/debate) 进行代码审查？
+**A:** `/debate` 允许多个模型针对复杂的重构、设计或 Bug 修复场景展开多轮激辩，最后由轻量级 Flash 模型自动汇总输出高水平设计方案。
+1. **启动对审：** 输入 `/debate` 打开向导，配置参与的辩手模型（如 Claude 与 Gemini）、辩论主题及辩论轮数（推荐 2-3 模型，1-2 轮）。
+2. **自动汇总：** 辩论结束后，系统会调用极速模型整理辩论纪要并生成一份正式的 `DEBATE_SUMMARY.md` 报告，极具参考价值。
 
 ---
 
-### `/copy` - 复制最后输出
-将 AI 的最后一条输出复制到剪贴板。
-
-**用法：** `/copy`
-
-**使用场景：**
-- 快速复制生成的代码
-- 分享 AI 的回答
-- 保存重要输出
-
----
-
-### `/editor` - 选择编辑器
-打开编辑器选择对话框，用于查看 diff。
-
-**用法：** `/editor`
-
-**支持的编辑器：**
-- VSCode
-- Sublime Text
-- Vim
-- 其他...
-
-**配置：** 在 `settings.json` 中设置 `preferredEditor`
-
----
-
-### `/help` 或 `/?` - 显示帮助
-显示传统的命令列表帮助对话框。
-
-**用法：** `/help` 或 `/?`
-
----
-
-### `/help-ask` - AI 智能帮助助手
-**（你现在正在使用的功能！）**
-
-启动 AI 智能帮助系统，可以询问任何关于 CLI 功能的问题。
-
-**用法：** `/help-ask`
-
-**特点：**
-- 基于完整的 CLI 知识库回答问题
-- 使用 Auto 模型（会消耗 token）
-- 支持中英文问答
-- 按 Esc 键退出帮助模式
-
-**退出帮助：** 按 `Esc` 键
-
-**注意：** 此功能会消耗 API token，如果只想查看命令列表，请使用 `/help`
-
----
-
-### `/issue` - 提交 Issue 反馈
-快速提交 GitHub Issue，并自动附加当前会话的错误日志（已脱敏）。
-
-**用法：** `/issue <问题描述>`
-
-**说明：**
-- 会自动打开 GitHub Issue 页面
-- 仅附带 error 日志，敏感内容将以 `*` 脱敏
-
----
-
-### `/init` - 初始化项目上下文
-自动分析项目并生成 `DEEPV.md` 文件，提供项目上下文。
-
-**用法：** `/init`
-
-**功能：**
-1. 分析项目结构
-2. 识别项目类型（代码项目 vs 非代码项目）
-3. 生成包含以下内容的 `DEEPV.md`：
-   - 项目概述
-   - 主要技术栈
-   - 构建/运行命令
-   - 开发规范
-   - 特殊配置
-
-**注意：** 如果 `DEEPV.md` 已存在，此命令则无法执行。
-
-**相关：** `/memory refresh`
-
----
-
-### `/mcp` - MCP 服务器管理
-列出配置的 Model Context Protocol (MCP) 服务器及其工具。
-
-**用法：** `/mcp [子命令]`
-
-**子命令：**
-- `desc` / `descriptions`：显示详细的工具描述
-- `nodesc` / `nodescriptions`：隐藏工具描述，仅显示名称
-- `schema`：显示工具参数的完整 JSON schema
-
-**快捷键：** `Ctrl+T` - 切换工具描述显示
-
-**配置：** 参见 Q5 或 `docs/cli/configuration.md`
-
----
-
-### `/memory` - 记忆管理
-管理 AI 的指令上下文（从 `DEEPV.md` 文件加载）。
-
-**子命令：**
-- `add <text>` - 添加文本到 AI 记忆
-- `show` - 显示当前加载的完整分层记忆
-- `refresh` - 重新加载所有  `DEEPV.md` 文件
-
-**用法示例：**
-```
-/memory add 使用 TypeScript strict 模式
-/memory show
-/memory refresh
-```
-
-**记忆文件层次（优先级递增）：**
-1. 全局：`~/.deepv/DEEPV.md`
-2. 项目根及父目录：`<项目路径>/DEEPV.md`
-3. 子目录：项目内各子目录的 `DEEPV.md`
-
-
-
----
-
-### `/model` - 切换模型
-交互式选择 AI 模型。
-
-**用法：** `/model [模型名]`
-
-**交互式：**
-1. 输入 `/model` 后按空格
-2. 显示可用模型列表
-3. 方向键选择
-4. 回车确认
-
-**直接指定：** `/model Claude-Sonnet-4.5`
-
-**查看统计：** `/stats model`
-
----
-
-### `/quit` 或 `/exit` - 退出 CLI
-退出 DeepV Code CLI。
-
-**用法：** `/quit` 或 `/exit`
-
-**注意：** 未保存的会话状态将丢失
-
----
-
-### `/restore` - 恢复检查点
-将项目文件恢复到某个工具执行前的状态。
-
-**用法：** `/restore [checkpoint_id]`
-
-**无参数：** 列出所有可用的检查点
-
-**指定 ID：** 恢复到指定检查点
-
-
-**用途：**
-- 撤销文件编辑
-- 回滚代码变更
-- 恢复删除的文件
-
-**相关文档：** `docs/checkpointing.md`
-
----
-
-### `/stats` - 统计信息
-显示当前会话的详细统计信息。
-
-**用法：** `/stats [子命令]`
-
-**子命令：**
-- 无参数：显示总体统计（token 用量、缓存节省、会话时长）
-- `model [模型名]`：显示模型统计（支持 Tab 补全）
-- `tools`：显示工具使用统计
-
-**示例：**
-```
-/stats
-/stats model gemini-2.0-flash-exp
-/stats tools
-```
-
-**注意：** 缓存 token 信息仅在使用 API key 认证时显示。
-
----
-
-### `/theme` - 切换主题
-打开主题选择对话框。
-
-**用法：** `/theme`
-
-**配置：**
-```json
-{
-  "theme": "GitHub"
-}
-```
-
-**自定义主题：**
-```json
-{
-  "customThemes": {
-    "MyTheme": {
-      "primary": "#00FF00",
-      "background": "#000000"
-    }
-  }
-}
-```
-
-**相关文档：** `docs/cli/themes.md`
-
----
-
-### `/auth` - 认证设置
-打开认证对话框，用于重新登录认证。
-
-**用法：** `/auth`
-
-**支持的认证方式：**
-- 根据您所在的组织会有不同的认证支持，具体看界面引导即可。
-
----
-
-### `/config` - 统一配置菜单
-打开交互式设置面板，让您可以直观地配置 DeepV Code 的各种设置。常用的设置如主题、模型、Agent 风格等都在这里了。
-
-**用法：** `/config [子命令]`
-
-**功能：**
-- **交互式面板：** 直接输入 `/config` 回车，打开可视化菜单。
-- **常用设置：** 面板集成了主题、编辑器、模型切换、Vim 模式、Agent 风格、YOLO 模式、健康使用提醒及语言偏好。
-- **快捷操作：** 支持键盘上下移动、回车进入子菜单、`Esc` 返回或关闭。
-
-**子命令：**
-- `/config theme` - 打开主题选择
-- `/config model` - 打开模型选择
-- `/config agent-style` - 切换 Agent 风格
-- `/config yolo [on|off]` - 切换 YOLO 自动批准模式
-- `/config language [name]` - 设置回复语言偏好
-
-**示例：**
-```
-/config
-/config model claude
-/config yolo on
-```
-
----
-
-### `/tools` - 工具列表
-显示当前可用的所有工具（内置 + MCP）。
-
-**用法：** `/tools [子命令]`
-
-**子命令：**
-- 默认：显示工具名称和描述
-- `nodesc` / `nodescriptions`：仅显示工具名称
-- `desc` / `descriptions`：显示详细描述（旧版，现为默认）
-
-**示例：**
-```
-/tools
-/tools nodesc
-```
-
-**相关：** `/mcp`、`/mcp schema`
-
----
-
-### `/extensions` - 扩展管理
-管理 DeepV Code 的扩展。
-
-**用法：** `/extensions [子命令]`
-
-**子命令：**
-- `list` - 列出所有可用的扩展
-- `info` - 查看扩展的安装和卸载相关知识
-
-**示例：**
-```
-/extensions list
-/extensions info
-```
-
-**功能说明：**
-- `/extensions list`：显示当前可用的所有扩展列表
-- `/extensions info`：获取关于如何安装、配置和卸载扩展的详细信息
-
----
-
-### `/ext:` - 使用已安装的扩展命令
-调用已安装的 context 类型扩展提供的斜杠命令。
-
-**用法：** `/ext:<扩展名> [参数]`
-
-**说明：**
-- 当安装了扩展后，扩展可能提供自定义的斜杠命令
-- 使用 `/ext:` 前缀可以调用这些已安装的 context 类型扩展
-- 扩展命令会在已安装扩展列表中显示
-
-**示例：**
-```
-/ext:myExtension
-/ext:customCommand --option value
-```
-
----
-
-### `/vim` - Vim 模式
-切换 vim 模式。
-
-**用法：** `/vim`
-
-**功能：**
-- **NORMAL 模式：** `h`、`j`、`k`、`l` 导航；`w`、`b`、`e` 跳词；`0`、`# DeepV Code CLI 帮助知识库
-
-> 本知识库包含 DeepV Code CLI 的所有命令和功能详细说明，供智能帮助系统使用。
-
-## 📌 常见问题快速索引
-
-### Q1: 如何切换 AI 模型？
-**A:** 使用 `/model` 命令进行交互式切换：
-1. 输入 `/model` 后按空格
-2. 会显示可用模型列表
-3. 使用方向键选择目标模型
-4. 按回车确认切换，或者直接输入可用的模型名称后按回车
-
-
-
----
-
-### Q2: 如何回滚到某个代码检查点？
-**A:** 使用 `/restore` 命令：
-1. 直接输入 `/restore` 后按空格，你可以用方向键查看所有可恢复的检查点
-2. 输入 `/restore <检查点ID>` 回滚到指定检查点（在创建检查点时屏幕上会显示）
-**用途：**
-- 撤销文件编辑、回滚代码变更
-
-
-
----
-
-### Q3: 如何保存和恢复会话？
-**A:** 使用 `/session` 命令的子命令：
-- **恢复会话：** `/chat select <ID>`
-  - 示例：`/chat select 1`
-- **查看所有会话详情：** `/session list`
-- **新建干净的会话：** `/session new`
-
-
----
-
-### Q4: 如何升级 DeepV Code CLI？
-**A:** 使用 `dvcode -u` 命令进行升级。
-
-
----
-
-### Q5: 如何让 CLI 感知 VS Code 中打开的文件或选中的代码？
-**A:** DeepV Code CLI 可以通过 VS Code 扩展与编辑器进行深度集成。
-1. **安装扩展：** 在 VS Code 扩展市场搜索并安装 `DeepV Code Companion` 扩展。
-2. **启动 CLI：** 在 VS Code 的内置终端中启动 DeepV Code CLI。
-3. **确认连接：** 当 CLI 成功启动后，你会在 VS Code 右下角看到一个绿色的指示器，显示 `IDE 已连接`。这表示 CLI 已成功与 VS Code 建立连接，可以感知你打开的文件和选中的代码。
-
-
----
-
-### Q6: 如何添加自定义斜杠命令？
-**A:** 创建 TOML 格式的命令定义文件：
-
-**位置选择：**
-- 全局命令：`~/.deepv/commands/`（所有项目可用）
-- 项目命令：`<项目根目录>/.deepvcode/commands/`（仅当前项目）
-
-**文件格式示例：**
-```toml
-# 文件：~/.deepv/commands/git/commit.toml
-# 命令名：/git:commit
-
-description = "生成符合规范的 git commit 消息"
-prompt = """
-请分析当前的 git staged 变更，生成一条符合 Conventional Commits 规范的 commit 消息。
-
-格式要求：
-- type(scope): subject
-- type 可以是：feat、fix、docs、style、refactor、test、chore
-- subject 简洁明确，不超过 50 字符
-"""
-```
-
-**使用参数：**
-```toml
-prompt = "请重构以下代码为纯函数：{{args}}"
-```
-调用：`/refactor:pure some code here`
-
-**相关文档：** 查看 `docs/cli/commands.md` 的 "Custom Commands" 章节
-
----
-
-### Q7: 如何配置 MCP 服务器？
-**A:** 在 `settings.json` 中配置 `mcpServers` 字段：
-
-**位置选择：**
-- 全局命令：`~/.deepv/`（所有项目可用）
-- 项目命令：`<项目根目录>/.deepv/`（仅当前项目）
-
-#### 方式一：标准模式（通过命令启动）
-
-适用于本地 MCP 服务器，通过命令行启动进程。
-
-```json
-{
-  "mcpServers": {
-    "myPythonServer": {
-      "command": "python",
-      "args": ["mcp_server.py", "--port", "8080"],
-      "cwd": "./mcp_tools/python",
-      "timeout": 5000,
-      "includeTools": ["safe_tool", "file_reader"]
-    },
-    "myNodeServer": {
-      "command": "node",
-      "args": ["mcp_server.js"],
-      "excludeTools": ["dangerous_tool"]
-    }
-  }
-}
-```
-
-**字段说明：**
-- `command`（必需）：启动服务器的命令
-- `args`（可选）：命令参数数组
-- `env`（可选）：环境变量对象
-- `cwd`（可选）：工作目录
-- `timeout`（可选）：请求超时（毫秒）
-- `trust`（可选）：信任服务器，跳过确认
-- `includeTools`（可选）：白名单，仅启用指定工具
-- `excludeTools`（可选）：黑名单，排除指定工具
-
-#### 方式二：Streamable HTTP 模式（推荐用于云服务）
-
-适用于支持 HTTP 的远程 MCP 服务器，无需本地启动进程。
-
-```json
-{
-  "mcpServers": {
-    "Web-Search-by-Z.ai": {
-      "httpUrl": "https://open.bigmodel.cn/api/mcp-broker/proxy/web-search/mcp",
-      "headers": {
-        "Authorization": "Bearer **************************"
-      }
-    },
-    "myHttpServer": {
-      "httpUrl": "https://api.example.com/mcp/endpoint",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY",
-        "Custom-Header": "custom-value"
-      }
-    }
-  }
-}
-```
-
-**Streamable HTTP 模式字段说明：**
-- `httpUrl`（必需）：MCP 服务器的 HTTP 端点 URL
-- `headers`（可选）：HTTP 请求头对象，用于认证或传递自定义信息
-  - 常用认证方式：`Authorization: Bearer <token>`
-- 其他字段（`includeTools`、`excludeTools`、`trust` 等）同样适用
-
-**两种模式对比：**
-
-| 特性 | 标准模式 | Streamable HTTP 模式 |
-|-----|---------|---------------------|
-| **连接方式** | 本地启动进程 | HTTP 请求 |
-| **适用场景** | 本地 MCP 服务器 | 云服务、远程 MCP |
-| **配置复杂度** | 需要配置命令、路径 | 只需 URL 和可选 Headers |
-| **资源占用** | 本地进程资源 | 无本地进程 |
-| **网络要求** | 无需网络 | 需要网络连接 |
-
-**查看 MCP 状态：** `/mcp` 或 `/mcp desc`
-
-**快捷键：** `Ctrl+T` 切换工具描述显示
-
----
-
-### Q8: 如何切换主题？
-**A:** 使用 `/theme` 命令：
-1. 输入 `/theme` 打开主题选择对话框
-2. 浏览可用主题
-3. 选择并应用
-
----
-
-### Q9: 有没有在 VSCode 中使用的图形化界面版/扩展/插件/GUI 版？
-**A:** 是的，DeepV Code 也支持 VSCode 扩展！
-你可以在 VSCode 扩展市场中搜索 **DeepV Code for VSCode** 在线安装，即可在 VSCode 中使用图形化界面版本。
-
-**安装方式：**
-1. 打开 VSCode
-2. 进入扩展市场（快捷键：`Ctrl+Shift+X` 或 `Cmd+Shift+X`）
-3. 搜索 `DeepV Code for VSCode`
-4. 点击安装
-
-**特点：**
-- 图形化界面操作，更直观便捷
-- 与 VSCode 深度集成
-- 支持文件感知、代码选中等 IDE 功能
-- 与 CLI 版本功能互补，可根据需求选择使用
-
----
-
-### Q10: 如何快速调整主题、模型、Agent风格等常用设置？
-**A:** 使用 `/config` 命令打开**交互式设置面板**：
-1. 直接输入 `/config` 并按回车。
-2. 你将看到一个可视化菜单，集成了所有常用设置：
-   - **🎨 主题 (Theme)**：快速切换界面配色。
-   - **🤖 AI 模型 (Model)**：在不同的 AI 模型间切换。
-   - **🧠 Agent 风格 (Style)**：调整助手的行为风格（如默认、Codex、Cursor、Windsurf、Claude Code 等）。
-   - **🚀 YOLO 模式**：开启/关闭工具调用自动批准。
-   - **Vim 模式**：切换内置输入的 Vim 体验。
-   - **🌐 语言偏好**：设置 AI 的回复语言。
-3. 使用方向键上下移动，按回车进入子菜单或确认选择，按 `Esc` 返回或退出。
-
----
-
-### Q11: 如何配置自定义模型（OpenAI/Claude API）？
-**A:** DeepV Code 支持配置 OpenAI 兼容格式和 Anthropic Claude API 格式的自定义模型。
-
-#### 📝 配置文件位置
-
-自定义模型配置保存在：`~/.deepv/custom-models.json`
-
-**为什么使用独立文件？**
-- 避免与 `settings.json` 产生冲突
-- 防止云端模型更新覆盖自定义配置
-- 支持多个 DeepV Code 实例并发运行
-
-#### 🚀 方式一：使用配置向导（推荐）
-
-在 CLI 中输入：
-
-```
-/add-model
-```
-
-按照向导提示填写：
-1. **选择提供商类型**：OpenAI Compatible / Anthropic Claude
-2. **输入显示名称**：如 `GPT-4 Turbo`
-3. **输入 API 基础 URL**：如 `https://api.openai.com/v1`
-4. **输入 API 密钥**：推荐使用环境变量格式 `${OPENAI_API_KEY}`
-5. **输入模型 ID**：如 `gpt-4-turbo`
-6. **最大 Token 数**（可选）：如 `128000`
-7. **确认配置**：输入 `y` 保存
-
-#### ⚙️ 方式二：手动编辑配置文件
-
-编辑 `~/.deepv/custom-models.json`：
-
-```json
-{
-  "models": [
-    {
-      "displayName": "GPT-4 Turbo",
-      "provider": "openai",
-      "baseUrl": "https://api.openai.com/v1",
-      "apiKey": "${OPENAI_API_KEY}",
-      "modelId": "gpt-4-turbo",
-      "maxTokens": 128000,
-      "enabled": true
-    },
-    {
-      "displayName": "Claude Sonnet",
-      "provider": "anthropic",
-      "baseUrl": "https://api.anthropic.com",
-      "apiKey": "${ANTHROPIC_API_KEY}",
-      "modelId": "claude-sonnet-4-5",
-      "maxTokens": 200000,
-      "enabled": true
-    },
-    {
-      "displayName": "Local Llama",
-      "provider": "openai",
-      "baseUrl": "http://localhost:1234/v1",
-      "apiKey": "not-needed",
-      "modelId": "llama-3-70b",
-      "maxTokens": 8192,
-      "enabled": true
-    }
-  ]
-}
-```
-
-#### 📋 配置字段说明
-
-**必需字段：**
-- `displayName` - 显示名称（也作为唯一标识符）
-- `provider` - 提供商类型：`openai` 或 `anthropic`
-- `baseUrl` - API 基础 URL（不要以 `/` 结尾）
-- `apiKey` - API 密钥（支持环境变量：`${VAR_NAME}`）
-- `modelId` - 实际的模型名称（传递给 API）
-
-**可选字段：**
-- `maxTokens` - 最大上下文窗口大小（数字）
-- `enabled` - 是否启用（`true`/`false`，默认 `true`）
-- `headers` - 额外的 HTTP 请求头（键值对对象）
-- `timeout` - 请求超时时间（毫秒）
-- `enableThinking` - 启用 Anthropic 扩展思考（仅 `anthropic` 提供商，默认启用）
-
-#### 🔌 支持的提供商类型
-
-**OpenAI Compatible (`openai`)：**
-- OpenAI 官方 API
-- Azure OpenAI
-- 本地模型（LM Studio, Ollama, text-generation-webui）
-- 第三方兼容服务（Groq, Together AI, DeepInfra 等）
-
-**Anthropic Claude (`anthropic`)：**
-- Claude API 官方端点
-- 自动启用 Anthropic 扩展思考（所有模型默认开启，不支持的模型会自动忽略）
-- 可通过 `enableThinking: false` 明确禁用
-
-#### 💡 常见配置示例
-
-**OpenAI 官方 API：**
-```json
-{
-  "displayName": "GPT-4 Turbo",
-  "provider": "openai",
-  "baseUrl": "https://api.openai.com/v1",
-  "apiKey": "${OPENAI_API_KEY}",
-  "modelId": "gpt-4-turbo"
-}
-```
-
-**Azure OpenAI：**
-```json
-{
-  "displayName": "Azure GPT-4",
-  "provider": "openai",
-  "baseUrl": "https://your-resource.openai.azure.com/openai/deployments/your-deployment",
-  "apiKey": "${AZURE_OPENAI_KEY}",
-  "modelId": "gpt-4",
-  "headers": {
-    "api-version": "2024-02-01"
-  }
-}
-```
-
-**Groq：**
-```json
-{
-  "displayName": "Groq Llama 3",
-  "provider": "openai",
-  "baseUrl": "https://api.groq.com/openai/v1",
-  "apiKey": "${GROQ_API_KEY}",
-  "modelId": "llama-3-70b-8192"
-}
-```
-
-**本地 LM Studio：**
-```json
-{
-  "displayName": "Local Llama",
-  "provider": "openai",
-  "baseUrl": "http://localhost:1234/v1",
-  "apiKey": "not-needed",
-  "modelId": "local-model"
-}
-```
-
-**Claude API（自动启用扩展思考）：**
-```json
-{
-  "displayName": "Claude Sonnet 4.5",
-  "provider": "anthropic",
-  "baseUrl": "https://api.anthropic.com",
-  "apiKey": "${ANTHROPIC_API_KEY}",
-  "modelId": "claude-sonnet-4-5"
-  // enableThinking 默认为 true，所有 Anthropic 模型自动启用
-  // 不支持的模型会自动忽略此参数
-}
-```
-
-#### 🎯 使用自定义模型
-
-**通过模型选择对话框：**
-```
-/model
-```
-自定义模型会显示 `[Custom]` 标签和青色，使用方向键选择。
-
-**直接切换：**
-```
-/model custom:openai:gpt-4-turbo@abc123
-```
-
-#### 🔧 环境变量设置
-
-**Linux/macOS：**
-```bash
-export OPENAI_API_KEY="sk-your-key-here"
-export ANTHROPIC_API_KEY="sk-ant-your-key-here"
-```
-
-**Windows PowerShell：**
-```powershell
-$env:OPENAI_API_KEY="sk-your-key-here"
-$env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
-```
-
-**Windows CMD：**
-```cmd
-set OPENAI_API_KEY=sk-your-key-here
-set ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-#### ⚠️ 注意事项
-
-- **安全性**：推荐使用环境变量存储 API 密钥，避免明文写入配置文件
-- **Base URL 格式**：必须以 `http://` 或 `https://` 开头，不要以 `/` 结尾
-- **重启生效**：修改配置后需要重启 DeepV Code
-- **Token 计费**：自定义模型不消耗 DeepV 积分，直接向提供商付费
-- **功能限制**：某些高级功能可能因提供商 API 限制而不可用
-
-#### 🐛 故障排除
-
-| 问题 | 解决方案 |
-|-----|---------|
-| 模型不显示 | 检查 `enabled` 是否为 `true`，重启 CLI |
-| API 调用失败 | 验证 API Key、Base URL、Model ID 是否正确 |
-| 环境变量未生效 | 确保使用 `${VAR_NAME}` 格式（带花括号） |
-| 网络错误 | 检查网络连接，确认 URL 可访问 |
-
-#### 📚 更多文档
-
-- [自定义模型快速入门](../../docs/custom-models-quickstart.md)
-- [自定义模型完整指南](../../docs/custom-models-guide.md)
-- [自定义模型架构说明](../../docs/custom-models-architecture.md)
+### Q15: 如何开启和配置 AI 的自适应思考与推理深度 (/thinking)？
+**A:** 使用 `/thinking` 命令配置推理引擎，为 Anthropic Claude 3.7+ 的 Thinking Budget、OpenAI 的 Reasoning Effort，及 Gemini 的思维链提供自适应参数映射：
+1. **修改深度：** 输入 `/thinking`，选择推理强度（`none`、`low`、`medium`、`high`、`xhigh` 等）。
+2. **防灾与清洗（cleanContents）：**
+   - 自动 Bypass：针对不支持 Thinking Budget 的模型（如 Claude Haiku 等），系统自动识别并降级直连，防止 400 崩溃。
+   - 历史清洗：像 Kimi 等第三方代理网关，在接收带推理标记 of 上下文时极易返回 400 格式错误。系统的 `cleanContents` 在中继时会自动合并推理数据到 Primary Message 块，提供 100% 的兼容性。
 
 ---
 
@@ -1670,6 +928,64 @@ AI: [使用 write_file、replace 等工具执行修改]
 
 ---
 
+### `/feishu` - 飞书机器人管理
+管理 DeepV Code 与飞书 (Feishu) / Lark 的机器人长连接及接入。
+
+**用法：** `/feishu [子命令]`
+
+**子命令：**
+- `/feishu` 或 `/feishu setup` - 交互式启动设置，获取机器人配置凭据。
+- `/feishu start` - 开启与飞书的高速 WebSocket 长连接消息网关。
+- `/feishu stop` - 关闭飞书连接网关。
+- `/feishu status` - 实时查看机器人运行、bound 工作区、绑定的项目、及权限申请状态。
+- `/feishu logout` - 清理并注销当前存储的飞书机器人密钥及凭据。
+
+---
+
+### `/goal` - 目标驱动模式
+开启对多步骤高复杂任务的契约型自动迭代执行，承诺不达目的誓不罢休。
+
+**用法：** `/goal [子命令]`
+
+**子命令：**
+- `/goal` 或 `/goal new` - 打开 GoalWizard 多步配置向导并开启目标执行。
+- `/goal clear` - 主动打破目标契约、释放锁定。
+
+**工作原理：**
+- 开启后，系统在每轮会话都自动对 AI 持续注流当前活动的目标约束、禁止项和验收指标。
+- AI 达标后必须调用 `goal_achieved` 验证工具，由系统验证无误后自动解除契约。
+- **看门狗（Watchdog）：** 在执行过程中，若 AI 空转或无实质动作，空闲看门狗将触发系统警告提示 AI 评估路线，从而防止 AI 卡死。
+
+---
+
+### `/debate` - 多模型对决代码审查
+让多名 AI 专家（不同模型）针对关键代码段、设计方案或 Bug 修复进行激辩、多维评估与对审。
+
+**用法：** `/debate`
+
+**说明：**
+- 该命令会打开交互式多模型激辩向导。
+- 引导你选择参与论战的模型、激辩的主题以及辩论的轮数。
+- 结束辩论后，系统会自动组织轻量级高速模型提炼论战核心成果并输出正式的 `DEBATE_SUMMARY.md`。
+
+---
+
+### `/thinking` - 自适应思考深度配置
+一键调整模型思考与推理的深度，从而自适应各大模型的思维深度。
+
+**用法：** `/thinking [子命令]`
+
+**子命令：**
+- `/thinking` - 打开交互式滑块菜单选择思考级别（None, Low, Medium, High, Extreme）。
+- `/thinking on` - 开启最大深度思考模式。
+- `/thinking off` - 关闭思考，转为快速直连回答模式。
+
+**配置优势：**
+- 支持 Claude 3.7+ 的 Thinking Budget，OpenAI 级别 Effort 及 Gemini 的自适应思维映射。
+- 自动绕过 Haiku 等不支持思考的模型，提供对 Kimi 等中继网关的自动推理块重组与格式清洗（防 400 格式崩溃）。
+
+---
+
 ### Q9: 自定义命令
 用户可创建自定义斜杠命令。
 
@@ -1683,7 +999,7 @@ AI: [使用 write_file、replace 等工具执行修改]
 
 #### 命名：文件路径决定命令名
 - `~/.deepv/commands/test.toml` → `/test`
-- `<项目>/.deepv/commands/git/commit.toml` → `/git:commit`
+- `<项目>/.deepvcode/commands/git/commit.toml` → `/git:commit`
 
 #### 必需字段：
 - `prompt`（字符串）：发送给模型的 prompt
@@ -1853,7 +1169,7 @@ Ctrl+G     # Windows 下直接粘贴
 ### 配置层次（优先级递增）
 1. **默认值**：硬编码默认值
 2. **用户设置**：`~/.deepv/settings.json`（全局）
-3. **项目设置**：`<项目根>/.deepv/settings.json`（项目专用）
+3. **项目设置**：`<项目根>/.deepvcode/settings.json`（项目专用）
 
 
 ### 环境变量
@@ -1987,7 +1303,7 @@ dvcode -e my-extension -e another
 使用预构建的 `gemini-cli-sandbox` Docker 镜像。
 
 ### 自定义沙箱
-在项目根创建 `.deepv/sandbox.Dockerfile`：
+在项目根创建 `.deepvcode/sandbox.Dockerfile`：
 ```dockerfile
 FROM gemini-cli-sandbox
 
@@ -2004,7 +1320,7 @@ BUILD_SANDBOX=1 dvcode -s
 使用 `SEATBELT_PROFILE` 环境变量：
 - `permissive-open`（默认）：限制写入项目文件夹
 - `strict`：严格模式
-- `<profile_name>`：自定义 profile（`.deepv/sandbox-macos-<profile_name>.sb`）
+- `<profile_name>`：自定义 profile（`.deepvcode/sandbox-macos-<profile_name>.sb`）
 
 ---
 
@@ -2061,7 +1377,7 @@ CLI 内：
 ```
 
 ### 场景 4：配置 MCP 服务器
-编辑 `.deepv/settings.json`：
+编辑 `.deepvcode/settings.json` 或 `~/.deepv/settings.json`：
 ```json
 {
   "mcpServers": {
@@ -2125,7 +1441,7 @@ prompt = """
 
 ### 问题：自定义命令不显示
 **检查：**
-1. 文件位置：`~/.deepv/commands/` 或 `<项目>/.deepv/commands/`
+1. 文件位置：`~/.deepv/commands/` 或 `<项目>/.deepvcode/commands/`
 2. 文件扩展名：必须是 `.toml`
 3. 文件格式：必须包含 `prompt` 字段
 4. 重启 CLI
