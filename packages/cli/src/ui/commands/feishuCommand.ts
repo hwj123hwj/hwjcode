@@ -70,6 +70,7 @@ import {
   MarketplaceManager,
   SkillLoader,
   getSpecificMimeType,
+  AudioReaderTool,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -2119,6 +2120,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         ));
 
+        // 注册飞书模式专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
+        toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
+
         await isolatedClient.setTools();
         dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
 
@@ -3292,6 +3296,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         ));
 
+        // 🎯 动态注册专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
+        toolRegistry.registerTool(new AudioReaderTool(config));
+
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');
       } catch (toolErr: any) {
@@ -3331,7 +3338,8 @@ async function handleStop(context?: CommandContext): Promise<string> {
       const toolRegistry: ToolRegistry = await config.getToolRegistry();
       const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
       const removedGroupTool = toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
-      if (removed || removedGroupTool) {
+      const removedAudioTool = toolRegistry.unregisterTool(AudioReaderTool.Name);
+      if (removed || removedGroupTool || removedAudioTool) {
         await geminiClient.setTools();
         dlog('Unregistered Feishu file-send and group-chat tools successfully.');
       }
@@ -3599,6 +3607,8 @@ async function handleLogout(context?: CommandContext): Promise<string> {
       try {
         const toolRegistry: ToolRegistry = await config.getToolRegistry();
         toolRegistry.unregisterTool(SendFeishuFileTool.Name);
+        toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
+        toolRegistry.unregisterTool(AudioReaderTool.Name);
         await geminiClient.setTools();
       } catch {
         // ignore
