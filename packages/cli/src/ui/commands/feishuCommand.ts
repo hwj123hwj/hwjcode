@@ -2378,7 +2378,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
       let currentMessage: PartListUnion = messageTextForAI;
 
       // 1. 处理文件下载 (落盘至 .deepvcode/inbound/)
-      const filePaths: string[] = [];
       if (msg.pendingFiles && msg.pendingFiles.length > 0) {
         const projectRoot = config?.getProjectRoot?.() || process.cwd();
         const fs = await import('node:fs');
@@ -2386,6 +2385,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const inboundDir = pathModule.join(projectRoot, '.deepvcode', 'inbound');
         fs.mkdirSync(inboundDir, { recursive: true });
 
+        const filePaths: string[] = [];
         for (const file of msg.pendingFiles) {
           const localPath = await gateway.downloadFileToDir(msg.messageId, file.fileKey, file.fileName, inboundDir);
           if (localPath) {
@@ -2405,33 +2405,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
         msg.text = reconstructedText;
         messageTextForAI = reconstructedText.trim();
         dlog(`[Feishu] Reconstructed message with file paths: "${messageTextForAI}"`);
-      }
-
-      // 🎯 完美多模态对齐：构建基础文本 Part
-      const messageParts: Part[] = [{ text: messageTextForAI }];
-
-      // 🎯 完美多模态音频/视频对齐：自动检测音频、视频文件并附带为 base64 inlineData
-      if (filePaths.length > 0) {
-        const fs = await import('node:fs');
-        for (const localPath of filePaths) {
-          if (localPath && !localPath.startsWith('[文件下载失败') && fs.existsSync(localPath)) {
-            try {
-              const detected = getSpecificMimeType(localPath);
-              if (detected && (detected.startsWith('audio/') || detected.startsWith('video/'))) {
-                const base64Data = fs.readFileSync(localPath).toString('base64');
-                messageParts.push({
-                  inlineData: {
-                    mimeType: detected,
-                    data: base64Data,
-                  }
-                });
-                dlog(`[Feishu] Multimodal media part successfully appended for AI from: ${localPath}`);
-              }
-            } catch (e: any) {
-              dwarn(`[Feishu] Failed to convert local media file to inlineData for AI: ${e?.message || e}`);
-            }
-          }
-        }
       }
 
       // 2. 处理图片下载 (落盘至 .deepvcode/clipboard/)
@@ -2463,8 +2436,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         messageTextForAI = reconstructedText.trim();
         dlog(`[Feishu] Reconstructed message with image paths: "${messageTextForAI}"`);
 
-        // update base text part in case it changed
-        messageParts[0] = { text: messageTextForAI };
+        // 🎯 完美多模态对齐：既保留文本绝对路径，又在消息中附加实际图片的 base64 作为 inlineData Part
+        // 这可以让支持多模态的模型直接读取图片提高效率，同时让非多模态模型依然能利用路径通过工具访问图片，实现自适应！
+        const messageParts: Part[] = [{ text: messageTextForAI }];
 
         for (const localPath of imagePaths) {
           if (localPath && !localPath.startsWith('[图片下载失败') && fs.existsSync(localPath)) {
@@ -2489,10 +2463,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
           }
         }
-      }
 
-      if (messageParts.length > 1) {
-        currentMessage = messageParts;
+        if (messageParts.length > 1) {
+          currentMessage = messageParts;
+        } else {
+          currentMessage = messageTextForAI;
+        }
       } else {
         currentMessage = messageTextForAI;
       }

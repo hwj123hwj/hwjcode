@@ -52,6 +52,7 @@
 | [SkillLoader](wiki/SkillLoader.md) | entity | Plugin | `core/src/skills/skill-loader.ts` |
 | [MarketplaceManager](wiki/MarketplaceManager.md) | entity | Plugin | `core/src/skills/marketplace-manager.ts` |
 | [lark-cli-tool](wiki/lark-cli-tool.md) | entity | Tool | `core/src/tools/lark-cli.ts` |
+| [audio-reader](packages/core/src/tools/audio-reader.ts) | entity | Tool | `core/src/tools/audio-reader.ts` |
 
 ## Overview
 
