@@ -31,12 +31,15 @@ export interface FeishuMessageLogEntry {
 
 export interface FeishuStatusDashboardProps {
   routes: Record<string, FeishuProjectRoute>;
-  activeGroupChatId: string | null;
+  /** 「当前正在干活（Agent 仍在处理）」的群集合，可同时多个。 */
+  activeGroupChatIds: Set<string>;
   groupLogs: Record<string, FeishuMessageLogEntry[]>;
   botName: string;
   platform: string;
   isConnected: boolean;
   terminalWidth: number;
+  /** chatId → 群名 的解析结果（尽力而为）。有群名时优先展示群名，否则 fallback 到 chatId。 */
+  chatNames?: Record<string, string>;
 }
 
 // ── 辅助 ──────────────────────────────────────────────────
@@ -75,18 +78,38 @@ const MAX_VISIBLE_LOG_LINES = 5; // 可见窗口行数
 
 export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
   routes,
-  activeGroupChatId,
+  activeGroupChatIds,
   groupLogs,
   botName,
   platform,
   isConnected,
   terminalWidth,
+  chatNames,
 }) => {
   const routeEntries = Object.entries(routes);
+  const hasActiveGroups = activeGroupChatIds.size > 0;
 
-  // ── 活动聊天的最新日志 (最多 MAX_VISIBLE_LOG_LINES 条) ──
-  const activeLogs: FeishuMessageLogEntry[] = activeGroupChatId
-    ? (groupLogs[activeGroupChatId] ?? []).slice(-MAX_VISIBLE_LOG_LINES)
+  // ── 日志窗口聚焦的群 ──
+  // 可能多个群同时在干活；日志窗口只展示一个，选「正在干活的群中最近有日志活动」的那个，
+  // 让窗口跟随当前最活跃的对话。
+  const focusedChatId: string | null = (() => {
+    if (!hasActiveGroups) return null;
+    let best: string | null = null;
+    let bestTs = -1;
+    for (const chatId of activeGroupChatIds) {
+      const logs = groupLogs[chatId];
+      const lastTs = logs && logs.length > 0 ? logs[logs.length - 1].timestamp : 0;
+      if (lastTs >= bestTs) {
+        bestTs = lastTs;
+        best = chatId;
+      }
+    }
+    return best;
+  })();
+
+  // ── 聚焦群的最新日志 (最多 MAX_VISIBLE_LOG_LINES 条) ──
+  const activeLogs: FeishuMessageLogEntry[] = focusedChatId
+    ? (groupLogs[focusedChatId] ?? []).slice(-MAX_VISIBLE_LOG_LINES)
     : [];
 
   return (
@@ -139,10 +162,14 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
         ) : (
           <Box flexDirection="column" marginTop={0}>
             {routeEntries.map(([chatId, route]) => {
-              const isActive = chatId === activeGroupChatId;
-              // 屏幕足够宽时（>= 85 字符），显示完整的 chatId，否则使用短 chatId 截断，保证不换行
+              const isActive = activeGroupChatIds.has(chatId);
+              // 优先展示已解析的群名；无群名时 fallback 到 chatId。
+              // 屏幕足够宽时（>= 85 字符），显示完整的 chatId，否则使用短 chatId 截断，保证不换行。
+              const resolvedName = chatNames?.[chatId];
               const isWide = terminalWidth >= 85;
-              const chatIdToShow = isWide ? chatId : shortChatId(chatId);
+              const chatIdToShow = resolvedName
+                ? resolvedName
+                : isWide ? chatId : shortChatId(chatId);
               return (
                 <Box key={chatId} justifyContent="space-between" marginTop={0}>
                   <Box>
@@ -169,7 +196,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
       </Box>
 
       {/* ── 活跃群的消息滚动窗口 ── */}
-      {activeGroupChatId && activeLogs.length > 0 ? (
+      {focusedChatId && activeLogs.length > 0 ? (
         <Box
           flexDirection="column"
           marginTop={1}
@@ -214,7 +241,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
             })}
           </Box>
         </Box>
-      ) : activeGroupChatId ? (
+      ) : focusedChatId ? (
         <Box marginTop={1} marginLeft={1}>
           <Text dimColor>{t('feishu.dashboard.waiting')}</Text>
         </Box>

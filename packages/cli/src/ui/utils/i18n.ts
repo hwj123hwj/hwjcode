@@ -1540,6 +1540,10 @@ export const translations = {
     'feishu.status.bot_status_stopped': '🔴 Stopped',
     'feishu.status.bot_status_label': '  Bot status:  {status}',
     'feishu.status.run_start': '  Run /feishu start to start the Bot',
+    'feishu.status.bound_projects_title': '🔗 Bound Projects ({count})',
+    'feishu.status.bound_projects_none': '  No projects bound yet. Send /bind <path> in a group chat to link a workspace.',
+    'feishu.status.bound_active_suffix': '(Active)',
+    'feishu.status.bound_resolving_names': '  (resolving group names…)',
 
     // Logout handler
     'feishu.logout.cleared': '🗑️ Feishu credentials cleared, Bot disconnected.',
@@ -1592,6 +1596,10 @@ export const translations = {
     'feishu.tui.tool_failed': '❌ Tool failed: {name} — {error}',
     'feishu.tui.processing_error': '❌ Error processing message: {error}',
     'feishu.tui.unauthorized_log': '🛡️ Rejected unauthorized message: openId={openId} text="{text}"',
+
+    // Lifecycle commands intercepted on the Feishu side (start/stop must run in the local CLI)
+    'feishu.lifecycle.start_blocked': '⚠️ **The Bot is already running** — that\'s exactly how this message reached me.\n\n`/feishu start` manages the Bot\'s lifecycle and must be run from the **local dvcode terminal**, not here in Feishu.\n\n💡 If you want to work, just talk to me directly, or use `/feishu status` to view connection and bound projects.',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` cannot be run from Feishu.**\n\nThis command stops the very gateway that is relaying your message — running it here would disconnect the Bot and you could not restart it from Feishu.\n\n💡 To stop the Bot, run `/feishu stop` in the **local dvcode terminal**.\n🛑 To abort the current running task instead, use `/stop`.',
 
     // Feishu Dashboard
     'feishu.dashboard.connected': 'Connected',
@@ -3187,6 +3195,10 @@ export const translations = {
     'feishu.status.bot_status_stopped': '🔴 已停止',
     'feishu.status.bot_status_label': '  Bot 状态:    {status}',
     'feishu.status.run_start': '  运行 /feishu start 启动 Bot',
+    'feishu.status.bound_projects_title': '🔗 绑定项目 ({count})',
+    'feishu.status.bound_projects_none': '  暂无绑定项目。在群聊中发送 /bind <路径> 即可绑定工作区。',
+    'feishu.status.bound_active_suffix': '(活跃中)',
+    'feishu.status.bound_resolving_names': '  (正在解析群名称…)',
 
     // Logout handler
     'feishu.logout.cleared': '🗑️ 飞书凭证已清除，Bot 已断开。',
@@ -3239,6 +3251,10 @@ export const translations = {
     'feishu.tui.tool_failed': '❌ 工具失败: {name} — {error}',
     'feishu.tui.processing_error': '❌ 处理消息时出错: {error}',
     'feishu.tui.unauthorized_log': '🛡️ 拒绝未授权消息: openId={openId} text="{text}"',
+
+    // 飞书侧拦截的生命周期命令（start/stop 必须在本地 CLI 执行）
+    'feishu.lifecycle.start_blocked': '⚠️ **Bot 已经在运行中** —— 您这条消息正是通过它转发给我的。\n\n`/feishu start` 用于管理 Bot 的生命周期，只能在 **本地 dvcode 终端** 执行，无法在飞书里运行。\n\n💡 想干活直接跟我说就行；或用 `/feishu status` 查看连接状态和绑定项目。',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` 不能在飞书里执行。**\n\n这个命令会停掉正在转发您消息的网关本身——在这里执行会导致 Bot 直接断连，而且您无法再从飞书侧重新启动它。\n\n💡 要停止 Bot，请在 **本地 dvcode 终端** 执行 `/feishu stop`。\n🛑 若只是想中止当前正在运行的任务，请使用 `/stop`。',
 
     // Feishu Dashboard（飞书仪表板）
     'feishu.dashboard.connected': '已连接',
