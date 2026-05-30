@@ -1063,8 +1063,20 @@ You are running outside of a sandbox container, directly on the user's system. F
       return `
 # LLM Wiki
 
-This project has an LLM Wiki knowledge base at \`.llm-wiki/\`.
+This project has a curated LLM Wiki knowledge base at \`.llm-wiki/\`. It contains
+distilled, human/AI-maintained knowledge about this codebase — architecture,
+key modules, conventions, and gotchas — that is often faster and more reliable
+than exploring the raw source from scratch.
 
+## Consult it proactively
+- Before exploring the codebase or answering questions about how something works,
+  consult \`.llm-wiki/index.md\` first to see if a relevant page already exists.
+- Prefer reading the matching \`.llm-wiki/wiki/*.md\` page over re-deriving the same
+  knowledge by broad code search. Use it to orient yourself, then dig into source.
+- Treat the wiki as a strong hint, not absolute truth: if a page looks stale or
+  conflicts with the current code, trust the code and consider updating the wiki.
+
+## Maintain it when asked
 When the user asks you to "save to wiki", "learn into wiki", "update wiki", or similar:
 1. Read \`.llm-wiki/index.md\` to understand the current structure.
 2. Create or update pages in \`.llm-wiki/wiki/\` with YAML frontmatter (\`type\`, \`date\`, \`tags\`).
