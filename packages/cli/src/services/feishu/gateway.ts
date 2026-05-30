@@ -2190,20 +2190,22 @@ export class FeishuGateway {
             name: formName,
             elements: formElements,
           },
+          // schema 2.0 中按钮是一等组件，直接放进 body.elements，通过
+          // behaviors:[{type:'callback'}] 声明服务端回调。⚠️ 绝不能用
+          // schema 1.0 的 { tag:'action', actions:[...] } 容器包裹——2.0 不
+          // 识别该 tag，会导致整卡 JSON 校验失败、卡片发送失败而回退到纯按钮模式。
           {
-            tag: 'action',
-            actions: [
+            tag: 'button',
+            text: { tag: 'plain_text', content: '💡 我有其他想法' },
+            type: 'default',
+            width: 'fill',
+            behaviors: [
               {
-                tag: 'button',
-                text: { tag: 'plain_text', content: '💡 我有其他想法' },
-                type: 'default',
-                width: 'fill',
-                value: {
-                  choice: 'other_ideas'
-                }
-              }
-            ]
-          }
+                type: 'callback',
+                value: { choice: 'other_ideas' },
+              },
+            ],
+          },
         ],
       },
     };
