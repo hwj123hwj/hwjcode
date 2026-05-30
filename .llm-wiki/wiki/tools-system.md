@@ -30,7 +30,7 @@ AI FunctionCall → ToolExecutionEngine → ToolRegistry.getTool()
 | [[BaseTool]] | Abstract base class for all tools |
 | [[DiscoveredMCPTool]] | Wrapper for [[mcp-system]] tools |
 
-## 31 Built-in Tools
+## 32 Built-in Tools
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -42,7 +42,7 @@ AI FunctionCall → ToolExecutionEngine → ToolRegistry.getTool()
 | Code Intelligence | 4 | lsp, read_lints, lint_fix, codesearch |
 | Skills | 3 | list_available_skills, get_skill_details, use_skill |
 | PPT | 2 | ppt_outline, ppt_generate |
-| Workspace & Utilities | 5 | ask_user_question, [[lark-cli-tool]] (`lark_cli`), local_time, goal_achieved, image_reader |
+| Workspace & Utilities | 6 | ask_user_question, [[lark-cli-tool]] (`lark_cli`), local_time, goal_achieved, image_reader, audio_reader |
 
 ## Confirmation Types
 
