@@ -24,6 +24,7 @@ import {
 } from '../index.js';
 import { PartListUnion, Part } from '@google/genai';
 import { convertToFunctionResponse } from './coreToolScheduler.js';
+import { todoStore, checkTodoStaleness } from '../tools/todo-store.js';
 import {
   ToolSchedulerAdapter,
   ToolExecutionContext,
@@ -1061,6 +1062,19 @@ export class ToolExecutionEngine {
       }
 
       // 转换为响应格式
+      // 📋 Todo staleness: count non-todo_write tool calls and inject reminder if stale
+      if (reqInfo.name !== 'todo_write') {
+        todoStore.incrementToolCallsSinceLastUpdate();
+        const stalenessReminder = checkTodoStaleness();
+        if (stalenessReminder) {
+          if (typeof guardedLlmContent === 'string') {
+            guardedLlmContent = guardedLlmContent + '\n\n' + stalenessReminder;
+          } else if (Array.isArray(guardedLlmContent)) {
+            guardedLlmContent = [...guardedLlmContent, stalenessReminder];
+          }
+        }
+      }
+
       const responseParts = convertToFunctionResponse(
         reqInfo.name,
         reqInfo.callId,
