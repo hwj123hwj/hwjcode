@@ -5,7 +5,7 @@
  */
 
 import { expect, describe, it, vi, beforeEach } from 'vitest';
-import { ShellTool } from './shell.js';
+import { ShellTool, isServerOrPersistentCommand } from './shell.js';
 import { Config } from '../config/config.js';
 import * as summarizer from '../utils/summarizer.js';
 import { GeminiClient } from '../core/client.js';
@@ -163,5 +163,68 @@ describe('shouldConfirmExecute', () => {
       new AbortController().signal,
     )) as ToolExecuteConfirmationDetails;
     expect(result.rootCommand).toEqual('git');
+  });
+});
+
+describe('isServerOrPersistentCommand', () => {
+  it('identifies server and persistent commands correctly', () => {
+    // 1. Matches
+    expect(isServerOrPersistentCommand('npm run dev')).toBe(true);
+    expect(isServerOrPersistentCommand('npm start')).toBe(true);
+    expect(isServerOrPersistentCommand('pnpm dev')).toBe(true);
+    expect(isServerOrPersistentCommand('vite')).toBe(true);
+    expect(isServerOrPersistentCommand('python -m http.server')).toBe(true);
+    expect(isServerOrPersistentCommand('uvicorn main:app')).toBe(true);
+    expect(isServerOrPersistentCommand('flask run')).toBe(true);
+    expect(isServerOrPersistentCommand('python manage.py runserver')).toBe(true);
+    expect(isServerOrPersistentCommand('rails server')).toBe(true);
+    expect(isServerOrPersistentCommand('php -S localhost:8000')).toBe(true);
+    expect(isServerOrPersistentCommand('docker compose up')).toBe(true);
+
+    // 2. Non-matches
+    expect(isServerOrPersistentCommand('npm run test')).toBe(false);
+    expect(isServerOrPersistentCommand('python test.py')).toBe(false);
+    expect(isServerOrPersistentCommand('git status')).toBe(false);
+    expect(isServerOrPersistentCommand('echo hello')).toBe(false);
+    expect(isServerOrPersistentCommand('docker compose up -d')).toBe(false);
+  });
+});
+
+describe('ShellTool - Background Task Actions', () => {
+  let shellTool: ShellTool;
+  let config: Config;
+
+  beforeEach(() => {
+    config = {
+      getCoreTools: () => undefined,
+      getExcludeTools: () => undefined,
+      getDebugMode: () => false,
+      getGeminiClient: () => ({}) as GeminiClient,
+      getTargetDir: () => '.',
+      getSummarizeToolOutputConfig: () => ({}),
+    } as unknown as Config;
+    shellTool = new ShellTool(config);
+  });
+
+  it('validates action parameters correctly', () => {
+    // normal execute needs command
+    expect(shellTool.validateToolParams({ command: '' })).not.toBeNull();
+    expect(shellTool.validateToolParams({ command: 'echo 1' })).toBeNull();
+
+    // list_background_tasks needs no command
+    expect(shellTool.validateToolParams({ command: '', action: 'list_background_tasks' })).toBeNull();
+
+    // stop_background_task needs backgroundTaskId
+    expect(shellTool.validateToolParams({ command: '', action: 'stop_background_task' })).not.toBeNull();
+    expect(shellTool.validateToolParams({ command: '', action: 'stop_background_task', backgroundTaskId: '123' })).toBeNull();
+  });
+
+  it('bypasses confirmation for background task listings/stop', async () => {
+    const signal = new AbortController().signal;
+    const confirmList = await shellTool.shouldConfirmExecute({ command: '', action: 'list_background_tasks' }, signal);
+    expect(confirmList).toBe(false);
+
+    const confirmStop = await shellTool.shouldConfirmExecute({ command: '', action: 'stop_background_task', backgroundTaskId: 'abc' }, signal);
+    expect(confirmStop).toBe(false);
   });
 });
