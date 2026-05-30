@@ -50,6 +50,7 @@ import {
   buildGoalContinuationMessage,
   type GoalContext,
 } from '../utils/goalContinuationPrompt.js';
+import { GoalAchievedTool } from '../tools/goal-achieved.js';
 
 import { DeepVServerAdapter } from './DeepVServerAdapter.js';
 
@@ -206,6 +207,16 @@ export class GeminiClient {
     logger.info(
       `[GeminiClient] Goal context activated. T0=${new Date(ctx.startedAt).toISOString()}, hours=${ctx.hours}, taskLen=${ctx.task.length}`,
     );
+
+    // 🎯 动态注册 goal_achieved 工具（仅在 goal 模式激活时存在，保障 AI 无法在普通模式下滥用）
+    this.config.getToolRegistry().then((toolRegistry) => {
+      toolRegistry.registerTool(new GoalAchievedTool(this.config));
+      this.setTools().catch((err) => {
+        logger.error('[GeminiClient] Failed to reload tools after registering goal_achieved:', err);
+      });
+    }).catch((err) => {
+      logger.error('[GeminiClient] Failed to get tool registry for goal_achieved:', err);
+    });
   }
 
   /**
@@ -217,6 +228,18 @@ export class GeminiClient {
       logger.info('[GeminiClient] Goal context cleared.');
     }
     this.activeGoalContext = null;
+
+    // 🎯 动态注销 goal_achieved 工具
+    this.config.getToolRegistry().then((toolRegistry) => {
+      const removed = toolRegistry.unregisterTool(GoalAchievedTool.Name);
+      if (removed) {
+        this.setTools().catch((err) => {
+          logger.error('[GeminiClient] Failed to reload tools after unregistering goal_achieved:', err);
+        });
+      }
+    }).catch((err) => {
+      logger.error('[GeminiClient] Failed to get tool registry to unregister goal_achieved:', err);
+    });
   }
 
   /**
