@@ -2,6 +2,22 @@
 
 > Chronological record of wiki operations.
 
+## [2026-05-30] feat | Massive Core & CLI Architecture Wiki Expansion (Recent 2 Months Feature Streams)
+
+### Pages Added
+- `wiki/background-tasks.md` — Core background process management, CRC32 IDs, cross-platform tree termination, and shell integrations.
+- `wiki/feishu-integration.md` — Secure Feishu WebSocket (WSClient) gateway, GCM credential encryption, media downloads, and SendFeishuFileTool sandboxing.
+- `wiki/lark-cli-tool.md` — The `lark_cli` tool architecture, live output streams, Device-flow OAuth interception, and argument overflow guards.
+- `wiki/goal-driven-mode.md` — Comprehensive guide to the `/goal` driven mode contract, idle watchdog loop, and auto-clear constraints.
+- `wiki/context-compression.md` — Context compression pipeline (`CompressionService` and `MicroCompactService` triggers), role prefill safeguards, and state restorations.
+- `wiki/adaptive-thinking.md` — Standardized reasoning effort mapping across OpenAI, Gemini, and Claude; Haiku exclusions, and webview BrainIcon indicators.
+
+### Pages Updated
+- `wiki/tools-system.md` — Promoted the built-in tool count from 27 to 31, introducing LarkCliTool, LocalTimeTool, GoalAchievedTool, and ImageReaderTool under the new "Workspace & Utilities" category.
+- `index.md` — Registered background-tasks, feishu-integration, lark-cli-tool, goal-driven-mode, context-compression, and adaptive-thinking.
+
+---
+
 ## [2026-05-30] fix | Corrected oral error in Release Process Guide
 
 ### Pages Updated
