@@ -23,6 +23,8 @@ export enum AppEvent {
   FeishuMessageLog = 'feishu-message-log',
   /** 飞书仪表板：项目路由表已更新 */
   FeishuProjectRoutesUpdated = 'feishu-project-routes-updated',
+  /** 飞书仪表板：群名称解析完成（chatId → 群名），用于在 Dashboard 中用群名替代 chatId 展示 */
+  FeishuChatNamesResolved = 'feishu-chat-names-resolved',
   AuthenticationSuccessful = 'authentication-successful',
   AuthenticationFailed = 'authentication-failed',
   AuthenticationRequired = 'authentication-required',
