@@ -32,7 +32,6 @@ import {
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
 import { ImageReaderTool } from '../tools/image-reader.js';
-import { AudioReaderTool } from '../tools/audio-reader.js';
 import { TodoWriteTool } from '../tools/todo-write.js';
 import { ReadLintsTool } from '../tools/read-lints.js';
 import { LintFixTool } from '../tools/lint-fix.js';
@@ -51,7 +50,6 @@ import { PatchTool } from '../tools/patch.js';
 import { BatchTool } from '../tools/batch.js';
 import { AskUserQuestionTool } from '../tools/ask-user-question.js';
 import { LocalTimeTool } from '../tools/local-time.js';
-import { GoalAchievedTool } from '../tools/goal-achieved.js';
 import { LarkCliTool } from '../tools/lark-cli.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
@@ -1104,9 +1102,10 @@ export class Config {
     registerCoreTool(MemoryTool, this);
     registerCoreTool(WebSearchTool, this);
     registerCoreTool(ImageReaderTool, this);
-    registerCoreTool(AudioReaderTool, this);
     registerCoreTool(TodoWriteTool, this);
-    registerCoreTool(ReadLintsTool, this);
+    if (this.getVsCodePluginMode()) {
+      registerCoreTool(ReadLintsTool, this);
+    }
     registerCoreTool(LintFixTool, this);
     registerCoreTool(UseSkillTool, this);
     registerCoreTool(ListSkillsTool, this);
@@ -1122,7 +1121,6 @@ export class Config {
     registerCoreTool(BatchTool, this);
     registerCoreTool(AskUserQuestionTool, this);
     registerCoreTool(LocalTimeTool, this);
-    registerCoreTool(GoalAchievedTool, this);
     registerCoreTool(LarkCliTool, this);
 
     // TaskTool (SubAgent) is disabled in VSCode plugin mode
