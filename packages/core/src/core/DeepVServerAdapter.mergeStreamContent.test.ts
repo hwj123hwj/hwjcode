@@ -352,3 +352,53 @@ describe('mergeStreamContent + finalize end-to-end (streamed local_time call)', 
     });
   });
 });
+
+describe('DeepVServerAdapter.cleanContents', () => {
+  const cleanContents = (contents: any[]) => proto.cleanContents.call({}, contents);
+
+  it('filters out empty or whitespace-only text parts within a message', () => {
+    const input = [
+      {
+        role: 'user',
+        parts: [
+          { text: '  ' }, // whitespace-only text part
+          { text: 'Hello' },
+          { text: '' }, // empty text part
+          { inlineData: { mimeType: 'image/png', data: 'abc' } }, // valid image part
+        ],
+      },
+    ];
+
+    const result = cleanContents(input);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('user');
+    expect(result[0].parts).toHaveLength(2);
+    expect(result[0].parts[0].text).toBe('Hello');
+    expect(result[0].parts[1].inlineData).toEqual({ mimeType: 'image/png', data: 'abc' });
+  });
+
+  it('completely removes a message if all parts are filtered out as invalid', () => {
+    const input = [
+      {
+        role: 'user',
+        parts: [
+          { text: '   ' },
+          { text: '' },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          { text: 'Keep this' },
+        ],
+      },
+    ];
+
+    const result = cleanContents(input);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].text).toBe('Keep this');
+  });
+});
