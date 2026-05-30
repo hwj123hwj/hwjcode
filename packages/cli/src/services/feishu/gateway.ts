@@ -2190,6 +2190,20 @@ export class FeishuGateway {
             name: formName,
             elements: formElements,
           },
+          {
+            tag: 'action',
+            actions: [
+              {
+                tag: 'button',
+                text: { tag: 'plain_text', content: '💡 我有其他想法' },
+                type: 'default',
+                width: 'fill',
+                value: {
+                  choice: 'other_ideas'
+                }
+              }
+            ]
+          }
         ],
       },
     };
@@ -2210,6 +2224,10 @@ export class FeishuGateway {
       }, timeoutMs);
       this.cardCallbacks.set(messageId, { resolve, timer });
     });
+
+    if (actionData.value === 'other_ideas') {
+      return { ok: true, otherIdeas: true } as any;
+    }
 
     // 解析 form_value → 每个问题的答案
     const formValue = actionData.formValue || {};

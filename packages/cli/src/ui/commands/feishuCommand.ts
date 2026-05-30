@@ -1143,7 +1143,17 @@ async function handleAskUserQuestionViaCard(
       replyToMessageId,
     );
 
-    if (result.ok && result.answers) {
+    if (result.ok && (result as any).otherIdeas) {
+      formSucceeded = true;
+      for (const q of answerableQuestions) {
+        answers[q.question] = '用户选择直接提供其他想法，不回答预设选项。请向用户询问其想法并退出当前工具执行等待用户消息。';
+      }
+      // 回执：告诉用户可以发送想法了
+      await gateway.sendMessage(
+        chatId,
+        '💡 已记录：你选择直接提供其他想法，请直接在聊天框中发送你的要求。',
+      );
+    } else if (result.ok && result.answers) {
       formSucceeded = true;
       const summaryLines: string[] = [];
       for (const q of answerableQuestions) {
