@@ -30,18 +30,19 @@ AI FunctionCall → ToolExecutionEngine → ToolRegistry.getTool()
 | [[BaseTool]] | Abstract base class for all tools |
 | [[DiscoveredMCPTool]] | Wrapper for [[mcp-system]] tools |
 
-## 27 Built-in Tools
+## 31 Built-in Tools
 
 | Category | Count | Tools |
 |----------|-------|-------|
 | File System | 8 | list_directory, read_file, write_file, replace, glob, search_file_content, read_many_files, delete_file |
 | Advanced Edit | 3 | multiedit, patch, batch |
-| Execution | 2 | run_shell_command, task ([[SubAgent]]) |
+| Execution & Sub-agent | 2 | run_shell_command, task ([[SubAgent]]) |
 | Web | 2 | web_fetch, google_web_search |
 | Memory/Todo | 2 | save_memory, todo_write |
 | Code Intelligence | 4 | lsp, read_lints, lint_fix, codesearch |
 | Skills | 3 | list_available_skills, get_skill_details, use_skill |
 | PPT | 2 | ppt_outline, ppt_generate |
+| Workspace & Utilities | 5 | ask_user_question, [[lark-cli-tool]] (`lark_cli`), local_time, goal_achieved, image_reader |
 
 ## Confirmation Types
 

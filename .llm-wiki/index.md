@@ -22,11 +22,13 @@
 |------|------|-------------|
 | [core-module](wiki/core-module.md) | entity | Backend engine — API, tools, sessions, auth |
 | [cli-module](wiki/cli-module.md) | entity | Terminal frontend — Ink/React UI, slash commands |
-| [tools-system](wiki/tools-system.md) | entity | Extensible tool framework — 27 built-in tools |
+| [tools-system](wiki/tools-system.md) | entity | Extensible tool framework — 31 built-in tools |
 | [hooks-system](wiki/hooks-system.md) | entity | 5-layer lifecycle hook pipeline — 11 event types |
 | [mcp-system](wiki/mcp-system.md) | entity | MCP protocol integration — external tool discovery |
 | [build-system](wiki/build-system.md) | entity | Two-pipeline build: tsc + esbuild |
 | [skills-system](wiki/skills-system.md) | entity | Pluggable skill modules / marketplace |
+| [background-tasks](wiki/background-tasks.md) | entity | Background Task system - process control & execution |
+| [feishu-integration](wiki/feishu-integration.md) | entity | Feishu / Lark Bot Integration - WebSocket long-polling gateway |
 
 ### Classes / Components
 
@@ -49,6 +51,7 @@
 | [SessionManager](wiki/SessionManager.md) | entity | Repository | `core/src/services/sessionManager.ts` |
 | [SkillLoader](wiki/SkillLoader.md) | entity | Plugin | `core/src/skills/skill-loader.ts` |
 | [MarketplaceManager](wiki/MarketplaceManager.md) | entity | Plugin | `core/src/skills/marketplace-manager.ts` |
+| [lark-cli-tool](wiki/lark-cli-tool.md) | entity | Tool | `core/src/tools/lark-cli.ts` |
 
 ## Overview
 
@@ -61,6 +64,9 @@
 | Page | Description |
 |------|-------------|
 | [debate-i18n-enhancement](wiki/debate-i18n-enhancement.md) | Debate mode i18n & language selection — multilingual UI and prompts |
+| [goal-driven-mode](wiki/goal-driven-mode.md) | Goal-Driven state machine, watchdog control, contract boundaries, and goal_achieved triggers |
+| [context-compression](wiki/context-compression.md) | Token-aware MicroCompactService, post-compact restoration, and prefill crash guards |
+| [adaptive-thinking](wiki/adaptive-thinking.md) | Adaptive thinking effort mappings (Claude/OpenAI/Gemini), UI brain outlines, and sanitization |
 
 ## Guides & Checklists
 
