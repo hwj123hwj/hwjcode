@@ -32,6 +32,7 @@ import {
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
 import { ImageReaderTool } from '../tools/image-reader.js';
+import { AudioReaderTool } from '../tools/audio-reader.js';
 import { TodoWriteTool } from '../tools/todo-write.js';
 import { ReadLintsTool } from '../tools/read-lints.js';
 import { LintFixTool } from '../tools/lint-fix.js';
@@ -1103,6 +1104,7 @@ export class Config {
     registerCoreTool(MemoryTool, this);
     registerCoreTool(WebSearchTool, this);
     registerCoreTool(ImageReaderTool, this);
+    registerCoreTool(AudioReaderTool, this);
     registerCoreTool(TodoWriteTool, this);
     registerCoreTool(ReadLintsTool, this);
     registerCoreTool(LintFixTool, this);
