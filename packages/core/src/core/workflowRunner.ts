@@ -44,8 +44,9 @@ export async function runWorkflowScript(
   const tokenAccumulator = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
   // Wrap the agent API to accumulate token usage transparently
-  const wrappedAgent: WorkflowAgentAPI = {
-    async run(options) {
+  // Also expose setPhase() so scripts can tell the registry which phase is active
+  const wrappedAgent = {
+    async run(options: Parameters<WorkflowAgentAPI['run']>[0]) {
       const result = await agentAPI.run(options);
       if (result.tokenUsage) {
         tokenAccumulator.inputTokens += result.tokenUsage.inputTokens;
@@ -54,7 +55,7 @@ export async function runWorkflowScript(
       }
       return result;
     },
-    async runParallel(tasks) {
+    async runParallel(tasks: Parameters<WorkflowAgentAPI['runParallel']>[0]) {
       const results = await agentAPI.runParallel(tasks);
       for (const r of results) {
         if (r.tokenUsage) {
@@ -64,6 +65,11 @@ export async function runWorkflowScript(
         }
       }
       return results;
+    },
+    setPhase(index: number) {
+      if ('currentPhaseIndex' in agentAPI) {
+        (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = index;
+      }
     },
   };
 
