@@ -20,6 +20,7 @@ import { Config } from '../config/config.js';
 import { WorkflowAgentBridge } from '../core/workflowAgentBridge.js';
 import { runWorkflowScript } from '../core/workflowRunner.js';
 import { ToolExecutionContext } from '../core/toolSchedulerAdapter.js';
+import { WorkflowRegistry } from '../core/workflowRegistry.js';
 
 export interface WorkflowToolParams {
   /**
@@ -96,6 +97,7 @@ Script API (available inside the script as the \`agent\` argument):
 - \`agent.run({ prompt, context?, agent_type?, max_turns?, model? })\` — run one sub-agent, returns \`{ success, result, data? }\`
   - \`model\`: optional model override, e.g. \`'gemini-2.0-flash'\` for fast/cheap steps, \`'gemini-2.5-pro'\` for deep reasoning steps
 - \`agent.runParallel([...tasks])\` — run multiple sub-agents concurrently, returns results in input order
+- \`agent.setPhase(index)\` — IMPORTANT: call before each phase to update the UI tracker (0-based index). Example: \`agent.setPhase(0)\` before first phase, \`agent.setPhase(1)\` before second phase.
 
 Context passing: set \`context\` to any JSON-serializable value from a previous step. It will be injected into the sub-agent prompt so the sub-agent can use prior results immediately.
 
@@ -200,7 +202,12 @@ The script is the source of truth for task decomposition, branching, and result 
       };
     }
 
+    const workflowId = `wf-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     updateOutput?.(`**Workflow started:** ${params.description}\n`);
+
+    // Register with the workflow registry so /workflow panel can track it
+    const phases = extractWorkflowPhases(params.script);
+    WorkflowRegistry.startWorkflow(workflowId, params.description, phases);
 
     // Track sub-agent events so we can surface them in the output stream
     const onUpdate = (agentId: string, output: string) => {
@@ -214,11 +221,14 @@ The script is the source of truth for task decomposition, branching, and result 
       signal,
       onUpdate,
       params.max_concurrency,
+      workflowId,
     );
 
     const runResult = await runWorkflowScript(params.script, bridge, signal);
 
     if (runResult.success) {
+      WorkflowRegistry.endWorkflow(workflowId, 'completed', runResult.totalTokenUsage);
+
       const tokenSummary =
         `Input: ${runResult.totalTokenUsage.inputTokens}, ` +
         `Output: ${runResult.totalTokenUsage.outputTokens}, ` +
@@ -236,6 +246,8 @@ The script is the source of truth for task decomposition, branching, and result 
         returnDisplay: display,
       };
     } else {
+      WorkflowRegistry.endWorkflow(workflowId, 'failed');
+
       const display =
         `**Workflow failed:** ${params.description}\n\n` +
         `Error: ${runResult.error ?? 'unknown error'}`;

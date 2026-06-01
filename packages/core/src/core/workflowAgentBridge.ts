@@ -9,6 +9,7 @@ import { ToolRegistry } from '../tools/tool-registry.js';
 import { GeminiClient } from './client.js';
 import { SubAgent } from './subAgent.js';
 import { getBuiltInAgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
+import { WorkflowRegistry } from './workflowRegistry.js';
 
 /**
  * Options passed to agent.run() inside a workflow script.
@@ -74,6 +75,8 @@ const DEFAULT_MAX_CONCURRENCY = 6;
  */
 export class WorkflowAgentBridge implements WorkflowAgentAPI {
   private readonly maxConcurrency: number;
+  /** Current phase index. The workflow script should update this before each phase. */
+  public currentPhaseIndex: number = 0;
 
   constructor(
     private readonly config: Config,
@@ -83,6 +86,8 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     /** Optional callback for forwarding sub-agent output events upstream. */
     private readonly onUpdate?: (agentId: string, output: string) => void,
     maxConcurrency: number = DEFAULT_MAX_CONCURRENCY,
+    /** Workflow ID for registry tracking. */
+    private readonly workflowId?: string,
   ) {
     this.maxConcurrency = maxConcurrency;
   }
@@ -96,6 +101,12 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     const filteredRegistry = this.buildFilteredRegistry(agentDefinition);
 
     const agentId = `wf-agent-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const label = options.prompt.slice(0, 60) + (options.prompt.length > 60 ? '…' : '');
+
+    // Register agent start
+    if (this.workflowId) {
+      WorkflowRegistry.startAgent(this.workflowId, agentId, label, options.prompt, options.model, this.currentPhaseIndex);
+    }
 
     const subAgent = new SubAgent(
       this.config,
@@ -103,15 +114,24 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       this.geminiClient,
       (output: string) => this.onUpdate?.(agentId, output),
       this.abortSignal,
-      undefined, // no pre-tool execution handler needed here
+      // Track tool calls in real-time for the /workflow panel
+      this.workflowId
+        ? ({ tool, args }) => {
+            const summary = `${tool.name}(${JSON.stringify(args).slice(0, 60)})`;
+            WorkflowRegistry.updateAgentToolCall(this.workflowId!, agentId, summary);
+          }
+        : undefined,
       agentDefinition,
-      options.model, // per-agent model override
+      options.model,
+      // Real-time token update for the /workflow panel
+      this.workflowId
+        ? (tok) => WorkflowRegistry.updateAgentTokens(this.workflowId!, agentId, tok)
+        : undefined,
     );
 
     const result = await subAgent.executeTask(prompt, maxTurns);
 
     // Attempt to parse JSON from the summary for structured data passing.
-    // The AI is encouraged to return JSON in its final response for downstream steps.
     let data: unknown = undefined;
     const jsonMatch = result.summary.match(/```(?:json)?\s*([\s\S]*?)```/) ||
       result.summary.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
@@ -121,6 +141,14 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       } catch {
         // Not JSON — leave data undefined
       }
+    }
+
+    const agentStatus = result.success ? 'completed' : 'failed';
+    const outcome = result.success ? result.summary : (result.error ?? 'failed');
+
+    // Register agent end
+    if (this.workflowId) {
+      WorkflowRegistry.endAgent(this.workflowId, agentId, agentStatus, outcome, result.tokenUsage);
     }
 
     return {
