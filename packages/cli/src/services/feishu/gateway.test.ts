@@ -819,7 +819,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
   it('builds a schema 2.0 form card with select_static + input + submit button', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_1' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     // 不等待提交，先验证发出的卡片结构。给极短超时让它尽快 resolve。
@@ -864,7 +864,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     expect(select.options[2].value).toBe('__other__');
 
     const submit = form.elements.find((e: any) => e.tag === 'button');
-    expect(submit.action_type).toBe('form_submit');
+    expect(submit.form_action_type).toBe('submit');
     expect(submit.name).toBe('submit_btn');
 
     // 让超时触发，避免悬挂
@@ -878,7 +878,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     await gateway.connect();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_2' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_2' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
@@ -915,7 +915,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     await gateway.connect();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_3' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_3' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
@@ -942,7 +942,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     await gateway.connect();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_multi' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_multi' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
@@ -988,7 +988,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     await gateway.connect();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_unwrapped' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_unwrapped' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
@@ -1040,7 +1040,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
   it('renders the "other ideas" button as a schema 2.0 callback button OUTSIDE the form (never tag:action)', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_other' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_other' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
@@ -1075,7 +1075,7 @@ describe('FeishuGateway - askQuestionsViaForm (interactive form card)', () => {
     await gateway.connect();
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { message_id: 'om_form_oi' } }));
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_form_oi' } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = gateway.askQuestionsViaForm(
