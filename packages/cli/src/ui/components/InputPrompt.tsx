@@ -1066,8 +1066,12 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         display = formatAttachmentReferencesForDisplay(truncatedLineText);
       }
 
-      // 彩虹色高亮 "workflow" 关键词
-      display = applyWorkflowRainbow(display);
+      // 彩虹色高亮 "workflow" 关键词（斜杠命令模式下不着色）
+      const trimmed = buffer.text.trimStart();
+      const isSlashWorkflow = /^\/wf\b|^\/workflow\b/i.test(trimmed);
+      if (!isSlashWorkflow) {
+        display = applyWorkflowRainbow(display);
+      }
 
       // 补充空格以填充行宽
       const currentVisualWidth = stringWidth(display);

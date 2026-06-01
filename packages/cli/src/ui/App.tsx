@@ -49,6 +49,7 @@ import { LoadingIndicator } from './components/LoadingIndicator.js';
 import { AutoAcceptIndicator } from './components/AutoAcceptIndicator.js';
 import { GoalActiveIndicator } from './components/GoalActiveIndicator.js';
 import { WorkflowActiveIndicator } from './components/WorkflowActiveIndicator.js';
+import { WorkflowPanel } from './components/WorkflowPanel.js';
 import { ShellModeIndicator } from './components/ShellModeIndicator.js';
 import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
@@ -983,6 +984,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 🎯 目标驱动模式向导。和 debate 一样，submitQuery 在下面才被定义，
   // 走同一个 ref 中转。
   const submitQueryForGoalRef = useRef<DebateSubmitQuery | null>(null);
+
+  // ⚡ Workflow panel state
+  const [isWorkflowPanelOpen, setIsWorkflowPanelOpen] = useState(false);
+  const openWorkflowPanel = useCallback(() => setIsWorkflowPanelOpen(true), []);
+  const closeWorkflowPanel = useCallback(() => setIsWorkflowPanelOpen(false), []);
+
   const {
     isGoalWizardOpen,
     openGoalWizard,
@@ -1412,6 +1419,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openDebateWizard, // 🎭 传递 openDebateWizard
     handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
     openGoalWizard, // 🎯 传递 openGoalWizard
+    openWorkflowPanel, // ⚡ 传递 openWorkflowPanel
   );
 
   const {
@@ -2020,6 +2028,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     //     meta: key.meta
     //   });
     // }
+
+    // ⚡ Workflow 面板按键拦截（Esc 只关闭面板，不触发 abort）
+    if (isWorkflowPanelOpen && key.escape) {
+      closeWorkflowPanel();
+      return;
+    }
 
     // 🎯 后台任务面板按键处理（最高优先级）
     if (showBackgroundTaskPanel) {
@@ -2707,6 +2721,15 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 onCancel={handleGoalWizardCancel}
               />
             </Box>
+          ) : isWorkflowPanelOpen ? (
+            <Box flexDirection="column">
+              <WorkflowPanel
+                isVisible={isWorkflowPanelOpen}
+                onClose={closeWorkflowPanel}
+                terminalWidth={mainAreaWidth}
+                terminalHeight={terminalHeight}
+              />
+            </Box>
           ) : isPluginInstallDialogOpen ? (
             <Box flexDirection="column">
               <PluginInstallDialog
@@ -3102,7 +3125,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isWorkflowPanelOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={streamingState !== StreamingState.Idle || queuedPrompts.length > 0}
                   isInSpecialMode={!!refineResult || queueEditMode}
