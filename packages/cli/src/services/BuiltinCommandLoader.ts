@@ -61,6 +61,7 @@ import { debateCommand } from '../ui/commands/debateCommand.js';
 import { goalCommand } from '../ui/commands/goalCommand.js';
 import { feishuCommand } from '../ui/commands/feishuCommand.js';
 import { todoCommand } from '../ui/commands/todoCommand.js';
+import { workflowCommand } from '../ui/commands/workflowCommand.js';
 
 /**
  * Loads the core, hard-coded slash commands that are an integral part
@@ -130,6 +131,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       goalCommand,
       feishuCommand,
       todoCommand,
+      workflowCommand,
     ];
 
     return allDefinitions.filter((cmd): cmd is SlashCommand => cmd !== null);
