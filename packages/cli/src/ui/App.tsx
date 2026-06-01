@@ -48,6 +48,7 @@ import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { LoadingIndicator } from './components/LoadingIndicator.js';
 import { AutoAcceptIndicator } from './components/AutoAcceptIndicator.js';
 import { GoalActiveIndicator } from './components/GoalActiveIndicator.js';
+import { WorkflowActiveIndicator } from './components/WorkflowActiveIndicator.js';
 import { ShellModeIndicator } from './components/ShellModeIndicator.js';
 import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
@@ -1891,6 +1892,19 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
   const isGoalActive = useGoalActive(config);
 
+  // workflow 工具执行期间显示状态栏指示器
+  // 扫描 pendingHistoryItems（实时工具状态）中是否有 workflow 工具正在执行
+  const isWorkflowActive = useMemo(() => {
+    const isWorkflowRunning = (tools: IndividualToolCallDisplay[]): boolean =>
+      tools.some(t =>
+        (t.toolId === 'workflow') &&
+        (t.status === ToolCallStatus.Executing || t.status === ToolCallStatus.SubAgentRunning),
+      );
+    return pendingHistoryItems.some(item =>
+      item.type === 'tool_group' && isWorkflowRunning(item.tools),
+    );
+  }, [pendingHistoryItems]);
+
   const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
 
   // ──── Goal 模式 Idle 看门狗 ────
@@ -2909,8 +2923,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   {!planModeActive && isGoalActive && !shellModeActive && !helpModeActive ? (
                     <GoalActiveIndicator config={config} />
                   ) : null}
+                  {!planModeActive && !isGoalActive && isWorkflowActive && !shellModeActive && !helpModeActive ? (
+                    <WorkflowActiveIndicator />
+                  ) : null}
                   {showAutoAcceptIndicator !== ApprovalMode.DEFAULT &&
-                    !shellModeActive && !helpModeActive && !planModeActive && !isGoalActive ? (
+                    !shellModeActive && !helpModeActive && !planModeActive && !isGoalActive && !isWorkflowActive ? (
                       <AutoAcceptIndicator
                         approvalMode={showAutoAcceptIndicator}
                       />
