@@ -1156,22 +1156,15 @@ async function handleAskUserQuestionViaCard(
       );
     } else if (result.ok && result.answers) {
       formSucceeded = true;
-      const summaryLines: string[] = [];
       for (const q of answerableQuestions) {
         const ans = result.answers[q.question] || '';
         if (ans) {
           answers[q.question] = ans;
-          summaryLines.push(`✅ ${q.header || q.question}: ${ans}`);
         } else {
           answers[q.question] = '用户未回答，请自行决策';
-          summaryLines.push(`⏭ ${q.header || q.question}: 未回答`);
         }
       }
-      // 回执：告诉用户已收到答案
-      await gateway.sendMessage(
-        chatId,
-        `📋 已收到你的回答：\n${summaryLines.join('\n')}`,
-      );
+      // 原表单卡片已在 askQuestionsViaForm 内通过 PATCH 更新为"已收到回答"，无需再发新消息
     }
   }
 
