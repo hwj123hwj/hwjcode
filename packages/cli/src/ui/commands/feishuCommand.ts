@@ -1586,14 +1586,8 @@ async function handleFeishuCommand(
         }
 
         const actualModelName = exactMatch.name;
-        settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
-
-        if (chatId) {
-          await saveProjectRoute(chatId, { model: actualModelName });
-        }
 
         if (config) {
-          config.setModel?.(actualModelName);
           const geminiClient = config.getGeminiClient();
           if (geminiClient) {
             await geminiClient.waitForChatInitialized();
@@ -1601,6 +1595,12 @@ async function handleFeishuCommand(
 
             if (!switchResult.success) {
               return `❌ 切换到模型 **${exactMatch.displayName}** 失败: ${switchResult.error || '可能由于上下文压缩失败'}`;
+            }
+
+            // switchModel 内部已调用 config.setModel + chat.setSpecifiedModel，切换成功后再持久化
+            settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
+            if (chatId) {
+              await saveProjectRoute(chatId, { model: actualModelName });
             }
 
             let responseMsg = `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
@@ -1616,6 +1616,11 @@ async function handleFeishuCommand(
           }
         }
 
+        // 无 config/client 时（理论上不应发生），也先尝试持久化
+        settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
+        if (chatId) {
+          await saveProjectRoute(chatId, { model: actualModelName });
+        }
         return `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
       } catch (err: any) {
         return `❌ 切换模型失败: ${err.message}`;
@@ -2485,6 +2490,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         let responseText = '';
         let lastUpdateTime = 0;
         const MIN_UPDATE_INTERVAL = 1500; // 节流控制，1.5 秒更新一次
+        // 工具执行阶段（开始/结束状态更新）共享节流，防止多工具连续调用触发飞书限流
+        let lastToolCardUpdateTime = 0;
+        const TOOL_CARD_UPDATE_THROTTLE_MS = 1500;
         const toolCallRequests: ToolCallRequestInfo[] = [];
 
         for await (const event of stream) {
@@ -2846,21 +2854,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
               }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
-              // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)
-              const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
-              if (activeCardId && streaming) {
-                const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-                toolInProgressFooterMetrics.status = toolName === 'image_reader'
-                  ? '正在识别并分析图像内容(请稍候)...'
-                  : `执行工具中: ${toolName}`;
-                await streaming.pushContent(renderCurrentDisplay(blocks, '', liveToolProgress));
-                await streaming.pushFooter(toolInProgressFooterMetrics);
-              } else if (activeCardId && !streaming) {
-                const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-                toolInProgressFooterMetrics.status = toolName === 'image_reader'
-                  ? '正在识别并分析图像内容(请稍候)...'
-                  : `执行工具中: ${toolName}`;
-                await gateway.updateCard(activeCardId, `DeepV Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
+              // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
+              const nowToolStart = Date.now();
+              if (activeCardId && nowToolStart - lastToolCardUpdateTime >= TOOL_CARD_UPDATE_THROTTLE_MS) {
+                const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
+                if (streaming) {
+                  const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                  toolInProgressFooterMetrics.status = toolName === 'image_reader'
+                    ? '正在识别并分析图像内容(请稍候)...'
+                    : `执行工具中: ${toolName}`;
+                  await streaming.pushContent(renderCurrentDisplay(blocks, '', liveToolProgress));
+                  await streaming.pushFooter(toolInProgressFooterMetrics);
+                } else {
+                  const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                  toolInProgressFooterMetrics.status = toolName === 'image_reader'
+                    ? '正在识别并分析图像内容(请稍候)...'
+                    : `执行工具中: ${toolName}`;
+                  await gateway.updateCard(activeCardId, `DeepV Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
+                }
+                lastToolCardUpdateTime = nowToolStart;
               }
               toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
             }
@@ -2879,7 +2891,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
             blocks.push({ type: 'tool', content: toolReportMarkdown });
 
-            // 最终无打字机光标的连贯卡片更新
+            // 工具完成后的卡片更新：始终执行（确保最终结果可见），并更新节流时间戳
             if (activeCardId && streaming) {
               const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               toolDoneFooterMetrics.status = toolName === 'image_reader'
@@ -2887,12 +2899,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 : `工具已完成: ${toolName}`;
               await streaming.pushContent(renderCurrentDisplay(blocks));
               await streaming.pushFooter(toolDoneFooterMetrics);
+              lastToolCardUpdateTime = Date.now();
             } else if (activeCardId && !streaming) {
               const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               toolDoneFooterMetrics.status = toolName === 'image_reader'
                 ? '已完成图像内容读取，正在构思回复...'
                 : `工具已完成: ${toolName}`;
               await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
+              lastToolCardUpdateTime = Date.now();
             }
 
             emitFeishuMessageLog(msg.chatId, `✅ ${toolName}`, 'tool');
