@@ -527,13 +527,38 @@ export interface ToolQuestionConfirmationDetails {
   ) => Promise<void>;
 }
 
+/**
+ * A single phase/step in a workflow, shown in the pre-run confirmation dialog.
+ */
+export interface WorkflowPhase {
+  /** Short label for this phase, e.g. "运行测试" */
+  name: string;
+  /** One-line description of what this phase does */
+  description: string;
+  /** Up to 3 sample agent prompts (truncated) to show the user */
+  agentPreviews?: string[];
+}
+
+export interface ToolWorkflowConfirmationDetails {
+  type: 'workflow';
+  title: string;
+  /** Short description of the overall workflow goal */
+  description: string;
+  /** Ordered list of high-level phases inferred from the script */
+  phases: WorkflowPhase[];
+  /** The raw orchestration script, shown when user picks "View script" */
+  rawScript: string;
+  onConfirm: (outcome: ToolConfirmationOutcome) => Promise<void>;
+}
+
 export type ToolCallConfirmationDetails =
   | ToolEditConfirmationDetails
   | ToolExecuteConfirmationDetails
   | ToolMcpConfirmationDetails
   | ToolInfoConfirmationDetails
   | ToolDeleteConfirmationDetails
-  | ToolQuestionConfirmationDetails;
+  | ToolQuestionConfirmationDetails
+  | ToolWorkflowConfirmationDetails;
 
 export enum ToolConfirmationOutcome {
   ProceedOnce = 'proceed_once',

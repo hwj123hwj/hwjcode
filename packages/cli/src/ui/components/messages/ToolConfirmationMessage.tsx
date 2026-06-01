@@ -14,6 +14,7 @@ import {
   ToolExecuteConfirmationDetails,
   ToolMcpConfirmationDetails,
   ToolQuestionConfirmationDetails,
+  ToolWorkflowConfirmationDetails,
   Config,
 } from 'deepv-code-core';
 import {
@@ -394,6 +395,48 @@ export const ToolConfirmationMessage: React.FC<
         )}
       </Box>
     );
+  } else if (confirmationDetails.type === 'workflow') {
+    const wfProps = confirmationDetails as ToolWorkflowConfirmationDetails;
+    question = wfProps.title;
+
+    options.push(
+      { label: '1. Yes, run it', value: ToolConfirmationOutcome.ProceedOnce },
+      { label: '2. No', value: ToolConfirmationOutcome.Cancel },
+    );
+
+    bodyContent = (
+      <Box flexDirection="column" paddingX={1} marginLeft={1}>
+        {/* Workflow description */}
+        <Box marginBottom={1}>
+          <Text color={Colors.AccentCyan} bold>{wfProps.description}</Text>
+        </Box>
+
+        {/* Phase list */}
+        {wfProps.phases.length > 0 && (
+          <Box flexDirection="column" marginBottom={1}>
+            <Text dimColor>{'  This dynamic workflow will spin up multiple subagents across the following phases:'}</Text>
+            {wfProps.phases.map((phase, i) => (
+              <Box key={i} flexDirection="column" marginLeft={2} marginTop={i === 0 ? 1 : 0}>
+                <Text>
+                  <Text color={Colors.AccentYellow} bold>{`${i + 1}. ${phase.name}`}</Text>
+                  {phase.description ? <Text dimColor>{` — ${phase.description}`}</Text> : null}
+                </Text>
+                {phase.agentPreviews && phase.agentPreviews.length > 0 && phase.agentPreviews.map((preview, j) => (
+                  <Text key={j} dimColor>{`     · "${preview}"`}</Text>
+                ))}
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        {/* Token warning */}
+        <Box marginTop={1}>
+          <Text color={Colors.AccentYellow} dimColor>
+            {'  ⚠ Dynamic workflows can use a lot of tokens quickly by running many subagents in parallel.'}
+          </Text>
+        </Box>
+      </Box>
+    );
   } else {
     // mcp tool confirmation
     const mcpProps = confirmationDetails as ToolMcpConfirmationDetails;
@@ -442,7 +485,8 @@ export const ToolConfirmationMessage: React.FC<
     const compactQuestion = smallWindowConfig.sizeLevel === WindowSizeLevel.TINY
       ? (confirmationDetails.type === 'edit' ? '📝 Apply changes?' :
          confirmationDetails.type === 'exec' ? '▶ Run command?' :
-         confirmationDetails.type === 'delete' ? '🗑️ Delete file?' : question)
+         confirmationDetails.type === 'delete' ? '🗑️ Delete file?' :
+         confirmationDetails.type === 'workflow' ? '⚡ Run workflow?' : question)
       : question;
 
     return (
