@@ -50,8 +50,21 @@ export interface WorkflowRecord {
 const records: WorkflowRecord[] = [];
 let listeners: Array<() => void> = [];
 
-function notify() {
-  listeners.forEach(fn => fn());
+// Debounced notify: high-frequency updates (token/tool-call) are batched to max once per 150ms
+let _notifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function notify(immediate = false) {
+  if (immediate) {
+    if (_notifyTimer) { clearTimeout(_notifyTimer); _notifyTimer = null; }
+    listeners.forEach(fn => fn());
+    return;
+  }
+  if (!_notifyTimer) {
+    _notifyTimer = setTimeout(() => {
+      _notifyTimer = null;
+      listeners.forEach(fn => fn());
+    }, 150);
+  }
 }
 
 export const WorkflowRegistry = {
@@ -84,7 +97,9 @@ export const WorkflowRegistry = {
       phases: phases.map((p, i) => ({ index: i, name: p.name, description: p.description, agents: [] })),
       agents: [],
     });
-    notify();
+    // Keep at most 50 records to prevent unbounded memory growth in long sessions
+    if (records.length > 50) records.splice(0, records.length - 50);
+    notify(true);  // immediate: workflow started
   },
 
   endWorkflow(
@@ -99,7 +114,7 @@ export const WorkflowRegistry = {
     if (tokenUsage) {
       r.totalTokenUsage = tokenUsage;
     }
-    notify();
+    notify(true);  // immediate: workflow ended
   },
 
   startAgent(workflowId: string, agentId: string, label: string, prompt: string, model?: string, phaseIndex?: number): void {
@@ -128,7 +143,7 @@ export const WorkflowRegistry = {
     } else {
       r.agents.push(agent);
     }
-    notify();
+    notify(true);  // immediate: new agent appeared
   },
 
   updateAgentTokens(
@@ -139,7 +154,7 @@ export const WorkflowRegistry = {
     const agent = findAgent(workflowId, agentId);
     if (!agent) return;
     agent.tokenUsage = tokenUsage;
-    notify();
+    notify();  // debounced: high-frequency token updates
   },
 
   updateAgentToolCall(workflowId: string, agentId: string, toolCallSummary: string): void {
@@ -148,7 +163,7 @@ export const WorkflowRegistry = {
     agent.toolCallCount++;
     agent.recentToolCalls.push(toolCallSummary);
     if (agent.recentToolCalls.length > 5) agent.recentToolCalls.shift();
-    notify();
+    notify();  // debounced: high-frequency tool-call updates
   },
 
   endAgent(
@@ -172,12 +187,12 @@ export const WorkflowRegistry = {
       r.totalTokenUsage.outputTokens += tokenUsage.outputTokens;
       r.totalTokenUsage.totalTokens += tokenUsage.totalTokens;
     }
-    notify();
+    notify(true);  // immediate: agent ended
   },
 
   clear(): void {
     records.length = 0;
-    notify();
+    notify(true);
   },
 
   // ── Reactivity ──────────────────────────────────────────────────────────────

@@ -597,6 +597,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         if (key.return && agentsInPhase[selectedAgent]) {
           setCurrentAgent(agentsInPhase[selectedAgent]!);
           setPromptExpanded(false);
+          setAgentScrollOffset(0);
           setView('agent');
         }
         if (key.leftArrow) setDetailFocus('left');

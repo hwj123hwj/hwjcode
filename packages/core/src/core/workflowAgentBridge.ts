@@ -162,40 +162,57 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
   async runParallel(tasks: WorkflowAgentRunOptions[]): Promise<WorkflowAgentRunResult[]> {
     if (tasks.length === 0) return [];
 
-    // Semaphore-based concurrency control
+    // Local AbortController so we can cancel remaining tasks on first failure
+    const localAbort = new AbortController();
+    // Propagate parent abort to local
+    if (this.abortSignal.aborted) { localAbort.abort(); }
+    else { this.abortSignal.addEventListener('abort', () => localAbort.abort(), { once: true }); }
+
     const results: WorkflowAgentRunResult[] = new Array(tasks.length);
     const queue = tasks.map((task, index) => ({ task, index }));
     let active = 0;
     let queueIndex = 0;
+    let failed = false;
+
+    // Run sub-agents using the local abort signal via a temporary bridge
+    const parallelBridge = new WorkflowAgentBridge(
+      this.config,
+      this.toolRegistry,
+      this.geminiClient,
+      localAbort.signal,
+      this.onUpdate,
+      this.maxConcurrency,
+      this.workflowId,
+    );
+    parallelBridge.currentPhaseIndex = this.currentPhaseIndex;
 
     await new Promise<void>((resolve, reject) => {
       const tryNext = () => {
-        while (active < this.maxConcurrency && queueIndex < queue.length) {
+        while (!failed && active < this.maxConcurrency && queueIndex < queue.length) {
           const { task, index } = queue[queueIndex++]!;
           active++;
 
-          this.run(task)
-            .then(result => {
-              results[index] = result;
-            })
+          parallelBridge.run(task)
+            .then(result => { results[index] = result; })
             .catch(err => {
-              reject(err);
+              if (!failed) {
+                failed = true;
+                localAbort.abort();  // cancel remaining in-flight tasks
+                reject(err);
+              }
             })
             .finally(() => {
               active--;
-              if (queueIndex >= queue.length && active === 0) {
-                resolve();
-              } else {
+              if (active === 0 && (queueIndex >= queue.length || failed)) {
+                if (!failed) resolve();
+              } else if (!failed) {
                 tryNext();
               }
             });
         }
+        if (queue.length === 0) resolve();
       };
-
       tryNext();
-
-      // Handle the case where tasks is empty (already handled above, but be safe)
-      if (queue.length === 0) resolve();
     });
 
     return results;
