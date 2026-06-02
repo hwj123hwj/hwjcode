@@ -988,7 +988,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // ⚡ Workflow panel state
   const [isWorkflowPanelOpen, setIsWorkflowPanelOpen] = useState(false);
   const openWorkflowPanel = useCallback(() => setIsWorkflowPanelOpen(true), []);
-  const closeWorkflowPanel = useCallback(() => setIsWorkflowPanelOpen(false), []);
+  const closeWorkflowPanel = useCallback(() => {
+    setIsWorkflowPanelOpen(false);
+    // Force a static refresh so buffered history items appear immediately after closing
+    refreshStatic();
+  }, [refreshStatic]);
 
   const {
     isGoalWizardOpen,
@@ -2607,7 +2611,9 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         </Static>
         <OverflowProvider>
           <Box ref={pendingHistoryItemRef} flexDirection="column">
-            {pendingHistoryItems.map((item, i) => (
+            {/* Suppress intermediate tool output while WorkflowPanel is open to prevent flicker.
+                Items are buffered in pendingHistoryItems and will appear in history when the panel closes. */}
+            {!isWorkflowPanelOpen && pendingHistoryItems.map((item, i) => (
               <HistoryItemDisplay
                 key={i}
                 availableTerminalHeight={availableTerminalHeight}
