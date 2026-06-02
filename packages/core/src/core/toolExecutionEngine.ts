@@ -682,7 +682,12 @@ export class ToolExecutionEngine {
           (confirmationDetails as any).type === 'question';
 
         // If dangerous command or a user-question tool, always require confirmation (skip YOLO mode)
-        if (isDangerousCommand || isAskUserQuestion) {
+        // Workflow confirmation is also mandatory — it spins up many sub-agents and burns tokens.
+        const isWorkflowConfirm =
+          confirmationDetails &&
+          (confirmationDetails as any).type === 'workflow';
+
+        if (isDangerousCommand || isAskUserQuestion || isWorkflowConfirm) {
           // 🎯 保存原始onConfirm以避免递归
           const originalOnConfirm = (confirmationDetails as any).onConfirm;
 

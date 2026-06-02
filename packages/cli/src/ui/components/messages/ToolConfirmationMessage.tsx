@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { DiffRenderer } from './DiffRenderer.js';
 import { Colors } from '../../colors.js';
@@ -14,6 +14,7 @@ import {
   ToolExecuteConfirmationDetails,
   ToolMcpConfirmationDetails,
   ToolQuestionConfirmationDetails,
+  ToolWorkflowConfirmationDetails,
   Config,
 } from 'deepv-code-core';
 import {
@@ -49,6 +50,9 @@ export const ToolConfirmationMessage: React.FC<
   const childWidth = terminalWidth - 2; // 2 for padding
   const smallWindowConfig = useSmallWindowOptimization();
 
+  // Workflow script preview toggle
+  const [showWorkflowScript, setShowWorkflowScript] = useState(false);
+
   // 🎵 播放确认提示音
   useEffect(() => {
     if (isFocused) {
@@ -83,6 +87,12 @@ export const ToolConfirmationMessage: React.FC<
   }
 
   const handleSelect = (item: ToolConfirmationOutcome) => {
+    // Intercept "inspect_script" pseudo-value for workflow confirmation
+    if ((item as unknown as string) === 'inspect_script') {
+      setShowWorkflowScript(true);
+      return;
+    }
+
     // 🔧 调试日志
     console.log('[ToolConfirmationMessage] handleSelect called with:', item);
 
@@ -394,6 +404,81 @@ export const ToolConfirmationMessage: React.FC<
         )}
       </Box>
     );
+  } else if (confirmationDetails.type === 'workflow') {
+    const wfProps = confirmationDetails as ToolWorkflowConfirmationDetails;
+    question = wfProps.title;
+
+    if (showWorkflowScript) {
+      // Script preview mode — show full script, then run or cancel
+      options.push(
+        { label: '1. Yes, run it', value: ToolConfirmationOutcome.ProceedOnce },
+        { label: '2. No', value: ToolConfirmationOutcome.Cancel },
+      );
+
+      const scriptLines = (wfProps.rawScript ?? '').split('\n');
+      bodyContent = (
+        <Box flexDirection="column" paddingX={1} marginLeft={1}>
+          <Box marginBottom={1}>
+            <Text color={Colors.AccentCyan} bold>{wfProps.description}</Text>
+            <Text dimColor>  (script preview)</Text>
+          </Box>
+          <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor={Colors.Gray} paddingX={1}>
+            {scriptLines.map((line, i) => (
+              <Text key={i}>
+                <Text dimColor>{String(i + 1).padStart(3, ' ')}  </Text>
+                <Text color={Colors.AccentGreen}>{line}</Text>
+              </Text>
+            ))}
+          </Box>
+          <Box marginTop={1}>
+            <Text color={Colors.AccentYellow} dimColor>
+              {'  ⚠ Dynamic workflows can use a lot of tokens quickly by running many subagents in parallel.'}
+            </Text>
+          </Box>
+        </Box>
+      );
+    } else {
+      // Default mode — phases summary + option to inspect script
+      options.push(
+        { label: '1. Yes, run it', value: ToolConfirmationOutcome.ProceedOnce },
+        { label: '2. Inspect script', value: 'inspect_script' as unknown as ToolConfirmationOutcome },
+        { label: '3. No', value: ToolConfirmationOutcome.Cancel },
+      );
+
+      bodyContent = (
+        <Box flexDirection="column" paddingX={1} marginLeft={1}>
+          <Box marginBottom={1}>
+            <Text color={Colors.AccentCyan} bold>{wfProps.description}</Text>
+          </Box>
+
+          {wfProps.phases.length > 0 && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text dimColor>{'  This dynamic workflow will spin up multiple subagents across the following phases:'}</Text>
+              {wfProps.phases.map((phase, i) => (
+                <Box key={i} flexDirection="column" marginLeft={2} marginTop={i === 0 ? 1 : 0}>
+                  <Text>
+                    <Text color={Colors.AccentYellow} bold>{`${i + 1}. ${phase.name}`}</Text>
+                    {phase.description ? <Text dimColor>{` — ${phase.description}`}</Text> : null}
+                  </Text>
+                  {phase.agentPreviews && phase.agentPreviews.length > 0 && phase.agentPreviews.map((preview, j) => (
+                    <Text key={j} dimColor>{`     · "${preview}"`}</Text>
+                  ))}
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          <Box marginTop={1}>
+            <Text color={Colors.AccentYellow} dimColor>
+              {'  ⚠ Dynamic workflows can use a lot of tokens quickly by running many subagents in parallel.'}
+            </Text>
+          </Box>
+        </Box>
+      );
+    }
+
+    // Intercept "Inspect script" selection to toggle preview instead of calling onSelect
+    // This is handled via onWorkflowSelect below at the RadioButtonSelect call site
   } else {
     // mcp tool confirmation
     const mcpProps = confirmationDetails as ToolMcpConfirmationDetails;
@@ -442,7 +527,8 @@ export const ToolConfirmationMessage: React.FC<
     const compactQuestion = smallWindowConfig.sizeLevel === WindowSizeLevel.TINY
       ? (confirmationDetails.type === 'edit' ? '📝 Apply changes?' :
          confirmationDetails.type === 'exec' ? '▶ Run command?' :
-         confirmationDetails.type === 'delete' ? '🗑️ Delete file?' : question)
+         confirmationDetails.type === 'delete' ? '🗑️ Delete file?' :
+         confirmationDetails.type === 'workflow' ? '⚡ Run workflow?' : question)
       : question;
 
     return (
