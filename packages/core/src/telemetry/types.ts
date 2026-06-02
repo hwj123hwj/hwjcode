@@ -279,12 +279,13 @@ export class ApiResponseEvent {
     this.cached_content_token_count = usage_data?.cachedContentTokenCount ?? 0;
     // 提取详细的缓存统计信息
     // cacheWriteInputTokens: 部分供应商使用的别名；cacheCreationInputTokens: Anthropic 使用的字段名
-    this.cache_write_input_tokens = (usage_data as any)?.cacheWriteInputTokens ?? (usage_data as any)?.cacheCreationInputTokens ?? 0;
-    this.cache_read_input_tokens = (usage_data as any)?.cacheReadInputTokens ?? 0;
+    const usageRecord = usage_data as Record<string, unknown> | undefined;
+    this.cache_write_input_tokens = (usageRecord?.cacheWriteInputTokens ?? usageRecord?.cacheCreationInputTokens ?? 0) as number;
+    this.cache_read_input_tokens = (usageRecord?.cacheReadInputTokens ?? 0) as number;
     this.thoughts_token_count = usage_data?.thoughtsTokenCount ?? 0;
     this.tool_token_count = usage_data?.toolUsePromptTokenCount ?? 0;
     this.total_token_count = usage_data?.totalTokenCount ?? 0;
-    this.credits_usage = (usage_data as any)?.creditsUsage ?? 0;
+    this.credits_usage = (usageRecord?.creditsUsage ?? 0) as number;
     this.response_text = response_text;
     this.error = error;
     this.prompt_id = prompt_id;

@@ -2626,6 +2626,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 isFocused={!isEditorDialogOpen}
               />
             ))}
+            {isWorkflowPanelOpen && pendingHistoryItems.length > 0 && (
+              <Box paddingX={1}>
+                <Text dimColor>{pendingHistoryItems.length} update{pendingHistoryItems.length !== 1 ? 's' : ''} pending (will show when panel closes)</Text>
+              </Box>
+            )}
             <ShowMoreLines />
           </Box>
         </OverflowProvider>

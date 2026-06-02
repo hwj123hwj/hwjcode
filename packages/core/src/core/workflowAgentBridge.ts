@@ -72,6 +72,12 @@ export interface WorkflowAgentAPI {
    * If any sub-agent throws, the error propagates and remaining tasks are cancelled.
    */
   runParallel(tasks: WorkflowAgentRunOptions[]): Promise<WorkflowAgentRunResult[]>;
+
+  /**
+   * Update the current phase index. Called by the workflow script's `phase()` function
+   * to track which phase is currently executing.
+   */
+  setCurrentPhaseIndex(index: number): void;
 }
 
 const DEFAULT_MAX_TURNS = 15;
@@ -86,9 +92,14 @@ const DEFAULT_MAX_AGENTS = 1000;
 export class WorkflowAgentBridge implements WorkflowAgentAPI {
   private readonly maxConcurrency: number;
   private readonly maxAgents: number;
-  private agentCount: number = 0;
+  /** Cumulative total of agents spawned in this workflow (lifetime limit). */
+  private totalAgentCount: number = 0;
   /** Current phase index. The workflow script should update this before each phase. */
   public currentPhaseIndex: number = 0;
+
+  setCurrentPhaseIndex(index: number): void {
+    this.currentPhaseIndex = index;
+  }
 
   constructor(
     private readonly config: Config,
@@ -108,10 +119,12 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
 
   async run(options: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> {
     // Hard limit: prevent runaway workflows from spinning up unlimited agents
-    this.agentCount++;
-    if (this.agentCount > this.maxAgents) {
+    // This is a cumulative lifetime limit — once exceeded, no more agents can spawn
+    // in this workflow, even if earlier agents have finished.
+    this.totalAgentCount++;
+    if (this.totalAgentCount > this.maxAgents) {
       throw new Error(
-        `Workflow agent limit reached (max ${this.maxAgents}). ` +
+        `Workflow agent limit reached (max ${this.maxAgents}, used ${this.totalAgentCount}). ` +
         `Reduce the number of agent() calls or increase max_agents.`,
       );
     }
@@ -203,7 +216,9 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     let queueIndex = 0;
     let failed = false;
 
-    // Use a wrapped run() that respects localAbort but shares `this` counters (agentCount, etc.)
+    // Use a wrapped run() that respects localAbort. When localAbort fires,
+    // we skip spawning new tasks but allow in-flight tasks to finish naturally
+    // (they are bound to the parent abortSignal and will stop when it fires).
     const runWithLocalAbort = (task: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> => {
       if (localAbort.signal.aborted) return Promise.reject(new Error('AbortError'));
       return this.run(task);
@@ -211,12 +226,15 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
 
     await new Promise<void>((resolve, reject) => {
       const tryNext = () => {
-        while (!failed && active < this.maxConcurrency && queueIndex < queue.length) {
+        // Skip scheduling new tasks if we've been aborted
+        while (!failed && !localAbort.signal.aborted && active < this.maxConcurrency && queueIndex < queue.length) {
           const { task, index } = queue[queueIndex++]!;
           active++;
 
           runWithLocalAbort(task)
-            .then(result => { results[index] = result; })
+            .then(result => {
+              if (!failed) results[index] = result;
+            })
             .catch(err => {
               if (!failed) {
                 failed = true;
@@ -228,7 +246,7 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
               active--;
               if (active === 0 && (queueIndex >= queue.length || failed)) {
                 if (!failed) resolve();
-              } else if (!failed) {
+              } else if (!failed && !localAbort.signal.aborted) {
                 tryNext();
               }
             });
@@ -237,6 +255,13 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       };
       tryNext();
     });
+
+    // Fill any never-started slots with error placeholders so callers don't hit undefined
+    for (let i = 0; i < results.length; i++) {
+      if (results[i] === undefined) {
+        results[i] = { success: false, result: 'Cancelled: workflow abort', tokenUsage: undefined };
+      }
+    }
 
     return results;
   }

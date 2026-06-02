@@ -1514,10 +1514,12 @@ export async function callAnthropicModel(
 
       // 🔧 计算真正的总输入 token：
       // Anthropic 的 input_tokens 只是非缓存的直接输入，实际总输入需要加上缓存 token
-      const uncachedInputTokens = data.usage?.input_tokens || 0;
+      // Note: Anthropic's `input_tokens` field represents ONLY the uncached (direct) input portion.
+      // It does NOT include cache_creation_input_tokens or cache_read_input_tokens.
+      const directInputTokens = data.usage?.input_tokens || 0;
       const cacheCreationTokens = data.usage?.cache_creation_input_tokens || 0;
       const cacheReadTokens = data.usage?.cache_read_input_tokens || 0;
-      const actualPromptTokens = uncachedInputTokens + cacheCreationTokens + cacheReadTokens;
+      const actualPromptTokens = directInputTokens + cacheCreationTokens + cacheReadTokens;
       const outputTokens = data.usage?.output_tokens || 0;
 
       const result = {
@@ -1539,7 +1541,7 @@ export async function callAnthropicModel(
           // - uncachedInputTokens: 非缓存的直接输入 token
           ...(cacheCreationTokens && { cacheCreationInputTokens: cacheCreationTokens, cacheWriteInputTokens: cacheCreationTokens }),
           ...(cacheReadTokens != null && { cacheReadInputTokens: cacheReadTokens }),
-          uncachedInputTokens: uncachedInputTokens,
+          uncachedInputTokens: directInputTokens,
         } as any,
       };
       addFunctionCallsGetter(result);

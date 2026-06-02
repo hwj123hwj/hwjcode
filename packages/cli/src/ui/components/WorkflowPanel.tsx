@@ -56,6 +56,7 @@ function allAgentsForPhase(phase: WorkflowPhaseRecord): WorkflowAgentRecord[] {
 
 /** Truncate string to visWidth columns (CJK-aware), pad with spaces if shorter */
 function visSlice(str: string, maxCols: number): string {
+  maxCols = Math.max(0, maxCols);
   let cols = 0;
   let i = 0;
   const chars = [...str]; // handle multi-byte correctly
@@ -71,6 +72,7 @@ function visSlice(str: string, maxCols: number): string {
 
 /** Like visSlice but append '…' if truncated */
 function visTrunc(str: string, maxCols: number): string {
+  maxCols = Math.max(1, maxCols); // Need at least 1 col for the character + ellipsis
   if (stringWidth(str) <= maxCols) {
     return str + ' '.repeat(maxCols - stringWidth(str));
   }
@@ -84,7 +86,8 @@ function visTrunc(str: string, maxCols: number): string {
     cols += w;
     i++;
   }
-  return chars.slice(0, i).join('') + '…' + ' '.repeat(maxCols - 1 - cols);
+  const padLen = Math.max(0, maxCols - 1 - cols);
+  return chars.slice(0, i).join('') + '…' + ' '.repeat(padLen);
 }
 
 /** Wrap a string to maxCols columns (CJK-aware), returning an array of visual lines */
@@ -554,7 +557,10 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
   const [agentScrollOffset, setAgentScrollOffset] = useState(0);
 
   const refresh = useCallback(() => {
-    setRecords([...WorkflowRegistry.getAll()]);
+    const all = [...WorkflowRegistry.getAll()];
+    setRecords(all);
+    // Clamp selectedWorkflow index after records change (e.g., after trimming)
+    setSelectedWorkflow(prev => Math.min(prev, Math.max(0, all.length - 1)));
   }, []);
 
   // 同步全局 modal 状态，防止 ESC 触发 stream abort
@@ -582,9 +588,21 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
     };
 
     const unsub = WorkflowRegistry.subscribe(throttledRefresh);
-    // Tick for duration counter — 2s interval, minimise redraws
-    const timer = setInterval(() => setTick(t => t + 1), 2000);
-    return () => { unsub(); clearInterval(timer); };
+    // Tick for duration counter — only when at least one workflow is running.
+    // This avoids unnecessary redraws when all workflows have completed.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const hasRunning = () => WorkflowRegistry.getAll().some(r => r.status === 'running');
+    if (hasRunning()) {
+      timer = setInterval(() => {
+        setTick(t => t + 1);
+        // Stop the timer once all workflows have completed
+        if (!hasRunning()) {
+          clearInterval(timer!);
+          timer = undefined;
+        }
+      }, 2000);
+    }
+    return () => { unsub(); if (timer) clearInterval(timer); };
   }, [isVisible, refresh]);
 
   const now = Date.now();
