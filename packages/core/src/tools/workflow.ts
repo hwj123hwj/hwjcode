@@ -61,6 +61,13 @@ export interface WorkflowToolParams {
    * Defaults to 6. Set lower to reduce API quota pressure.
    */
   max_concurrency?: number;
+
+  /**
+   * Maximum total number of sub-agents this workflow may spawn.
+   * Defaults to 1000 (matches Claude Code's limit). Hard ceiling — exceeding it
+   * throws an error and aborts the workflow.
+   */
+  max_agents?: number;
 }
 
 /**
@@ -153,6 +160,12 @@ NOT available: require, import, fs, process, fetch, any Node.js globals.`,
             description: 'Maximum parallel sub-agents. Default: 6. Lower to reduce API pressure.',
             minimum: 1,
             maximum: 16,
+          },
+          max_agents: {
+            type: Type.NUMBER,
+            description: 'Hard limit on total sub-agents this workflow may spawn. Default: 1000.',
+            minimum: 1,
+            maximum: 1000,
           },
         },
         required: ['script', 'description'],
@@ -256,6 +269,7 @@ NOT available: require, import, fs, process, fetch, any Node.js globals.`,
       onUpdate,
       params.max_concurrency,
       workflowId,
+      params.max_agents,
     );
 
     const runResult = await runWorkflowScript(params.script, bridge, signal);
