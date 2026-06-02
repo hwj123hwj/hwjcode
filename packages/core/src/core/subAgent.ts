@@ -464,10 +464,23 @@ export class SubAgent {
       return;
     }
 
+    // SubAgent 工具等待超时：比 shell.ts 的 300s 多一层缓冲，防止工具回调永久挂起
+    const TOOL_COMPLETION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
     try {
-      // 创建Promise等待工具完成回调
-      const toolCompletionPromise = new Promise<any[]>((resolve) => {
+      // 创建Promise等待工具完成回调，附加超时保护
+      const toolCompletionPromise = new Promise<any[]>((resolve, reject) => {
         this.toolCompletionResolver = resolve;
+        setTimeout(() => {
+          if (this.toolCompletionResolver) {
+            this.toolCompletionResolver = undefined;
+            const toolNames = toolCallRequests.map(r => r.name).join(', ');
+            reject(new Error(
+              `Tool completion timeout after ${TOOL_COMPLETION_TIMEOUT_MS / 1000}s. ` +
+              `Stuck tool(s): [${toolNames}]. The tool may have hung — aborting this turn.`
+            ));
+          }
+        }, TOOL_COMPLETION_TIMEOUT_MS);
       });
 
       // 启动工具执行
@@ -557,25 +570,72 @@ export class SubAgent {
       console.warn('[SubAgent] Failed to save request log:', error);
     });
 
-    // 发送消息给AI
-    const response = await this.subAgentChat.sendMessage({
+    // 使用流式接口发送消息，避免非流式 response.json() 在服务端长时间处理时永久挂起
+    const streamRequestStart = Date.now();
+    this.log(`[turn ${this.context.currentTurn}] Sending stream request (ctx ~${messageParts.length} parts)`);
+
+    const streamGenerator = await this.subAgentChat.sendMessageStream({
       message: messageParts,
       config: {
         abortSignal: this.abortSignal
       }
     }, this.context.agentId, SceneType.SUB_AGENT);
 
-    // 更新token使用统计
+    this.log(`[turn ${this.context.currentTurn}] Stream connection established (${Date.now() - streamRequestStart}ms)`);
+
+    // 消费 AsyncGenerator，将所有 chunks 合并为单个 Content
     const tokenUsage = {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0
     };
+    const allParts: any[] = [];
+    let lastUsageMetadata: any = null;
+    let chunkCount = 0;
+    let firstChunkMs: number | undefined;
 
-    if (response?.usageMetadata) {
-      tokenUsage.inputTokens = response.usageMetadata.promptTokenCount || 0;
-      tokenUsage.outputTokens = response.usageMetadata.candidatesTokenCount || 0;
-      tokenUsage.totalTokens = response.usageMetadata.totalTokenCount || 0;
+    // 心跳定时器：每30秒打印一次，区分"AI慢慢推理"和"真的卡住"
+    const heartbeatId = setInterval(() => {
+      const elapsed = Math.round((Date.now() - streamRequestStart) / 1000);
+      this.log(`[turn ${this.context.currentTurn}] Still receiving stream... ${elapsed}s elapsed, ${chunkCount} chunks so far`);
+    }, 30000);
+
+    try {
+      for await (const chunk of streamGenerator) {
+        // 跳过取消信号已触发的情况
+        if (this.abortSignal?.aborted) break;
+
+        chunkCount++;
+        if (chunkCount === 1) {
+          firstChunkMs = Date.now() - streamRequestStart;
+          this.log(`[turn ${this.context.currentTurn}] First chunk received (${firstChunkMs}ms)`);
+        }
+
+        // 收集 parts（排除纯 thought 内容，与 geminiChat.processStreamResponse 保持一致）
+        const content = chunk.candidates?.[0]?.content;
+        if (content?.parts) {
+          for (const part of content.parts) {
+            // thought 不进入最终 Content（与主 Agent 行为一致）
+            if ((part as any).thought === true) continue;
+            allParts.push(part);
+          }
+        }
+
+        // 记录最后一个含有 usageMetadata 的 chunk
+        if (chunk.usageMetadata) {
+          lastUsageMetadata = chunk.usageMetadata;
+        }
+      }
+    } finally {
+      clearInterval(heartbeatId);
+      const totalMs = Date.now() - streamRequestStart;
+      this.log(`[turn ${this.context.currentTurn}] Stream done: ${chunkCount} chunks, first=${firstChunkMs ?? 'n/a'}ms, total=${totalMs}ms`);
+    }
+
+    if (lastUsageMetadata) {
+      tokenUsage.inputTokens = lastUsageMetadata.promptTokenCount || 0;
+      tokenUsage.outputTokens = lastUsageMetadata.candidatesTokenCount || 0;
+      tokenUsage.totalTokens = lastUsageMetadata.totalTokenCount || 0;
 
       this.context.tokenUsage.inputTokens += tokenUsage.inputTokens;
       this.context.tokenUsage.outputTokens += tokenUsage.outputTokens;
@@ -585,10 +645,10 @@ export class SubAgent {
       this.onTokenUpdate?.(this.context.tokenUsage);
     }
 
-    // 提取AI的响应内容
+    // 将合并后的 parts 组装为 Content
     const aiContent: Content = {
       role: MESSAGE_ROLES.MODEL,
-      parts: response.candidates?.[0]?.content?.parts || []
+      parts: allParts
     };
 
     // 📝 保存完整日志（包含响应）

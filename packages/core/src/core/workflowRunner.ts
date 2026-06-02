@@ -182,7 +182,18 @@ export async function runWorkflowScript(
     if (abortSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
       throw err;
     }
-    return { success: false, output: '', error: errorMessage, totalTokenUsage: tokenAccumulator };
+    // The orchestrator script itself threw — but sub-agents may have already produced
+    // useful output. Collect whatever was logged and surface it alongside the error,
+    // so the caller (and the model) can see the partial results instead of just an error.
+    const partialOutput = capturedLogs.length > 0
+      ? `Partial output before error:\n${capturedLogs.join('\n')}`
+      : '';
+    return {
+      success: false,
+      output: partialOutput,
+      error: `${errorMessage}${partialOutput ? '\n\n' + partialOutput : ''}`,
+      totalTokenUsage: tokenAccumulator,
+    };
   }
 }
 

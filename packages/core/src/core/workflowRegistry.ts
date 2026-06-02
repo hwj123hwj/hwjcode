@@ -19,6 +19,8 @@ export interface WorkflowAgentRecord {
   toolCallCount: number;
   /** Last N tool calls for the Activity section */
   recentToolCalls: string[];
+  /** Current activity phase: waiting for AI response vs executing tools */
+  currentPhase?: 'thinking' | 'executing_tools';
   /** Final output / error message */
   outcome?: string;
 }
@@ -163,7 +165,15 @@ export const WorkflowRegistry = {
     agent.toolCallCount++;
     agent.recentToolCalls.push(toolCallSummary);
     if (agent.recentToolCalls.length > 5) agent.recentToolCalls.shift();
+    agent.currentPhase = 'executing_tools';
     notify();  // debounced: high-frequency tool-call updates
+  },
+
+  updateAgentPhase(workflowId: string, agentId: string, phase: 'thinking' | 'executing_tools'): void {
+    const agent = findAgent(workflowId, agentId);
+    if (!agent) return;
+    agent.currentPhase = phase;
+    notify();
   },
 
   endAgent(

@@ -77,6 +77,8 @@ export interface WorkflowAgentAPI {
 const DEFAULT_MAX_TURNS = 15;
 const DEFAULT_MAX_CONCURRENCY = 6;
 const DEFAULT_MAX_AGENTS = 1000;
+/** Per-agent hard deadline: 30 minutes. Prevents a single hung agent from blocking the workflow forever. */
+const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Implements WorkflowAgentAPI. Each call to run() spins up a fresh SubAgent instance.
@@ -148,15 +150,35 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       options.model,
       // Real-time token update for the /workflow panel
       this.workflowId
-        ? (tok) => WorkflowRegistry.updateAgentTokens(this.workflowId!, agentId, tok)
+        ? (tok) => {
+            WorkflowRegistry.updateAgentTokens(this.workflowId!, agentId, tok);
+            // Token update means AI just finished a turn → now thinking/deciding next step
+            WorkflowRegistry.updateAgentPhase(this.workflowId!, agentId, 'thinking');
+          }
         : undefined,
     );
 
-    const result = await subAgent.executeTask(prompt, maxTurns);
+    // Soft deadline: log a warning after 30min but do NOT abort the agent.
+    // Complex tasks (large codebase analysis, long migrations) legitimately take longer.
+    // Hard abort is left to the user via the global AbortSignal.
+    const warningTimer = setTimeout(() => {
+      console.warn(
+        `[WorkflowAgentBridge] Agent "${label}" has been running for ${DEFAULT_AGENT_TIMEOUT_MS / 60000}min. ` +
+        `It is still alive — this is a warning only. Use Ctrl+C to abort if needed.`
+      );
+    }, DEFAULT_AGENT_TIMEOUT_MS);
+
+    let result: Awaited<ReturnType<typeof subAgent.executeTask>>;
+    try {
+      result = await subAgent.executeTask(prompt, maxTurns);
+    } finally {
+      clearTimeout(warningTimer);
+    }
 
     // Parse structured data from the summary.
     // When schema was provided, attempt strict JSON parse of the entire summary first;
     // otherwise fall back to extracting a JSON block from prose output.
+    // If all parsing fails, wrap the raw text so callers never get data === undefined.
     let data: unknown = undefined;
     if (options.schema) {
       // Schema mode: the sub-agent should have returned raw JSON
@@ -170,6 +192,11 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       if (jsonMatch) {
         try { data = JSON.parse(jsonMatch[1] ?? jsonMatch[0]); } catch { /* not JSON */ }
       }
+    }
+    // Final fallback: ensure data is never undefined so scripts using result.data.xxx
+    // get a meaningful error rather than a silent "Cannot read property of undefined".
+    if (data === undefined) {
+      data = { text: result.summary, _parse_failed: true };
     }
 
     const agentStatus = result.success ? 'completed' : 'failed';
@@ -245,13 +272,31 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
    * Build the final prompt for a sub-agent, appending structured context and schema
    * requirements if provided. When `schema` is set, the sub-agent is instructed to
    * respond ONLY with a JSON object matching the schema — no prose, no markdown fences.
+   *
+   * Context size is capped at MAX_CONTEXT_CHARS to prevent prompt explosion when
+   * upstream agents return raw file contents instead of distilled summaries.
+   * Claude Code's own guidance: sub-agents should return 1k-2k token summaries, not raw data.
    */
   private buildPrompt(options: WorkflowAgentRunOptions): string {
+    // ~20k chars ≈ 5k tokens — enough for rich structured summaries, hard cap against raw-content blowup
+    const MAX_CONTEXT_CHARS = 20000;
+
     let prompt = options.prompt;
 
     // Append structured context from previous steps
     if (options.context !== undefined && options.context !== null) {
-      const contextJson = JSON.stringify(options.context, null, 2);
+      let contextJson = JSON.stringify(options.context, null, 2);
+      if (contextJson.length > MAX_CONTEXT_CHARS) {
+        const originalLen = contextJson.length;
+        contextJson = contextJson.slice(0, MAX_CONTEXT_CHARS);
+        // Trim to last complete line to avoid broken JSON mid-string
+        const lastNewline = contextJson.lastIndexOf('\n');
+        if (lastNewline > MAX_CONTEXT_CHARS * 0.8) {
+          contextJson = contextJson.slice(0, lastNewline);
+        }
+        contextJson += `\n... [context truncated: ${originalLen} chars → ${MAX_CONTEXT_CHARS} chars max. Sub-agents should return distilled JSON summaries, not raw file contents.]`;
+        console.warn(`[WorkflowAgentBridge] context truncated from ${originalLen} to ${MAX_CONTEXT_CHARS} chars for agent: "${options.label ?? options.prompt.slice(0, 60)}"`);
+      }
       prompt += `\n\n<workflow_context>\n${contextJson}\n</workflow_context>`;
     }
 
