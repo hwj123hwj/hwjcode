@@ -76,6 +76,7 @@ export interface WorkflowAgentAPI {
 
 const DEFAULT_MAX_TURNS = 15;
 const DEFAULT_MAX_CONCURRENCY = 6;
+const DEFAULT_MAX_AGENTS = 1000;
 
 /**
  * Implements WorkflowAgentAPI. Each call to run() spins up a fresh SubAgent instance.
@@ -84,6 +85,8 @@ const DEFAULT_MAX_CONCURRENCY = 6;
  */
 export class WorkflowAgentBridge implements WorkflowAgentAPI {
   private readonly maxConcurrency: number;
+  private readonly maxAgents: number;
+  private agentCount: number = 0;
   /** Current phase index. The workflow script should update this before each phase. */
   public currentPhaseIndex: number = 0;
 
@@ -97,11 +100,22 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     maxConcurrency: number = DEFAULT_MAX_CONCURRENCY,
     /** Workflow ID for registry tracking. */
     private readonly workflowId?: string,
+    maxAgents: number = DEFAULT_MAX_AGENTS,
   ) {
     this.maxConcurrency = maxConcurrency;
+    this.maxAgents = maxAgents;
   }
 
   async run(options: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> {
+    // Hard limit: prevent runaway workflows from spinning up unlimited agents
+    this.agentCount++;
+    if (this.agentCount > this.maxAgents) {
+      throw new Error(
+        `Workflow agent limit reached (max ${this.maxAgents}). ` +
+        `Reduce the number of agent() calls or increase max_agents.`,
+      );
+    }
+
     const prompt = this.buildPrompt(options);
     const agentType = options.agent_type ?? 'code-analysis';
     const maxTurns = options.max_turns ?? DEFAULT_MAX_TURNS;
@@ -189,17 +203,11 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     let queueIndex = 0;
     let failed = false;
 
-    // Run sub-agents using the local abort signal via a temporary bridge
-    const parallelBridge = new WorkflowAgentBridge(
-      this.config,
-      this.toolRegistry,
-      this.geminiClient,
-      localAbort.signal,
-      this.onUpdate,
-      this.maxConcurrency,
-      this.workflowId,
-    );
-    parallelBridge.currentPhaseIndex = this.currentPhaseIndex;
+    // Use a wrapped run() that respects localAbort but shares `this` counters (agentCount, etc.)
+    const runWithLocalAbort = (task: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> => {
+      if (localAbort.signal.aborted) return Promise.reject(new Error('AbortError'));
+      return this.run(task);
+    };
 
     await new Promise<void>((resolve, reject) => {
       const tryNext = () => {
@@ -207,7 +215,7 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
           const { task, index } = queue[queueIndex++]!;
           active++;
 
-          parallelBridge.run(task)
+          runWithLocalAbort(task)
             .then(result => { results[index] = result; })
             .catch(err => {
               if (!failed) {
