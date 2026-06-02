@@ -223,6 +223,9 @@ export class SubAgent {
 
       this.log(`SubAgent chat instance initialized, available tools: ${this.getAvailableToolNames().length}`);
 
+      // 🎯 发送运行中状态
+      this.sendStatusChange('running');
+
       // 主对话循环
       // 关键改动：在最后一轮显式标注 isFinalTurn，让 callGemini 注入"停止调用工具、立即总结"指令，
       // 这样即便 max_turns 触达，主 Agent 也能拿到子 Agent 已积累的发现。
