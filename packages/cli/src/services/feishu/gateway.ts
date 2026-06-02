@@ -1081,6 +1081,49 @@ export class FeishuGateway {
   }
 
   /**
+   * 以应用身份向指定用户发送私聊消息。
+   *
+   * 与 sendMessage（需 chatId）不同，此方法使用 open_id 作为 receive_id，
+   * 飞书平台会自动创建或复用与该用户的 P2P 会话。
+   *
+   * @param openId 目标用户的 open_id
+   * @param text 消息文本
+   * @returns message_id 或 null
+   */
+  async sendPrivateMessage(openId: string, text: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+
+      const body = {
+        receive_id: openId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      };
+
+      const url = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=open_id`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data: any = await res.json();
+      if (data.code === 0) {
+        return data.data?.message_id || null;
+      }
+
+      derror('Feishu sendPrivateMessage failed:', JSON.stringify(data));
+      return null;
+    } catch (e: any) {
+      derror('Feishu sendPrivateMessage threw:', e?.message || e);
+      return null;
+    }
+  }
+
+  /**
    * 更新已发送消息的内容（用于流式进度更新）
    *
    * 注意事项:
