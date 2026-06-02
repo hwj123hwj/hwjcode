@@ -189,18 +189,23 @@ const DetailView: React.FC<{
   // ── right column: agent row layout (CJK-aware) ──────────────────────────────
   // inner usable cols = rightWidth - 2(border) - 2(paddingX) - 2(selector) - 2(icon)
   const rowInnerCols = rightWidth - 8;
-  // model col = max visual width of model strings
-  const MODEL_COL = Math.max(...agents.map(a => stringWidth(a.model ?? '')), 0);
-  // stats string per agent (all ASCII, safe to use .length)
+  // stats format: "16.2k tok · 5 tools · 1m30s[ · failed: ...]"
+  // worst case without failure: "000.0M tok · 99 tools · 99m 99s" ≈ 32 chars
+  // reserve 34 cols for stats to be safe
+  const STATS_COL = 34;
+  // model col: use actual max or 0 if no agents yet
+  const MODEL_COL = agents.length
+    ? Math.max(...agents.map(a => stringWidth(a.model ?? '')), 0)
+    : 0;
+  // label gets remaining space
+  const LABEL_COL = Math.max(8, rowInnerCols - MODEL_COL - (MODEL_COL > 0 ? 2 : 0) - STATS_COL - 2);
+
   const agentStatsStr = (a: WorkflowAgentRecord) => {
     const tok = a.tokenUsage ? fmtTokens(a.tokenUsage.totalTokens) : '0 tok';
     const d = formatDuration((a.endTime ?? now) - a.startTime);
     const fail = a.status === 'failed' && a.outcome ? ` · failed: ${a.outcome.slice(0, 28)}…` : '';
     return `${tok} · ${a.toolCallCount} tools · ${d}${fail}`;
   };
-  const maxStatsLen = agents.length ? Math.max(...agents.map(a => agentStatsStr(a).length)) : 20;
-  // label col = remaining space
-  const LABEL_COL = Math.max(8, rowInnerCols - MODEL_COL - 2 - maxStatsLen - 2);
 
   return (
     <Box flexDirection="column">

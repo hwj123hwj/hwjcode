@@ -18,6 +18,8 @@ import { WorkflowRegistry } from './workflowRegistry.js';
 export interface WorkflowAgentRunOptions {
   /** Full task description for the sub-agent. Include all needed instructions inline. */
   prompt: string;
+  /** Short label shown in the /workflow panel (e.g. "运行测试套件"). */
+  label?: string;
   /**
    * Structured context from previous steps. Will be serialized and appended to the
    * sub-agent prompt so the sub-agent can consume prior results without extra turns.
@@ -29,11 +31,18 @@ export interface WorkflowAgentRunOptions {
   max_turns?: number;
   /**
    * Optional model override for this specific sub-agent.
-   * Use any model identifier supported by the current provider.
-   * Examples: 'gemini-2.0-flash', 'claude-opus-4-5', 'gpt-4o'
-   * Defaults to the global model configured in settings.
+   * Examples: 'gemini-2.0-flash', 'claude-opus-4-5'
    */
   model?: string;
+  /**
+   * JSON Schema for structured output. When provided, the sub-agent is instructed
+   * to return ONLY a JSON object matching this schema. The result is automatically
+   * parsed and available as `result.data`.
+   *
+   * Example:
+   *   schema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string' } } }, required: ['files'] }
+   */
+  schema?: Record<string, unknown>;
 }
 
 export interface WorkflowAgentRunResult {
@@ -131,15 +140,21 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
 
     const result = await subAgent.executeTask(prompt, maxTurns);
 
-    // Attempt to parse JSON from the summary for structured data passing.
+    // Parse structured data from the summary.
+    // When schema was provided, attempt strict JSON parse of the entire summary first;
+    // otherwise fall back to extracting a JSON block from prose output.
     let data: unknown = undefined;
-    const jsonMatch = result.summary.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-      result.summary.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-    if (jsonMatch) {
-      try {
-        data = JSON.parse(jsonMatch[1] ?? jsonMatch[0]);
-      } catch {
-        // Not JSON — leave data undefined
+    if (options.schema) {
+      // Schema mode: the sub-agent should have returned raw JSON
+      const cleaned = result.summary.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      try { data = JSON.parse(cleaned); } catch { /* will try prose extraction below */ }
+    }
+    if (data === undefined) {
+      const jsonMatch =
+        result.summary.match(/```(?:json)?\s*([\s\S]*?)```/) ||
+        result.summary.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+      if (jsonMatch) {
+        try { data = JSON.parse(jsonMatch[1] ?? jsonMatch[0]); } catch { /* not JSON */ }
       }
     }
 
@@ -219,17 +234,26 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
   }
 
   /**
-   * Build the final prompt for a sub-agent, appending structured context if provided.
-   * The context section uses a machine-readable format: no markdown, raw JSON.
-   * The sub-agent is expected to parse and use it directly.
+   * Build the final prompt for a sub-agent, appending structured context and schema
+   * requirements if provided. When `schema` is set, the sub-agent is instructed to
+   * respond ONLY with a JSON object matching the schema — no prose, no markdown fences.
    */
   private buildPrompt(options: WorkflowAgentRunOptions): string {
-    if (options.context === undefined || options.context === null) {
-      return options.prompt;
+    let prompt = options.prompt;
+
+    // Append structured context from previous steps
+    if (options.context !== undefined && options.context !== null) {
+      const contextJson = JSON.stringify(options.context, null, 2);
+      prompt += `\n\n<workflow_context>\n${contextJson}\n</workflow_context>`;
     }
 
-    const contextJson = JSON.stringify(options.context, null, 2);
-    return `${options.prompt}\n\n<workflow_context>\n${contextJson}\n</workflow_context>`;
+    // Append schema constraint — force structured JSON output
+    if (options.schema) {
+      const schemaJson = JSON.stringify(options.schema, null, 2);
+      prompt += `\n\n<output_schema>\nYou MUST respond with ONLY a valid JSON object matching this schema. No prose, no markdown fences, no explanation — raw JSON only:\n${schemaJson}\n</output_schema>`;
+    }
+
+    return prompt;
   }
 
   private resolveAgentDefinition(agentType: string, maxTurns: number) {
