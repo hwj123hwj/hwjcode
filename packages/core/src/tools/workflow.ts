@@ -18,7 +18,7 @@ import {
 import { ToolRegistry } from './tool-registry.js';
 import { Config } from '../config/config.js';
 import { WorkflowAgentBridge } from '../core/workflowAgentBridge.js';
-import { runWorkflowScript } from '../core/workflowRunner.js';
+import { runWorkflowScript, extractMeta } from '../core/workflowRunner.js';
 import { ToolExecutionContext } from '../core/toolSchedulerAdapter.js';
 import { WorkflowRegistry } from '../core/workflowRegistry.js';
 
@@ -93,25 +93,56 @@ Use this tool when the task:
 
 Trigger: include "workflow" in the user's prompt, or invoke directly for complex tasks.
 
-Script API (available inside the script as the \`agent\` argument):
-- \`agent.run({ prompt, context?, agent_type?, max_turns?, model? })\` — run one sub-agent, returns \`{ success, result, data? }\`
-  - \`model\`: optional model override, e.g. \`'gemini-2.0-flash'\` for fast/cheap steps, \`'gemini-2.5-pro'\` for deep reasoning steps
-- \`agent.runParallel([...tasks])\` — run multiple sub-agents concurrently, returns results in input order
-- \`agent.setPhase(index)\` — IMPORTANT: call before each phase to update the UI tracker (0-based index). Example: \`agent.setPhase(0)\` before first phase, \`agent.setPhase(1)\` before second phase.
+**Script format** (follow exactly):
 
-Context passing: set \`context\` to any JSON-serializable value from a previous step. It will be injected into the sub-agent prompt so the sub-agent can use prior results immediately.
+\`\`\`javascript
+export const meta = {
+  name: 'workflow-slug',          // kebab-case identifier
+  description: '简短描述',
+  phases: [
+    { title: '阶段名', detail: '详细说明' },
+  ],
+};
 
-Sub-agent result: \`result\` is the sub-agent's text summary. \`data\` is auto-parsed JSON if the sub-agent returned a JSON block in its final response.`,
+phase('阶段名');  // REQUIRED before each phase — updates the UI tracker
+
+const result = await agent('prompt text', {
+  label: 'UI显示标签',            // short label for /workflow panel
+  schema: { type: 'object', properties: { ... }, required: [...] },  // optional: force JSON output
+  model: 'gemini-2.0-flash',     // optional: per-agent model override
+  context: previousResult,       // optional: pass prior results
+});
+
+// Parallel execution:
+const [r1, r2] = await Promise.all([
+  agent('prompt1', { label: '任务1' }),
+  agent('prompt2', { label: '任务2' }),
+]);
+
+export default async function(agent) {
+  // orchestration logic
+}
+\`\`\`
+
+**API reference**:
+- \`phase(title)\` — advance the phase tracker; title must match one of \`meta.phases[].title\`
+- \`await agent(prompt, opts)\` or \`await agent.run({ prompt, ...opts })\` — run one sub-agent
+  - opts: \`{ label, schema, model, context, max_turns, agent_type }\`
+  - returns: \`{ success, result, data }\` — \`data\` is auto-parsed JSON when \`schema\` is set
+- \`await agent.runParallel([...tasks])\` — run multiple sub-agents concurrently (max ${6} by default)
+- \`schema\`: JSON Schema object — forces the sub-agent to return structured JSON; result available as \`result.data\`
+- \`model\`: per-step model override, e.g. \`'gemini-2.0-flash'\` for fast steps, \`'gemini-2.5-pro'\` for deep reasoning
+
+**Context passing**: set \`context\` to any JSON-serializable value from a previous step. It will be injected into the sub-agent prompt automatically.`,
       Icon.Tasks,
       {
         type: Type.OBJECT,
         properties: {
           script: {
             type: Type.STRING,
-            description: `JavaScript orchestration script. Must export a default async function(agent).
-Script has access to: agent.run(), agent.runParallel(), JSON, console.log.
-Script does NOT have access to: require, import, fs, process, fetch, or any Node.js globals.
-The script is the source of truth for task decomposition, branching, and result aggregation.`,
+            description: `JavaScript orchestration script with export const meta and export default async function(agent).
+Available globals: agent (callable + agent.run/runParallel/setPhase), phase(), JSON, console.log/error, Promise.
+NOT available: require, import, fs, process, fetch, any Node.js globals.`,
           },
           description: {
             type: Type.STRING,
@@ -157,11 +188,12 @@ The script is the source of truth for task decomposition, branching, and result 
     params: WorkflowToolParams,
     _abortSignal: AbortSignal,
   ): Promise<ToolCallConfirmationDetails | false> {
+    const meta = extractMeta(params.script);
     const details: ToolWorkflowConfirmationDetails = {
       type: 'workflow',
       title: 'Run a dynamic workflow?',
-      description: params.description,
-      phases: extractWorkflowPhases(params.script),
+      description: meta.description ?? params.description,
+      phases: (meta.phases ?? []).map(p => ({ name: p.title, description: p.detail ?? '' })),
       rawScript: params.script,
       onConfirm: async (_outcome: ToolConfirmationOutcome) => {
         // The scheduler handles the outcome — Cancel stops execution,
@@ -205,9 +237,11 @@ The script is the source of truth for task decomposition, branching, and result 
     const workflowId = `wf-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     updateOutput?.(`**Workflow started:** ${params.description}\n`);
 
-    // Register with the workflow registry so /workflow panel can track it
-    const phases = extractWorkflowPhases(params.script);
-    WorkflowRegistry.startWorkflow(workflowId, params.description, phases);
+    // Register with the workflow registry — use meta if available
+    const meta = extractMeta(params.script);
+    const phases = (meta.phases ?? []).map(p => ({ name: p.title, description: p.detail ?? '' }));
+    const description = meta.description ?? params.description;
+    WorkflowRegistry.startWorkflow(workflowId, description, phases);
 
     // Track sub-agent events so we can surface them in the output stream
     const onUpdate = (agentId: string, output: string) => {
@@ -263,72 +297,5 @@ The script is the source of truth for task decomposition, branching, and result 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Script analysis helpers
+// (extractWorkflowPhases removed — now using extractMeta from workflowRunner.ts)
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Extract high-level phases from the orchestration script for the confirmation
- * dialog preview. Looks for comment blocks like:
- *   // Phase 1: Name — description
- *   // Step 2: Name — description
- *   // === Name ===
- * and falls back to extracting `agent.run` / `agent.runParallel` call sites.
- */
-function extractWorkflowPhases(script: string): WorkflowPhase[] {
-  const phases: WorkflowPhase[] = [];
-
-  // 1. Try to find explicit phase/step comments
-  const phaseCommentRe =
-    /\/\/\s*(?:Phase|Step|阶段|步骤)\s*\d*[:\s.]\s*([^\n—-]+?)(?:[—-]\s*([^\n]+))?$/gim;
-  let m: RegExpExecArray | null;
-  while ((m = phaseCommentRe.exec(script)) !== null) {
-    phases.push({
-      name: m[1]!.trim(),
-      description: m[2]?.trim() ?? '',
-    });
-  }
-
-  if (phases.length > 0) {
-    // Attach up to 3 agent prompt previews per phase (not trivial to map, so do it globally)
-    attachAgentPreviews(script, phases);
-    return phases.slice(0, 6);
-  }
-
-  // 2. Fallback: extract agent.run / agent.runParallel call sites
-  const runRe = /await\s+agent\.(run|runParallel)\s*\(\s*(?:\[?\s*)?{[^}]*prompt\s*:\s*['"`]([\s\S]*?)['"`]/g;
-  const seen = new Set<string>();
-  while ((m = runRe.exec(script)) !== null) {
-    const isParallel = m[1] === 'runParallel';
-    const prompt = m[2]!.slice(0, 80).replace(/\n/g, ' ');
-    if (!seen.has(prompt)) {
-      seen.add(prompt);
-      phases.push({
-        name: isParallel ? '并行执行' : '串行执行',
-        description: prompt + (m[2]!.length > 80 ? '…' : ''),
-      });
-    }
-    if (phases.length >= 6) break;
-  }
-
-  if (phases.length === 0) {
-    // Ultimate fallback: single generic phase
-    phases.push({ name: '执行', description: '运行工作流脚本' });
-  }
-
-  return phases;
-}
-
-function attachAgentPreviews(script: string, phases: WorkflowPhase[]): void {
-  // Collect all agent prompt strings globally and distribute across phases
-  const promptRe = /prompt\s*:\s*['"`]([\s\S]*?)['"`]/g;
-  const allPrompts: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = promptRe.exec(script)) !== null) {
-    allPrompts.push(m[1]!.slice(0, 60).replace(/\n/g, ' ') + (m[1]!.length > 60 ? '…' : ''));
-    if (allPrompts.length >= phases.length * 3) break;
-  }
-  const perPhase = Math.ceil(allPrompts.length / Math.max(phases.length, 1));
-  phases.forEach((phase, i) => {
-    phase.agentPreviews = allPrompts.slice(i * perPhase, i * perPhase + 3);
-  });
-}

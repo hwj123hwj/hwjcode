@@ -8,6 +8,15 @@ import vm from 'node:vm';
 import { WorkflowAgentAPI } from './workflowAgentBridge.js';
 
 /**
+ * Structured metadata parsed from `export const meta = { ... }` at the top of a workflow script.
+ */
+export interface WorkflowMeta {
+  name?: string;
+  description?: string;
+  phases?: Array<{ title: string; detail?: string }>;
+}
+
+/**
  * Result returned after the orchestration script finishes.
  */
 export interface WorkflowRunResult {
@@ -20,21 +29,36 @@ export interface WorkflowRunResult {
 }
 
 /**
+ * Parse `export const meta = { ... }` from the script source without executing it.
+ * Returns an empty object if no meta is found or parsing fails.
+ */
+export function extractMeta(script: string): WorkflowMeta {
+  // Match: export const meta = { ... }; (handles multi-line JSON-like object literal)
+  const match = script.match(/export\s+const\s+meta\s*=\s*(\{[\s\S]*?\});?\s*\n/);
+  if (!match) return {};
+  try {
+    // Evaluate the object literal in a sandboxed context (no side-effects)
+    const sandbox = { result: undefined as unknown };
+    const evalScript = new vm.Script(`result = (${match[1]!})`);
+    evalScript.runInNewContext(sandbox);
+    const val = sandbox.result;
+    if (val && typeof val === 'object') return val as WorkflowMeta;
+  } catch {
+    // ignore parse errors
+  }
+  return {};
+}
+
+/**
  * Execute a workflow orchestration script inside a Node.js vm sandbox.
  *
- * Security model:
- * - The script runs in a completely fresh context with no access to the host
- *   module system (no require, no import, no process, no fs).
- * - Only the `agent` object and a subset of safe globals (JSON, console.log)
- *   are injected.
- * - The script MUST export a default async function: `export default async function(agent) {...}`
- *   This is transpiled server-side to a CommonJS-compatible wrapper before execution.
- *
  * Script contract:
- * - Call `await agent.run({...})` for serial execution.
- * - Call `await agent.runParallel([...])` for parallel execution.
+ * - Declare metadata at the top:
+ *     export const meta = { name, description, phases: [{title, detail}] };
+ * - Call `phase('name')` to advance the UI phase tracker.
+ * - Call `await agent(prompt, { label, schema?, model? })` for serial execution.
+ * - Call `await Promise.all([agent(...), agent(...)])` for parallel execution.
  * - Return a string (or JSON-serializable value) as the final workflow output.
- * - The script should not catch AbortSignal errors — let them propagate.
  */
 export async function runWorkflowScript(
   script: string,
@@ -43,64 +67,98 @@ export async function runWorkflowScript(
 ): Promise<WorkflowRunResult> {
   const tokenAccumulator = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
-  // Wrap the agent API to accumulate token usage transparently
-  // Also expose setPhase() so scripts can tell the registry which phase is active
-  const wrappedAgent = {
-    async run(options: Parameters<WorkflowAgentAPI['run']>[0]) {
-      const result = await agentAPI.run(options);
-      if (result.tokenUsage) {
-        tokenAccumulator.inputTokens += result.tokenUsage.inputTokens;
-        tokenAccumulator.outputTokens += result.tokenUsage.outputTokens;
-        tokenAccumulator.totalTokens += result.tokenUsage.totalTokens;
-      }
-      return result;
-    },
-    async runParallel(tasks: Parameters<WorkflowAgentAPI['runParallel']>[0]) {
-      const results = await agentAPI.runParallel(tasks);
-      for (const r of results) {
-        if (r.tokenUsage) {
-          tokenAccumulator.inputTokens += r.tokenUsage.inputTokens;
-          tokenAccumulator.outputTokens += r.tokenUsage.outputTokens;
-          tokenAccumulator.totalTokens += r.tokenUsage.totalTokens;
-        }
-      }
-      return results;
-    },
-    setPhase(index: number) {
-      if ('currentPhaseIndex' in agentAPI) {
-        (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = index;
-      }
-    },
+  // ── phase() top-level function ────────────────────────────────────────────
+  // Maps phase title → index by consulting the meta we already parsed, with fallback counter.
+  const meta = extractMeta(script);
+  const phaseTitles = (meta.phases ?? []).map(p => p.title);
+  let currentPhaseIdx = 0;
+
+  const phaseFunc = (title: string) => {
+    // Find by title first, fall back to sequential increment
+    const idx = phaseTitles.indexOf(title);
+    currentPhaseIdx = idx >= 0 ? idx : currentPhaseIdx + 1;
+    if ('currentPhaseIndex' in agentAPI) {
+      (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = currentPhaseIdx;
+    }
   };
 
-  // Transpile "export default async function" to a module.exports assignment
-  // so it runs in a CommonJS-style vm context.
+  // ── agent() / agent.run() / agent.runParallel() ───────────────────────────
+  // Support both the flat `agent(prompt, opts)` call style AND the nested
+  // `agent.run({...})` / `agent.runParallel([...])` style for backwards compat.
+  const runOne = async (
+    promptOrOpts: string | Parameters<WorkflowAgentAPI['run']>[0],
+    opts?: { label?: string; schema?: Record<string, unknown>; model?: string; context?: unknown; max_turns?: number },
+  ) => {
+    const options: Parameters<WorkflowAgentAPI['run']>[0] =
+      typeof promptOrOpts === 'string'
+        ? { prompt: promptOrOpts, label: opts?.label, schema: opts?.schema, model: opts?.model, context: opts?.context, max_turns: opts?.max_turns }
+        : promptOrOpts;
+
+    const result = await agentAPI.run(options);
+    if (result.tokenUsage) {
+      tokenAccumulator.inputTokens += result.tokenUsage.inputTokens;
+      tokenAccumulator.outputTokens += result.tokenUsage.outputTokens;
+      tokenAccumulator.totalTokens += result.tokenUsage.totalTokens;
+    }
+    return result;
+  };
+
+  const runParallel = async (tasks: Parameters<WorkflowAgentAPI['runParallel']>[0]) => {
+    const results = await agentAPI.runParallel(tasks);
+    for (const r of results) {
+      if (r.tokenUsage) {
+        tokenAccumulator.inputTokens += r.tokenUsage.inputTokens;
+        tokenAccumulator.outputTokens += r.tokenUsage.outputTokens;
+        tokenAccumulator.totalTokens += r.tokenUsage.totalTokens;
+      }
+    }
+    return results;
+  };
+
+  // The callable `agent` function — supports both call styles
+  const agentFn = Object.assign(
+    async (
+      promptOrOpts: string | Parameters<WorkflowAgentAPI['run']>[0],
+      opts?: { label?: string; schema?: Record<string, unknown>; model?: string; context?: unknown; max_turns?: number },
+    ) => runOne(promptOrOpts, opts),
+    {
+      run: runOne,
+      runParallel,
+      setPhase: (index: number) => {
+        currentPhaseIdx = index;
+        if ('currentPhaseIndex' in agentAPI) {
+          (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = index;
+        }
+      },
+    },
+  );
+
+  // Transpile ES module syntax to CommonJS for vm context
   const transpiled = transpileScript(script);
 
-  // Logs produced by the script are captured and available for debugging
   const capturedLogs: string[] = [];
   const safeConsole = {
-    log: (...args: unknown[]) => {
-      capturedLogs.push(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
-    },
+    log: (...args: unknown[]) =>
+      capturedLogs.push(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
+    error: (...args: unknown[]) =>
+      capturedLogs.push('[error] ' + args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
   };
 
   const sandbox: Record<string, unknown> = {
-    agent: wrappedAgent,
+    agent: agentFn,
+    phase: phaseFunc,          // top-level phase() function
     console: safeConsole,
     JSON,
+    Promise,
     module: { exports: {} as Record<string, unknown> },
     exports: {} as Record<string, unknown>,
-    __capturedLogs: capturedLogs,
   };
 
   try {
-    // Compile and run the script body (registers module.exports.default)
     const vmScript = new vm.Script(transpiled, { filename: 'workflow.js' });
     const context = vm.createContext(sandbox);
     vmScript.runInContext(context);
 
-    // Retrieve the exported default function
     const exports = sandbox['module'] as { exports: Record<string, unknown> };
     const mainFn = exports.exports['default'];
     if (typeof mainFn !== 'function') {
@@ -109,10 +167,8 @@ export async function runWorkflowScript(
       );
     }
 
-    // Execute the orchestration function
-    const rawOutput = await (mainFn as (agent: WorkflowAgentAPI) => Promise<unknown>)(wrappedAgent);
+    const rawOutput = await (mainFn as (agent: typeof agentFn) => Promise<unknown>)(agentFn);
 
-    // Coerce the return value to a string
     const output =
       typeof rawOutput === 'string'
         ? rawOutput
@@ -120,52 +176,33 @@ export async function runWorkflowScript(
           ? JSON.stringify(rawOutput, null, 2)
           : '(workflow completed with no return value)';
 
-    return {
-      success: true,
-      output,
-      totalTokenUsage: tokenAccumulator,
-    };
+    return { success: true, output, totalTokenUsage: tokenAccumulator };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-
-    // Re-throw abort errors so the caller can handle them
     if (abortSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
       throw err;
     }
-
-    return {
-      success: false,
-      output: '',
-      error: errorMessage,
-      totalTokenUsage: tokenAccumulator,
-    };
+    return { success: false, output: '', error: errorMessage, totalTokenUsage: tokenAccumulator };
   }
 }
 
 /**
- * Minimal transpiler: converts ES module syntax used in workflow scripts to
- * CommonJS-style assignments that work inside a vm.Script context.
- *
- * Handles:
- *   export default async function(agent) { ... }
- *   export default async function myFn(agent) { ... }
- *   export default function(agent) { ... }
- *
- * Everything else is passed through unchanged — the script author is responsible
- * for not using unsupported syntax (import, require, etc.).
+ * Transpile ES module syntax to CommonJS for vm.Script.
+ * Also strips `export const meta = {...}` (it's only used by extractMeta).
  */
 function transpileScript(script: string): string {
   let result = script;
 
+  // Strip "export const meta = { ... };" — already consumed by extractMeta()
+  result = result.replace(/export\s+const\s+meta\s*=\s*\{[\s\S]*?\};?\s*\n/, '');
+
   // "export default async function [name]?(" → "module.exports.default = async function("
-  // Handles both named and anonymous async functions.
   result = result.replace(
     /export\s+default\s+async\s+function\s*\w*\s*\(/g,
     'module.exports.default = async function(',
   );
 
   // "export default function [name]?(" → "module.exports.default = function("
-  // Handles both named and anonymous functions.
   result = result.replace(
     /export\s+default\s+function\s*\w*\s*\(/g,
     'module.exports.default = function(',
