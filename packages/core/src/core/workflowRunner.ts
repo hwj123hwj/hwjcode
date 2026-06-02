@@ -129,7 +129,7 @@ export async function runWorkflowScript(
     const errorMessage = err instanceof Error ? err.message : String(err);
 
     // Re-throw abort errors so the caller can handle them
-    if (errorMessage.includes('abort') || errorMessage.includes('cancel') || abortSignal.aborted) {
+    if (abortSignal.aborted || (err instanceof Error && err.name === 'AbortError')) {
       throw err;
     }
 
