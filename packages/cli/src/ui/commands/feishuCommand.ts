@@ -3316,6 +3316,77 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const platform = creds.domain === 'lark'
       ? t('feishu.start.platform.lark')
       : t('feishu.start.platform.feishu');
+
+    // 🎯 以飞书应用身份给 Bot 拥有者发送欢迎私聊消息，告知已上线及当前工作目录
+    if (creds.ownerOpenId) {
+      const ownerOpenId = creds.ownerOpenId;
+      void (async () => {
+        try {
+          const projectRoot = (typeof config?.getProjectRoot === 'function' && config.getProjectRoot()) || process.cwd();
+          const welcomeLines: string[] = [
+            `👋 你好！我已成功上线，随时为你服务！`,
+            ``,
+            `📂 当前私聊工作目录：\`${projectRoot}\``,
+            ``,
+            `💡 如需使用其他工作目录，请发送：**拉个群 + 文件夹路径**`,
+            `   例如：拉个群 D:\\projects\\my-app`,
+            ``,
+            `❓ 需要帮助请发送 /help`,
+          ];
+
+          // 🔍 检查飞书应用权限状态，将缺失权限的快捷申请链接追加到欢迎消息
+          try {
+            const probe = await probeCredentials(creds.appId, creds.appSecret, creds.domain);
+            if (probe?.grantedScopes) {
+              const requiredAll = [...REQUIRED_APP_SCOPES];
+              const missing = computeMissingScopes(probe.grantedScopes, requiredAll);
+              const hasGroupMsgScope = probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE);
+
+              if (missing.length === 0 && hasGroupMsgScope) {
+                welcomeLines.push('', `✅ 应用权限配置完整，所有功能均可正常使用。`);
+              } else {
+                welcomeLines.push('', `⚠️ **以下应用权限尚未开通，部分功能可能受限：**`);
+
+                if (missing.length > 0) {
+                  const scopeApplyUrl = buildScopeApplyUrl({
+                    appId: creds.appId,
+                    scopes: missing,
+                    brand: creds.domain,
+                    tokenType: 'tenant',
+                  });
+                  welcomeLines.push(`  📋 缺失 ${missing.length} 项基础权限，一键申请：`);
+                  welcomeLines.push(`     👉 ${scopeApplyUrl}`);
+                }
+
+                if (!hasGroupMsgScope) {
+                  const sensitiveUrl = buildScopeApplyUrl({
+                    appId: creds.appId,
+                    scopes: [SENSITIVE_GROUP_MSG_SCOPE],
+                    brand: creds.domain,
+                    tokenType: 'tenant',
+                  });
+                  welcomeLines.push(`  💬 缺失「免@响应」敏感权限（群内需@机器人才能触发）：`);
+                  welcomeLines.push(`     👉 ${sensitiveUrl}`);
+                }
+
+                welcomeLines.push(`  📡 事件订阅页（勾选 im.message.receive_v1 等）：`);
+                welcomeLines.push(`     👉 ${buildEventSubUrl({ appId: creds.appId, brand: creds.domain })}`);
+                welcomeLines.push(`  🔄 权限生效需发布版本：`);
+                welcomeLines.push(`     👉 ${buildPermissionPageUrl({ appId: creds.appId, brand: creds.domain })}`);
+              }
+            }
+          } catch (scopeErr: any) {
+            dwarn(`[Feishu] Failed to check scopes for welcome message: ${scopeErr.message}`);
+          }
+
+          await gateway.sendPrivateMessage(ownerOpenId, welcomeLines.join('\n'));
+          dlog('[Feishu] Welcome private message sent to owner.');
+        } catch (err: any) {
+          dwarn(`[Feishu] Failed to send welcome private message: ${err.message}`);
+        }
+      })();
+    }
+
     return [
       t('feishu.dashboard.welcome_title'),
       tp('feishu.start.success_bot', { name: creds.botName || t('feishu.start.bot_unknown') }),
