@@ -3685,7 +3685,7 @@ class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResu
     super(
       CreateProjectGroupTool.Name,
       'CreateProjectAndGroupChat',
-      'Creates a new local directory and automatically creates a dedicated Feishu group chat for this project, inviting the current user and binding the workspace. Only available in direct/P2P chat.',
+      'Creates a new local project directory AND a dedicated Feishu group chat in one step: creates the directory, creates the group, invites the current user, binds the workspace route, and sends a welcome message. Use this tool when the user wants to set up a project workspace with a bound Feishu group (e.g. "拉个群", "建个项目群", "create a project group"). For creating a standalone Feishu group chat WITHOUT a local project directory or workspace binding, use lark_cli with command="im +chat-create" instead. Only available in direct/P2P chat.',
       Icon.Globe,
       {
         type: Type.OBJECT,
