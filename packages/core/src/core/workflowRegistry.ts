@@ -114,6 +114,10 @@ export const WorkflowRegistry = {
     if (tokenUsage) {
       r.totalTokenUsage = tokenUsage;
     }
+    // Trim stored data for completed/failed workflows to prevent memory accumulation.
+    // Keep only metadata (agentId, label, status, times, token counts, tool call counts).
+    // Truncate prompt and outcome text to 500 chars, and clear recentToolCalls.
+    trimAgentData(r);
     notify(true);  // immediate: workflow ended
   },
 
@@ -213,4 +217,27 @@ function findAgent(workflowId: string, agentId: string): WorkflowAgentRecord | u
     if (a) return a;
   }
   return r.agents.find(a => a.agentId === agentId);
+}
+
+/**
+ * Trim stored agent data for a completed/failed workflow to prevent memory
+ * accumulation in long-running sessions. Truncates prompt and outcome text
+ * to a reasonable length and clears detailed tool call logs.
+ */
+const MAX_TRIMMED_TEXT_LENGTH = 500;
+
+function trimAgentData(record: WorkflowRecord): void {
+  const allAgents = record.phases.length
+    ? record.phases.flatMap(p => p.agents)
+    : record.agents;
+
+  for (const agent of allAgents) {
+    if (agent.prompt && agent.prompt.length > MAX_TRIMMED_TEXT_LENGTH) {
+      agent.prompt = agent.prompt.slice(0, MAX_TRIMMED_TEXT_LENGTH) + '…[trimmed]';
+    }
+    if (agent.outcome && agent.outcome.length > MAX_TRIMMED_TEXT_LENGTH) {
+      agent.outcome = agent.outcome.slice(0, MAX_TRIMMED_TEXT_LENGTH) + '…[trimmed]';
+    }
+    agent.recentToolCalls = []; // Clear once workflow is done — no longer needed
+  }
 }
