@@ -1081,6 +1081,49 @@ export class FeishuGateway {
   }
 
   /**
+   * 以应用身份向指定用户发送私聊消息。
+   *
+   * 与 sendMessage（需 chatId）不同，此方法使用 open_id 作为 receive_id，
+   * 飞书平台会自动创建或复用与该用户的 P2P 会话。
+   *
+   * @param openId 目标用户的 open_id
+   * @param text 消息文本
+   * @returns message_id 或 null
+   */
+  async sendPrivateMessage(openId: string, text: string): Promise<string | null> {
+    try {
+      const token = await this.getTenantToken();
+
+      const body = {
+        receive_id: openId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      };
+
+      const url = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=open_id`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data: any = await res.json();
+      if (data.code === 0) {
+        return data.data?.message_id || null;
+      }
+
+      derror('Feishu sendPrivateMessage failed:', JSON.stringify(data));
+      return null;
+    } catch (e: any) {
+      derror('Feishu sendPrivateMessage threw:', e?.message || e);
+      return null;
+    }
+  }
+
+  /**
    * 更新已发送消息的内容（用于流式进度更新）
    *
    * 注意事项:
@@ -1717,6 +1760,7 @@ export class FeishuGateway {
     title: string,
     content: string,
     footerMetrics?: FeishuFooterMetrics, // 新增 footerMetrics 参数
+    useSchema2?: boolean, // 若原卡片是 schema 2.0（如表单卡片），须用 schema 2.0 格式更新
   ): Promise<boolean> {
     if (!messageId) return false;
     try {
@@ -1727,21 +1771,38 @@ export class FeishuGateway {
         elements.push({ tag: 'markdown', content: optimizeMarkdownStyle(content, 1) });
       }
 
-      // 添加页脚
-      if (footerMetrics) {
+      // 添加页脚（仅 schema 1.0 支持；schema 2.0 表单更新时通常不需要页脚）
+      if (footerMetrics && !useSchema2) {
         elements.push(...buildFeishuFooterElements(footerMetrics));
       }
 
-      const cardContent = {
-        config: { wide_screen_mode: true, streaming: true },
-        header: title
-          ? {
-              template: 'green',
-              title: { tag: 'plain_text', content: title },
-            }
-          : undefined,
-        elements,
-      };
+      let cardContent: Record<string, any>;
+      if (useSchema2) {
+        // schema 2.0 格式：body.elements（与 sendRawInteractiveCard 发送时保持一致）
+        cardContent = {
+          schema: '2.0',
+          config: { update_multi: true, wide_screen_mode: true },
+          header: title
+            ? {
+                template: 'green',
+                title: { tag: 'plain_text', content: title },
+              }
+            : undefined,
+          body: { elements },
+        };
+      } else {
+        // schema 1.0 格式（默认，兼容普通流式卡片）
+        cardContent = {
+          config: { wide_screen_mode: true, streaming: true },
+          header: title
+            ? {
+                template: 'green',
+                title: { tag: 'plain_text', content: title },
+              }
+            : undefined,
+          elements,
+        };
+      }
 
       const res = await fetch(
         `${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}`,
@@ -2173,7 +2234,7 @@ export class FeishuGateway {
       type: 'primary',
       width: 'default',
       name: 'submit_btn',
-      action_type: 'form_submit',
+      form_action_type: 'submit',
     });
 
     const card: Record<string, any> = {
@@ -2228,7 +2289,25 @@ export class FeishuGateway {
     });
 
     if (actionData.value === 'other_ideas') {
+      // 🎯 更新原表单卡片为反馈已收到，避免原表单一直晾着
+      const updateTitle = '💡 已收到反馈';
+      const updateContent = '你选择直接提供其他想法，不回答预设选项。请直接在下方输入框发送你的要求。';
+      await this.updateCard(messageId, updateTitle, updateContent, undefined, true);
+
       return { ok: true, otherIdeas: true } as any;
+    }
+
+    // 检查是否是由于超时而未提交
+    if (!actionData.formValue && !actionData.value) {
+      const updateTitle = '⏰ 等待超时 — 未收到回答';
+      const updateContent = '由于在规定时间内未收到作答，该问题卡片已超时失效。';
+      await this.updateCard(messageId, updateTitle, updateContent, undefined, true);
+
+      const emptyAnswers: FeishuQuestionAnswers = {};
+      questions.forEach((q) => {
+        emptyAnswers[q.question] = '';
+      });
+      return { ok: true, answers: emptyAnswers };
     }
 
     // 解析 form_value → 每个问题的答案
@@ -2283,6 +2362,22 @@ export class FeishuGateway {
       }
       answers[q.question] = answer;
     });
+
+    // 🎯 用户提交答案后，将原表单卡片更新为“已收到回答”和具体的问答内容，避免原表单一直晾着
+    const summaryLines: string[] = [];
+    questions.forEach((q, idx) => {
+      const ans = answers[q.question] || '';
+      const title = q.header ? `${q.header}: ${q.question}` : q.question;
+      if (ans) {
+        summaryLines.push(`**${idx + 1}. ${title}**\n回答: ${ans}`);
+      } else {
+        summaryLines.push(`**${idx + 1}. ${title}**\n回答: *(未回答)*`);
+      }
+    });
+
+    const updateTitle = '📋 已收到回答';
+    const updateContent = summaryLines.join('\n\n');
+    await this.updateCard(messageId, updateTitle, updateContent, undefined, true);
 
     return { ok: true, answers };
   }
