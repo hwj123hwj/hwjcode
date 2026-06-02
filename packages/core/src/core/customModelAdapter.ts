@@ -1534,9 +1534,10 @@ export async function callAnthropicModel(
           // 🔧 Claude prompt caching 详细信息
           // 字段名与 geminiChat.ts 中读取的一致（不带 Count 后缀）
           // - cacheCreationInputTokens: 本次写入缓存的 token（1.25x 价格）
+          //   同时设置 cacheWriteInputTokens 别名，供 telemetry 等下游兼容读取
           // - cacheReadInputTokens: 从缓存读取的 token（0.1x 价格，便宜 90%）
           // - uncachedInputTokens: 非缓存的直接输入 token
-          ...(cacheCreationTokens && { cacheCreationInputTokens: cacheCreationTokens }),
+          ...(cacheCreationTokens && { cacheCreationInputTokens: cacheCreationTokens, cacheWriteInputTokens: cacheCreationTokens }),
           ...(cacheReadTokens != null && { cacheReadInputTokens: cacheReadTokens }),
           uncachedInputTokens: uncachedInputTokens,
         } as any,
@@ -1959,9 +1960,10 @@ export async function* callAnthropicModelStream(
                 // 🔧 Claude prompt caching 详细信息
                 // 字段名与 geminiChat.ts 中读取的一致（不带 Count 后缀）
                 // - cacheCreationInputTokens: 本次写入缓存的 token（1.25x 价格）
+                //   同时设置 cacheWriteInputTokens 别名，供 telemetry 等下游兼容读取
                 // - cacheReadInputTokens: 从缓存读取的 token（0.1x 价格，便宜 90%）
                 // - uncachedInputTokens: 非缓存的直接输入 token（原始 input_tokens）
-                ...(cacheCreationInputTokens != null && { cacheCreationInputTokens }),
+                ...(cacheCreationInputTokens != null && { cacheCreationInputTokens, cacheWriteInputTokens: cacheCreationInputTokens }),
                 ...(cacheReadInputTokens != null && { cacheReadInputTokens }),
                 // 保留原始的非缓存输入 token 以便精确计费
                 uncachedInputTokens: inputTokens,
