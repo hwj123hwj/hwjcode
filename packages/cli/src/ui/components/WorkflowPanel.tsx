@@ -225,11 +225,12 @@ const DetailView: React.FC<{
         <Box
           flexDirection="column"
           width={leftWidth}
+          borderStyle="round"
+          borderColor={focus === 'left' ? Colors.AccentCyan : Colors.Gray}
         >
-          <Box>
-            <Text bold color={focus === 'left' ? Colors.AccentCyan : Colors.Gray}>Phases</Text>
+          <Box paddingX={1}>
+            <Text bold color={Colors.AccentCyan}>Phases</Text>
           </Box>
-          <Box><Text color={Colors.Gray}>{'─'.repeat(leftWidth)}</Text></Box>
           {phases.map((phase, i) => {
             const doneCount = phase.agents.filter(a => a.status === 'completed').length;
             const totalCount = phase.agents.length;
@@ -243,7 +244,7 @@ const DetailView: React.FC<{
             const namePadded = visTrunc(phase.name, nameColCols);
             const counterPadded = counterStr.padStart(maxCounterLen);
             return (
-              <Box key={i} paddingLeft={1}>
+              <Box key={i} paddingX={1}>
                 <Text color={isSelPhase ? Colors.AccentCyan : undefined}>{isSelPhase ? '❯ ' : '  '}</Text>
                 <Text color={statusColor(phaseStatus)}>{statusIcon(phaseStatus)} </Text>
                 <Text bold={isSelPhase}>{namePadded}</Text>
@@ -264,15 +265,16 @@ const DetailView: React.FC<{
         <Box
           flexDirection="column"
           width={rightWidth}
+          borderStyle="round"
+          borderColor={focus === 'right' ? Colors.AccentCyan : Colors.Gray}
         >
-          <Box>
-            <Text bold color={focus === 'right' ? Colors.AccentCyan : Colors.Gray}>
+          <Box paddingX={1}>
+            <Text bold color={Colors.AccentCyan}>
               {currentPhase?.name ?? '执行'} · {agents.length} agent{agents.length !== 1 ? 's' : ''}
             </Text>
           </Box>
-          <Box><Text color={Colors.Gray}>{'─'.repeat(rightWidth)}</Text></Box>
           {agents.length === 0 && (
-            <Box paddingLeft={1}><Text color={Colors.Gray}>No agents yet</Text></Box>
+            <Box paddingX={1}><Text color={Colors.Gray}>No agents yet</Text></Box>
           )}
           {agents.map((agent, i) => {
             const isSelected = focus === 'right' && i === selectedAgent;
@@ -282,7 +284,7 @@ const DetailView: React.FC<{
             // label: CJK-aware truncate+pad to LABEL_COL
             const labelPadded = visTrunc(agent.label, LABEL_COL);
             return (
-              <Box key={agent.agentId} paddingLeft={1}>
+              <Box key={agent.agentId} paddingX={1}>
                 <Text color={isSelected ? Colors.AccentCyan : undefined}>{isSelected ? '❯ ' : '  '}</Text>
                 <Text color={statusColor(agent.status)}>{statusIcon(agent.status)} </Text>
                 <Text bold={isSelected}>{labelPadded}</Text>
@@ -338,8 +340,8 @@ const AgentDetailView: React.FC<{
   //   footer row: 1
   //   total = 4 rows outside → paneHeight = height - 4
   const paneHeight = Math.max(6, height - 4);
-  // Inside right pane (no border): title row(1) + divider(1) = 2 overhead
-  const viewportHeight = Math.max(3, paneHeight - 2);
+  // Inside right border: border top(1) + title row(1) + border bottom(1) = 3 overhead
+  const viewportHeight = Math.max(3, paneHeight - 3);
 
   // Build all content lines for the right pane
   const contentLines: React.ReactNode[] = [];
@@ -463,24 +465,25 @@ const AgentDetailView: React.FC<{
           flexDirection="column"
           width={leftWidth}
           height={paneHeight}
+          borderStyle="round"
+          borderColor={Colors.Gray}
           overflow="hidden"
         >
-          <Box>
+          <Box paddingX={1}>
             <Text bold color={Colors.AccentCyan}>
               {(() => {
                 const suffix = ` · ${phaseAgents.length} agent${phaseAgents.length !== 1 ? 's' : ''}`;
-                const maxNameCols = Math.max(4, leftWidth - stringWidth(suffix));
+                const maxNameCols = Math.max(4, leftWidth - 6 - suffix.length); // -2 border -2 paddingX -2 prefix
                 return visTrunc(phaseName, maxNameCols).trimEnd() + suffix;
               })()}
             </Text>
           </Box>
-          <Box><Text color={Colors.Gray}>{'─'.repeat(leftWidth)}</Text></Box>
           {phaseAgents.map((a, idx) => {
-            const labelCols = Math.max(4, leftWidth - 6);
+            const labelCols = Math.max(4, leftWidth - 8); // -2 border -2 paddingX -2 selector -2 icon
             const labelTrunc = visTrunc(a.label, labelCols).trimEnd();
             const isSelected = idx === selectedAgentIndex;
             return (
-              <Box key={a.agentId}>
+              <Box key={a.agentId} paddingX={1}>
                 <Text color={isSelected ? Colors.AccentCyan : undefined}>{isSelected ? '❯ ' : '  '}</Text>
                 <Text color={statusColor(a.status)}>{statusIcon(a.status)} </Text>
                 <Text bold={isSelected}>{labelTrunc}</Text>
@@ -496,18 +499,19 @@ const AgentDetailView: React.FC<{
           flexDirection="column"
           width={rightWidth}
           height={paneHeight}
+          borderStyle="round"
+          borderColor={Colors.AccentCyan}
           overflow="hidden"
         >
           {/* Title + scroll hint */}
-          <Box justifyContent="space-between">
-            <Text bold color={Colors.AccentCyan}>{visTrunc(agent.label, rightWidth - 4).trimEnd()}</Text>
+          <Box paddingX={1} justifyContent="space-between">
+            <Text bold color={Colors.AccentCyan}>{visTrunc(agent.label, rightWidth - 6).trimEnd()}</Text>
             {(canScrollUp || canScrollDown) && (
               <Text color={Colors.Gray}>
                 {canScrollUp ? '↑' : ' '}{canScrollDown ? '↓' : ' '}
               </Text>
             )}
           </Box>
-          <Box><Text color={Colors.Gray}>{'─'.repeat(rightWidth)}</Text></Box>
 
           {/* Scrollable content */}
           {visibleLines}
