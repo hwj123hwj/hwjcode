@@ -314,13 +314,16 @@ const DetailView: React.FC<{
 
 const AgentDetailView: React.FC<{
   wf: WorkflowRecord;
-  agent: WorkflowAgentRecord;
+  agent: WorkflowAgentRecord;      // currently selected agent (right pane)
+  phaseAgents: WorkflowAgentRecord[]; // all agents in the current phase (left pane)
+  selectedAgentIndex: number;       // index into phaseAgents
+  phaseName: string;
   now: number;
   width: number;
   height: number;
   promptExpanded: boolean;
   scrollOffset: number;
-}> = ({ wf, agent, now, width, height, promptExpanded, scrollOffset }) => {
+}> = ({ wf, agent, phaseAgents, selectedAgentIndex, phaseName, now, width, height, promptExpanded, scrollOffset }) => {
   const leftWidth = Math.max(24, Math.floor(width * 0.3));
   const rightWidth = width - leftWidth - 3;
   // content area inside right pane: rightWidth - 2(border) - 2(paddingX) - 3(indent)
@@ -444,9 +447,7 @@ const AgentDetailView: React.FC<{
   const canScrollUp = clampedOffset > 0;
   const canScrollDown = clampedOffset < maxOffset;
 
-  // Left pane: agent list
-  const agents = allAgents(wf);
-  const phaseName = wf.phases.find(p => p.agents.includes(agent))?.name ?? '执行';
+  // agents / phaseName are now received as props — no need to recompute here
 
   return (
     <Box flexDirection="column">
@@ -471,20 +472,21 @@ const AgentDetailView: React.FC<{
           <Box paddingX={1}>
             <Text bold color={Colors.AccentCyan}>
               {(() => {
-                const suffix = ` · ${agents.length} agent${agents.length !== 1 ? 's' : ''}`;
+                const suffix = ` · ${phaseAgents.length} agent${phaseAgents.length !== 1 ? 's' : ''}`;
                 const maxNameCols = Math.max(4, leftWidth - 4 - suffix.length);
                 return visTrunc(phaseName, maxNameCols).trimEnd() + suffix;
               })()}
             </Text>
           </Box>
-          {agents.map((a) => {
+          {phaseAgents.map((a, idx) => {
             const labelCols = Math.max(4, leftWidth - 8);
             const labelTrunc = visTrunc(a.label, labelCols).trimEnd();
+            const isSelected = idx === selectedAgentIndex;
             return (
               <Box key={a.agentId} paddingX={1}>
-                <Text color={a === agent ? Colors.AccentCyan : undefined}>{a === agent ? '❯ ' : '  '}</Text>
+                <Text color={isSelected ? Colors.AccentCyan : undefined}>{isSelected ? '❯ ' : '  '}</Text>
                 <Text color={statusColor(a.status)}>{statusIcon(a.status)} </Text>
-                <Text bold={a === agent}>{labelTrunc}</Text>
+                <Text bold={isSelected}>{labelTrunc}</Text>
               </Box>
             );
           })}
@@ -548,6 +550,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
   const [detailFocus, setDetailFocus] = useState<'left' | 'right'>('left');
   const [promptExpanded, setPromptExpanded] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<WorkflowAgentRecord | null>(null);
+  const [agentListIndex, setAgentListIndex] = useState(0); // index in phase agents list
   const [agentScrollOffset, setAgentScrollOffset] = useState(0);
 
   const refresh = useCallback(() => {
@@ -601,6 +604,7 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         if (key.downArrow) setSelectedAgent(i => Math.min(agentsInPhase.length - 1, i + 1));
         if (key.return && agentsInPhase[selectedAgent]) {
           setCurrentAgent(agentsInPhase[selectedAgent]!);
+          setAgentListIndex(selectedAgent);
           setPromptExpanded(false);
           setAgentScrollOffset(0);
           setView('agent');
@@ -609,13 +613,28 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         if (key.escape) onClose();
       }
     } else if (view === 'agent') {
-      const allWfAgents = wf ? allAgents(wf) : [];
-      const currentIdx = currentAgent ? allWfAgents.indexOf(currentAgent) : -1;
-      // ↑/↓ switch between agents
-      // j/k or ↓/↑ scroll content
-      if (input === 'j' || key.downArrow) setAgentScrollOffset(o => o + 1);
-      if (input === 'k' || key.upArrow) setAgentScrollOffset(o => Math.max(0, o - 1));
-      // Enter toggle prompt expand/collapse
+      // Compute current phase agents for navigation
+      const curPhase = wf?.phases.find(p => currentAgent && p.agents.includes(currentAgent));
+      const phaseAgents = curPhase ? curPhase.agents : (wf ? wf.agents : []);
+
+      // ↑/↓ — switch to prev/next agent in the phase (left panel navigation)
+      if (key.upArrow && agentListIndex > 0) {
+        const newIdx = agentListIndex - 1;
+        setAgentListIndex(newIdx);
+        setCurrentAgent(phaseAgents[newIdx]!);
+        setAgentScrollOffset(0);
+        setPromptExpanded(false);
+      } else if (key.downArrow && agentListIndex < phaseAgents.length - 1) {
+        const newIdx = agentListIndex + 1;
+        setAgentListIndex(newIdx);
+        setCurrentAgent(phaseAgents[newIdx]!);
+        setAgentScrollOffset(0);
+        setPromptExpanded(false);
+      }
+      // j/k — scroll right pane content
+      if (input === 'j') setAgentScrollOffset(o => o + 1);
+      if (input === 'k') setAgentScrollOffset(o => Math.max(0, o - 1));
+      // Enter — toggle prompt expand/collapse
       if (key.return) setPromptExpanded(e => !e);
       if (key.leftArrow || key.escape) {
         if (key.leftArrow) { setView('detail'); setDetailFocus('right'); setAgentScrollOffset(0); }
@@ -676,17 +695,25 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
         />
       )}
 
-      {view === 'agent' && wf && currentAgent && (
-        <AgentDetailView
-          wf={wf}
-          agent={currentAgent}
-          now={now}
-          width={panelWidth}
-          height={panelHeight}
-          promptExpanded={promptExpanded}
-          scrollOffset={agentScrollOffset}
-        />
-      )}
+      {view === 'agent' && wf && currentAgent && (() => {
+        const curPhase = wf.phases.find(p => currentAgent && p.agents.includes(currentAgent));
+        const phaseAgents = curPhase ? curPhase.agents : wf.agents;
+        const phaseName = curPhase?.name ?? '执行';
+        return (
+          <AgentDetailView
+            wf={wf}
+            agent={currentAgent}
+            phaseAgents={phaseAgents}
+            selectedAgentIndex={agentListIndex}
+            phaseName={phaseName}
+            now={now}
+            width={panelWidth}
+            height={panelHeight}
+            promptExpanded={promptExpanded}
+            scrollOffset={agentScrollOffset}
+          />
+        );
+      })()}
     </Box>
   );
 };
