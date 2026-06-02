@@ -44,7 +44,7 @@ import {
   buildScopeApplyUrl,
   buildEventSubUrl,
   buildPermissionPageUrl,
-  missingScopes as computeMissingScopes,
+  missingScopes,
 } from '../../services/feishu/scopes.js';
 import { getEncoding } from 'js-tiktoken';
 import {
@@ -98,6 +98,13 @@ export function feishuGetToolShortName(name: string): string {
     case 'write_file': return 'WriteFile';
     case 'delete_file': return 'DeleteFile';
     case 'replace': return 'Replace';
+    case 'multiedit': return 'MultiEdit';
+    case 'patch': return 'Patch';
+    case 'batch': return 'Batch';
+    case 'ppt_outline': return 'PPTOutline';
+    case 'ppt_generate': return 'PPTGenerate';
+    case 'codesearch': return 'CodeSearch';
+    case 'lsp': return 'LSP';
     case 'glob': return 'Glob';
     case 'grep': return 'Grep';
     case 'search_file_content': return 'SearchContent';
@@ -826,7 +833,7 @@ function appendPostSetupGuidance(
 ): void {
   const requiredAll = [...REQUIRED_APP_SCOPES];
   const missing = grantedScopes
-    ? computeMissingScopes(grantedScopes, requiredAll)
+    ? missingScopes(grantedScopes, requiredAll)
     : requiredAll; // 没拿到已开通列表（首次扫码很正常）→ 假定全部缺失
 
   lines.push('');
@@ -2705,7 +2712,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 执行工具调用，收集 functionResponse
         const toolResponseParts: Part[] = [];
         let hasUserAnswered = false;
-        for (const req of toolCallRequests) {
+        for (let i = 0; i < toolCallRequests.length; i++) {
+          const req = toolCallRequests[i];
+          const isLastTool = i === toolCallRequests.length - 1;
           const toolName = req.name || 'unknown';
           const toolArgsDesc = req.args ? JSON.stringify(req.args).slice(0, 100) : '';
           emitFeishuMessageLog(msg.chatId, `🔧 ${toolName} ${toolArgsDesc}`, 'tool');
@@ -2737,6 +2746,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (taskTool) {
                 const startTime = Date.now();
                 let lastCardUpdateTime = 0;
+                let lastKnownStatus = '';
+                let lastSubAgentJson = '';
                 const SUBAGENT_UPDATE_THROTTLE_MS = 2000;
 
                 const toolResult = await taskTool.execute(
@@ -2744,9 +2755,27 @@ async function handleStart(context?: CommandContext): Promise<string> {
                   abortController.signal,
                   async (output) => {
                     const now = Date.now();
+                    // 检测关键状态变化（starting → running → completed/failed），
+                    // 状态切换时跳过节流，确保飞书卡片上的"启动中"→"运行中"及时刷新。
+                    let isStatusTransition = false;
+                    let isValidUpdate = false;
+                    try {
+                      const parsed = JSON.parse(output);
+                      if (parsed?.type === 'subagent_update' && parsed.data?.status) {
+                        isValidUpdate = true;
+                        lastSubAgentJson = output;
+                        if (parsed.data.status !== lastKnownStatus) {
+                          isStatusTransition = true;
+                          lastKnownStatus = parsed.data.status;
+                        }
+                      }
+                    } catch { /* ignore */ }
+
                     // 节流刷新（子代理更新非常频繁），避免触发飞书 API 限流
-                    if (activeCardId && now - lastCardUpdateTime >= SUBAGENT_UPDATE_THROTTLE_MS) {
-                      const liveProgressMarkdown = formatToolCallWithBorder('task', req.args, true, output, true);
+                    // 但状态切换时跳过节流，确保用户看到"启动中"→"运行中"
+                    // 并且只有当获得了有效的 subagent_update 数据时才进行卡片刷新，以避免流式纯文本干扰
+                    if (isValidUpdate && activeCardId && (isStatusTransition || now - lastCardUpdateTime >= SUBAGENT_UPDATE_THROTTLE_MS)) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('task', req.args, true, lastSubAgentJson, true);
                       const taskFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                       taskFooterMetrics.status = `子代理执行中: ${req.args?.description || ''}`;
                       if (streaming) {
@@ -2883,30 +2912,56 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
 
             // 在 blocks 后面追加当前工具的最终精美运行报告
-            const finalDisplayOutput = typeof toolResponse.resultDisplay === 'string'
-              ? toolResponse.resultDisplay
-              : JSON.stringify(toolResponse.resultDisplay, null, 2);
+            let finalDisplayOutput: string;
+            if (toolName === 'task' && toolResponse.resultDisplay && typeof toolResponse.resultDisplay === 'object') {
+              finalDisplayOutput = JSON.stringify(toolResponse.resultDisplay);
+            } else if (typeof toolResponse.resultDisplay === 'string') {
+              finalDisplayOutput = toolResponse.resultDisplay;
+            } else if (toolResponse.resultDisplay && typeof toolResponse.resultDisplay === 'object') {
+              // 对象类型的 returnDisplay（如 multiedit 的 { fileDiff, fileName }），
+              // 在飞书卡片上做友好摘要，而非 dump 整个 JSON
+              const rd = toolResponse.resultDisplay as unknown as Record<string, unknown>;
+              if (rd.fileName && rd.fileDiff) {
+                // 多文件编辑 / multiedit / patch 等
+                const lineCount = String(rd.fileDiff).split('\n').length;
+                finalDisplayOutput = `✏️ Edited ${rd.fileName} (${lineCount} diff lines)`;
+              } else if (rd.fileName) {
+                finalDisplayOutput = `✏️ Edited ${rd.fileName}`;
+              } else {
+                // 其他对象类型：提取关键信息做摘要
+                const keys = Object.keys(rd);
+                const summary = keys.slice(0, 3).map(k => `${k}: ${String(rd[k]).slice(0, 60)}`).join(', ');
+                finalDisplayOutput = summary || 'done';
+              }
+            } else {
+              finalDisplayOutput = String(toolResponse.resultDisplay ?? 'done');
+            }
 
             const toolReportMarkdown = formatToolCallWithBorder(toolName, req.args, true, finalDisplayOutput, false);
 
             blocks.push({ type: 'tool', content: toolReportMarkdown });
 
-            // 工具完成后的卡片更新：始终执行（确保最终结果可见），并更新节流时间戳
-            if (activeCardId && streaming) {
-              const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-              toolDoneFooterMetrics.status = toolName === 'image_reader'
-                ? '已完成图像内容读取，正在构思回复...'
-                : `工具已完成: ${toolName}`;
-              await streaming.pushContent(renderCurrentDisplay(blocks));
-              await streaming.pushFooter(toolDoneFooterMetrics);
-              lastToolCardUpdateTime = Date.now();
-            } else if (activeCardId && !streaming) {
-              const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-              toolDoneFooterMetrics.status = toolName === 'image_reader'
-                ? '已完成图像内容读取，正在构思回复...'
-                : `工具已完成: ${toolName}`;
-              await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
-              lastToolCardUpdateTime = Date.now();
+            // 工具完成后的卡片更新：如果是最后一个工具，或者距离上一次更新超过节流阈值，则执行更新以节省飞书 RPC
+            const nowToolEnd = Date.now();
+            const shouldUpdateCard = isLastTool || (nowToolEnd - lastToolCardUpdateTime >= TOOL_CARD_UPDATE_THROTTLE_MS);
+
+            if (shouldUpdateCard) {
+              if (activeCardId && streaming) {
+                const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                toolDoneFooterMetrics.status = toolName === 'image_reader'
+                  ? '已完成图像内容读取，正在构思回复...'
+                  : `工具已完成: ${toolName}`;
+                await streaming.pushContent(renderCurrentDisplay(blocks));
+                await streaming.pushFooter(toolDoneFooterMetrics);
+                lastToolCardUpdateTime = Date.now();
+              } else if (activeCardId && !streaming) {
+                const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                toolDoneFooterMetrics.status = toolName === 'image_reader'
+                  ? '已完成图像内容读取，正在构思回复...'
+                  : `工具已完成: ${toolName}`;
+                await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
+                lastToolCardUpdateTime = Date.now();
+              }
             }
 
             emitFeishuMessageLog(msg.chatId, `✅ ${toolName}`, 'tool');
@@ -3053,8 +3108,21 @@ async function handleStart(context?: CommandContext): Promise<string> {
       mainArg = args.command;
     } else if ((toolName === 'read_file' || toolName === 'write_file') && args.absolute_path) {
       mainArg = args.absolute_path;
-    } else if (toolName === 'replace' && args.file_path) {
-      mainArg = args.file_path;
+    } else if ((toolName === 'replace' || toolName === 'multiedit') && (args.file_path || args.filePath)) {
+      mainArg = args.file_path || args.filePath;
+    } else if (toolName === 'patch') {
+      mainArg = 'unified diff';
+    } else if (toolName === 'batch') {
+      const callCount = args.tool_calls ? args.tool_calls.length : 0;
+      mainArg = callCount > 0 ? `${callCount} independent operations` : 'operations';
+    } else if (toolName === 'ppt_outline') {
+      mainArg = args.action ? `${args.action}${args.topic ? `: ${args.topic}` : ''}` : '';
+    } else if (toolName === 'ppt_generate') {
+      mainArg = 'Generate PPT';
+    } else if (toolName === 'codesearch' && args.query) {
+      mainArg = args.query;
+    } else if (toolName === 'lsp') {
+      mainArg = `${args.operation || 'query'}${args.filePath ? ` on ${args.filePath}` : (args.query ? `: ${args.query}` : '')}`;
     } else if (toolName === 'search_file_content' && args.pattern) {
       mainArg = `'${args.pattern}'`;
       if (args.glob) {
@@ -3075,7 +3143,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     } else if (args.pattern) {
       mainArg = args.pattern;
     } else if (keys.length > 0) {
-      mainArg = String(args[keys[0]]);
+      const firstVal = args[keys[0]];
+      mainArg = typeof firstVal === 'object' && firstVal !== null ? JSON.stringify(firstVal) : String(firstVal);
     }
 
     // 缩短绝对路径到相对路径（看起来更整洁）
@@ -3102,20 +3171,42 @@ async function handleStart(context?: CommandContext): Promise<string> {
     let todoData: any = null;
 
     try {
-      if (output && typeof output === 'string') {
-        const parsed = JSON.parse(output);
-        // 实时态：task 工具通过 updateOutput 推送 { type:'subagent_update', data:{...} }
-        // 最终态：task 工具的 returnDisplay 直接是 { type:'subagent_display', ... }
-        // 两者都要识别，data 内层即 SubAgentDisplay 对象。
-        if (parsed && parsed.type === 'subagent_update' && parsed.data) {
-          isSubAgentDisplay = true;
-          subagentData = parsed.data;
-        } else if (parsed && parsed.type === 'subagent_display') {
-          isSubAgentDisplay = true;
-          subagentData = parsed;
-        } else if (parsed && parsed.type === 'todo_display') {
-          isTodoDisplay = true;
-          todoData = parsed;
+      if (output) {
+        if (typeof output === 'string') {
+          const parsed = JSON.parse(output);
+          // 实时态：task 工具通过 updateOutput 推送 { type:'subagent_update', data:{...} }
+          // 最终态：task 工具的 returnDisplay 直接是 { type:'subagent_display', ... }
+          // 两者都要识别，data 内层即 SubAgentDisplay 对象。
+          if (parsed && parsed.type === 'subagent_update' && parsed.data) {
+            isSubAgentDisplay = true;
+            subagentData = parsed.data;
+          } else if (parsed && parsed.type === 'subagent_display') {
+            isSubAgentDisplay = true;
+            subagentData = parsed;
+          } else if (parsed && parsed.type === 'todo_display') {
+            isTodoDisplay = true;
+            todoData = parsed;
+          }
+        } else if (typeof output === 'object') {
+          const parsed = output as any;
+          if (parsed && parsed.type === 'subagent_update' && parsed.data) {
+            isSubAgentDisplay = true;
+            subagentData = parsed.data;
+          } else if (parsed && parsed.type === 'subagent_display') {
+            isSubAgentDisplay = true;
+            subagentData = parsed;
+          } else if (parsed && parsed.agentId && parsed.status && parsed.stats) {
+            // 如果直接是 SubAgentDisplay 实体对象 (例如 TaskTool 结尾直接返回的 returnDisplay 属性)
+            isSubAgentDisplay = true;
+            subagentData = parsed;
+          } else if (parsed && parsed.type === 'todo_display') {
+            isTodoDisplay = true;
+            todoData = parsed;
+          } else if (parsed && parsed.items) {
+            // 已经是 todoData 实体对象
+            isTodoDisplay = true;
+            todoData = parsed;
+          }
         }
       }
     } catch {
@@ -3219,7 +3310,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
       branchLine = `\n └ ( update todo list completed )`;
     } else if (toolName === 'task' || isSubAgentDisplay) {
-      contentBox = buildSubAgentDisplayBox(subagentData, args, isLive);
+      contentBox = isLive ? buildSubAgentDisplayBox(subagentData, args, isLive) : '';
       branchLine = isLive ? `\n └ ( sub-agent executing... )` : `\n └ ( sub-agent task completed )`;
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
@@ -3339,7 +3430,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             const probe = await probeCredentials(creds.appId, creds.appSecret, creds.domain);
             if (probe?.grantedScopes) {
               const requiredAll = [...REQUIRED_APP_SCOPES];
-              const missing = computeMissingScopes(probe.grantedScopes, requiredAll);
+              const missing = missingScopes(probe.grantedScopes, requiredAll);
               const hasGroupMsgScope = probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE);
 
               if (missing.length === 0 && hasGroupMsgScope) {
@@ -3379,8 +3470,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
             dwarn(`[Feishu] Failed to check scopes for welcome message: ${scopeErr.message}`);
           }
 
-          await gateway.sendPrivateMessage(ownerOpenId, welcomeLines.join('\n'));
-          dlog('[Feishu] Welcome private message sent to owner.');
+          const msgId = await gateway.sendPrivateMessage(ownerOpenId, welcomeLines.join('\n'));
+          if (msgId) {
+            dlog('[Feishu] Welcome private message sent to owner.');
+          } else {
+            dwarn('[Feishu] Welcome private message could not be delivered — the bot may lack the im:message:send_as_bot permission.');
+          }
         } catch (err: any) {
           dwarn(`[Feishu] Failed to send welcome private message: ${err.message}`);
         }
@@ -3512,7 +3607,7 @@ async function handleStatus(): Promise<string> {
   try {
     const probe = await probeCredentials(creds.appId, creds.appSecret, creds.domain);
     if (probe?.grantedScopes) {
-      const missing = computeMissingScopes(probe.grantedScopes, [...REQUIRED_APP_SCOPES]);
+      const missing = missingScopes(probe.grantedScopes, [...REQUIRED_APP_SCOPES]);
       lines.push('');
       if (missing.length === 0) {
         lines.push('  ✅ 应用权限：已开通全部 dvcode 必需的 scope');

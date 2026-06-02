@@ -33,18 +33,41 @@ export interface WorkflowRunResult {
  * Returns an empty object if no meta is found or parsing fails.
  */
 export function extractMeta(script: string): WorkflowMeta {
-  // Match: export const meta = { ... }; (handles multi-line JSON-like object literal)
-  const match = script.match(/export\s+const\s+meta\s*=\s*(\{[\s\S]*?\});?\s*\n/);
-  if (!match) return {};
-  try {
-    // Evaluate the object literal in a sandboxed context (no side-effects)
-    const sandbox = { result: undefined as unknown };
-    const evalScript = new vm.Script(`result = (${match[1]!})`);
-    evalScript.runInNewContext(sandbox);
-    const val = sandbox.result;
-    if (val && typeof val === 'object') return val as WorkflowMeta;
-  } catch {
-    // ignore parse errors
+  // Extract `export const meta = { ... }` by counting brace depth instead of
+  // relying on lazy regex, which breaks on nested objects or `};` inside strings.
+  const startMatch = script.match(/export\s+const\s+meta\s*=\s*\{/);
+  if (!startMatch) return {};
+  const startIdx = startMatch.index! + startMatch[0].length - 1; // index of opening '{'
+  let depth = 0;
+  let inString: string | null = null; // tracks whether we're inside a string literal
+  let escaped = false;
+  for (let i = startIdx; i < script.length; i++) {
+    const ch = script[i]!;
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (inString) {
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+    if (ch === '{') depth++;
+    if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        // Found the closing brace
+        const objectLiteral = script.substring(startIdx, i + 1);
+        try {
+          const sandbox = { result: undefined as unknown };
+          const evalScript = new vm.Script(`result = (${objectLiteral})`);
+          evalScript.runInNewContext(sandbox);
+          const val = sandbox.result;
+          if (val && typeof val === 'object') return val as WorkflowMeta;
+        } catch {
+          // ignore parse errors
+        }
+        return {};
+      }
+    }
   }
   return {};
 }
@@ -77,9 +100,7 @@ export async function runWorkflowScript(
     // Find by title first, fall back to sequential increment
     const idx = phaseTitles.indexOf(title);
     currentPhaseIdx = idx >= 0 ? idx : currentPhaseIdx + 1;
-    if ('currentPhaseIndex' in agentAPI) {
-      (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = currentPhaseIdx;
-    }
+    agentAPI.setCurrentPhaseIndex(currentPhaseIdx);
   };
 
   // ── agent() / agent.run() / agent.runParallel() ───────────────────────────
@@ -126,9 +147,7 @@ export async function runWorkflowScript(
       runParallel,
       setPhase: (index: number) => {
         currentPhaseIdx = index;
-        if ('currentPhaseIndex' in agentAPI) {
-          (agentAPI as unknown as { currentPhaseIndex: number }).currentPhaseIndex = index;
-        }
+        agentAPI.setCurrentPhaseIndex(index);
       },
     },
   );
@@ -189,30 +208,180 @@ export async function runWorkflowScript(
 /**
  * Transpile ES module syntax to CommonJS for vm.Script.
  * Also strips `export const meta = {...}` (it's only used by extractMeta).
+ *
+ * Uses a state machine to skip over string literals and comments so that
+ * ES module syntax inside strings/comments is not incorrectly transformed.
  */
 function transpileScript(script: string): string {
+  // Phase 1: Strip "export const meta = { ... };" using brace-depth counting
+  // (same approach as extractMeta to handle nested objects correctly)
   let result = script;
+  const metaStart = result.match(/export\s+const\s+meta\s*=\s*\{/);
+  if (metaStart) {
+    const startIdx = metaStart.index! + metaStart[0].length - 1;
+    let depth = 0;
+    let inString: string | null = null;
+    let escaped = false;
+    let endIdx = -1;
+    for (let i = startIdx; i < result.length; i++) {
+      const ch = result[i]!;
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (inString) {
+        if (ch === inString) inString = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+      if (ch === '{') depth++;
+      if (ch === '}') {
+        depth--;
+        if (depth === 0) { endIdx = i; break; }
+      }
+    }
+    if (endIdx >= 0) {
+      // Remove from 'export' start to the closing brace + optional semicolon + newline
+      const exportStart = metaStart.index!;
+      let cutEnd = endIdx + 1;
+      if (result[cutEnd] === ';') cutEnd++;
+      if (result[cutEnd] === '\n') cutEnd++;
+      result = result.substring(0, exportStart) + result.substring(cutEnd);
+    }
+  }
 
-  // Strip "export const meta = { ... };" — already consumed by extractMeta()
-  result = result.replace(/export\s+const\s+meta\s*=\s*\{[\s\S]*?\};?\s*\n/, '');
-
-  // "export default async function [name]?(" → "module.exports.default = async function("
-  result = result.replace(
-    /export\s+default\s+async\s+function\s*\w*\s*\(/g,
-    'module.exports.default = async function(',
-  );
-
-  // "export default function [name]?(" → "module.exports.default = function("
-  result = result.replace(
-    /export\s+default\s+function\s*\w*\s*\(/g,
-    'module.exports.default = function(',
-  );
-
-  // "export default async (" or "export default (" — arrow function form
-  result = result.replace(
-    /export\s+default\s+(async\s*)?\(/g,
-    'module.exports.default = $1(',
-  );
+  // Phase 2: Replace export default patterns, but only outside strings and comments
+  result = replaceOutsideStringsAndComments(result, [
+    // "export default async function [name]?(" → "module.exports.default = async function("
+    {
+      pattern: /export\s+default\s+async\s+function\s*\w*\s*\(/g,
+      replacement: 'module.exports.default = async function(',
+    },
+    // "export default function [name]?(" → "module.exports.default = function("
+    {
+      pattern: /export\s+default\s+function\s*\w*\s*\(/g,
+      replacement: 'module.exports.default = function(',
+    },
+    // "export default async (" or "export default (" — arrow function form
+    {
+      pattern: /export\s+default\s+(async\s*)?\(/g,
+      replacement: 'module.exports.default = $1(',
+    },
+  ]);
 
   return result;
+}
+
+/**
+ * Apply regex replacements only to code portions outside of string literals
+ * and comments. This prevents accidental transformation of ES module syntax
+ * that appears inside template strings or comments.
+ */
+function replaceOutsideStringsAndComments(
+  code: string,
+  rules: Array<{ pattern: RegExp; replacement: string }>,
+): string {
+  // Split code into tokens: code vs string/comment regions
+  const segments: Array<{ text: string; isCode: boolean }> = [];
+  let i = 0;
+  let inString: string | null = null;
+  let inComment: 'line' | 'block' | null = null;
+  let escaped = false;
+  let segStart = 0;
+
+  while (i < code.length) {
+    const ch = code[i]!;
+    const next = code[i + 1];
+
+    if (escaped) {
+      escaped = false;
+      i++;
+      continue;
+    }
+
+    // Inside a string literal
+    if (inString) {
+      if (ch === '\\') { escaped = true; i++; continue; }
+      if (ch === inString) {
+        // End of string — emit segment
+        segments.push({ text: code.substring(segStart, i + 1), isCode: false });
+        inString = null;
+        segStart = i + 1;
+      }
+      i++;
+      continue;
+    }
+
+    // Inside a block comment
+    if (inComment === 'block') {
+      if (ch === '*' && next === '/') {
+        segments.push({ text: code.substring(segStart, i + 2), isCode: false });
+        inComment = null;
+        segStart = i + 2;
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    // Inside a line comment
+    if (inComment === 'line') {
+      if (ch === '\n') {
+        segments.push({ text: code.substring(segStart, i), isCode: false });
+        inComment = null;
+        segStart = i;
+      }
+      i++;
+      continue;
+    }
+
+    // Not inside string or comment — detect start of one
+    if (ch === '"' || ch === "'" || ch === '`') {
+      // Emit preceding code segment
+      if (i > segStart) {
+        segments.push({ text: code.substring(segStart, i), isCode: true });
+      }
+      inString = ch;
+      segStart = i;
+      i++;
+      continue;
+    }
+
+    if (ch === '/' && next === '/') {
+      if (i > segStart) {
+        segments.push({ text: code.substring(segStart, i), isCode: true });
+      }
+      inComment = 'line';
+      segStart = i;
+      i++;
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      if (i > segStart) {
+        segments.push({ text: code.substring(segStart, i), isCode: true });
+      }
+      inComment = 'block';
+      segStart = i;
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  // Emit remaining segment
+  if (segStart < code.length) {
+    segments.push({ text: code.substring(segStart), isCode: !inString && !inComment });
+  }
+
+  // Apply replacements only to code segments
+  for (const rule of rules) {
+    for (const seg of segments) {
+      if (seg.isCode) {
+        seg.text = seg.text.replace(rule.pattern, rule.replacement);
+      }
+    }
+  }
+
+  return segments.map(s => s.text).join('');
 }
