@@ -52,7 +52,14 @@ function getRipgrepPath(): string {
 
 
 /**
- * Find VSCode's built-in ripgrep binary
+ * Find VSCode's built-in ripgrep binary.
+ *
+ * VSCode stores ripgrep in different locations depending on version:
+ * - Old: @vscode/ripgrep → bin/rg.exe
+ * - New (1.99+): @vscode/ripgrep-universal → bin/{platform-arch}/rg.exe
+ *
+ * The appRoot (from vscode.env.appRoot) typically points to
+ * .../resources/app, where node_modules lives.
  */
 function findVSCodeRipgrep(): string {
   const platform = process.platform;
@@ -61,26 +68,38 @@ function findVSCodeRipgrep(): string {
   // Get VSCode app root from environment variable set by extension
   const appRoot = process.env.VSCODE_APP_ROOT;
   if (!appRoot) {
-    throw new Error('VSCODE_APP_ROOT environment variable not set. VSCode extension may not be properly initialized.');
+    logger.warn('[GrepTool] VSCODE_APP_ROOT not set, falling back to bundled ripgrep');
+    return rgPath;
   }
 
   logger.info(`[GrepTool] Using VSCode app root: ${appRoot}`);
 
-  // Common relative paths where VSCode stores ripgrep
-  const commonPaths = [
-    // VSCode standard locations
+  // Platform-arch directory name used by @vscode/ripgrep-universal
+  const platformArchDirs: Record<string, string> = {
+    win32: 'win32-x64',
+    darwin: 'darwin-arm64',
+    linux: 'linux-x64',
+  };
+  const platformArchDir = platformArchDirs[platform] ?? `linux-x64`;
+
+  // Search paths in priority order
+  const candidatePaths = [
+    // New VSCode (1.99+): @vscode/ripgrep-universal with platform-arch subdirectory
+    path.join(appRoot, 'node_modules', '@vscode', 'ripgrep-universal', 'bin', platformArchDir, binaryName),
+    // Old VSCode: @vscode/ripgrep with flat bin directory
     path.join(appRoot, 'node_modules.asar.unpacked', '@vscode', 'ripgrep', 'bin', binaryName),
     path.join(appRoot, 'node_modules', '@vscode', 'ripgrep', 'bin', binaryName),
   ];
 
-  for (const rgPath of commonPaths) {
-    if (fs.existsSync(rgPath)) {
-      logger.info(`[GrepTool] Found VSCode ripgrep at: ${rgPath}`);
-      return rgPath;
+  for (const rgCandidatePath of candidatePaths) {
+    if (fs.existsSync(rgCandidatePath)) {
+      logger.info(`[GrepTool] Found VSCode ripgrep at: ${rgCandidatePath}`);
+      return rgCandidatePath;
     }
   }
 
-  throw new Error(`Could not find VSCode's built-in ripgrep binary in app root: ${appRoot}`);
+  logger.warn(`[GrepTool] Could not find VSCode ripgrep in app root, falling back to bundled ripgrep`);
+  return rgPath;
 }
 
 
