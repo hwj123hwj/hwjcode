@@ -75,12 +75,14 @@ function findVSCodeRipgrep(): string {
   logger.info(`[GrepTool] Using VSCode app root: ${appRoot}`);
 
   // Platform-arch directory name used by @vscode/ripgrep-universal
-  const platformArchDirs: Record<string, string> = {
-    win32: 'win32-x64',
-    darwin: 'darwin-arm64',
-    linux: 'linux-x64',
+  // Detect process.arch dynamically to support ARM, x64, and other architectures
+  const arch = process.arch; // e.g. 'x64', 'arm64', 'arm'
+  const platformArchDirs: Record<string, Record<string, string>> = {
+    win32: { x64: 'win32-x64', arm64: 'win32-arm64', arm: 'win32-arm' },
+    darwin: { x64: 'darwin-x64', arm64: 'darwin-arm64', arm: 'darwin-arm' },
+    linux: { x64: 'linux-x64', arm64: 'linux-arm64', arm: 'linux-arm' },
   };
-  const platformArchDir = platformArchDirs[platform] ?? `linux-x64`;
+  const platformArchDir = platformArchDirs[platform]?.[arch] ?? `${platform}-${arch}`;
 
   // Search paths in priority order
   const candidatePaths = [
@@ -216,15 +218,23 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
    */
   private resolveAndValidatePath(relativePath?: string): string {
     // Handle both absolute and relative paths correctly
-    const targetPath = relativePath && path.isAbsolute(relativePath)
-      ? relativePath
-      : path.resolve(this.config.getTargetDir(), relativePath || '.');
+    const targetPath = path.normalize(
+      relativePath && path.isAbsolute(relativePath)
+        ? relativePath
+        : path.resolve(this.config.getTargetDir(), relativePath || '.'),
+    );
+    const normalizedRoot = path.normalize(this.config.getTargetDir());
 
     // Security Check: Ensure the resolved path is still within the root directory.
-    if (
-      !targetPath.startsWith(this.config.getTargetDir()) &&
-      targetPath !== this.config.getTargetDir()
-    ) {
+    // Use normalized paths for comparison; on Windows, also compare case-insensitively.
+    const isWithinRoot = targetPath === normalizedRoot ||
+      targetPath.startsWith(normalizedRoot + path.sep) ||
+      (process.platform === 'win32' &&
+        targetPath.toLowerCase() === normalizedRoot.toLowerCase()) ||
+      (process.platform === 'win32' &&
+        targetPath.toLowerCase().startsWith(normalizedRoot.toLowerCase() + path.sep));
+
+    if (!isWithinRoot) {
       throw new Error(
         `Path validation failed: Attempted path "${relativePath || '.'}" resolves outside the allowed root directory "${this.config.getTargetDir()}".`,
       );
@@ -646,33 +656,44 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
     const results: GrepMatch[] = [];
     const lines = output.split('\n').filter(line => line.trim());
 
-    // Determine if this is a single file search
-    const isSearchingFile = searchPath && fs.statSync(searchPath).isFile();
+    // Determine if this is a single file search (cache the stat call once)
+    let isSearchingFile = false;
+    if (searchPath) {
+      try { isSearchingFile = fs.statSync(searchPath).isFile(); } catch { /* ignore */ }
+    }
+
+    // Regex for parsing ripgrep output: filename:line_number:content
+    // Handles Windows drive letters (e.g., D:\path) correctly by matching
+    // a non-empty path followed by :digits:content
+    // Note: multiFileRe uses lazy .+? so it prefers matching the shortest path
+    // before the first :digits: boundary. For Windows drive letter paths like
+    // D:\path\file.ts:42:content, the regex correctly matches the full path
+    // because the :42: portion can only match digits after the colon.
+    const MULTI_FILE_RE = /^(.+?):([0-9]+):(.*)$/;
+    const SINGLE_FILE_RE = /^([0-9]+):(.*)$/;
 
     for (const line of lines) {
-      const firstColonIndex = line.indexOf(':');
-      if (firstColonIndex === -1) continue;
-
       let filePath: string;
       let lineNumberStr: string;
       let content: string;
 
       if (isSearchingFile) {
         // Single file format: line_number:content
-        lineNumberStr = line.substring(0, firstColonIndex);
-        content = line.substring(firstColonIndex + 1);
+        const m = line.match(SINGLE_FILE_RE);
+        if (!m) continue;
+        lineNumberStr = m[1]!;
+        content = m[2]!;
         // Use the relative path of the search target
-        filePath = path.relative(basePath, searchPath);
+        filePath = path.relative(basePath, searchPath!);
       } else {
         // Multi file format: filename:line_number:content
-        const secondColonIndex = line.indexOf(':', firstColonIndex + 1);
-        if (secondColonIndex === -1) {
-          // Malformed line, skip
-          continue;
-        }
-        filePath = line.substring(0, firstColonIndex);
-        lineNumberStr = line.substring(firstColonIndex + 1, secondColonIndex);
-        content = line.substring(secondColonIndex + 1);
+        // The regex handles Windows paths like D:\path\file.ts correctly
+        // because the lazy .+? prefers the shortest path before :digits:
+        const m = line.match(MULTI_FILE_RE);
+        if (!m) continue;
+        filePath = m[1]!;
+        lineNumberStr = m[2]!;
+        content = m[3]!;
       }
 
       const lineNumber = parseInt(lineNumberStr, 10);

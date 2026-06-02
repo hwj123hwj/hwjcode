@@ -294,7 +294,8 @@ NOT available: require, import, fs, process, fetch, any Node.js globals.`,
         returnDisplay: display,
       };
     } else {
-      WorkflowRegistry.endWorkflow(workflowId, 'failed');
+      // Always record token usage even on failure — completed agents' data is valuable
+      WorkflowRegistry.endWorkflow(workflowId, 'failed', runResult.totalTokenUsage);
 
       const display =
         `**Workflow failed:** ${params.description}\n\n` +
