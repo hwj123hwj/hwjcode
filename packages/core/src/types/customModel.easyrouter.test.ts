@@ -32,6 +32,7 @@ describe('EasyRouter integration', () => {
         'seedance',
         'seed',
         'veo',
+        'tts',
       ]);
     });
   });
@@ -61,6 +62,13 @@ describe('EasyRouter integration', () => {
       expect(shouldExcludeEasyRouterModel('veo-3.1-generate-001')).toBe(true);
       expect(shouldExcludeEasyRouterModel('veo-3.1-fast-generate-001')).toBe(true);
       expect(shouldExcludeEasyRouterModel('VEO-x')).toBe(true);
+    });
+
+    it('excludes tts / TTS speech-synthesis families', () => {
+      expect(shouldExcludeEasyRouterModel('gemini-2.5-flash-tts')).toBe(true);
+      expect(shouldExcludeEasyRouterModel('gpt-4o-mini-tts')).toBe(true);
+      expect(shouldExcludeEasyRouterModel('Gemini-2.5-Pro-TTS')).toBe(true);
+      expect(shouldExcludeEasyRouterModel('claude-tts-experimental')).toBe(true);
     });
 
     it('does not exclude regular text/chat models', () => {
@@ -96,13 +104,15 @@ describe('EasyRouter integration', () => {
         { id: 'qwen3.7-max' },
         { id: 'text-embedding-004' },
         { id: 'veo-3.1-fast-generate-001' },
+        { id: 'gemini-2.5-flash-tts' },
+        { id: 'gpt-4o-mini-tts' },
       ];
 
       const filtered = filterEasyRouterModels(raw);
       const ids = filtered.map((m) => m.id);
 
       // Sorted by localeCompare (case-insensitive) ascending, no
-      // image/embed/video/seedance/seed/veo entries.
+      // image/embed/video/seedance/seed/veo/tts entries.
       expect(ids).toEqual([
         'claude-haiku-4-5',
         'claude-opus-4-7',

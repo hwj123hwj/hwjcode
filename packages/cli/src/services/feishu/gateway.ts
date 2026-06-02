@@ -1091,6 +1091,11 @@ export class FeishuGateway {
    * @returns message_id 或 null
    */
   async sendPrivateMessage(openId: string, text: string): Promise<string | null> {
+    // Basic format validation: Feishu open_ids start with 'ou_'
+    if (!openId || !openId.startsWith('ou_')) {
+      derror(`Feishu sendPrivateMessage: invalid openId format "${openId?.slice(0, 20)}" — expected 'ou_' prefix`);
+      return null;
+    }
     try {
       const token = await this.getTenantToken();
 
@@ -1115,7 +1120,13 @@ export class FeishuGateway {
         return data.data?.message_id || null;
       }
 
-      derror('Feishu sendPrivateMessage failed:', JSON.stringify(data));
+      // Provide specific guidance for common permission errors
+      const errCode = data.code;
+      if (errCode === 99991400 || errCode === 99991663) {
+        derror('Feishu sendPrivateMessage failed: insufficient scope (im:message:send_as_bot). The bot needs this permission to send private messages.');
+      } else {
+        derror('Feishu sendPrivateMessage failed:', JSON.stringify(data));
+      }
       return null;
     } catch (e: any) {
       derror('Feishu sendPrivateMessage threw:', e?.message || e);
