@@ -268,9 +268,15 @@ export class BinaryManager {
 
       console.log(`[LSP] Downloading ${repo} from GitHub ${owner}/${repo}...`);
 
+      const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
+      const headers: Record<string, string> = { 'User-Agent': 'DeepV-Code-Agent' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const apiUri = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
       const res = await request(apiUri, {
-        headers: { 'User-Agent': 'DeepV-Code-Agent' }
+        headers
       });
       const release = (await res.body.json()) as any;
 
