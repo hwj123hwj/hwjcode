@@ -264,9 +264,10 @@ export function useCompletion(
       // 🚀 过滤命令列表：在 AI 忙碌或特殊模式时限制可用命令
       let availableCommands: readonly SlashCommand[] = slashCommands;
       if (isBusy && !isInSpecialMode) {
-        // AI 正在工作时，只显示队列管理和退出命令
+        // AI 正在工作时，只显示队列管理、退出和 workflow 面板命令
         availableCommands = slashCommands.filter(cmd =>
-          cmd.name === 'queue' || cmd.name === 'quit'
+          cmd.name === 'queue' || cmd.name === 'quit' ||
+          cmd.name === 'workflow' || cmd.name === 'wf' || cmd.name === 'workflows'
         );
       } else if (isInSpecialMode) {
         // 特殊模式（润色确认、队列编辑）时，不提供命令补全

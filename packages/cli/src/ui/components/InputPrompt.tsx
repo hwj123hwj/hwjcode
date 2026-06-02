@@ -19,6 +19,25 @@ import {
   formatAttachmentSegment
 } from '../utils/attachmentFormatter.js';
 import chalk from 'chalk';
+
+/** Rainbow-colorize every occurrence of the word "workflow" in a chalk string. */
+function applyWorkflowRainbow(text: string): string {
+  const RAINBOW = ['#FF0000', '#FF7700', '#FFFF00', '#00CC00', '#0099FF', '#8844FF'];
+  const keyword = 'workflow';
+  const lower = text.toLowerCase();
+  let result = '';
+  let searchFrom = 0;
+  let idx = lower.indexOf(keyword, searchFrom);
+  while (idx !== -1) {
+    result += text.slice(searchFrom, idx);
+    const word = text.slice(idx, idx + keyword.length);
+    result += word.split('').map((ch, i) => chalk.hex(RAINBOW[i % RAINBOW.length]!).bold(ch)).join('');
+    searchFrom = idx + keyword.length;
+    idx = lower.indexOf(keyword, searchFrom);
+  }
+  result += text.slice(searchFrom);
+  return result;
+}
 import stringWidth from 'string-width';
 import { useShellHistory } from '../hooks/useShellHistory.js';
 import { useCompletion } from '../hooks/useCompletion.js';
@@ -1045,6 +1064,13 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       } else {
         // 没有光标的情况：直接格式化
         display = formatAttachmentReferencesForDisplay(truncatedLineText);
+      }
+
+      // 彩虹色高亮 "workflow" 关键词（斜杠命令模式下不着色）
+      const trimmed = buffer.text.trimStart();
+      const isSlashWorkflow = /^\/wf\b|^\/workflow\b/i.test(trimmed);
+      if (!isSlashWorkflow) {
+        display = applyWorkflowRainbow(display);
       }
 
       // 补充空格以填充行宽

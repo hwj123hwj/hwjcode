@@ -14,6 +14,7 @@ export const BUILT_IN_AGENT_TYPES = [
   'code-explorer',
   'code-reviewer',
   'test-planner',
+  'workflow-orchestrator',
 ] as const;
 
 export type BuiltInAgentType = (typeof BUILT_IN_AGENT_TYPES)[number];
@@ -184,6 +185,18 @@ export function getBuiltInAgentDefinition(
           'Use before adding tests or when deciding which tests are needed for a change.',
         systemPrompt: buildTestPlannerPrompt(availableTools, maxTurns),
         tools: READ_ONLY_ANALYSIS_TOOLS,
+        maxTurns,
+      };
+    case 'workflow-orchestrator':
+      return {
+        agentType: 'workflow-orchestrator',
+        displayName: 'Workflow Orchestrator',
+        description:
+          'General-purpose sub-agent used inside dynamic workflows. Has access to all allowed tools.',
+        whenToUse:
+          'Used automatically by WorkflowTool to execute individual workflow steps.',
+        systemPrompt: TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, maxTurns),
+        tools: ['*'],
         maxTurns,
       };
     default:

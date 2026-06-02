@@ -36,6 +36,7 @@ import { TodoWriteTool } from '../tools/todo-write.js';
 import { ReadLintsTool } from '../tools/read-lints.js';
 import { LintFixTool } from '../tools/lint-fix.js';
 import { TaskTool } from '../tools/task.js';
+import { WorkflowTool } from '../tools/workflow.js';
 import { UseSkillTool } from '../tools/use-skill.js';
 import { ListSkillsTool } from '../tools/list-skills.js';
 import { GetSkillDetailsTool } from '../tools/get-skill-details.js';
@@ -1123,10 +1124,11 @@ export class Config {
     registerCoreTool(LocalTimeTool, this);
     registerCoreTool(LarkCliTool, this);
 
-    // TaskTool (SubAgent) is disabled in VSCode plugin mode
-    // but remains available in CLI mode and other IDE environments
+    // TaskTool (SubAgent) and WorkflowTool are disabled in VSCode plugin mode
+    // but remain available in CLI mode and other IDE environments
     if (!this.getVsCodePluginMode()) {
       registerCoreTool(TaskTool, this, registry);
+      registerCoreTool(WorkflowTool, this, registry);
     }
 
     // 快速启动优化：只发现命令行工具，MCP工具将在后台异步加载
