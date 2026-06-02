@@ -1226,12 +1226,15 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
     }
 
-    // 注意：不使用全局超时定时器
-    // 原因：
-    // 1. 流式API本身没有明确的时间限制（可能会持续很长时间）
-    // 2. 如果中途没有数据，createStreamGenerator 中的 120秒 read() 超时会生效
-    // 3. 全局定时器易导致定时器泄漏（流完成后无法清理）
-    // 4. 用户可以通过 abortSignal 随时取消请求
+    // 🚨 流式连接超时：保护 fetch() 等待响应头阶段和第一个 SSE chunk 到达前的窗口。
+    // 非流式路径有两层 fetchTimeout + dataTimeout，流式路径此前完全没有连接层保护，
+    // 导致服务端接受请求后迟迟不发响应头时永久挂住（Thinking 卡死的根因之一）。
+    // 300s 与非流式的连接层超时保持一致；一旦流数据开始流动，createStreamGenerator
+    // 内部的 per-chunk 300s 超时接管，此处 timeout 应立即清除。
+    const fetchTimeoutId = setTimeout(() => {
+      console.warn('[DeepV Server] Stream fetch timeout - no response headers after 300s. Aborting.');
+      controller.abort();
+    }, 300000);
 
     const startTime = Date.now();
 
@@ -1273,6 +1276,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       });
 
       if (!response.ok) {
+        clearTimeout(fetchTimeoutId);
         const errorText = await response.text();
 
         // 401错误特殊处理 - 与非流式API保持一致
@@ -1300,6 +1304,8 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
 
       const duration = Date.now() - startTime;
+      // 响应头已收到，清除连接层超时，后续由 createStreamGenerator 的 per-chunk 超时接管
+      clearTimeout(fetchTimeoutId);
       console.log('[DeepV Server] Stream API call initiated', {
         endpoint,
         duration: `${duration}ms`,
@@ -1309,6 +1315,7 @@ export class DeepVServerAdapter implements ContentGenerator {
       return response;
 
     } catch (error) {
+      clearTimeout(fetchTimeoutId);
       const duration = Date.now() - startTime;
 
       // 🚨 清理资源：移除abort监听器
