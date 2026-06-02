@@ -1156,22 +1156,15 @@ async function handleAskUserQuestionViaCard(
       );
     } else if (result.ok && result.answers) {
       formSucceeded = true;
-      const summaryLines: string[] = [];
       for (const q of answerableQuestions) {
         const ans = result.answers[q.question] || '';
         if (ans) {
           answers[q.question] = ans;
-          summaryLines.push(`✅ ${q.header || q.question}: ${ans}`);
         } else {
           answers[q.question] = '用户未回答，请自行决策';
-          summaryLines.push(`⏭ ${q.header || q.question}: 未回答`);
         }
       }
-      // 回执：告诉用户已收到答案
-      await gateway.sendMessage(
-        chatId,
-        `📋 已收到你的回答：\n${summaryLines.join('\n')}`,
-      );
+      // 原表单卡片已在 askQuestionsViaForm 内通过 PATCH 更新为"已收到回答"，无需再发新消息
     }
   }
 
@@ -1593,14 +1586,8 @@ async function handleFeishuCommand(
         }
 
         const actualModelName = exactMatch.name;
-        settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
-
-        if (chatId) {
-          await saveProjectRoute(chatId, { model: actualModelName });
-        }
 
         if (config) {
-          config.setModel?.(actualModelName);
           const geminiClient = config.getGeminiClient();
           if (geminiClient) {
             await geminiClient.waitForChatInitialized();
@@ -1608,6 +1595,12 @@ async function handleFeishuCommand(
 
             if (!switchResult.success) {
               return `❌ 切换到模型 **${exactMatch.displayName}** 失败: ${switchResult.error || '可能由于上下文压缩失败'}`;
+            }
+
+            // switchModel 内部已调用 config.setModel + chat.setSpecifiedModel，切换成功后再持久化
+            settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
+            if (chatId) {
+              await saveProjectRoute(chatId, { model: actualModelName });
             }
 
             let responseMsg = `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
@@ -1623,6 +1616,11 @@ async function handleFeishuCommand(
           }
         }
 
+        // 无 config/client 时（理论上不应发生），也先尝试持久化
+        settings.setValue(SettingScope.User, 'preferredModel', actualModelName);
+        if (chatId) {
+          await saveProjectRoute(chatId, { model: actualModelName });
+        }
         return `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
       } catch (err: any) {
         return `❌ 切换模型失败: ${err.message}`;
@@ -2492,6 +2490,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         let responseText = '';
         let lastUpdateTime = 0;
         const MIN_UPDATE_INTERVAL = 1500; // 节流控制，1.5 秒更新一次
+        // 工具执行阶段（开始/结束状态更新）共享节流，防止多工具连续调用触发飞书限流
+        let lastToolCardUpdateTime = 0;
+        const TOOL_CARD_UPDATE_THROTTLE_MS = 1500;
         const toolCallRequests: ToolCallRequestInfo[] = [];
 
         for await (const event of stream) {
@@ -2853,21 +2854,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
               }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
-              // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)
-              const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
-              if (activeCardId && streaming) {
-                const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-                toolInProgressFooterMetrics.status = toolName === 'image_reader'
-                  ? '正在识别并分析图像内容(请稍候)...'
-                  : `执行工具中: ${toolName}`;
-                await streaming.pushContent(renderCurrentDisplay(blocks, '', liveToolProgress));
-                await streaming.pushFooter(toolInProgressFooterMetrics);
-              } else if (activeCardId && !streaming) {
-                const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
-                toolInProgressFooterMetrics.status = toolName === 'image_reader'
-                  ? '正在识别并分析图像内容(请稍候)...'
-                  : `执行工具中: ${toolName}`;
-                await gateway.updateCard(activeCardId, `DeepV Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
+              // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
+              const nowToolStart = Date.now();
+              if (activeCardId && nowToolStart - lastToolCardUpdateTime >= TOOL_CARD_UPDATE_THROTTLE_MS) {
+                const liveToolProgress = formatToolCallWithBorder(toolName, req.args, true, '', true);
+                if (streaming) {
+                  const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                  toolInProgressFooterMetrics.status = toolName === 'image_reader'
+                    ? '正在识别并分析图像内容(请稍候)...'
+                    : `执行工具中: ${toolName}`;
+                  await streaming.pushContent(renderCurrentDisplay(blocks, '', liveToolProgress));
+                  await streaming.pushFooter(toolInProgressFooterMetrics);
+                } else {
+                  const toolInProgressFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                  toolInProgressFooterMetrics.status = toolName === 'image_reader'
+                    ? '正在识别并分析图像内容(请稍候)...'
+                    : `执行工具中: ${toolName}`;
+                  await gateway.updateCard(activeCardId, `DeepV Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
+                }
+                lastToolCardUpdateTime = nowToolStart;
               }
               toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
             }
@@ -2886,7 +2891,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
             blocks.push({ type: 'tool', content: toolReportMarkdown });
 
-            // 最终无打字机光标的连贯卡片更新
+            // 工具完成后的卡片更新：始终执行（确保最终结果可见），并更新节流时间戳
             if (activeCardId && streaming) {
               const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               toolDoneFooterMetrics.status = toolName === 'image_reader'
@@ -2894,12 +2899,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 : `工具已完成: ${toolName}`;
               await streaming.pushContent(renderCurrentDisplay(blocks));
               await streaming.pushFooter(toolDoneFooterMetrics);
+              lastToolCardUpdateTime = Date.now();
             } else if (activeCardId && !streaming) {
               const toolDoneFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               toolDoneFooterMetrics.status = toolName === 'image_reader'
                 ? '已完成图像内容读取，正在构思回复...'
                 : `工具已完成: ${toolName}`;
               await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
+              lastToolCardUpdateTime = Date.now();
             }
 
             emitFeishuMessageLog(msg.chatId, `✅ ${toolName}`, 'tool');
@@ -3309,6 +3316,77 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const platform = creds.domain === 'lark'
       ? t('feishu.start.platform.lark')
       : t('feishu.start.platform.feishu');
+
+    // 🎯 以飞书应用身份给 Bot 拥有者发送欢迎私聊消息，告知已上线及当前工作目录
+    if (creds.ownerOpenId) {
+      const ownerOpenId = creds.ownerOpenId;
+      void (async () => {
+        try {
+          const projectRoot = (typeof config?.getProjectRoot === 'function' && config.getProjectRoot()) || process.cwd();
+          const welcomeLines: string[] = [
+            `👋 你好！我已成功上线，随时为你服务！`,
+            ``,
+            `📂 当前私聊工作目录：\`${projectRoot}\``,
+            ``,
+            `💡 如需使用其他工作目录，请发送：**拉个群 + 文件夹路径**`,
+            `   例如：拉个群 D:\\projects\\my-app`,
+            ``,
+            `❓ 需要帮助请发送 /help`,
+          ];
+
+          // 🔍 检查飞书应用权限状态，将缺失权限的快捷申请链接追加到欢迎消息
+          try {
+            const probe = await probeCredentials(creds.appId, creds.appSecret, creds.domain);
+            if (probe?.grantedScopes) {
+              const requiredAll = [...REQUIRED_APP_SCOPES];
+              const missing = computeMissingScopes(probe.grantedScopes, requiredAll);
+              const hasGroupMsgScope = probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE);
+
+              if (missing.length === 0 && hasGroupMsgScope) {
+                welcomeLines.push('', `✅ 应用权限配置完整，所有功能均可正常使用。`);
+              } else {
+                welcomeLines.push('', `⚠️ **以下应用权限尚未开通，部分功能可能受限：**`);
+
+                if (missing.length > 0) {
+                  const scopeApplyUrl = buildScopeApplyUrl({
+                    appId: creds.appId,
+                    scopes: missing,
+                    brand: creds.domain,
+                    tokenType: 'tenant',
+                  });
+                  welcomeLines.push(`  📋 缺失 ${missing.length} 项基础权限，一键申请：`);
+                  welcomeLines.push(`     👉 ${scopeApplyUrl}`);
+                }
+
+                if (!hasGroupMsgScope) {
+                  const sensitiveUrl = buildScopeApplyUrl({
+                    appId: creds.appId,
+                    scopes: [SENSITIVE_GROUP_MSG_SCOPE],
+                    brand: creds.domain,
+                    tokenType: 'tenant',
+                  });
+                  welcomeLines.push(`  💬 缺失「免@响应」敏感权限（群内需@机器人才能触发）：`);
+                  welcomeLines.push(`     👉 ${sensitiveUrl}`);
+                }
+
+                welcomeLines.push(`  📡 事件订阅页（勾选 im.message.receive_v1 等）：`);
+                welcomeLines.push(`     👉 ${buildEventSubUrl({ appId: creds.appId, brand: creds.domain })}`);
+                welcomeLines.push(`  🔄 权限生效需发布版本：`);
+                welcomeLines.push(`     👉 ${buildPermissionPageUrl({ appId: creds.appId, brand: creds.domain })}`);
+              }
+            }
+          } catch (scopeErr: any) {
+            dwarn(`[Feishu] Failed to check scopes for welcome message: ${scopeErr.message}`);
+          }
+
+          await gateway.sendPrivateMessage(ownerOpenId, welcomeLines.join('\n'));
+          dlog('[Feishu] Welcome private message sent to owner.');
+        } catch (err: any) {
+          dwarn(`[Feishu] Failed to send welcome private message: ${err.message}`);
+        }
+      })();
+    }
+
     return [
       t('feishu.dashboard.welcome_title'),
       tp('feishu.start.success_bot', { name: creds.botName || t('feishu.start.bot_unknown') }),
@@ -3678,7 +3756,7 @@ class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResu
     super(
       CreateProjectGroupTool.Name,
       'CreateProjectAndGroupChat',
-      'Creates a new local directory and automatically creates a dedicated Feishu group chat for this project, inviting the current user and binding the workspace. Only available in direct/P2P chat.',
+      'Creates a new local project directory AND a dedicated Feishu group chat in one step: creates the directory, creates the group, invites the current user, binds the workspace route, and sends a welcome message. Use this tool when the user wants to set up a project workspace with a bound Feishu group (e.g. "拉个群", "建个项目群", "create a project group"). For creating a standalone Feishu group chat WITHOUT a local project directory or workspace binding, use lark_cli with command="im +chat-create" instead. Only available in direct/P2P chat.',
       Icon.Globe,
       {
         type: Type.OBJECT,

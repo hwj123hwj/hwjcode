@@ -278,7 +278,8 @@ export class ApiResponseEvent {
     this.output_token_count = usage_data?.candidatesTokenCount ?? 0;
     this.cached_content_token_count = usage_data?.cachedContentTokenCount ?? 0;
     // 提取详细的缓存统计信息
-    this.cache_write_input_tokens = (usage_data as any)?.cacheWriteInputTokens ?? 0;
+    // cacheWriteInputTokens: 部分供应商使用的别名；cacheCreationInputTokens: Anthropic 使用的字段名
+    this.cache_write_input_tokens = (usage_data as any)?.cacheWriteInputTokens ?? (usage_data as any)?.cacheCreationInputTokens ?? 0;
     this.cache_read_input_tokens = (usage_data as any)?.cacheReadInputTokens ?? 0;
     this.thoughts_token_count = usage_data?.thoughtsTokenCount ?? 0;
     this.tool_token_count = usage_data?.toolUsePromptTokenCount ?? 0;
