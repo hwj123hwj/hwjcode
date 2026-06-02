@@ -1111,6 +1111,7 @@ export class Config {
     registerCoreTool(UseSkillTool, this);
     registerCoreTool(ListSkillsTool, this);
     registerCoreTool(GetSkillDetailsTool, this);
+
     // Old individual LSP tools registration removed in favor of unified LspTool
 
     registerCoreTool(PptOutlineTool, this);
@@ -1120,14 +1121,22 @@ export class Config {
     registerCoreTool(MultiEditTool, this);
     registerCoreTool(PatchTool, this);
     registerCoreTool(BatchTool, this);
-    registerCoreTool(AskUserQuestionTool, this);
+
+    // AskUserQuestion interactive dialog is only available in CLI mode;
+    // it performs poorly in VSCode plugin environment
+    if (!this.getVsCodePluginMode()) {
+      registerCoreTool(AskUserQuestionTool, this);
+    }
+
     registerCoreTool(LocalTimeTool, this);
     registerCoreTool(LarkCliTool, this);
 
-    // TaskTool (SubAgent) and WorkflowTool are disabled in VSCode plugin mode
-    // but remain available in CLI mode and other IDE environments
+    // TaskTool (SubAgent) is available in both CLI and VSCode environments
+    registerCoreTool(TaskTool, this, registry);
+
+    // WorkflowTool is disabled in VSCode plugin mode (not yet adapted)
+    // but remains available in CLI mode
     if (!this.getVsCodePluginMode()) {
-      registerCoreTool(TaskTool, this, registry);
       registerCoreTool(WorkflowTool, this, registry);
     }
 

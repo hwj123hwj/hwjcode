@@ -256,7 +256,7 @@ export class AIService {
           enableRecursiveFileSearch: true
         },
         telemetry: { enabled: false },
-        vsCodePluginMode: false              // 🎯 禁用VSCode插件模式，启用SubAgent工具
+        vsCodePluginMode: true
       });
 
       await this.config.initialize();
