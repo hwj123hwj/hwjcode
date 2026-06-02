@@ -562,8 +562,24 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
   useEffect(() => {
     if (!isVisible) return;
     refresh();
-    const unsub = WorkflowRegistry.subscribe(refresh);
-    const timer = setInterval(() => setTick(t => t + 1), 1000);
+
+    // Throttle redraws to max once per 500ms to reduce terminal flicker.
+    // WorkflowRegistry may fire notify() many times per second (token updates etc.)
+    // but the panel only needs to reflect changes at human-perceptible speed.
+    let pending = false;
+    const throttledRefresh = () => {
+      if (pending) return;
+      pending = true;
+      setTimeout(() => {
+        pending = false;
+        refresh();
+        setTick(t => t + 1);
+      }, 500);
+    };
+
+    const unsub = WorkflowRegistry.subscribe(throttledRefresh);
+    // Tick for duration counter — 2s interval, minimise redraws
+    const timer = setInterval(() => setTick(t => t + 1), 2000);
     return () => { unsub(); clearInterval(timer); };
   }, [isVisible, refresh]);
 
@@ -642,7 +658,10 @@ export const WorkflowPanel: React.FC<WorkflowPanelProps> = ({
   if (!isVisible) return null;
 
   const panelWidth = Math.min(terminalWidth - 2, 120);
-  const panelHeight = terminalHeight - 4;
+  // Keep panel height well below terminal height to prevent Ink from falling back
+  // to full-screen clear-and-redraw mode, which is the primary cause of flicker.
+  // Reserve at least 6 rows: status bar(1) + input(1) + margins(4).
+  const panelHeight = Math.max(10, terminalHeight - 8);
 
   return (
     <Box flexDirection="column" width={panelWidth}>
