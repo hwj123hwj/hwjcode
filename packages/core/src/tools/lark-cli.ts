@@ -118,7 +118,7 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         '',
         'RULES:',
         '- ALWAYS use this tool for every Lark/Feishu operation — NEVER run lark-cli via run_shell_command/shell.',
-        '- ROUTING: When the user wants to create a project with a local directory AND a Feishu group chat bound together (e.g. "拉个群 + 项目路径", "create a project group"), use the `create_project_and_group_chat` tool instead — it handles directory creation, group creation, user invitation, and workspace binding in one call. Only use `im +chat-create` here when you need a standalone group chat WITHOUT project binding.',
+        '- ROUTING: When the user wants to create a project with a local directory AND a Feishu group chat bound together (e.g. "拉个群 + 项目路径", "create a project group"), use the `create_project_and_group_chat` tool instead — it handles directory creation, group creation, user invitation, and workspace binding in one call. Note: this tool is only available when the Feishu bot is running (/feishu start). If the tool is not listed, fall back to `im +chat-create` for a standalone group chat.',
         '- Authorization is fully automatic: if the CLI is not configured/authorized yet, this tool launches the browser device-flow login itself and streams the verification URL to the user in real time within the same call. Do NOT manually run "lark-cli config init" or "auth login" in a shell.',
         '- Do NOT guess subcommands or flags. If unsure what a command supports, run it with "--help" first (e.g. command="calendar --help"). Error responses include hints with available options — follow them instead of guessing.',
         '',

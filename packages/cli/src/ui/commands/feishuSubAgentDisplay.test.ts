@@ -25,6 +25,13 @@ describe('feishuGetToolShortName', () => {
     expect(feishuGetToolShortName('run_shell_command')).toBe('Bash');
     expect(feishuGetToolShortName('search_file_content')).toBe('SearchContent');
     expect(feishuGetToolShortName('read_file')).toBe('ReadFile');
+    expect(feishuGetToolShortName('multiedit')).toBe('MultiEdit');
+    expect(feishuGetToolShortName('patch')).toBe('Patch');
+    expect(feishuGetToolShortName('batch')).toBe('Batch');
+    expect(feishuGetToolShortName('ppt_outline')).toBe('PPTOutline');
+    expect(feishuGetToolShortName('ppt_generate')).toBe('PPTGenerate');
+    expect(feishuGetToolShortName('codesearch')).toBe('CodeSearch');
+    expect(feishuGetToolShortName('lsp')).toBe('LSP');
   });
 
   it('PascalCases unknown tool names', () => {

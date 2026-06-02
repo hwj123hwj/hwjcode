@@ -567,6 +567,8 @@ export enum ToolConfirmationOutcome {
   ProceedAlwaysTool = 'proceed_always_tool',
   ProceedAlwaysProject = 'proceed_always_project', // 本项目始终允许
   ModifyWithEditor = 'modify_with_editor',
+  /** Special outcome: user wants to inspect the workflow script before running */
+  InspectScript = 'inspect_script',
   Cancel = 'cancel',
 }
 

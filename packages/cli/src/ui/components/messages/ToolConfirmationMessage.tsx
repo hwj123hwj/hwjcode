@@ -87,8 +87,8 @@ export const ToolConfirmationMessage: React.FC<
   }
 
   const handleSelect = (item: ToolConfirmationOutcome) => {
-    // Intercept "inspect_script" pseudo-value for workflow confirmation
-    if ((item as unknown as string) === 'inspect_script') {
+    // Intercept "InspectScript" for workflow confirmation — toggle script preview
+    if (item === ToolConfirmationOutcome.InspectScript) {
       setShowWorkflowScript(true);
       return;
     }
@@ -441,7 +441,7 @@ export const ToolConfirmationMessage: React.FC<
       // Default mode — phases summary + option to inspect script
       options.push(
         { label: '1. Yes, run it', value: ToolConfirmationOutcome.ProceedOnce },
-        { label: '2. Inspect script', value: 'inspect_script' as unknown as ToolConfirmationOutcome },
+        { label: '2. Inspect script', value: ToolConfirmationOutcome.InspectScript },
         { label: '3. No', value: ToolConfirmationOutcome.Cancel },
       );
 

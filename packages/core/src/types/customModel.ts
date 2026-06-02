@@ -586,6 +586,7 @@ export const EASY_ROUTER_DEFAULT_MAX_TOKENS = 200_000;
  * - image / embed / video：通用类别词
  * - seedance / seed：字节 Seedance 系列（视频生成；"seed" 作为词缀也涵盖 seed-* 视觉模型）
  * - veo：Google Veo 视频生成系列
+ * - tts：TTS 语音合成模型（如 gemini-2.5-flash-tts、gpt-4o-mini-tts 等）
  */
 export const EASY_ROUTER_EXCLUDE_KEYWORDS: readonly string[] = [
   'image',
@@ -594,6 +595,7 @@ export const EASY_ROUTER_EXCLUDE_KEYWORDS: readonly string[] = [
   'seedance',
   'seed',
   'veo',
+  'tts',
 ];
 
 /**
