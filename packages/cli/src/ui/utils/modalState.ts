@@ -19,3 +19,13 @@ export function setBackgroundTaskPanelOpen(open: boolean): void {
 export function isBackgroundTaskPanelOpen(): boolean {
   return _backgroundTaskPanelOpen;
 }
+
+let _workflowPanelOpen = false;
+
+export function setWorkflowPanelOpen(open: boolean): void {
+  _workflowPanelOpen = open;
+}
+
+export function isWorkflowPanelOpen(): boolean {
+  return _workflowPanelOpen;
+}

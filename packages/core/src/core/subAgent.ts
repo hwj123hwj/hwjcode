@@ -113,6 +113,10 @@ export class SubAgent {
     private readonly abortSignal?: AbortSignal,
     private readonly externalPreToolExecutionHandler?: PreToolExecutionHandler,
     private readonly agentDefinition?: AgentDefinition,
+    /** Optional model override — when set this sub-agent uses a different model than the global default. */
+    private readonly modelOverride?: string,
+    /** Optional callback invoked after each turn with the latest token usage (for real-time UI updates). */
+    private readonly onTokenUpdate?: (tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number }) => void,
   ) {
     this.context = {
       agentId: `subagent-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -317,6 +321,11 @@ export class SubAgent {
       [], // 空的额外历史
       { type: 'sub', agentId: this.context.agentId, taskDescription }
     );
+
+    // Apply per-agent model override if specified
+    if (this.modelOverride) {
+      this.subAgentChat.setSpecifiedModel(this.modelOverride);
+    }
 
     // 然后修改系统指令
     (this.subAgentChat as any).generationConfig.systemInstruction = this.buildSystemPrompt();
@@ -571,6 +580,9 @@ export class SubAgent {
       this.context.tokenUsage.inputTokens += tokenUsage.inputTokens;
       this.context.tokenUsage.outputTokens += tokenUsage.outputTokens;
       this.context.tokenUsage.totalTokens += tokenUsage.totalTokens;
+
+      // Notify caller of latest cumulative token usage for real-time UI
+      this.onTokenUpdate?.(this.context.tokenUsage);
     }
 
     // 提取AI的响应内容

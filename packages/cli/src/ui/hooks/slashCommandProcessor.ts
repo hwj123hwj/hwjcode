@@ -72,6 +72,7 @@ export const useSlashCommandProcessor = (
   openDebateWizard?: () => void, // 🎭 接收 openDebateWizard
   resumeDebate?: () => void, // 🎭 接收 resumeDebate (由 /debate continue 触发)
   openGoalWizard?: () => void, // 🎯 接收 openGoalWizard (由 /goal 触发)
+  openWorkflowPanel?: () => void, // ⚡ 接收 openWorkflowPanel (由 /workflow 触发)
 ) => {
   const session = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
@@ -424,6 +425,12 @@ export const useSlashCommandProcessor = (
                       setShowHelp(false);
                       if (openGoalWizard) {
                         openGoalWizard();
+                      }
+                      return { type: 'handled' };
+                    case 'workflow-panel':
+                      setShowHelp(false);
+                      if (openWorkflowPanel) {
+                        openWorkflowPanel();
                       }
                       return { type: 'handled' };
                     default: {
