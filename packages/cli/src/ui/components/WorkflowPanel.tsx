@@ -351,7 +351,9 @@ const AgentDetailView: React.FC<{
 
   // Status line
   const statusLabel = agent.status === 'failed' ? 'Failed'
-    : agent.status === 'completed' ? 'Completed' : 'Running';
+    : agent.status === 'completed' ? 'Completed'
+    : agent.currentPhase === 'executing_tools' ? 'Executing tools'
+    : 'Thinking';
   const failReason = agent.status === 'failed' && agent.outcome
     ? ` (${agent.outcome.slice(0, 60)})` : '';
   contentLines.push(
