@@ -10,6 +10,7 @@ import {
 } from '@google/genai';
 import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToGeminiLevel, effortToGeminiBudget, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking, applyOpenAIChatThinking } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
+import { sanitizeConversation, cleanContents } from './messageSanitizer.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
 /**
@@ -2796,10 +2797,21 @@ export async function* callCustomModelStream(
   console.log(
     `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/stream) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
   );
-  if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'anthropic') yield* callAnthropicModelStream(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'gemini') yield* callGeminiNativeModelStream(modelConfig, request, abortSignal);
+
+  let requestToUse = request;
+  if (request && Array.isArray(request.contents)) {
+    let cleaned = cleanContents(request.contents);
+    cleaned = sanitizeConversation(cleaned, { provider: modelConfig.provider });
+    requestToUse = {
+      ...request,
+      contents: cleaned
+    };
+  }
+
+  if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'anthropic') yield* callAnthropicModelStream(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'gemini') yield* callGeminiNativeModelStream(modelConfig, requestToUse, abortSignal);
   else throw new Error(`Unsupported custom model provider for streaming: ${modelConfig.provider}`);
 }
 
@@ -2814,10 +2826,21 @@ export async function callCustomModel(
   console.log(
     `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/unary) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
   );
-  if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'anthropic') return callAnthropicModel(modelConfig, request, abortSignal);
-  else if (modelConfig.provider === 'gemini') return callGeminiNativeModel(modelConfig, request, abortSignal);
+
+  let requestToUse = request;
+  if (request && Array.isArray(request.contents)) {
+    let cleaned = cleanContents(request.contents);
+    cleaned = sanitizeConversation(cleaned, { provider: modelConfig.provider });
+    requestToUse = {
+      ...request,
+      contents: cleaned
+    };
+  }
+
+  if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'anthropic') return callAnthropicModel(modelConfig, requestToUse, abortSignal);
+  else if (modelConfig.provider === 'gemini') return callGeminiNativeModel(modelConfig, requestToUse, abortSignal);
   else throw new Error(`Unsupported custom model provider: ${modelConfig.provider}`);
 }
 
