@@ -38,7 +38,6 @@ import {
 } from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
-import { sanitizeConversation, cleanContents } from './messageSanitizer.js';
 import { LoopDetectionService } from '../services/loopDetectionService.js';
 import { CompressionService } from '../services/compressionService.js';
 import { MicroCompactService } from '../services/microCompactService.js';
@@ -553,7 +552,14 @@ export class GeminiClient {
   }
 
   setHistory(history: Content[]) {
-    this.getChat().setHistory(history);
+    // 🛡️ /session select / IDE companion 等路径会直接通过此入口注入历史，
+    //    在历史本身已经损坏的情况下（中断、截断、压缩失误），下一次 sendMessage
+    //    无论走 Gemini 原生还是 CustomModel 直连，都会因为孤立的 functionResponse 报 400。
+    //    所以这里统一用 GeminiChat.sanitizeRequestContents 在写入前做一次卫士级清洗。
+    const sanitized = Array.isArray(history)
+      ? GeminiChat.sanitizeRequestContents(history)
+      : history;
+    this.getChat().setHistory(sanitized);
   }
 
   async setTools(): Promise<void> {
@@ -592,13 +598,12 @@ export class GeminiClient {
    */
   async resumeChat(history: Content[]): Promise<void> {
     this.resetCompressionFlag();
-    let sanitizedHistory = history;
-    if (Array.isArray(history)) {
-      // 🎯 深度复查与极致净化：在恢复和水化历史会话时，主动清理、对齐并规整残余/孤立的 functionCall ↔ functionResponse
-      sanitizedHistory = cleanContents(history);
-      sanitizedHistory = sanitizeConversation(sanitizedHistory);
-    }
-    this.chat = await this.startChat(sanitizedHistory);
+    // 🛡️ 与 setHistory 保持一致：通过 fixRequestContents 兜底清洗历史。
+    //    ACP 路径（IDE companion）的会话水化也会走到这里。
+    const sanitized = Array.isArray(history)
+      ? GeminiChat.sanitizeRequestContents(history)
+      : history;
+    this.chat = await this.startChat(sanitized);
   }
 
   private async getEnvironment(): Promise<Part[]> {
