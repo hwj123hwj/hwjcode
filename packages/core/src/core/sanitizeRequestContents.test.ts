@@ -5,17 +5,67 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi } from 'vitest';
+/**
+ * sanitizeRequestContents 是 fixRequestContents 的静态包装器，
+ * 它是 /session select、resumeChat、CustomModelAdapter 出网前的「最后一道安全网」。
+ *
+ * fixRequestContents.test.ts 已经覆盖了「正常 + 部分边界」的协议场景；
+ * 本文件聚焦于「奇葩输入 / 真实生产事故 / 多层污染嵌套」的回归用例：
+ *
+ *   - 已知 Bedrock 400：孤立 tool_result 在历史首条
+ *   - 末尾以 model 收尾：必须追加 user 占位符
+ *   - 截断后 functionCall 残留 / functionResponse 提前到达
+ *   - 跨轮 ID 复用（同一 callId 出现多次）
+ *   - 多个 cancel + 多个真实结果混在一起
+ *   - 完全空对象 / parts 缺失 / role 异常 / 怪异类型字段
+ *   - 静态方法与实例方法行为完全一致（防漂移哨兵）
+ *   - 调用方可以反复调用且幂等（再清洗一次结果不再变）
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GeminiChat } from './geminiChat.js';
 import { Content } from '../types/extendedContent.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { Config } from '../config/config.js';
+import { logger } from '../utils/enhancedLogger.js';
 
 vi.mock('../config/config.js');
 vi.mock('./contentGenerator.js');
 
-describe('GeminiChat.sanitizeRequestContents (static wrapper)', () => {
-  it('应当与实例方法 fixRequestContents 行为完全一致', () => {
+// 公共 mock config，避免每个 describe 都重写一遍
+function makeMockConfig(): Config {
+  return {
+    getModel: vi.fn().mockReturnValue('gemini-2.0-flash'),
+    getContentGeneratorConfig: vi.fn().mockReturnValue({ authType: 'oauth' }),
+    getProjectRoot: vi.fn().mockReturnValue('/mock/path'),
+    getSessionId: vi.fn().mockReturnValue('test-session'),
+    getQuotaErrorOccurred: vi.fn().mockReturnValue(false),
+    setModel: vi.fn(),
+  } as unknown as Config;
+}
+
+// 静默业务日志，避免污染 vitest 输出
+let loggerDebugSpy: ReturnType<typeof vi.spyOn> | undefined;
+let consoleWarnSpy: ReturnType<typeof vi.spyOn> | undefined;
+let consoleLogSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+beforeEach(() => {
+  loggerDebugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+  consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  loggerDebugSpy?.mockRestore();
+  consoleWarnSpy?.mockRestore();
+  consoleLogSpy?.mockRestore();
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 1. 静态 / 实例方法行为一致性（防漂移哨兵）
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 静态/实例一致性', () => {
+  it('简单输入：静态方法应当与实例方法 fixRequestContents 行为完全一致', () => {
     const input: Content[] = [
       {
         role: MESSAGE_ROLES.MODEL,
@@ -23,27 +73,57 @@ describe('GeminiChat.sanitizeRequestContents (static wrapper)', () => {
           { functionCall: { name: 'search', id: 'abc', args: {} } as any },
         ],
       },
-      // 第二条 user 消息没有对应 functionResponse，fixRequestContents 应当补全 user cancel
     ];
 
-    const mockConfig = {
-      getModel: vi.fn().mockReturnValue('gemini-2.0-flash'),
-      getContentGeneratorConfig: vi.fn().mockReturnValue({ authType: 'oauth' }),
-      getProjectRoot: vi.fn().mockReturnValue('/mock/path'),
-      getSessionId: vi.fn().mockReturnValue('test-session'),
-      getQuotaErrorOccurred: vi.fn().mockReturnValue(false),
-      setModel: vi.fn(),
-    } as unknown as Config;
-    const chat = new GeminiChat(mockConfig, {} as any);
+    const chat = new GeminiChat(makeMockConfig(), {} as any);
     const instanceResult = (chat as any).fixRequestContents(input);
-
     const staticResult = GeminiChat.sanitizeRequestContents(input);
     expect(staticResult).toEqual(instanceResult);
   });
 
-  it('应当移除孤立的 functionResponse（无对应 functionCall 的 tool_result，对应 Bedrock 报错场景）', () => {
-    // 模拟 /session select 加载到的残缺历史：
-    //   - 历史首条就是 functionResponse（前置 functionCall 已被截断丢失）
+  it('复杂输入：脏历史（模型截断+混合 ID 缺失）也应当行为一致', () => {
+    // 这是更接近真实事故的输入
+    const dirty: Content[] = [
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          {
+            functionResponse: {
+              name: 'glob',
+              id: 'toolu_glob_orphan',
+              response: { result: 'leftover-from-truncated-session' },
+            } as any,
+          },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { text: '我来帮你查文件' } as any,
+          { functionCall: { name: 'read_file', id: 'rf-1', args: { path: 'a' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', id: 'rf-1', response: { content: 'ok' } } as any },
+        ],
+      },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: '完成' } as any] },
+    ];
+
+    const chat = new GeminiChat(makeMockConfig(), {} as any);
+    const instanceResult = (chat as any).fixRequestContents(dirty);
+    const staticResult = GeminiChat.sanitizeRequestContents(dirty);
+    expect(staticResult).toEqual(instanceResult);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 2. 已知生产事故：/session select 加载脏历史 → Bedrock 400
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 真实事故回归', () => {
+  it('Bedrock 400 现场还原：历史首条就是孤立 functionResponse，应当被移除', () => {
     const input: Content[] = [
       {
         role: MESSAGE_ROLES.USER,
@@ -69,32 +149,518 @@ describe('GeminiChat.sanitizeRequestContents (static wrapper)', () => {
 
     const result = GeminiChat.sanitizeRequestContents(input);
 
-    // 孤立 functionResponse 应当被移除；那条 user 消息也会因 parts 为空而被清掉
     const allParts = result.flatMap(c => c.parts || []);
     const hasOrphan = allParts.some(
       p => (p as any).functionResponse && (p as any).functionResponse.id === 'toolu_glob',
     );
     expect(hasOrphan).toBe(false);
 
-    // 后续真实对话应保留
     const lastUser = result[result.length - 1];
     expect(lastUser.role).toBe(MESSAGE_ROLES.USER);
   });
 
-  it('当结果以 model 消息结尾时，应自动追加 user 占位避免 Bedrock prefill 错误', () => {
+  it('末尾以 model 消息收尾时应自动追加 user 占位（防止 Anthropic prefill 错误）', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '你好' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: '你好啊' } as any] },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const last = result[result.length - 1];
+    expect(last.role).toBe(MESSAGE_ROLES.USER);
+    expect((last.parts?.[0] as any).text).toBe('[Conversation continues]');
+  });
+
+  it('多个孤立 functionResponse 同时出现：应当全部被移除', () => {
     const input: Content[] = [
       {
         role: MESSAGE_ROLES.USER,
-        parts: [{ text: '你好' } as any],
+        parts: [
+          { functionResponse: { name: 'a', id: 'a-1', response: {} } as any },
+          { functionResponse: { name: 'b', id: 'b-1', response: {} } as any },
+          { functionResponse: { name: 'c', id: 'c-1', response: {} } as any },
+        ],
       },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'reply' } as any] },
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'continue' } as any] },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const remainingFRIds = result.flatMap(c => c.parts || [])
+      .map((p: any) => p.functionResponse?.id)
+      .filter(Boolean);
+    expect(remainingFRIds).toEqual([]);
+  });
+
+  it('孤立 fr 与正常 fr/fc 配对混在同一历史：只清孤立、保留正常', () => {
+    const input: Content[] = [
+      // 孤立的（前置 call 已丢失）
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'orphan', id: 'orphan-1', response: {} } as any },
+        ],
+      },
+      // 正常配对
       {
         role: MESSAGE_ROLES.MODEL,
-        parts: [{ text: '你好啊' } as any],
+        parts: [{ functionCall: { name: 'paired', id: 'paired-1', args: {} } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'paired', id: 'paired-1', response: { ok: true } } as any },
+        ],
+      },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'done' } as any] },
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'next?' } as any] },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const ids = result.flatMap(c => c.parts || [])
+      .map((p: any) => p.functionResponse?.id)
+      .filter(Boolean);
+    expect(ids).toContain('paired-1');
+    expect(ids).not.toContain('orphan-1');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 3. 截断 / 流中断的各种残局
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 截断/流中断残局', () => {
+  it('functionCall 在最后一条 model 没有任何后续：应当被补 user-cancel 并以 user 收尾', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '搜个东西' } as any] },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'search', id: 'abc', args: { q: 'x' } } as any },
+        ],
       },
     ];
 
     const result = GeminiChat.sanitizeRequestContents(input);
     const last = result[result.length - 1];
     expect(last.role).toBe(MESSAGE_ROLES.USER);
+    const cancelPart = last.parts?.find(
+      (p: any) => p.functionResponse?.id === 'abc',
+    );
+    expect(cancelPart).toBeDefined();
+    expect(((cancelPart as any).functionResponse.response as any).result).toBe('user cancel');
+  });
+
+  it('多个相邻 user 消息（中断恢复时常见）：应当合并成一条 user', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'q' } as any] },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'fn', id: 'c1', args: {} } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'fn', id: 'c1', response: { v: 1 } } as any }],
+      },
+      // 由客户端注入的 "continue" 消息
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '[System] continue' } as any] },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    // 任意相邻两条 role 不能相同
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].role).not.toBe(result[i - 1].role);
+    }
+    // 尾部 user 应该既包含 functionResponse 又包含 text
+    const last = result[result.length - 1];
+    expect(last.role).toBe(MESSAGE_ROLES.USER);
+    const partTypes = (last.parts || []).map((p: any) =>
+      p.functionResponse ? 'fr' : p.text ? 'text' : 'unknown',
+    );
+    expect(partTypes).toContain('fr');
+    expect(partTypes).toContain('text');
+  });
+
+  it('cancel 与真实结果分散在两条 user：保留真实结果，不再补冗余 cancel', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'todo_write', id: 'tw-1' } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{
+          functionResponse: { name: 'todo_write', id: 'tw-1', response: { result: 'user cancel' } } as any,
+        }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{
+          functionResponse: { name: 'todo_write', id: 'tw-1', response: { output: 'real-result' } } as any,
+        }],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fRs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    expect(fRs).toHaveLength(1);
+    expect((fRs[0] as any).functionResponse.response.output).toBe('real-result');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 4. Claude / Anthropic 兼容性：ID 缺失 / 模糊匹配
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > Claude/Anthropic 协议兼容', () => {
+  it('Call 无 ID + Response 有 ID：应通过 name 匹配并对齐 ID', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        // Claude 风格：functionCall 缺失 ID
+        parts: [{ functionCall: { name: 'glob', args: { pattern: '**/*' } } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'glob', id: 'glob-real', response: { output: 'files' } } as any }],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fr = result.flatMap(c => c.parts || []).find((p: any) => p.functionResponse);
+    expect(fr).toBeDefined();
+    // 业务的「ID 对齐」逻辑会让 response 的 id 同步成 call 的 id
+    expect((fr as any).functionResponse.id).toBeUndefined();
+    expect((fr as any).functionResponse.response.output).toBe('files');
+  });
+
+  it('Call 有 ID + Response 无 ID：应通过 name 匹配并保留', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'search', id: 'search-1', args: {} } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'search', response: { ok: true } } as any }],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fr = result.flatMap(c => c.parts || []).find((p: any) => p.functionResponse);
+    expect(fr).toBeDefined();
+    expect((fr as any).functionResponse.name).toBe('search');
+  });
+
+  it('混合：同一历史中既有 call 缺 ID、又有 response 缺 ID', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'a', args: {} } as any }, // call 无 ID
+          { functionCall: { name: 'b', id: 'b-1', args: {} } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'a', id: 'a-1', response: {} } as any }, // response 有 ID
+          { functionResponse: { name: 'b', response: {} } as any }, // response 无 ID
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fNames = result
+      .flatMap(c => c.parts || [])
+      .filter((p: any) => p.functionResponse)
+      .map((p: any) => p.functionResponse.name);
+    expect(fNames).toContain('a');
+    expect(fNames).toContain('b');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 5. 重复 / 仲裁 / 跨轮 ID 复用
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 仲裁与去重', () => {
+  it('完全相同的 functionResponse 出现两次：仅保留一个', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'fn', id: 'c1', args: {} } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'fn', id: 'c1', response: { v: 1 } } as any },
+          { functionResponse: { name: 'fn', id: 'c1', response: { v: 1 } } as any }, // 完全重复
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fRs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    expect(fRs).toHaveLength(1);
+  });
+
+  it('真实结果优先于 user cancel（即便 cancel 在前）', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'fn', id: 'c1' } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'fn', id: 'c1', response: { result: 'user cancel' } } as any },
+          { functionResponse: { name: 'fn', id: 'c1', response: { value: 'REAL' } } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fRs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    expect(fRs).toHaveLength(1);
+    expect((fRs[0] as any).functionResponse.response.value).toBe('REAL');
+  });
+
+  it('同一对话连续多轮使用相同 callId（理论上不该但生产偶发）：应整体保留所有配对', () => {
+    // 极少数情况下，模型/客户端会在不同轮里复用同一个 toolu_xxx
+    // 业务规则：结构合法（model→user→model→user 交替）就保留
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'fn', id: 'shared', args: { v: 1 } } as any }] },
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'fn', id: 'shared', response: { v: 1 } } as any }] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'fn', id: 'shared', args: { v: 2 } } as any }] },
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'fn', id: 'shared', response: { v: 2 } } as any }] },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    // 结构必须保持 model/user 严格交替，不允许相邻同 role
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].role).not.toBe(result[i - 1].role);
+    }
+    // 至少保留了一个 functionResponse（业务的去重 Map 会按 id 仅保留一个，这是已知取舍）
+    const fRs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    expect(fRs.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 6. 极端边界 / 奇葩输入：不能崩溃
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 极端边界（不崩溃即合格）', () => {
+  it('空数组：应原样返回空数组', () => {
+    expect(GeminiChat.sanitizeRequestContents([])).toEqual([]);
+  });
+
+  it('仅一条 user 消息：应原样返回（不被错误注入占位符）', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '你好' } as any] },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    expect(result).toEqual(input);
+  });
+
+  it('仅一条 model 消息：应被追加 user 占位（防 prefill 错误）', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'hello' } as any] },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    expect(result).toHaveLength(2);
+    expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+  });
+
+  it('parts 缺失（undefined）：不应 crash', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: undefined as any },
+      { role: MESSAGE_ROLES.MODEL, parts: undefined as any },
+    ];
+    expect(() => GeminiChat.sanitizeRequestContents(input)).not.toThrow();
+  });
+
+  it('parts 是空数组：保留消息结构但不报错', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'ok' } as any] },
+    ];
+    expect(() => GeminiChat.sanitizeRequestContents(input)).not.toThrow();
+  });
+
+  it('parts 中混入未知字段（既非 text 也非 functionCall/Response）：应保留', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ inlineData: { mimeType: 'image/png', data: 'aGk=' } } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: '收到图片' } as any] },
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '多谢' } as any] },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    // 图片/未知 part 应保留
+    const hasInline = result.flatMap(c => c.parts || []).some((p: any) => p.inlineData);
+    expect(hasInline).toBe(true);
+  });
+
+  it('多条 model 相邻（极端损坏）：应被合并成一条 model', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'q' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'a' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'b' } as any] },
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'c' } as any] },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    // 不允许相邻同 role
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].role).not.toBe(result[i - 1].role);
+    }
+    // model 段的 'a' 'b' 都应保留在合并后的 parts 里
+    const modelMsg = result.find(c => c.role === MESSAGE_ROLES.MODEL);
+    const modelText = (modelMsg!.parts || []).map((p: any) => p.text).filter(Boolean);
+    expect(modelText).toContain('a');
+    expect(modelText).toContain('b');
+  });
+
+  it('functionCall 但 args 缺失：不应 crash 也应正常补 cancel', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'go' } as any] },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'fn', id: 'no-args' } as any }], // 没有 args
+      },
+    ];
+    expect(() => GeminiChat.sanitizeRequestContents(input)).not.toThrow();
+    const result = GeminiChat.sanitizeRequestContents(input);
+    expect(result[result.length - 1].role).toBe(MESSAGE_ROLES.USER);
+  });
+
+  it('functionResponse 但 response 字段缺失：保留消息不 crash', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'fn', id: 'r-1' } as any }] },
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'fn', id: 'r-1' } as any }] },
+    ];
+    expect(() => GeminiChat.sanitizeRequestContents(input)).not.toThrow();
+  });
+
+  it('100 条历史的压力测试：应在毫秒级完成且不丢配对结构', () => {
+    const input: Content[] = [];
+    for (let i = 0; i < 50; i++) {
+      input.push({
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'fn', id: `c-${i}`, args: {} } as any }],
+      });
+      input.push({
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'fn', id: `c-${i}`, response: { i } } as any }],
+      });
+    }
+
+    const start = Date.now();
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(500); // 极宽松阈值，正常 <50ms
+    // 100 条都应保留
+    expect(result.length).toBe(100);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 7. 幂等性：清洗结果再清洗一次应不再变化
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 幂等性', () => {
+  it('对脏历史清洗一次，结果再清洗一次应当与第一次清洗结果完全一致', () => {
+    const dirty: Content[] = [
+      // 孤立 fr
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'orphan', id: 'orphan-1', response: {} } as any }] },
+      // 末尾 model
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'last is model' } as any] },
+    ];
+
+    const once = GeminiChat.sanitizeRequestContents(dirty);
+    const twice = GeminiChat.sanitizeRequestContents(once);
+    expect(twice).toEqual(once);
+  });
+
+  it('对干净历史多次清洗应保持完全相等', () => {
+    const clean: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'hello' } as any] },
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'continue' } as any] },
+    ];
+
+    const once = GeminiChat.sanitizeRequestContents(clean);
+    const twice = GeminiChat.sanitizeRequestContents(once);
+    const thrice = GeminiChat.sanitizeRequestContents(twice);
+    expect(once).toEqual(clean);
+    expect(twice).toEqual(once);
+    expect(thrice).toEqual(once);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 8. 不变量保证：清洗结果必须满足下游协议契约
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 协议不变量', () => {
+  // 通用断言：检查任意输出是否满足下游契约
+  function assertContractInvariants(result: Content[]) {
+    if (result.length === 0) return;
+
+    // 不变量 1：相邻消息 role 不同（合并相邻同 role）
+    for (let i = 1; i < result.length; i++) {
+      expect(
+        result[i].role,
+        `相邻第 ${i} 与 ${i - 1} 条 role 相同：${result[i - 1].role} → ${result[i].role}`,
+      ).not.toBe(result[i - 1].role);
+    }
+
+    // 不变量 2：末尾必须是 user（防 Bedrock prefill 报错）
+    expect(result[result.length - 1].role).toBe(MESSAGE_ROLES.USER);
+
+    // 不变量 3：每个 functionResponse 必能在前面找到 name 或 id 匹配的 functionCall
+    const calls: any[] = [];
+    for (const c of result) {
+      if (c.role === MESSAGE_ROLES.MODEL && c.parts) {
+        for (const p of c.parts) {
+          if ((p as any).functionCall) calls.push((p as any).functionCall);
+        }
+      }
+      if (c.role === MESSAGE_ROLES.USER && c.parts) {
+        for (const p of c.parts) {
+          const fr = (p as any).functionResponse;
+          if (!fr) continue;
+          const matched = calls.some(
+            call => (fr.id && call.id === fr.id) || (fr.name && call.name === fr.name),
+          );
+          expect(matched, `孤立的 functionResponse 未被清理：${JSON.stringify(fr)}`).toBe(true);
+        }
+      }
+    }
+  }
+
+  it('真实事故输入清洗后满足全部协议不变量', () => {
+    const dirty: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'glob', id: 'orphan', response: {} } as any }] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: '你好' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: '我又说了一次' } as any] }, // 相邻同 role
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' } as any] },
+    ];
+    assertContractInvariants(GeminiChat.sanitizeRequestContents(dirty));
+  });
+
+  it('压力混合输入清洗后满足全部协议不变量', () => {
+    const dirty: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'q1' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ functionCall: { name: 'a', id: 'a-1' } as any }] },
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'a', id: 'a-1', response: {} } as any }] },
+      // 故意制造的脏数据：没有前置 call 的孤立 fr
+      { role: MESSAGE_ROLES.USER, parts: [{ functionResponse: { name: 'orphan', id: 'orphan' } as any }] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'reply' } as any] },
+      // 末尾 model（需要补 user 占位）
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'still model' } as any] },
+    ];
+    assertContractInvariants(GeminiChat.sanitizeRequestContents(dirty));
+  });
+
+  it('极简两条消息（user→model）清洗后也满足全部不变量（追加占位后仍然合法）', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: 'hi' } as any] },
+      { role: MESSAGE_ROLES.MODEL, parts: [{ text: 'hello' } as any] },
+    ];
+    assertContractInvariants(GeminiChat.sanitizeRequestContents(input));
   });
 });

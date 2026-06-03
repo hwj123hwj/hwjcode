@@ -12,6 +12,7 @@ import { GeminiChat } from './geminiChat.js';
 import { Config } from '../config/config.js';
 import { ContentGenerator } from './contentGenerator.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
+import { logger } from '../utils/enhancedLogger.js';
 
 // Mock dependencies
 vi.mock('../config/config.js');
@@ -21,7 +22,11 @@ describe('GeminiChat.fixRequestContents', () => {
   let geminiChat: GeminiChat;
   let mockConfig: Config;
   let mockContentGenerator: ContentGenerator;
-  let consoleSpy: ReturnType<typeof vi.spyOn> | undefined;
+  // 详细日志（如"补全/调整/孤立检测"）走 logger.debug；
+  // 致命级别（孤立移除/末尾占位等）走 console.warn。
+  // 这里两个 spy 各盯一头，断言时可以精确取舍。
+  let loggerDebugSpy: ReturnType<typeof vi.spyOn> | undefined;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn> | undefined;
 
   beforeEach(() => {
     // 创建完整的 mock Config 对象
@@ -38,12 +43,14 @@ describe('GeminiChat.fixRequestContents', () => {
     mockContentGenerator = {} as ContentGenerator;
     geminiChat = new GeminiChat(mockConfig, mockContentGenerator);
 
-    // Spy on console.log to test logging
-    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // 业务在 e36df4fc 之后把详细日志切到了 logger.debug，老的 spyOn(console, 'log') 永远收不到。
+    loggerDebugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    consoleSpy?.mockRestore();
+    loggerDebugSpy?.mockRestore();
+    consoleWarnSpy?.mockRestore();
   });
 
   // 使用反射访问私有方法进行测试
@@ -52,7 +59,7 @@ describe('GeminiChat.fixRequestContents', () => {
   };
 
   describe('单个 Function Call 场景', () => {
-    it('应该为没有 response 的 function call 补全 user cancel', () => {
+    it('应该为没有 response 的 function call 补全 user cancel（补全的 user 与原 user 会被合并）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -69,23 +76,21 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(3);
-      // 检查插入的 function response 在位置 [1]
-      expect(result[1]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{
+      // 业务行为：补全的 user(cancel) 与紧跟的 user(text) 在最后阶段会被合并成一条 user。
+      // 这是 e36df4fc 的合并相邻同 role 消息逻辑——避免上游协议看到连续两条 user 时把 tool_result 当成被截断。
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[1].parts).toEqual([
+        {
           functionResponse: {
             name: 'search',
             id: 'abc123',
             response: { result: 'user cancel' }
           }
-        }]
-      });
-      // 检查原始用户消息被推到位置 [2]
-      expect(result[2]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{ text: '等等，不用搜索了' }]
-      });
+        },
+        { text: '等等，不用搜索了' }
+      ]);
     });
 
     it('有正确 response 的 function call 不应该被补全', () => {
@@ -106,7 +111,7 @@ describe('GeminiChat.fixRequestContents', () => {
       expect(result).toEqual(input);
     });
 
-    it('ID 不匹配的 response 应该被认为是未匹配', () => {
+    it('ID 不匹配的 response 应该被认为是未匹配（cancel 补全后与原 response 合并）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -120,26 +125,27 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(3);
-      // 检查插入的补全 response 在位置 [1]
-      expect(result[1]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{
+      // 业务行为：
+      //   - call(abc123) 没有匹配响应 → 补 user(cancel id=abc123)
+      //   - 原 response(xyz789) 名字仍是 'search'，final 清理阶段用“id或name任一匹配” 保留了它
+          //     （这不是 bug：是为了容忍部分模型丢失 ID、或 ID 变形返回的场景）
+      //   - 两条 user 被合并为一条，parts=[cancel(abc123), original(xyz789)]
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[1].parts).toEqual([
+        {
           functionResponse: {
             name: 'search',
             id: 'abc123',
             response: { result: 'user cancel' }
           }
-        }]
-      });
-      // 检查原用户消息被推到位置 [2]
-      expect(result[2]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{ functionResponse: { name: 'search', id: 'xyz789', response: { result: '晴天' } } }]
-      });
+        },
+        { functionResponse: { name: 'search', id: 'xyz789', response: { result: '晴天' } } }
+      ]);
     });
 
-    it('name 不匹配的 response 应该被认为是未匹配', () => {
+    it('name 不匹配的 response 应该被认为是未匹配（cancel 补全后与原 response 合并）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -153,28 +159,30 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(3);
-      // 检查插入的补全 response 在位置 [1]
-      expect(result[1]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{
+      // 业务行为：
+      //   - call(search/abc123) 没匹配响应 → 补 user(cancel name=search id=abc123)
+      //   - 原 response(calculate/abc123) 使用 ID abc123，final 清理阶段“id或name”任一匹配 → 保留
+      //   - 两条 user 合并。这表明：模糊匹配是“宽进严出”，
+      //     只要 ID 同、哪怕 name 不同，上游依然可能看到“你调的 search，却返回了 calculate 的结果”，
+      //     但这是历史实现选择的容错。
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[1].parts).toEqual([
+        {
           functionResponse: {
             name: 'search',
             id: 'abc123',
             response: { result: 'user cancel' }
           }
-        }]
-      });
-      // 检查原用户消息被推到位置 [2]
-      expect(result[2]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{ functionResponse: { name: 'calculate', id: 'abc123', response: { result: '42' } } }]
-      });
+        },
+        { functionResponse: { name: 'calculate', id: 'abc123', response: { result: '42' } } }
+      ]);
     });
   });
 
   describe('多个 Function Call 场景', () => {
-    it('应该为所有未匹配的 function call 补全 response', () => {
+    it('应该为所有未匹配的 function call 补全 response（多条 cancel + 文本会合并到同一条 user）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -191,35 +199,30 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(3);
-      // 检查插入的补全 responses 在位置 [1]
-      expect(result[1]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [
-          {
-            functionResponse: {
-              name: 'search',
-              id: 'abc123',
-              response: { result: 'user cancel' }
-            }
-          },
-          {
-            functionResponse: {
-              name: 'calculate',
-              id: 'def456',
-              response: { result: 'user cancel' }
-            }
+      // 行为：补全两条 cancel + 原 text，三个 part 合并到一条 user
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[1].parts).toEqual([
+        {
+          functionResponse: {
+            name: 'search',
+            id: 'abc123',
+            response: { result: 'user cancel' }
           }
-        ]
-      });
-      // 检查原用户消息被推到位置 [2]
-      expect(result[2]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{ text: '不需要这些功能' }]
-      });
+        },
+        {
+          functionResponse: {
+            name: 'calculate',
+            id: 'def456',
+            response: { result: 'user cancel' }
+          }
+        },
+        { text: '不需要这些功能' }
+      ]);
     });
 
-    it('应该只为部分未匹配的 function call 补全 response', () => {
+    it('应该只为部分未匹配的 function call 补全 response（最终合并并且 function-response 在前）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -239,26 +242,24 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(3);
-      // 检查插入的补全 response 在位置 [1] (只为 calculate 补全)
-      expect(result[1]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{
+      // 业务行为：
+      //   - calculate 补全 cancel
+      //   - 原 user 已被混合内容顺序调整：[search FR, text]
+      //   - 两条 user 合并为一条：[calculate-cancel, search FR, text]
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[1].parts).toEqual([
+        {
           functionResponse: {
             name: 'calculate',
             id: 'def456',
             response: { result: 'user cancel' }
           }
-        }]
-      });
-      // 检查原用户消息被推到位置 [2]，并且由于有混合内容，function-response 被移到前面
-      expect(result[2]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [
-          { functionResponse: { name: 'search', id: 'abc123', response: { result: '晴天' } } },
-          { text: '搜索结果不错，但不需要计算' }
-        ]
-      });
+        },
+        { functionResponse: { name: 'search', id: 'abc123', response: { result: '晴天' } } },
+        { text: '搜索结果不错，但不需要计算' }
+      ]);
     });
 
     it('所有 function call 都有匹配的 response 时不应该补全', () => {
@@ -339,9 +340,22 @@ describe('GeminiChat.fixRequestContents', () => {
       const result1 = callFixRequestContents(input1);
       const result2 = callFixRequestContents(input2);
 
-      // input1 应该补全，input2 不应该改变顺序
-      expect(result1).toHaveLength(3); // 补全了 user cancel
-      expect(result2).toHaveLength(2); // 没有补全，顺序也没变
+      // input1：补全 user-cancel + 原 user(text) 合并 → length=2，但合并后 parts=[FR cancel, text]
+      expect(result1).toHaveLength(2);
+      expect(result1[1].role).toBe(MESSAGE_ROLES.USER);
+      expect(result1[1].parts).toEqual([
+        {
+          functionResponse: {
+            name: 'search',
+            id: 'abc123',
+            response: { result: 'user cancel' }
+          }
+        },
+        { text: '只有文本' }
+      ]);
+
+      // input2：完全匹配，原样返回
+      expect(result2).toHaveLength(2);
       expect(result2[1].parts).toEqual(input2[1].parts);
     });
   });
@@ -468,23 +482,25 @@ describe('GeminiChat.fixRequestContents', () => {
 
       const result = callFixRequestContents(input);
 
-      expect(result).toHaveLength(6);
-      // 检查插入的补全 response 在位置 [4]（在最后一个用户消息的位置）
-      expect(result[4]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{
+      // 6 → 5：补全的 user(cancel calc/2) 与原 user(text "不需要计算") 合并
+      expect(result).toHaveLength(5);
+      // 末尾合并后的 user 同时包含 cancel 和原 text
+      expect(result[4].role).toBe(MESSAGE_ROLES.USER);
+      expect(result[4].parts).toEqual([
+        {
           functionResponse: {
             name: 'calculate',
             id: '2',
             response: { result: 'user cancel' }
           }
-        }]
-      });
-      // 检查原用户消息被推到位置 [5]
-      expect(result[5]).toEqual({
-        role: MESSAGE_ROLES.USER,
-        parts: [{ text: '不需要计算' }]
-      });
+        },
+        { text: '不需要计算' }
+      ]);
+      // 前 4 条结构保持
+      expect(result[0]).toEqual(input[0]);
+      expect(result[1]).toEqual(input[1]);
+      expect(result[2]).toEqual(input[2]);
+      expect(result[3]).toEqual(input[3]);
     });
   });
 
@@ -506,7 +522,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 检测到第2条消息中有 1 个孤立的 function response:'),
         expect.arrayContaining([
           expect.objectContaining({ name: 'search', id: 'wrong_id' })
@@ -530,7 +546,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 检测到第2条消息中有 1 个孤立的 function response:'),
         expect.arrayContaining([
           expect.objectContaining({ name: 'calculate', id: 'abc123' })
@@ -557,7 +573,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 检测到第2条消息中有 2 个孤立的 function response:'),
         expect.arrayContaining([
           expect.objectContaining({ name: 'search', id: 'invalid_id1' }),
@@ -580,9 +596,10 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      // 确保没有多余 response 的日志
-      expect(consoleSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining('[fixRequestContents] 检测到')
+      // 确保没有 "检测到孤立" 的 debug 日志（合规对话不应该惊动开发者）
+      expect(loggerDebugSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('[fixRequestContents] 检测到'),
+        expect.anything(),
       );
     });
 
@@ -600,7 +617,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 检测到第2条消息中有 1 个孤立的 function response:'),
         expect.arrayContaining([
           expect.objectContaining({ name: 'search', id: 'orphan_id' })
@@ -725,7 +742,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 为第1条消息补全了 1 个未匹配的 function call')
       );
     });
@@ -747,7 +764,7 @@ describe('GeminiChat.fixRequestContents', () => {
 
       callFixRequestContents(input);
 
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(loggerDebugSpy).toHaveBeenCalledWith(
         expect.stringContaining('[fixRequestContents] 调整了第2条消息的内容顺序，function-response 在前')
       );
     });
