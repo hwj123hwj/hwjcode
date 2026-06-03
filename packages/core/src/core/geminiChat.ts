@@ -38,6 +38,7 @@ import {
   AgentContext,
 } from '../telemetry/types.js';
 import { DEFAULT_GEMINI_FLASH_MODEL, DEFAULT_GEMINI_MODEL } from '../config/models.js';
+import { WorkflowTool } from '../tools/workflow.js';
 import { tokenUsageEventManager } from '../events/tokenUsageEvents.js';
 import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 import { SessionManager } from '../services/sessionManager.js';
@@ -348,7 +349,7 @@ export class GeminiChat {
         return this.contentGenerator.generateContent({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config },
+          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
         }, scene);
       };
 
@@ -809,7 +810,7 @@ export class GeminiChat {
         return this.contentGenerator.generateContentStream({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config },
+          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
         }, scene);
       };
 
@@ -1202,4 +1203,33 @@ export class GeminiChat {
       parts: [{ reasoning: incomingText } as any],
     });
   }
+}
+
+/**
+ * Filter tools for a single request based on the current user message.
+ *
+ * WorkflowTool is only exposed when the user's message contains the exact
+ * trigger word "workflow" (case-insensitive). This is a hard, per-request
+ * enforcement layer that complements the prompt-level description constraints.
+ * Historical context (prior workflow invocations) cannot bypass this gate.
+ */
+function filterToolsByMessage(userContent: Content, tools: unknown): unknown {
+  if (!tools || !Array.isArray(tools)) return tools;
+
+  const userText = (userContent.parts ?? [])
+    .filter((p): p is { text: string } => typeof (p as any).text === 'string')
+    .map(p => p.text)
+    .join('');
+
+  const hasWorkflowTrigger = /\bworkflow\b/i.test(userText);
+  if (hasWorkflowTrigger) return tools;
+
+  // Remove WorkflowTool from this request's tool declarations
+  return (tools as Tool[]).map(toolGroup => {
+    if (!toolGroup.functionDeclarations) return toolGroup;
+    const filtered = toolGroup.functionDeclarations.filter(
+      decl => decl.name !== WorkflowTool.Name,
+    );
+    return { ...toolGroup, functionDeclarations: filtered };
+  });
 }
