@@ -39,6 +39,7 @@ function makeMockAPI(
   return {
     run: vi.fn().mockResolvedValue(defaultResult),
     runParallel: vi.fn().mockResolvedValue([defaultResult]),
+    setCurrentPhaseIndex: vi.fn(),
   };
 }
 
@@ -227,6 +228,7 @@ export const notDefault = () => {};
         return Promise.reject(err);
       }),
       runParallel: vi.fn(),
+      setCurrentPhaseIndex: vi.fn(),
     };
     const script = `
 export default async function(agent) {
