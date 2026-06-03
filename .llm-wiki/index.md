@@ -20,6 +20,7 @@
 
 | Page | Type | Description |
 |------|------|-------------|
+| [workflow-system](wiki/workflow-system.md) | entity | Dynamic Workflow — JS orchestration, multi-agent, token budget backlog |
 | [core-module](wiki/core-module.md) | entity | Backend engine — API, tools, sessions, auth |
 | [cli-module](wiki/cli-module.md) | entity | Terminal frontend — Ink/React UI, slash commands |
 | [tools-system](wiki/tools-system.md) | entity | Extensible tool framework — 31 built-in tools |
