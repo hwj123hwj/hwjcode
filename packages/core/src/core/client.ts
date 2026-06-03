@@ -38,6 +38,7 @@ import {
 } from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
+import { sanitizeConversation, cleanContents } from './messageSanitizer.js';
 import { LoopDetectionService } from '../services/loopDetectionService.js';
 import { CompressionService } from '../services/compressionService.js';
 import { MicroCompactService } from '../services/microCompactService.js';
@@ -591,7 +592,13 @@ export class GeminiClient {
    */
   async resumeChat(history: Content[]): Promise<void> {
     this.resetCompressionFlag();
-    this.chat = await this.startChat(history);
+    let sanitizedHistory = history;
+    if (Array.isArray(history)) {
+      // 🎯 深度复查与极致净化：在恢复和水化历史会话时，主动清理、对齐并规整残余/孤立的 functionCall ↔ functionResponse
+      sanitizedHistory = cleanContents(history);
+      sanitizedHistory = sanitizeConversation(sanitizedHistory);
+    }
+    this.chat = await this.startChat(sanitizedHistory);
   }
 
   private async getEnvironment(): Promise<Part[]> {
