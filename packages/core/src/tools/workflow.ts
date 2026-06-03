@@ -140,7 +140,15 @@ export default async function(agent) {
 - \`schema\`: JSON Schema object — forces the sub-agent to return structured JSON; result available as \`result.data\`
 - \`model\`: per-step model override, e.g. \`'gemini-2.0-flash'\` for fast steps, \`'gemini-2.5-pro'\` for deep reasoning
 
-**Context passing**: set \`context\` to any JSON-serializable value from a previous step. It will be injected into the sub-agent prompt automatically.`,
+**Context passing**: set \`context\` to any JSON-serializable value from a previous step. It will be injected into the sub-agent prompt automatically.
+
+**CRITICAL — Keep sub-agent outputs lean (Claude Code's core principle):**
+Each sub-agent must return a **distilled JSON summary** (target: under 2000 tokens), NOT raw file contents or tool outputs.
+- ✅ Good: \`{ "files": ["a.ts","b.ts"], "issues": [{"file":"a.ts","line":12,"desc":"..."}] }\`
+- ❌ Bad: returning full file contents, raw command output, or unstructured prose
+- Always use \`schema\` to enforce structured output on data-collection agents
+- The orchestrator context budget is finite — one agent returning raw code blows up all subsequent agents
+- Sub-agents should explore extensively with tools but **summarize aggressively before returning**`,
       Icon.Tasks,
       {
         type: Type.OBJECT,
@@ -149,7 +157,12 @@ export default async function(agent) {
             type: Type.STRING,
             description: `JavaScript orchestration script with export const meta and export default async function(agent).
 Available globals: agent (callable + agent.run/runParallel/setPhase), phase(), JSON, console.log/error, Promise.
-NOT available: require, import, fs, process, fetch, any Node.js globals.`,
+NOT available: require, import, fs, process, fetch, any Node.js globals.
+
+IMPORTANT — sub-agent output discipline:
+- Every agent prompt MUST instruct the agent to return a distilled JSON summary, NOT raw file contents.
+- Use schema to enforce structure. Example prompt suffix: "Return JSON: {files:[...], summary:'...'}. Do NOT return raw file contents."
+- Context passed between agents is capped at ~5k tokens. Agents returning raw code will be truncated.`,
           },
           description: {
             type: Type.STRING,
@@ -304,7 +317,7 @@ NOT available: require, import, fs, process, fetch, any Node.js globals.`,
       updateOutput?.(display);
 
       return {
-        llmContent: `Workflow failed: ${runResult.error}`,
+        llmContent: `Workflow failed: ${runResult.error}\n\nDo NOT attempt to complete this task manually or inline — report the workflow error to the user and stop.`,
         returnDisplay: display,
       };
     }
