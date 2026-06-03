@@ -2,7 +2,22 @@
 
 > Chronological record of wiki operations.
 
-## [2026-05-30] feat | Massive Core & CLI Architecture Wiki Expansion (Recent 2 Months Feature Streams)
+## [2026-06-03] update | workflow-system.md — 魔法词门控机制文档
+
+更新 `.llm-wiki/wiki/workflow-system.md`，新增「触发方式与魔法词门控」章节：
+- 三层防御机制说明（工具描述、system prompt、per-request 硬过滤）
+- `filterToolsByMessage()` 实现原理与代码位置
+- 如何为其他工具添加魔法词门控的操作指南（含代码模板）
+
+## [2026-06-02] feat | workflow-system.md — Dynamic Workflow 完整文档
+
+新增 `.llm-wiki/wiki/workflow-system.md`，内容包括：
+- 架构概览（调用链、核心文件、脚本 API）
+- 超时保护链路（4层）、Agent 状态可视化、result.data 规范
+- 今日修复的所有 bug 记录（上下文爆炸、脚本 JS 错误、Thinking 卡死、模型 fallback）
+- Backlog：P1 Token 预算（含 Anthropic task_budget 调研结论和我们的工程实现方案）、P2 Micro Compact（详细设计）、P3 自定义 Agent 定义文件夹
+
+
 
 ### Pages Added
 - `wiki/background-tasks.md` — Core background process management, CRC32 IDs, cross-platform tree termination, and shell integrations.
