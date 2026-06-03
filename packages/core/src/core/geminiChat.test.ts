@@ -732,3 +732,110 @@ describe('GeminiChat', () => {
     });
   });
 });
+
+// ─── filterToolsByMessage (per-request workflow gate) ────────────────────────
+
+describe('filterToolsByMessage (workflow gate)', () => {
+  const workflowDecl = { name: 'workflow', description: 'workflow tool' };
+  const otherDecl = { name: 'shell', description: 'shell tool' };
+  const toolsWithWorkflow = [{ functionDeclarations: [workflowDecl, otherDecl] }];
+
+  let chatWithTools: GeminiChat;
+  let mockConfig: Config;
+
+  function makeStreamResponse() {
+    return (async function* () {
+      yield {
+        candidates: [{
+          content: { parts: [{ text: 'ok' }], role: 'model' },
+          finishReason: 'STOP',
+          index: 0,
+        }],
+        text: () => 'ok',
+      } as unknown as GenerateContentResponse;
+    })();
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConfig = {
+      getSessionId: () => 'test-session-id',
+      getTelemetryLogPromptsEnabled: () => false,
+      getUsageStatisticsEnabled: () => false,
+      getDebugMode: () => false,
+      getContentGeneratorConfig: () => ({ authType: 'oauth-personal', model: 'test-model' }),
+      getModel: vi.fn().mockReturnValue('gemini-pro'),
+      setModel: vi.fn(),
+      getQuotaErrorOccurred: vi.fn().mockReturnValue(false),
+      setQuotaErrorOccurred: vi.fn(),
+      flashFallbackHandler: undefined,
+    } as unknown as Config;
+    chatWithTools = new GeminiChat(
+      mockConfig,
+      mockModelsModule,
+      { tools: toolsWithWorkflow } as GenerateContentConfig,
+      [],
+    );
+    vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(makeStreamResponse());
+  });
+
+  it('filters out workflow tool when message has no trigger word', async () => {
+    await chatWithTools.sendMessageStream(
+      { message: 'please help me refactor this large codebase' },
+      'p1',
+      SceneType.CHAT_CONVERSATION,
+    );
+
+    const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls[0][0];
+    const decls = (callArg.config?.tools as any[])?.[0]?.functionDeclarations ?? [];
+    expect(decls.map((d: any) => d.name)).not.toContain('workflow');
+    expect(decls.map((d: any) => d.name)).toContain('shell');
+  });
+
+  it('keeps workflow tool when message contains trigger word "workflow"', async () => {
+    await chatWithTools.sendMessageStream(
+      { message: 'workflow analyze all packages in parallel' },
+      'p2',
+      SceneType.CHAT_CONVERSATION,
+    );
+
+    const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls[0][0];
+    const decls = (callArg.config?.tools as any[])?.[0]?.functionDeclarations ?? [];
+    expect(decls.map((d: any) => d.name)).toContain('workflow');
+  });
+
+  it('trigger word match is case-insensitive (WORKFLOW, Workflow)', async () => {
+    for (const word of ['WORKFLOW', 'Workflow', 'WorkFlow']) {
+      vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(makeStreamResponse());
+      await chatWithTools.sendMessageStream(
+        { message: `${word} do something` },
+        'p3',
+        SceneType.CHAT_CONVERSATION,
+      );
+      const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls.at(-1)![0];
+      const decls = (callArg.config?.tools as any[])?.[0]?.functionDeclarations ?? [];
+      expect(decls.map((d: any) => d.name)).toContain('workflow');
+    }
+  });
+
+  it('does not crash when tools is undefined', async () => {
+    const chatNoTools = new GeminiChat(mockConfig, mockModelsModule, {}, []);
+    vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(makeStreamResponse());
+    await expect(
+      chatNoTools.sendMessageStream({ message: 'hello' }, 'p4', SceneType.CHAT_CONVERSATION),
+    ).resolves.toBeDefined();
+  });
+
+  it('/goal prompt (no workflow word) does not expose workflow tool', async () => {
+    const goalPrompt = '你是一个长程任务执行助手。任务：重构整个代码库。请并行分析所有模块。';
+    await chatWithTools.sendMessageStream(
+      { message: goalPrompt },
+      'p5',
+      SceneType.CHAT_CONVERSATION,
+    );
+
+    const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls[0][0];
+    const decls = (callArg.config?.tools as any[])?.[0]?.functionDeclarations ?? [];
+    expect(decls.map((d: any) => d.name)).not.toContain('workflow');
+  });
+});
