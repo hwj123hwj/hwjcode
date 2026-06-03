@@ -423,6 +423,20 @@ export class GeminiChat {
    * @returns 修正后的请求内容
    */
   private fixRequestContents(requestContents: Content[]): Content[] {
+    return GeminiChat.sanitizeRequestContents(requestContents);
+  }
+
+  /**
+   * 静态版本的请求内容修复器，与实例方法 fixRequestContents 行为完全一致，
+   * 但可被无 GeminiChat 实例的调用方直接复用（如 CustomModelAdapter、setHistory 兜底）。
+   *
+   * 之所以新增 static 入口而不是把 fixRequestContents 直接改成 static：
+   *   - 保持外部所有现有调用点（this.fixRequestContents）零改动
+   *   - 让所有协议路径（Gemini 原生 / DeepVServer / CustomModel）共享同一份实现，避免逻辑漂移
+   *
+   * 函数体保持不变；如需更新清洗规则，只在这里修改即可。
+   */
+  static sanitizeRequestContents(requestContents: Content[]): Content[] {
     const fixedContents: Content[] = [];
 
     // 🔍 辅助函数：判断 functionCall 和 functionResponse 是否匹配
