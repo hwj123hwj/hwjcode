@@ -238,10 +238,21 @@ export function enforceToolPairConsistency(
 
     if (msg.role === MESSAGE_ROLES.USER) {
       if (!msg.parts) continue;
+
+      const prevMsg = i > 0 ? contents[i - 1] : null;
+      const prevCallIds = new Set<string>();
+      if (prevMsg && prevMsg.role === MESSAGE_ROLES.MODEL && prevMsg.parts) {
+        for (const p of prevMsg.parts) {
+          if (p.functionCall && p.functionCall.id) {
+            prevCallIds.add(p.functionCall.id);
+          }
+        }
+      }
+
       const filteredParts = msg.parts.filter((p: any) => {
         if (p.functionResponse && p.functionResponse.id) {
-          if (!allFunctionCallIds.has(p.functionResponse.id)) {
-            return false; // 丢弃完全找不到对应 functionCall 的 functionResponse
+          if (!prevCallIds.has(p.functionResponse.id)) {
+            return false; // 丢弃在前一个 model 消息中找不到配对的 functionResponse
           }
         }
         return true;

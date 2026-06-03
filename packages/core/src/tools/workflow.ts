@@ -92,13 +92,13 @@ export class WorkflowTool extends BaseTool<WorkflowToolParams, ToolResult> {
       'Dynamic Workflow Orchestrator',
       `Execute a JavaScript orchestration script that coordinates multiple parallel sub-agents to solve large-scale or multi-step engineering tasks.
 
-Use this tool when the task:
+Use this tool ONLY when explicitly triggered by the magic word (see below). Do NOT self-invoke based on task complexity. Typical use cases (only when triggered):
 - Requires parallel analysis or execution across many files/modules
 - Has dependent steps where later agents need structured results from earlier ones
 - Is too large or complex for a single sub-agent or linear tool calls
 - Matches patterns like: codebase-wide audits, large migrations, cross-module refactors, deep research
 
-Trigger: include "workflow" in the user's prompt, or invoke directly for complex tasks.
+ONLY invoke this tool when the user's message contains the exact word "workflow". Do NOT invoke for /goal, task planning, or any other purpose — even if the task seems large or complex.
 
 **Script format** (follow exactly):
 
