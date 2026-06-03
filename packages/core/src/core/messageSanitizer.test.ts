@@ -168,6 +168,31 @@ describe('messageSanitizer - enforceToolPairConsistency', () => {
     // 因为唯一的 parts 是孤立的 functionResponse，所以整条消息会被过滤掉
     expect(result).toHaveLength(0);
   });
+
+  it('should drop tool results whose corresponding tool use is not in the PREVIOUS model message', () => {
+    const input = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'web_search', id: 'call_1', args: {} } }]
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'web_search', id: 'call_1', response: {} } }]
+      },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ text: 'Here is what I found' }]
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'web_search', id: 'call_1', response: {} } }]
+      }
+    ];
+
+    const result = enforceToolPairConsistency(input, 'synthesize');
+    // 最后一个 user 消息由于前置模型消息不含该 functionCall 应该被自动过滤丢弃
+    expect(result).toHaveLength(3);
+  });
 });
 
 describe('messageSanitizer - sanitizeConversation', () => {
