@@ -10,7 +10,7 @@ import {
 } from '@google/genai';
 import { CustomModelConfig, resolveThinkingConfig, effortToAnthropicBudget, effortToOpenAIEffort, effortToAnthropicEffort, effortToGeminiLevel, effortToGeminiBudget, isAdaptiveThinkingClaude, applyAnthropicAdaptiveThinking, applyOpenAIChatThinking } from '../types/customModel.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
-import { sanitizeConversation, cleanContents } from './messageSanitizer.js';
+import { GeminiChat } from './geminiChat.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
 /**
@@ -2798,15 +2798,13 @@ export async function* callCustomModelStream(
     `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/stream) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
   );
 
-  let requestToUse = request;
-  if (request && Array.isArray(request.contents)) {
-    let cleaned = cleanContents(request.contents);
-    cleaned = sanitizeConversation(cleaned, { provider: modelConfig.provider });
-    requestToUse = {
-      ...request,
-      contents: cleaned
-    };
-  }
+  // 🛡️ 协议安全网：复用 GeminiChat.sanitizeRequestContents（即 fixRequestContents）
+  // 修复 functionCall ↔ functionResponse 配对错乱、孤立 functionResponse、
+  // 末尾 model 消息（破坏 Bedrock prefill 限制）等问题。
+  // 该方法在 Gemini 原生路径已经经过长期打磨，CustomModel 路径直连（GCP/AWS/...）也必须走同一卫士。
+  const requestToUse = request && Array.isArray(request.contents)
+    ? { ...request, contents: GeminiChat.sanitizeRequestContents(request.contents) }
+    : request;
 
   if (modelConfig.provider === 'openai') yield* callOpenAICompatibleModelStream(modelConfig, requestToUse, abortSignal);
   else if (modelConfig.provider === 'openai-responses') yield* callOpenAIResponsesModelStream(modelConfig, requestToUse, abortSignal);
@@ -2827,15 +2825,10 @@ export async function callCustomModel(
     `\x1b[35m[thinking-debug]\x1b[0m (custom-direct/unary) modelId=\x1b[36m${modelConfig.modelId}\x1b[0m  resolvedThinking=${JSON.stringify(resolveThinkingConfig(modelConfig))}`
   );
 
-  let requestToUse = request;
-  if (request && Array.isArray(request.contents)) {
-    let cleaned = cleanContents(request.contents);
-    cleaned = sanitizeConversation(cleaned, { provider: modelConfig.provider });
-    requestToUse = {
-      ...request,
-      contents: cleaned
-    };
-  }
+  // 🛡️ 协议安全网：与 stream 路径保持一致，统一调用 fixRequestContents 清洗。
+  const requestToUse = request && Array.isArray(request.contents)
+    ? { ...request, contents: GeminiChat.sanitizeRequestContents(request.contents) }
+    : request;
 
   if (modelConfig.provider === 'openai') return callOpenAICompatibleModel(modelConfig, requestToUse, abortSignal);
   else if (modelConfig.provider === 'openai-responses') return callOpenAIResponsesModel(modelConfig, requestToUse, abortSignal);
