@@ -20,6 +20,7 @@
 import { getActiveProxyServerUrl } from '../config/proxyConfig.js';
 import { logIfNotSilent } from '../utils/logging.js';
 import { getSessionId } from '../utils/session.js';
+import { getUserAgent } from '../utils/userAgent.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -82,21 +83,11 @@ export class ProxyAuthManager {
 
   /**
    * 🎯 生成规范的 User-Agent 字符串
-   * 格式: DeepVCode/<client>/<version> (<platform>; <arch>)
+   * 委托给 core 统一的单一事实来源 utils/userAgent.ts。
+   * 格式: EasyCode/<client>/<version> (<platform>; <arch>)
    */
   private getUserAgent(): string {
-    const version = this.cliVersion;
-    const platform = process.platform;
-    const arch = process.arch;
-
-    // 检查是否是 VSCode 插件（版本以 VSCode- 开头）
-    if (version.startsWith('VSCode-')) {
-      const actualVersion = version.replace('VSCode-', '');
-      return `DeepVCode/VSCode/${actualVersion} (${platform}; ${arch})`;
-    }
-
-    // CLI 模式
-    return `DeepVCode/CLI/${version} (${platform}; ${arch})`;
+    return getUserAgent(this.cliVersion);
   }
 
   /**
@@ -579,7 +570,7 @@ export class ProxyAuthManager {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'DeepCode CLI ProxyAuthManager'
+          'User-Agent': this.getUserAgent()
         },
         body: JSON.stringify({
           refreshToken: this.jwtTokenData.refreshToken
