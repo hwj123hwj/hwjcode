@@ -364,7 +364,7 @@ export const enUS: Translations = {
     manualInProgress: 'Compressing conversation history…',
     manualInProgressDesc: 'Summarizing older messages while preserving recent context. This may take a moment.',
     manualDone: 'Context compressed',
-    manualDoneDesc: 'Reduced from {{original}} to {{compressed}} tokens (saved {{saved}}, {{percent}}).',
+    manualDoneDesc: 'Conversation history compressed successfully.',
     manualSkipped: 'Compression skipped',
     manualSkippedDesc: 'The conversation history is already small enough — nothing to compress.',
     manualFailed: 'Compression failed',
