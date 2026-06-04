@@ -523,7 +523,7 @@ export class RemoteServer {
   }
 
   private async downloadFeishuImageToClipboard(message: FeishuImageMessage): Promise<string> {
-    const clipboardDir = path.resolve(process.cwd(), '.deepvcode', 'clipboard');
+    const clipboardDir = path.resolve(process.cwd(), '.easycode', 'clipboard');
     await fs.mkdir(clipboardDir, { recursive: true });
 
     const response = await fetch(message.payload.imageUrl);

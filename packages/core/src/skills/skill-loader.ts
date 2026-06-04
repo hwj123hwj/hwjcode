@@ -74,7 +74,7 @@ export class SkillLoader {
    */
   private initializeCustomSkillPaths() {
     // 用户全局技能路径
-    this.customSkillPaths.set(SkillSource.USER_GLOBAL, path.join(process.env.HOME || '', '.deepv', 'skills'));
+    this.customSkillPaths.set(SkillSource.USER_GLOBAL, path.join(process.env.HOME || '', '.easycode-user', 'skills'));
 
     // 项目技能路径（使用工具函数，与命令处理保持一致）
     this.customSkillPaths.set(SkillSource.USER_PROJECT, getProjectSkillsDir(this.projectRoot));

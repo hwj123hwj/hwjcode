@@ -141,13 +141,13 @@ export class ProxyAuthManager {
     // 用户信息存储路径
 
     if ( process.env.DEEPX_SERVER_URL?.includes('localhost')) {
-      this.userInfoFilePath = path.join(os.homedir(), '.deepv', 'user-info-dev.json');
-      this.jwtTokenFilePath = path.join(os.homedir(), '.deepv', 'jwt-token-dev.json');
-      this.usageStatsFilePath = path.join(os.homedir(), '.deepv', 'usage-stats-dev.json');
+      this.userInfoFilePath = path.join(os.homedir(), '.easycode-user', 'user-info-dev.json');
+      this.jwtTokenFilePath = path.join(os.homedir(), '.easycode-user', 'jwt-token-dev.json');
+      this.usageStatsFilePath = path.join(os.homedir(), '.easycode-user', 'usage-stats-dev.json');
     } else {
-      this.userInfoFilePath = path.join(os.homedir(), '.deepv', 'user-info.json');
-      this.jwtTokenFilePath = path.join(os.homedir(), '.deepv', 'jwt-token.json');
-      this.usageStatsFilePath = path.join(os.homedir(), '.deepv', 'usage-stats.json');
+      this.userInfoFilePath = path.join(os.homedir(), '.easycode-user', 'user-info.json');
+      this.jwtTokenFilePath = path.join(os.homedir(), '.easycode-user', 'jwt-token.json');
+      this.usageStatsFilePath = path.join(os.homedir(), '.easycode-user', 'usage-stats.json');
     }
 
 

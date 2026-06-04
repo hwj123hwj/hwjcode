@@ -150,7 +150,7 @@ describe('FileCommandLoader', () => {
   it('loads commands from both .deepvcode and .gemini project directories', async () => {
     const projectRoot = process.cwd();
     // Use the actual path resolution logic to ensure we are testing correctly
-    const deepvcodeDir = path.join(projectRoot, '.deepvcode', 'commands');
+    const deepvcodeDir = path.join(projectRoot, '.easycode', 'commands');
     const geminiDir = path.join(projectRoot, '.gemini', 'commands');
 
     mock({

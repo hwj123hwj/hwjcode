@@ -3,7 +3,7 @@
  * 设置项基础组件
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React from 'react';

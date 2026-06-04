@@ -2,7 +2,7 @@
  * Startup Optimizer - 启动性能优化工具
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { singletonRegistry } from './singletonRegistry';

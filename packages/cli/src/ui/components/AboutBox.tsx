@@ -86,7 +86,7 @@ export const AboutBox: React.FC<AboutBoxProps> = ({
         </Text>
       </Box>
       <Box>
-        <Text color={Colors.LightBlue}>https://www.deepvlab.ai/</Text>
+        <Text color={Colors.LightBlue}>https://www.easycode.bot/</Text>
       </Box>
     </Box>
   </Box>

@@ -3,7 +3,7 @@
  * Plan模式禁用通知 - 告知用户不能执行修改操作
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useEffect } from 'react';

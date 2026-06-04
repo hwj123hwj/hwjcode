@@ -9,7 +9,7 @@
  * - 使用 VSCode 的 globalState 持久化存储
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import * as vscode from 'vscode';

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -41,6 +41,8 @@ import {
   EASY_CLAW_METADATA_URL,
   filterEasyRouterModels,
   indexEasyClawMetadata,
+  migrateLegacyDirectories,
+  needsLegacyMigration,
 } from 'deepv-code-core';
 import { SessionType, SessionStatus } from './constants/sessionConstants';
 import { SessionInfo } from './types/sessionTypes';
@@ -69,7 +71,45 @@ let slashCommandService: SlashCommandService;
 let servicesInitialized = false;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('=== DeepV Code AI Assistant: Starting activation ===');
+  // 品牌升级：执行历史配置文件夹平滑迁移 (.deepvcode -> .easycode 等)
+  // ⚠️ 必须在所有服务初始化之前【同步/阻塞】执行，确保历史数据完整迁移后再启动。
+  //    若放到异步流程或晚于其它服务，customModelsStorageService / mcpSettingsService
+  //    等会抢先用 mkdirSync 创建空的 ~/.easycode-user，导致迁移判定失败、被跳过。
+  //    使用静态 import 的 migrate*（而非 require），确保 esbuild 打包后可用。
+  try {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+    const migrateTarget = workspaceRoot || process.cwd();
+
+    // 中英文自适应：VS Code 的 env.language 形如 'zh-cn' / 'en' / 'ja' 等。
+    const isZh = vscode.env.language.toLowerCase().startsWith('zh');
+
+    if (needsLegacyMigration(migrateTarget)) {
+      // 1) 迁移【前】预告：告知用户即将开始，数据量大时可能耗时数秒到数十秒。
+      const startTitle = isZh
+        ? '🎉 DeepV Code 现已升级为 Easy Code'
+        : '🎉 DeepV Code is now upgraded to Easy Code';
+      const startDetail = isZh
+        ? '即将开始迁移您的历史数据与配置到 Easy Code。根据数据大小，这可能需要数秒到数十秒，期间请勿关闭 VS Code。点击「确定」开始。'
+        : 'Your legacy data and settings will now be migrated to Easy Code. Depending on the data size this may take a few to tens of seconds — please do not close VS Code. Click "OK" to begin.';
+      await vscode.window.showInformationMessage(startTitle, { modal: true, detail: startDetail });
+
+      // 2) 执行迁移（同步阻塞）。
+      migrateLegacyDirectories(migrateTarget, (type) => {
+        console.log(`[Migration] Migrating legacy ${type}-level directory to Easy Code...`);
+      });
+
+      // 3) 迁移【后】完成提示。
+      const doneTitle = isZh ? '✅ 迁移完成' : '✅ Migration complete';
+      const doneDetail = isZh
+        ? '您的历史数据与配置（settings、custom-models、commands 等）已成功迁移到 Easy Code，可直接继续使用。'
+        : 'Your legacy data and settings (settings, custom-models, commands, etc.) have been migrated to Easy Code. You can continue right away.';
+      void vscode.window.showInformationMessage(doneTitle, { modal: true, detail: doneDetail });
+    }
+  } catch (err) {
+    console.error('[Migration] Failed to migrate legacy directories:', err);
+  }
+
+  console.log('=== Easy Code AI Assistant: Starting activation ===');
 
   // 保存 context 到全局变量供其他函数使用
   extensionContext = context;
@@ -105,18 +145,18 @@ export async function activate(context: vscode.ExtensionContext) {
     (global as any).extensionContext = context;
 
     // Initialize logger first
-    const outputChannel = vscode.window.createOutputChannel('DeepV Code AI Assistant');
+    const outputChannel = vscode.window.createOutputChannel('Easy Code AI Assistant');
     logger = new Logger(context, outputChannel);
 
     // 🎯 设置 logger 引用到优化工具，使其能使用统一的日志格式
     startupOptimizer.setLogger(logger);
     EnvironmentOptimizer.setLogger(logger);
 
-    logger.info('DeepV Code AI Assistant is activating...');
+    logger.info('Easy Code AI Assistant is activating...');
     logger.info(`📁 Log file location: ${logger.getLogFilePath()}`);
     logger.info(`📁 Extension path: ${context.extensionPath}`);
 
-    vscode.window.showInformationMessage('DeepV Code AI Assistant is activating...');
+    vscode.window.showInformationMessage('Easy Code AI Assistant is activating...');
     startupOptimizer.endPhase();
 
     startupOptimizer.startPhase('Communication & WebView Services');
@@ -282,9 +322,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     });
 
-    logger.info('DeepV Code AI Assistant activated successfully');
-    console.log('=== DeepV Code AI Assistant: Activation completed ===');
-    vscode.window.showInformationMessage('DeepV Code AI Assistant activated successfully!');
+    logger.info('Easy Code AI Assistant activated successfully');
+    console.log('=== Easy Code AI Assistant: Activation completed ===');
+    vscode.window.showInformationMessage('Easy Code AI Assistant activated successfully!');
 
     // Verify commands are registered
     vscode.commands.getCommands().then(commands => {
@@ -294,18 +334,18 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
   } catch (error) {
-    console.error('=== DeepV Code AI Assistant: Activation failed ===', error);
+    console.error('=== Easy Code AI Assistant: Activation failed ===', error);
     if (logger) {
       logger.error('Failed to activate extension', error instanceof Error ? error : undefined);
     }
     const message = error instanceof Error ? error.message : String(error);
-    vscode.window.showErrorMessage(`Failed to activate DeepV Code AI Assistant: ${message}`);
+    vscode.window.showErrorMessage(`Failed to activate Easy Code AI Assistant: ${message}`);
     throw error; // Re-throw to ensure VS Code knows activation failed
   }
 }
 
 export async function deactivate(): Promise<void> {
-  logger?.info('DeepV Code AI Assistant is deactivating...');
+  logger?.info('Easy Code AI Assistant is deactivating...');
 
   try {
     // 🎯 重置服务初始化标志，允许重新激活时重新初始化
@@ -386,7 +426,7 @@ export async function deactivate(): Promise<void> {
       terminalOutputService = undefined;
     }
 
-    logger?.info('DeepV Code AI Assistant deactivated successfully');
+    logger?.info('Easy Code AI Assistant deactivated successfully');
 
     // 最后清理 logger
     // @ts-ignore
@@ -983,7 +1023,7 @@ function setupBasicMessageHandlers() {
       logger.debug(`[YOLO] Workspace root: ${workspaceRoot}`);
 
       if (workspaceRoot) {
-        const settingsDir = path.join(workspaceRoot, '.deepvcode');
+        const settingsDir = path.join(workspaceRoot, '.easycode');
         const settingsPath = path.join(settingsDir, 'settings.json');
         logger.debug(`[YOLO] Settings path: ${settingsPath}`);
 
@@ -1075,7 +1115,7 @@ function setupBasicMessageHandlers() {
       // 🎯 优先从项目配置文件读取，确保准确性
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (workspaceRoot) {
-        const settingsPath = path.join(workspaceRoot, '.deepvcode', 'settings.json');
+        const settingsPath = path.join(workspaceRoot, '.easycode', 'settings.json');
         if (fs.existsSync(settingsPath)) {
           try {
             const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
@@ -1832,11 +1872,11 @@ async function handleBackgroundTaskComplete(
     const outputPreview = task.output?.substring(0, 1000) || '(no output)';
 
     if (status === 'completed') {
-      notificationText = `[DeepV Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${shortId}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${outputPreview}`;
+      notificationText = `[Easy Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${shortId}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${outputPreview}`;
     } else if (status === 'failed') {
-      notificationText = `[DeepV Code - SYSTEM NOTIFICATION] Background task failed (Task ID: ${shortId}). Command: ${task.command}. Error: ${task.error || 'Unknown error'}. Output:\n${outputPreview}`;
+      notificationText = `[Easy Code - SYSTEM NOTIFICATION] Background task failed (Task ID: ${shortId}). Command: ${task.command}. Error: ${task.error || 'Unknown error'}. Output:\n${outputPreview}`;
     } else if (status === 'cancelled') {
-      notificationText = `[DeepV Code - SYSTEM NOTIFICATION] Background task killed by user (Task ID: ${shortId}). Command: ${task.command}. Output before kill:\n${outputPreview}`;
+      notificationText = `[Easy Code - SYSTEM NOTIFICATION] Background task killed by user (Task ID: ${shortId}). Command: ${task.command}. Output before kill:\n${outputPreview}`;
     }
 
     logger.info(`🎯 [Background] Notification text prepared, length: ${notificationText.length}`);
@@ -1875,7 +1915,7 @@ async function handleBackgroundTaskComplete(
       const triggerMessage = {
         id: `bg-trigger-${Date.now()}`,
         sessionId,
-        content: [{ type: 'text' as const, value: '[DeepV Code - SYSTEM NOTIFICATION] Background tasks have completed. Please review the results above and continue.' }],
+        content: [{ type: 'text' as const, value: '[Easy Code - SYSTEM NOTIFICATION] Background tasks have completed. Please review the results above and continue.' }],
         timestamp: Date.now(),
         type: 'user' as const,
       };
@@ -1925,7 +1965,7 @@ async function processPendingBackgroundNotifications(sessionId: string) {
   const triggerMessage = {
     id: `bg-trigger-${Date.now()}`,
     sessionId,
-    content: [{ type: 'text' as const, value: '[DeepV Code - SYSTEM NOTIFICATION] Background tasks have completed while you were busy. Please review the results above if necessary, and continue.' }],
+    content: [{ type: 'text' as const, value: '[Easy Code - SYSTEM NOTIFICATION] Background tasks have completed while you were busy. Please review the results above if necessary, and continue.' }],
     timestamp: Date.now(),
     type: 'user' as const,
   };
@@ -2205,7 +2245,7 @@ function setupLoginHandlers() {
 
           // 友好提示
           const action = await vscode.window.showInformationMessage(
-            'Extension page opened in your browser. You can also search for "DeepV Code" in Extensions (Ctrl+Shift+X).',
+            'Extension page opened in your browser. You can also search for "Easy Code" in Extensions (Ctrl+Shift+X).',
             'Open Extensions Panel'
           );
 
@@ -2838,7 +2878,7 @@ async function handleRefineCommand(originalText: string) {
 Here is an instruction that I'd like to give you, but it needs to be improved. Rewrite and enhance this instruction to make it clearer, more specific, less ambiguous, and correct any mistakes. Do not use any tools: reply immediately with your answer, even if you're not sure. Consider the context of our conversation history when enhancing the prompt. If there is code in triple backticks (\`\`\`) consider whether it is a code sample and should remain unchanged.Reply with the following format:
 ### BEGIN RESPONSE ###
 Here is an enhanced version of the original instruction that is more specific and clear:
-<dvcode-refine-prompt>enhanced prompt goes here</dvcode-refine-prompt>
+<easycode-refine-prompt>enhanced prompt goes here</easycode-refine-prompt>
 ### END RESPONSE ###
 
 Here is my original instruction:
@@ -2883,11 +2923,11 @@ Here is my original instruction:
 
       logger.info('✅ Text refinement completed');
 
-      // 🎯 清理AI响应，提取 <dvcode-refine-prompt> 标签内的内容
+      // 🎯 清理AI响应，提取 <easycode-refine-prompt> 标签内的内容
       let cleanedText = refinedText.trim();
 
-      // 尝试提取 <dvcode-refine-prompt>...</dvcode-refine-prompt> 标签内的内容
-      const tagMatch = cleanedText.match(/<dvcode-refine-prompt>([\s\S]*?)<\/dvcode-refine-prompt>/);
+      // 尝试提取 <easycode-refine-prompt>...</easycode-refine-prompt> 标签内的内容
+      const tagMatch = cleanedText.match(/<easycode-refine-prompt>([\s\S]*?)<\/easycode-refine-prompt>/);
       if (tagMatch && tagMatch[1]) {
         cleanedText = tagMatch[1].trim();
       } else {
@@ -3859,7 +3899,7 @@ function setupMultiSessionHandlers() {
 
   // 服务端配置
   const PPT_SERVER_URL = process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai';
-  const PPT_WEB_URL = process.env.DEEPX_WEB_URL || 'https://dvcode.deepvlab.ai';
+  const PPT_WEB_URL = process.env.DEEPX_WEB_URL || 'https://easycode.deepvlab.ai';
 
   // 🎯 处理PPT生成请求
   // 注意：后端没有 status 轮询接口，任务提交后直接打开浏览器让用户在网页查看进度
@@ -4353,19 +4393,19 @@ ${payload.outline}
 
 function registerCommands(context: vscode.ExtensionContext) {
   logger.info('Registering commands...');
-  console.log('DeepV Code: Registering commands');
+  console.log('Easy Code: Registering commands');
 
   const commands = [
     vscode.commands.registerCommand('deepv.openAIAssistant', async () => {
       logger.info('deepv.openAIAssistant command executed');
-      console.log('DeepV Code: openAIAssistant command executed');
+      console.log('Easy Code: openAIAssistant command executed');
 
       // 🎯 显示侧边栏视图
       try {
         await webviewService?.show();
       } catch (error) {
         logger.error('Failed to show webview', error instanceof Error ? error : undefined);
-        vscode.window.showErrorMessage('Failed to open DeepV Code Assistant');
+        vscode.window.showErrorMessage('Failed to open Easy Code Assistant');
       }
     }),
 
@@ -4943,7 +4983,7 @@ function registerCommands(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(...commands);
   logger.info(`Registered ${commands.length} commands successfully`);
-  console.log(`DeepV Code: Registered ${commands.length} commands`);
+  console.log(`Easy Code: Registered ${commands.length} commands`);
 }
 
 /**
@@ -5536,7 +5576,7 @@ function setupMemoryFileWatcher(context: vscode.ExtensionContext) {
 function setupOpenExtensionSettings(communicationService: MultiSessionCommunicationService) {
   communicationService.onOpenExtensionSettings(async () => {
     try {
-      logger.info('Opening VS Code extension settings for DeepV Code');
+      logger.info('Opening VS Code extension settings for Easy Code');
       // 使用 workbench.action.openSettings 命令打开设置面板，并通过 @ext: 过滤器显示扩展配置
       await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:DeepX.deepv-code-vscode-ui-plugin');
     } catch (error) {

@@ -5,7 +5,7 @@
  * 简化流程：提交任务后直接打开浏览器编辑页面，无需轮询状态
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';

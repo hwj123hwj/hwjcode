@@ -3,7 +3,7 @@
  * Session持久化存储服务
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import * as vscode from 'vscode';
@@ -81,7 +81,7 @@ export class SessionPersistenceService {
     // 🎯 按项目分离session存储（参考CLI结构）
     const homeDir = os.homedir();
     const projectName = this.getProjectName();
-    this.storageDir = path.join(homeDir, '.deepv', 'tmp', 'sessions_vscode', projectName);
+    this.storageDir = path.join(homeDir, '.easycode-user', 'tmp', 'sessions_vscode', projectName);
     this.sessionsDir = path.join(this.storageDir, 'sessions');
     this.indexFile = path.join(this.sessionsDir, 'index.json');
     this.backupDir = path.join(this.storageDir, 'backups');
@@ -461,7 +461,7 @@ export class SessionPersistenceService {
         metadata: {
           totalSessions: sessionsToExport.length,
           totalMessages: sessionsToExport.reduce((sum, s) => sum + s.messages.length, 0),
-          exportSource: 'DeepV Code VSCode Extension'
+          exportSource: 'Easy Code VSCode Extension'
         }
       };
 
