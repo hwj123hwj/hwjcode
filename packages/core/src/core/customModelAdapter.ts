@@ -2247,7 +2247,69 @@ function buildGeminiNativeRequestBody(
    *     thoughtSignature is preserved.
    *   - text / inlineData / fileData — pass through canonically.
    * Empty / unknown parts are dropped (oneof validator fails on `{}`).
+   *
+   * 🆕 Cross-model migration → Gemini 3.x downgrade
+   *   `thoughtSignature` is an opaque server-signed token: the client cannot
+   *   forge or back-fill it. When a user accumulates history with Opus /
+   *   GPT-4 / Gemini 2.5 and then switches to Gemini 3.x, the historical
+   *   functionCall parts have NO signature, and Gemini 3.x will reject the
+   *   request with HTTP 400 "Function call is missing a thought_signature".
+   *
+   *   Strategy: pre-scan the history once, identify every "naked" functionCall
+   *   (one without a thoughtSignature) when targeting Gemini 3.x, and rewrite
+   *   BOTH that part AND its paired functionResponse into plain text summary
+   *   parts. The semantic information (which tool, what args, what result)
+   *   survives as text — Gemini 3.x reads it as "previous tool activity
+   *   described in prose", and the protocol constraint disappears because no
+   *   `functionCall` part remains in the wire body.
+   *
+   *   Pairing key: `functionCall.id` if present, else `name:<name>`.
+   *   Native Gemini 3.x → 3.x is unaffected: signed parts still round-trip.
+   *   Gemini 2.5 / non-3.x targets are unaffected: detection gated on modelId.
    */
+  const lowerModelId = (modelConfig.modelId || '').toLowerCase();
+  const isGemini3Target = lowerModelId.includes('gemini-3');
+
+  // Pre-scan: collect pairing keys of naked functionCall parts so we can
+  // rewrite both the call AND its corresponding response as text.
+  const nakedCallKeys: Set<string> = new Set();
+  if (isGemini3Target && Array.isArray(request.contents)) {
+    for (const c of request.contents) {
+      if (!c || typeof c !== 'object') continue;
+      const parts = Array.isArray(c.parts) ? c.parts : [];
+      for (const p of parts) {
+        if (!p || typeof p !== 'object') continue;
+        if (
+          p.functionCall &&
+          typeof p.functionCall === 'object' &&
+          typeof p.functionCall.name === 'string' &&
+          p.functionCall.name.length > 0 &&
+          typeof p.thoughtSignature !== 'string'
+        ) {
+          const key =
+            typeof p.functionCall.id === 'string' && p.functionCall.id.length > 0
+              ? p.functionCall.id
+              : `name:${p.functionCall.name}`;
+          nakedCallKeys.add(key);
+        }
+      }
+    }
+  }
+
+  // Compact JSON helper for tool-summary text — keeps the line readable in
+  // the model's context. Defensive against non-serialisable args.
+  const safeStringify = (v: unknown): string => {
+    if (v === undefined || v === null) return '';
+    try {
+      const s = JSON.stringify(v);
+      // Trim absurdly long blobs so a single huge tool result doesn't blow
+      // up the migrated summary line.
+      return s.length > 2000 ? s.slice(0, 2000) + '…(truncated)' : s;
+    } catch {
+      return String(v);
+    }
+  };
+
   const sanitiseContentsForGemini = (raw: any[] | undefined): any[] => {
     if (!Array.isArray(raw)) return [];
     const out: any[] = [];
@@ -2295,6 +2357,17 @@ function buildGeminiNativeRequestBody(
         if (p.functionCall && typeof p.functionCall === 'object') {
           const fc = p.functionCall as Record<string, unknown>;
           if (typeof fc.name === 'string' && fc.name.length > 0) {
+            // 🆕 Naked functionCall on Gemini 3.x → downgrade to text summary.
+            // We cannot synthesise a thoughtSignature (server-signed opaque
+            // token), so preserve the semantics as prose instead. The paired
+            // functionResponse is downgraded in the same pass below.
+            if (isGemini3Target && typeof p.thoughtSignature !== 'string') {
+              const argsStr = safeStringify(fc.args);
+              cleanParts.push({
+                text: `[Previous tool call] ${fc.name}(${argsStr})`,
+              });
+              continue;
+            }
             const part: any = {
               functionCall: {
                 name: fc.name,
@@ -2318,6 +2391,23 @@ function buildGeminiNativeRequestBody(
           // object so the part stays valid; dropping it would unbalance the
           // tool-call/response pairing and cause subsequent 400s.
           if (typeof fr.name === 'string' && fr.name.length > 0) {
+            // 🆕 If this response pairs with a naked (downgraded) functionCall,
+            // downgrade it as text too — keeping a `functionResponse` part
+            // without its matching `functionCall` would produce a different
+            // 400 ("functionResponse without preceding functionCall").
+            if (isGemini3Target) {
+              const key =
+                typeof fr.id === 'string' && fr.id.length > 0
+                  ? fr.id
+                  : `name:${fr.name}`;
+              if (nakedCallKeys.has(key)) {
+                const resultStr = safeStringify(fr.response);
+                cleanParts.push({
+                  text: `[Previous tool result] ${fr.name} → ${resultStr}`,
+                });
+                continue;
+              }
+            }
             const responseValue =
               fr.response && typeof fr.response === 'object'
                 ? fr.response
