@@ -2468,15 +2468,17 @@ User question: ${contentStr}`;
         </div>
 
         <div className="multi-session-app__header-right">
-          {/* 🎯 PPT 生成入口 */}
-          <button
-            className="multi-session-app__manage-btn multi-session-app__ppt-btn"
-            onClick={() => setIsPPTGeneratorOpen(true)}
-            title={t('pptGenerator.buttonTooltip', {}, 'Generate PPT with AI')}
-            style={{ marginRight: '8px' }}
-          >
-            <PPTGeneratorIcon size={18} />
-          </button>
+          {/* 🎯 PPT 生成入口 —— 自定义模型下隐藏（依赖 DeepV 云服务） */}
+          {!isCustomModelOnlyMode && !selectedModelId?.startsWith('custom:') && (
+            <button
+              className="multi-session-app__manage-btn multi-session-app__ppt-btn"
+              onClick={() => setIsPPTGeneratorOpen(true)}
+              title={t('pptGenerator.buttonTooltip', {}, 'Generate PPT with AI')}
+              style={{ marginRight: '8px' }}
+            >
+              <PPTGeneratorIcon size={18} />
+            </button>
+          )}
           {/* 🎯 目标驱动模式入口 */}
           <button
             className="multi-session-app__manage-btn multi-session-app__goal-btn"
@@ -2486,15 +2488,17 @@ User question: ${contentStr}`;
           >
             <Target size={18} />
           </button>
-          {/* 🎯 NanoBanana 图像生成入口 */}
-          <button
-            className="multi-session-app__manage-btn multi-session-app__nanobanana-btn"
-            onClick={() => setIsNanoBananaOpen(true)}
-            title={t('nanoBanana.buttonTooltip', {}, 'Generate images with AI')}
-            style={{ marginRight: '8px' }}
-          >
-            <NanoBananaIcon size={18} />
-          </button>
+          {/* 🎯 NanoBanana 图像生成入口 —— 自定义模型下隐藏（依赖 DeepV 云服务） */}
+          {!isCustomModelOnlyMode && !selectedModelId?.startsWith('custom:') && (
+            <button
+              className="multi-session-app__manage-btn multi-session-app__nanobanana-btn"
+              onClick={() => setIsNanoBananaOpen(true)}
+              title={t('nanoBanana.buttonTooltip', {}, 'Generate images with AI')}
+              style={{ marginRight: '8px' }}
+            >
+              <NanoBananaIcon size={18} />
+            </button>
+          )}
           <button
             className="multi-session-app__manage-btn multi-session-app__history-btn"
             onClick={() => {
