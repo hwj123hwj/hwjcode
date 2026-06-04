@@ -5,6 +5,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../hooks/useTranslation';
+import { CustomModelWizard } from './CustomModelWizard';
+import { customModelsService } from '../services/customModelsService';
+import type { CustomModelConfig } from '../types/customModel';
 import './LoginPage.css';
 
 interface LoginPageProps {
@@ -15,6 +18,15 @@ interface LoginPageProps {
   isCheckingAuth?: boolean;
   // 🎯 新增：取消登录回调
   onCancelLogin?: () => void;
+  /**
+   * 🟢 新增：当用户选择"使用自定义模型"绕过登录时触发。
+   * 父组件应将整个应用切换到 custom-model-only 模式 — 与 CLI 的
+   * `isCustomModelOnlyMode` 行为对齐：跳过 OAuth、直接进入主界面。
+   * 触发时机：
+   *   1. 用户在 LoginPage 添加了第一个自定义模型（wizard `onSaved`）
+   *   2. 已经有自定义模型的用户点击 "Continue with Custom Models"
+   */
+  onUseCustomModel?: () => void;
 }
 
 // 登录超时时间（毫秒）
@@ -29,11 +41,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   isLoggingIn,
   loginError,
   isCheckingAuth = false,
-  onCancelLogin
+  onCancelLogin,
+  onUseCustomModel,
 }) => {
   const { t } = useTranslation();
   const [showCancelButton, setShowCancelButton] = useState(false);
   const [loginStartTime, setLoginStartTime] = useState<number | null>(null);
+  // 🟢 未登录也能添加自定义模型 — 本地开关，不拽住全局状态。
+  const [isCustomModelWizardOpen, setIsCustomModelWizardOpen] = useState(false);
+
+  // 🟢 已存在的自定义模型数量。用于判断是否要显示 "Continue with Custom Model" 入口
+  // — 让回头用户不必每次都重新走 wizard。空数组 = 还没有任何自定义模型。
+  const [existingCustomModels, setExistingCustomModels] = useState<CustomModelConfig[]>([]);
 
   // 监听登录状态变化，记录开始时间和设置超时检测
   useEffect(() => {
@@ -55,6 +74,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
   }, [isLoggingIn, isCheckingAuth]);
 
+  // 🟢 进入登录页就拉一次自定义模型列表，决定 "Continue with custom models" 是否要显示。
+  // 同时订阅变化事件 — 用户在 wizard 里加了模型后这里就能立刻反映。
+  useEffect(() => {
+    if (isCheckingAuth) return; // 检查阶段不要无谓的 IPC
+
+    let cancelled = false;
+    customModelsService
+      .listCustomModels()
+      .then((models) => {
+        if (!cancelled) setExistingCustomModels(models || []);
+      })
+      .catch(() => {
+        // best-effort — 如果拉不到（极少数情况），就当作空数组。
+        if (!cancelled) setExistingCustomModels([]);
+      });
+    const unsubscribe = customModelsService.onModelsChanged((models) => {
+      if (!cancelled) setExistingCustomModels(models || []);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [isCheckingAuth]);
+
   // 处理取消登录
   const handleCancelLogin = () => {
     setShowCancelButton(false);
@@ -63,6 +106,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     // 调用父组件的重置回调，让父组件重置登录状态
     onCancelLogin?.();
   };
+
+  // 🟢 wizard 保存成功后立刻"以自定义模型身份"进入主界面 —
+  // 与 CLI 的 isCustomModelOnlyMode 流程一致。
+  const handleWizardSaved = (saved: CustomModelConfig[]) => {
+    setIsCustomModelWizardOpen(false);
+    if (saved && saved.length > 0) {
+      onUseCustomModel?.();
+    }
+  };
+
+  // 是否已有可用的自定义模型 — 控制 "Continue" 按钮的显隐。
+  const hasExistingCustomModels = existingCustomModels.some((m) => m.enabled !== false);
 
   return (
     <div className="login-page">
@@ -122,6 +177,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </div>
           )}
 
+          {/* Login error message */}
+          {loginError && !isCheckingAuth && !isLoggingIn && (
+            <div className="login-page__error">
+              <span className="login-page__error-icon">⚠️</span>
+              <span className="login-page__error-text">{loginError}</span>
+            </div>
+          )}
+
           {/* Login instructions - only show when not checking status */}
           {!isCheckingAuth && (
             <div className="login-page__help">
@@ -171,6 +234,42 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             </div>
           )}
+
+          {/* 🟢 未登录入口 — 用户可直接配置 EasyRouter / 第三方自定义模型，
+              免去 OAuth 流程。已登录用户仍可在主界面 ModelSelector 末尾使用同一个向导。
+
+              两种入口：
+                1. 已经有自定义模型 → "Continue with Custom Models"（直接进入主界面）
+                2. 还没有 / 想再加 → "Add Custom Model"（打开 wizard）
+
+              放在登录卡片内 — 与主登录按钮形成"并列选项"而非弱化的 footer 链接。 */}
+          {!isCheckingAuth && (
+            <div className="login-page__custom-model-section">
+              <div className="login-page__divider">
+                <span className="login-page__divider-text">or use your own API key</span>
+              </div>
+              <div className="login-page__custom-model-buttons">
+                {hasExistingCustomModels && (
+                  <button
+                    type="button"
+                    className="login-page__custom-model-btn login-page__custom-model-btn--primary"
+                    onClick={() => onUseCustomModel?.()}
+                    disabled={isLoggingIn}
+                  >
+                    → Continue with Custom Models ({existingCustomModels.filter((m) => m.enabled !== false).length})
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="login-page__custom-model-btn"
+                  onClick={() => setIsCustomModelWizardOpen(true)}
+                  disabled={isLoggingIn}
+                >
+                  + Add Custom Model
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 底部信息 - 只在非检查状态时显示 */}
@@ -185,6 +284,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           </div>
         )}
       </div>
+
+      {/* 🟢 自定义模型向导 — 直接 mount 在 LoginPage 内，无需登录态。
+          保存成功后通过 onSaved 触发 onUseCustomModel，把用户带进主界面。 */}
+      <CustomModelWizard
+        isOpen={isCustomModelWizardOpen}
+        onClose={() => setIsCustomModelWizardOpen(false)}
+        onSaved={handleWizardSaved}
+      />
     </div>
   );
 };

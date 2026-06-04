@@ -19,6 +19,25 @@ import {
   formatAttachmentSegment
 } from '../utils/attachmentFormatter.js';
 import chalk from 'chalk';
+
+/** Rainbow-colorize every occurrence of the word "workflow" in a chalk string. */
+function applyWorkflowRainbow(text: string): string {
+  const RAINBOW = ['#FF0000', '#FF7700', '#FFFF00', '#00CC00', '#0099FF', '#8844FF'];
+  const keyword = 'workflow';
+  const lower = text.toLowerCase();
+  let result = '';
+  let searchFrom = 0;
+  let idx = lower.indexOf(keyword, searchFrom);
+  while (idx !== -1) {
+    result += text.slice(searchFrom, idx);
+    const word = text.slice(idx, idx + keyword.length);
+    result += word.split('').map((ch, i) => chalk.hex(RAINBOW[i % RAINBOW.length]!).bold(ch)).join('');
+    searchFrom = idx + keyword.length;
+    idx = lower.indexOf(keyword, searchFrom);
+  }
+  result += text.slice(searchFrom);
+  return result;
+}
 import stringWidth from 'string-width';
 import { useShellHistory } from '../hooks/useShellHistory.js';
 import { useCompletion } from '../hooks/useCompletion.js';
@@ -366,22 +385,16 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             textToInsert = textToInsert + ' ';
           }
 
-          // Insert at cursor position
-          console.log('🖼️ [剪贴板图像] 插入文本:', textToInsert);
           buffer.replaceRangeByOffset(offset, offset, textToInsert);
-        } else {
-          console.log('🖼️ [剪贴板图像] 没有获得有效的图像路径');
         }
-      } else {
-        console.log('🖼️ [剪贴板图像] 剪贴板不包含图像，跳过处理');
       }
-    } catch (error) {
-      console.error('🖼️ [剪贴板图像] 错误:', error);
+    } catch {
+      // Clipboard access is best-effort; keep paste handling silent so it does
+      // not perturb the terminal render loop.
     } finally {
       // 无论成功或失败，都隐藏粘贴提示
       setIsClipboardImagePasting(false);
     }
-    console.log('🖼️ [剪贴板图像] handleClipboardImage 执行完成');
   }, [buffer, config]);
 
   // 文本粘贴处理函数 - 处理所有文本粘贴逻辑
@@ -393,25 +406,16 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         if (hasImage) {
           await handleClipboardImage();
         }
-      } catch (error) {
+      } catch {
         // Silently ignore image detection errors
       }
       return;
     }
 
-    console.log('📋 [Paste] Starting text paste handling:', {
-      length: key.sequence.length,
-      contentPreview: key.sequence.substring(0, 50).replace(/\r?\n/g, '\\n'),
-      ctrl: key.ctrl,
-      shift: key.shift,
-      name: key.name
-    });
-
     const now = Date.now();
 
     // 智能合并策略：短时间内的多个粘贴事件可能是同一个大文本被分割
     if (now - lastPasteTimeRef.current < 2000 && pendingPasteContentRef.current) {
-      console.log('📋 [Paste] Detected possible split paste, merging content');
       pendingPasteContentRef.current += key.sequence;
 
       // 延长等待时间，看是否还有更多片段
@@ -478,7 +482,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
       return false; // 表示未处理
 
-    } catch (error) {
+    } catch {
       return false;
     }
   }, [handleClipboardImage, handleTextPaste]);
@@ -827,16 +831,16 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
       // 统一的粘贴快捷键处理
       if (key.ctrl && key.name === 'v') {
-        console.log('⌨️ [快捷键] 触发 Ctrl+V，使用统一粘贴处理');
-        handleUnifiedPaste().catch(error => {
-          console.error('⌨️ [快捷键] 统一粘贴处理失败:', error);
+        handleUnifiedPaste().catch(() => {
+          // Ignore clipboard failures; terminals may already have emitted a
+          // bracketed paste event for text content.
         });
         return;
       }
 
       // 保留 Ctrl+G 作为图像专用快捷键（向后兼容）
       if (key.ctrl && key.name === 'g') {
-        handleClipboardImage().catch(error => {
+        handleClipboardImage().catch(() => {
           // Silently ignore errors
         });
         return;
@@ -845,7 +849,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       // 处理终端的自动粘贴事件（空sequence通常表示特殊粘贴模式或图片粘贴）
       if (key.paste && !key.sequence) {
         // 空粘贴事件通常意味着终端无法处理的内容（如图片）
-        handleClipboardImage().catch(error => {
+        handleClipboardImage().catch(() => {
           // Silently ignore errors
         });
         return;
@@ -856,13 +860,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         // 这很可能是Ctrl+Enter或Shift+Enter，不是真正的粘贴
         if (key.shift || (key.sequence === '\n' && !key.ctrl)) {
           // Shift+Enter或者裸露的换行 - 应该换行
-          console.log('  └─ 判断为Shift+Enter或裸露换行，执行换行');
           buffer.newline();
           return;
         }
         if (key.ctrl) {
           // Ctrl+Enter - 也应该换行（Windows兼容性）
-          console.log('  └─ 判断为Ctrl+Enter，执行换行');
           buffer.newline();
           return;
         }
@@ -871,8 +873,9 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       // 处理终端的文本粘贴事件（bracketed paste 等）
       if (key.paste && key.sequence) {
         // 这里直接走文本粘贴逻辑，因为终端粘贴通常是文本
-        handleTextPaste(key).catch(error => {
-          console.error('⌨️ [快捷键] 文本粘贴处理失败:', error);
+        handleTextPaste(key).catch(() => {
+          // Keep paste handling silent; visible console output can corrupt the
+          // TUI layout during bracketed paste.
         });
         return;
       }
@@ -982,6 +985,8 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       handleSubmitAndClear,
       shellHistory,
       handleClipboardImage,
+      handleTextPaste,
+      handleUnifiedPaste,
       resetCompletionState,
       vimHandleInput,
       createPasteSegment,
@@ -1061,6 +1066,13 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         display = formatAttachmentReferencesForDisplay(truncatedLineText);
       }
 
+      // 彩虹色高亮 "workflow" 关键词（斜杠命令模式下不着色）
+      const trimmed = buffer.text.trimStart();
+      const isSlashWorkflow = /^\/wf\b|^\/workflow\b/i.test(trimmed);
+      if (!isSlashWorkflow) {
+        display = applyWorkflowRainbow(display);
+      }
+
       // 补充空格以填充行宽
       const currentVisualWidth = stringWidth(display);
       if (currentVisualWidth < inputWidth) {
@@ -1080,7 +1092,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     <>
       {/* Top border line */}
       <Box paddingX={1} marginTop={1}>
-        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth - 2, 20))}</Text>
+        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth + 2, 20))}</Text>
       </Box>
       {/* Input content */}
       <Box paddingX={1} minHeight={dynamicInputHeight}>
@@ -1104,7 +1116,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       </Box>
       {/* Bottom border line */}
       <Box paddingX={1}>
-        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth - 2, 20))}</Text>
+        <Text color={Colors.Gray} dimColor>{'─'.repeat(Math.max(inputWidth + 2, 20))}</Text>
       </Box>
 
       {/* 长文本粘贴提示 */}

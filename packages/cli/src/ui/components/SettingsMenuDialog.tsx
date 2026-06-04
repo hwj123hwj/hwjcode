@@ -23,6 +23,7 @@ interface SettingsMenuDialogProps {
   onOpenTheme: () => void;
   onOpenEditor: () => void;
   onOpenModel: () => void;
+  onReloadMemory?: () => Promise<void>;
 }
 
 /**
@@ -38,6 +39,7 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
   onOpenTheme,
   onOpenEditor,
   onOpenModel,
+  onReloadMemory,
 }: SettingsMenuDialogProps) {
 
   // Calculate display values
@@ -46,6 +48,16 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
   const modelValue = settings.merged.preferredModel
     ? getModelDisplayName(settings.merged.preferredModel, config)
     : t('config.value.auto');
+
+  // Project memory mode display value
+  const projectMemoryMode = settings.merged.projectMemoryMode || 'all';
+  const projectMemoryDisplayValue = (() => {
+    switch (projectMemoryMode) {
+      case 'deepv-only': return t('config.value.project.memory.deepvOnly');
+      case 'none': return t('config.value.project.memory.none');
+      default: return t('config.value.project.memory.all');
+    }
+  })();
 
   // 主菜单选项 - 按使用频率排序
   const menuItems: RadioSelectItem<string>[] = [
@@ -69,6 +81,7 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     { label: t('config.menu.theme'), value: 'theme', rightText: `(${themeValue})` },
     { label: t('config.menu.language'), value: 'language', rightText: settings.merged.preferredLanguage ? `(${settings.merged.preferredLanguage})` : `(${t('config.value.default')})` },
     { label: t('config.menu.editor'), value: 'editor', rightText: `(${editorValue})` },
+    { label: t('config.menu.project.memory'), value: 'project-memory', rightText: `(${projectMemoryDisplayValue})` },
     { label: `${settings.merged.vimMode ? '✅' : '❌'} ${t('config.menu.vim')}`, value: 'vim', rightText: settings.merged.vimMode ? `(${t('config.value.on')})` : `(${t('config.value.off')})` },
     { label: `${config.getHealthyUseEnabled() ? '✅' : '❌'} ${t('config.menu.healthy.use')}`, value: 'healthy-use', rightText: config.getHealthyUseEnabled() ? `(${t('config.value.on')})` : `(${t('config.value.off')})` },
   ];
@@ -96,8 +109,15 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     { label: t('config.option.healthy.use.disable'), value: 'off' },
   ];
 
+  // Project Memory Mode 选项
+  const projectMemoryItems: RadioSelectItem<string>[] = [
+    { label: t('config.option.project.memory.all'), value: 'all' },
+    { label: t('config.option.project.memory.deepvOnly'), value: 'deepv-only' },
+    { label: t('config.option.project.memory.none'), value: 'none' },
+  ];
+
   // 菜单状态
-  type MenuView = 'main' | 'yolo' | 'agent-style' | 'healthy-use' | 'language';
+  type MenuView = 'main' | 'yolo' | 'agent-style' | 'healthy-use' | 'language' | 'project-memory';
   const [currentView, setCurrentView] = useState<MenuView>('main');
   const [selectedMain, setSelectedMain] = useState<string>('model');
 
@@ -117,6 +137,9 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
   );
   const [selectedHealthyUse, setSelectedHealthyUse] = useState<string>(
     config.getHealthyUseEnabled() ? 'on' : 'off'
+  );
+  const [selectedProjectMemory, setSelectedProjectMemory] = useState<string>(
+    settings.merged.projectMemoryMode || 'all'
   );
 
   const [statusMessage, setStatusMessage] = useState<string>('');
@@ -146,6 +169,8 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
         handleEnterSubMenu('agent-style', value);
       } else if (value === 'healthy-use') {
         handleEnterSubMenu('healthy-use', value);
+      } else if (value === 'project-memory') {
+        handleEnterSubMenu('project-memory', value);
       } else if (value === 'language') {
         setLanguageInput(settings.merged.preferredLanguage || '');
         handleEnterSubMenu('language', value);
@@ -234,6 +259,35 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
       }, 1000);
     },
     [settings, config]
+  );
+
+  // 处理 Project Memory Mode 选择
+  const handleProjectMemorySelect = useCallback(
+    async (value: string) => {
+      setSelectedProjectMemory(value);
+      const newMode = value as 'all' | 'deepv-only' | 'none';
+      settings.setValue(SettingScope.Workspace, 'projectMemoryMode', newMode);
+
+      const modeLabel = (() => {
+        switch (newMode) {
+          case 'deepv-only': return t('config.value.project.memory.deepvOnly');
+          case 'none': return t('config.value.project.memory.none');
+          default: return t('config.value.project.memory.all');
+        }
+      })();
+      setStatusMessage(tp('config.status.project.memory.updated', { mode: modeLabel }));
+
+      // Reload memory to apply the new mode immediately
+      if (onReloadMemory) {
+        await onReloadMemory();
+      }
+
+      setTimeout(() => {
+        setCurrentView('main');
+        setStatusMessage('');
+      }, 1000);
+    },
+    [settings, onReloadMemory]
   );
 
   // 处理语言提交
@@ -385,6 +439,28 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
             onSelect={handleHealthyUseSelect}
             isFocused
             initialIndex={healthyUseItems.findIndex(item => item.value === selectedHealthyUse)}
+          />
+          <Box marginTop={1}>
+            <Text color={Colors.Foreground}>
+              {t('config.hint.press.esc')}
+            </Text>
+          </Box>
+        </Box>
+      )}
+
+      {/* Project Memory Mode Menu */}
+      {currentView === 'project-memory' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Box marginBottom={1}>
+            <Text color={Colors.AccentCyan}>
+              {t('config.submenu.project.memory.title')}
+            </Text>
+          </Box>
+          <RadioButtonSelect<string>
+            items={projectMemoryItems}
+            onSelect={handleProjectMemorySelect}
+            isFocused
+            initialIndex={projectMemoryItems.findIndex(item => item.value === selectedProjectMemory)}
           />
           <Box marginTop={1}>
             <Text color={Colors.Foreground}>

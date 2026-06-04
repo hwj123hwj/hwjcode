@@ -52,7 +52,8 @@ describe('SkillLoader', () => {
 
     marketplaceManager = new MarketplaceManager(settingsManager);
     pluginInstaller = new PluginInstaller(settingsManager, marketplaceManager);
-    loader = new SkillLoader(settingsManager, marketplaceManager);
+    // Pass testRoot as projectRoot to isolate tests from actual project directory
+    loader = new SkillLoader(settingsManager, marketplaceManager, undefined, testRoot);
   });
 
   afterEach(async () => {
@@ -352,6 +353,25 @@ Content
       expect(stats.byMarketplace['test-mp']).toBe(2);
       expect(stats.byPlugin['test-mp:test-plugin']).toBe(2);
     });
+
+    it('should force reload settings when requested', async () => {
+      await createTestMarketplace();
+
+      // First call without force reload
+      const stats1 = await loader.getSkillStats(false);
+      expect(stats1.total).toBe(2);
+
+      // Simulate external config change by directly modifying settings
+      const settingsManager = (loader as any).settingsManager;
+      const readSettingsSpy = vi.spyOn(settingsManager, 'readSettings');
+
+      // Second call with force reload
+      const stats2 = await loader.getSkillStats(true);
+
+      // Verify readSettings was called with forceReload=true
+      expect(readSettingsSpy).toHaveBeenCalledWith(true);
+      expect(stats2.total).toBe(2);
+    });
   });
 
   describe('cache management', () => {
@@ -383,6 +403,67 @@ Content
 
       const stats = loader.getCacheStats();
       expect(stats.skills).not.toContain('test-mp:test-plugin:skill1');
+    });
+  });
+
+  // ==========================================================================
+  // 🎯 Regression: symlinked user-project skills must be discovered.
+  //
+  // Bug: `fs.readdir(root, { withFileTypes: true })` returns Dirent objects
+  // whose `isDirectory()` method returns false for symlinks — even when
+  // the link points at a real directory. The pre-fix scanner used that
+  // method to filter entries, so `ln -s <repo> ~/.deepv/skills/foo`
+  // created a skill that silently failed to load.
+  // ==========================================================================
+  describe('symlink discovery', () => {
+    it('discovers symlinked skill directories alongside real ones', async () => {
+      // Project skill root (isolated by the `testRoot` wiring in beforeEach).
+      const projectSkillsDir = path.join(testRoot, '.deepv', 'skills');
+      await fs.ensureDir(projectSkillsDir);
+
+      // 1. A regular skill directory — the "happy path" baseline.
+      const realSkillDir = path.join(projectSkillsDir, 'real-skill');
+      await fs.ensureDir(realSkillDir);
+      await fs.writeFile(
+        path.join(realSkillDir, 'SKILL.md'),
+        `---\nname: real-skill\ndescription: regular folder skill\nlicense: MIT\n---\n\nBody`,
+      );
+
+      // 2. A skill that lives elsewhere and is surfaced via a symlink
+      //    — this is what users get on macOS when they `ln -s` a checkout
+      //    into ~/.deepv/skills/.
+      const externalSkillDir = path.join(testRoot, 'external', 'external-skill');
+      await fs.ensureDir(externalSkillDir);
+      await fs.writeFile(
+        path.join(externalSkillDir, 'SKILL.md'),
+        `---\nname: external-skill\ndescription: symlinked skill\nlicense: MIT\n---\n\nBody`,
+      );
+
+      const linkPath = path.join(projectSkillsDir, 'external-skill');
+      try {
+        await fs.symlink(externalSkillDir, linkPath, 'dir');
+      } catch (err: any) {
+        // On Windows without Developer Mode / admin rights symlink creation
+        // fails with EPERM; the bug can't be reproduced there, so skip.
+        if (err.code === 'EPERM' || err.code === 'ENOSYS') return;
+        throw err;
+      }
+
+      // Sanity: confirm the symlink looks like a file to Dirent (this is the
+      // exact pitfall the fix addresses — if this ever stops being true,
+      // Node's behavior changed and the helper can be simplified).
+      const rawEntries = await fs.readdir(projectSkillsDir, {
+        withFileTypes: true,
+      });
+      const linkEntry = rawEntries.find((e) => e.name === 'external-skill');
+      expect(linkEntry?.isDirectory()).toBe(false);
+      expect(linkEntry?.isSymbolicLink()).toBe(true);
+
+      // Load and assert BOTH skills are discovered.
+      const skills = await loader.loadEnabledSkills();
+      const skillNames = skills.map((s) => s.metadata.name).sort();
+      expect(skillNames).toContain('real-skill');
+      expect(skillNames).toContain('external-skill');
     });
   });
 });

@@ -362,6 +362,17 @@ export class MultiSessionCommunicationService {
     });
   }
 
+  /**
+   * 🔐 发送认证过期通知到 WebView，触发自动登出
+   * 当 API 返回 HTTP 401 时调用此方法
+   */
+  async sendAuthExpired(reason: string) {
+    await this.sendMessage({
+      type: 'auth_expired' as any,
+      payload: { reason }
+    });
+  }
+
   async sendToolConfirmationRequest(
     sessionId: string,
     toolId: string,
@@ -634,7 +645,7 @@ export class MultiSessionCommunicationService {
   }
 
   // 🎯 项目设置更新监听器
-  onProjectSettingsUpdate(handler: (data: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean }) => void): vscode.Disposable {
+  onProjectSettingsUpdate(handler: (data: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any }) => void): vscode.Disposable {
     return this.addMessageHandler('project_settings_update', handler);
   }
 
@@ -685,7 +696,7 @@ export class MultiSessionCommunicationService {
   }
 
   // 🎯 发送项目设置响应
-  async sendProjectSettingsResponse(settings: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean }) {
+  async sendProjectSettingsResponse(settings: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any }) {
     await this.sendMessage({
       type: 'project_settings_response',
       payload: settings
@@ -790,6 +801,87 @@ export class MultiSessionCommunicationService {
     confirmed: boolean;
   }) => void): vscode.Disposable {
     return this.addMessageHandler('compression_confirmation_response', handler);
+  }
+
+  // =============================================================================
+  // 🟢 自定义模型管理（与 CLI 共享 ~/.deepv/custom-models.json）
+  //
+  // 所有请求都带 requestId，extension 把响应原样回写到 webview。
+  // 与 onGetAvailableModels 的协议一致，避免 webview 端混用监听器。
+  // =============================================================================
+
+  onListCustomModels(handler: (data: { requestId: string }) => void): vscode.Disposable {
+    return this.addMessageHandler('list_custom_models', handler);
+  }
+
+  onAddCustomModels(
+    handler: (data: { requestId: string; models: any[] }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('add_custom_models', handler);
+  }
+
+  onDeleteCustomModel(
+    handler: (data: { requestId: string; modelId: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('delete_custom_model', handler);
+  }
+
+  onFetchEasyRouterModels(
+    handler: (data: { requestId: string; apiKey: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('fetch_easy_router_models', handler);
+  }
+
+  onFetchEasyClawMetadata(
+    handler: (data: { requestId: string }) => void,
+  ): vscode.Disposable {
+    return this.addMessageHandler('fetch_easy_claw_metadata', handler);
+  }
+
+  /**
+   * Reply to a custom-model request (list / add / delete) using the same
+   * `requestId` the webview sent. The webview's customModelsService matches
+   * pending promises by id.
+   */
+  async sendCustomModelsResponse(
+    requestId: string,
+    response: { success: boolean; models?: any[]; error?: string },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'custom_models_response',
+      payload: { requestId, ...response },
+    });
+  }
+
+  /**
+   * Broadcast that the persisted custom-model list changed. Sent without
+   * requestId so all webviews / model selectors can refresh themselves.
+   */
+  async sendCustomModelsChanged(models: any[]): Promise<void> {
+    await this.sendMessage({
+      type: 'custom_models_changed',
+      payload: { models },
+    });
+  }
+
+  async sendFetchEasyRouterModelsResponse(
+    requestId: string,
+    response: { success: boolean; models?: any[]; error?: string; status?: number },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'fetch_easy_router_models_response',
+      payload: { requestId, ...response },
+    });
+  }
+
+  async sendFetchEasyClawMetadataResponse(
+    requestId: string,
+    response: { success: boolean; entries?: Array<[string, any]>; error?: string },
+  ): Promise<void> {
+    await this.sendMessage({
+      type: 'fetch_easy_claw_metadata_response',
+      payload: { requestId, ...response },
+    });
   }
 
   // =============================================================================
@@ -1044,11 +1136,21 @@ export class MultiSessionCommunicationService {
   // =============================================================================
 
   /**
-   * 发送NanoBanana上传响应
+   * 发送NanoBanana上传响应（单张）
    */
   async sendNanoBananaUploadResponse(data: { success: boolean; publicUrl?: string; error?: string }) {
     await this.sendMessage({
       type: 'nanobanana_upload_response',
+      payload: data
+    });
+  }
+
+  /**
+   * 发送NanoBanana批量上传响应（多张）
+   */
+  async sendNanoBananaBatchUploadResponse(data: { success: boolean; publicUrls?: string[]; error?: string }) {
+    await this.sendMessage({
+      type: 'nanobanana_batch_upload_response',
       payload: data
     });
   }
@@ -1082,16 +1184,37 @@ export class MultiSessionCommunicationService {
   }
 
   /**
-   * 监听NanoBanana上传请求
+   * 监听NanoBanana上传请求（单张）
    */
   onNanoBananaUpload(handler: (data: { filename: string; contentType: string; fileData: string }) => void) {
     return this.addMessageHandler('nanobanana_upload', handler);
   }
 
   /**
-   * 监听NanoBanana生成请求
+   * 监听NanoBanana批量上传请求（多张）
    */
-  onNanoBananaGenerate(handler: (data: { prompt: string; aspectRatio: string; imageSize: string; referenceImageUrl?: string }) => void) {
+  onNanoBananaBatchUpload(handler: (data: { files: Array<{ filename: string; contentType: string; fileData: string }> }) => void) {
+    return this.addMessageHandler('nanobanana_batch_upload', handler);
+  }
+
+  /**
+   * 监听NanoBanana生成请求（支持多轮会话 + 多图参考）
+   */
+  onNanoBananaGenerate(handler: (data: {
+    prompt: string;
+    aspectRatio: string;
+    imageSize: string;
+    referenceImageUrl?: string;
+    referenceImageUrls?: string[];
+    conversationContext?: {
+      previousGeneratedImageUrl: string;
+      history: Array<{
+        role: 'user' | 'assistant';
+        prompt?: string;
+        imageUrl?: string;
+      }>;
+    };
+  }) => void) {
     return this.addMessageHandler('nanobanana_generate', handler);
   }
 

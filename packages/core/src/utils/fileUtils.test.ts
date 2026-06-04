@@ -118,6 +118,13 @@ describe('fileUtils', () => {
       expect(isWithinRoot(posixPathOutside, posixRoot)).toBe(false);
     });
 
+    if (process.platform === 'win32') {
+      it('should handle Windows drive letter casing difference case-insensitively', () => {
+        expect(isWithinRoot('d:\\123\\file.txt', 'D:\\123')).toBe(true);
+        expect(isWithinRoot('D:\\123\\file.txt', 'd:\\123')).toBe(true);
+      });
+    }
+
     it('should return false for a root path that is a sub-path of the path to check', () => {
       const pathToCheck = path.resolve('/project/root/sub');
       const rootSub = path.resolve('/project/root');

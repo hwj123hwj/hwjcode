@@ -62,8 +62,8 @@ describe('configCommand', () => {
     expect(configCommand.kind).toBe(CommandKind.BUILT_IN);
   });
 
-  it('should have 8 subcommands', () => {
-    expect(configCommand.subCommands).toHaveLength(8);
+  it('should have 9 subcommands', () => {
+    expect(configCommand.subCommands).toHaveLength(9);
     const names = configCommand.subCommands!.map(cmd => cmd.name);
     expect(names).toContain('theme');
     expect(names).toContain('editor');
@@ -73,6 +73,7 @@ describe('configCommand', () => {
     expect(names).toContain('yolo');
     expect(names).toContain('healthy-use');
     expect(names).toContain('language');
+    expect(names).toContain('memory-mode');
   });
 
   it('should open settings menu dialog when no args provided', async () => {

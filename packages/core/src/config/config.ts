@@ -31,10 +31,12 @@ import {
   GEMINI_CONFIG_DIR as GEMINI_DIR,
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { ImageReaderTool } from '../tools/image-reader.js';
 import { TodoWriteTool } from '../tools/todo-write.js';
 import { ReadLintsTool } from '../tools/read-lints.js';
 import { LintFixTool } from '../tools/lint-fix.js';
 import { TaskTool } from '../tools/task.js';
+import { WorkflowTool } from '../tools/workflow.js';
 import { UseSkillTool } from '../tools/use-skill.js';
 import { ListSkillsTool } from '../tools/list-skills.js';
 import { GetSkillDetailsTool } from '../tools/get-skill-details.js';
@@ -47,11 +49,18 @@ import { LspTool } from '../tools/lsp.js';
 import { MultiEditTool } from '../tools/multiedit.js';
 import { PatchTool } from '../tools/patch.js';
 import { BatchTool } from '../tools/batch.js';
+import { AskUserQuestionTool } from '../tools/ask-user-question.js';
+import { LocalTimeTool } from '../tools/local-time.js';
+import { LarkCliTool } from '../tools/lark-cli.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
+import {
+  type FileSystemService,
+  StandardFileSystemService,
+} from '../services/fileSystemService.js';
 import { GitService } from '../services/gitService.js';
 import { getProjectTempDir } from '../utils/paths.js';
 import {
@@ -65,7 +74,6 @@ import {
   DEFAULT_GEMINI_EMBEDDING_MODEL,
   DEFAULT_GEMINI_FLASH_MODEL,
 } from './models.js';
-import { ClearcutLogger } from '../telemetry/clearcut-logger/clearcut-logger.js';
 import { shouldAttemptBrowserLaunch } from '../utils/browser.js';
 import { MCPOAuthConfig } from '../mcp/oauth-provider.js';
 import { IdeClient } from '../ide/ide-client.js';
@@ -190,6 +198,7 @@ export interface ConfigParameters {
   mcpServers?: Record<string, MCPServerConfig>;
   userMemory?: string;
   geminiMdFileCount?: number;
+  userRules?: string;
   approvalMode?: ApprovalMode;
   showMemoryUsage?: boolean;
   contextFileName?: string | string[];
@@ -219,7 +228,7 @@ export interface ConfigParameters {
   summarizeToolOutput?: Record<string, SummarizeToolOutputSettings>;
   model?: string;
   cloudModels?: CloudModelInfo[];
-  customModels?: import('../types/customModel.js').CustomModelConfig[];
+  customModels?: Array<import('../types/customModel.js').CustomModelConfig>;
   ideMode?: boolean;
   ideClient?: IdeClient;
   silentMode?: boolean;
@@ -236,6 +245,9 @@ export class Config {
   private resourceRegistry!: ResourceRegistry;
   private sessionId: string;
   private contentGeneratorConfig!: ContentGeneratorConfig;
+  private acpAuthApiKey?: string;
+  private acpAuthBaseUrl?: string;
+  private acpAuthCustomHeaders?: Record<string, string>;
   private readonly embeddingModel: string;
   private readonly sandbox: SandboxConfig | undefined;
   private readonly targetDir: string;
@@ -251,6 +263,7 @@ export class Config {
   private userMemory: string;
   private memoryTokenCount: number = 0; // 新增
   private geminiMdFileCount: number;
+  private userRules: string;
   private geminiMdFilePaths: string[] = [];
   private approvalMode: ApprovalMode;
   private readonly showMemoryUsage: boolean;
@@ -265,6 +278,7 @@ export class Config {
     enableRecursiveFileSearch: boolean;
   };
   private fileDiscoveryService: FileDiscoveryService | null = null;
+  private fileSystemService: FileSystemService | null = null;
   private gitService: GitService | undefined = undefined;
   private readonly checkpointing: boolean;
   private readonly proxy: string | undefined;
@@ -292,7 +306,7 @@ export class Config {
     | undefined;
   private model: string | undefined;
   private cloudModels: CloudModelInfo[] | undefined;
-  private customModels: import('../types/customModel.js').CustomModelConfig[] | undefined;
+  private customModels: Array<import('../types/customModel.js').CustomModelConfig> | undefined;
   private readonly experimentalAcp: boolean = false;
   private readonly silentMode: boolean;
   private readonly vsCodePluginMode: boolean;
@@ -320,15 +334,19 @@ export class Config {
     this.userMemory = params.userMemory ?? '';
     this.memoryTokenCount = params.memoryTokenCount ?? 0; // 新增
     this.geminiMdFileCount = params.geminiMdFileCount ?? 0;
+    this.userRules = params.userRules ?? '';
     this.cwd = params.cwd ?? process.cwd();
 
     // 初始化项目配置管理器
     this.projectSettingsManager = new ProjectSettingsManager(this.cwd);
     const projectSettings = this.projectSettingsManager.load();
 
-    // 项目级配置优先于参数配置
+    // 项目级配置默认优先于一般参数配置
+    // 但如果命令行明确传入了 YOLO 模式（-y），它应具有最高优先级覆盖项目配置
     const projectApprovalMode = ProjectSettingsManager.toApprovalMode(projectSettings.yolo);
-    this.approvalMode = projectApprovalMode ?? params.approvalMode ?? ApprovalMode.DEFAULT;
+    this.approvalMode = params.approvalMode === ApprovalMode.YOLO
+      ? ApprovalMode.YOLO
+      : (projectApprovalMode ?? params.approvalMode ?? ApprovalMode.DEFAULT);
     this.showMemoryUsage = params.showMemoryUsage ?? false;
     this.accessibility = params.accessibility ?? {};
     // 硬编码禁用所有遥测功能
@@ -381,14 +399,6 @@ export class Config {
     if (this.telemetrySettings.enabled) {
       initializeTelemetry(this);
     }
-
-    if (this.getUsageStatisticsEnabled()) {
-      ClearcutLogger.getInstance(this)?.logStartSessionEvent(
-        new StartSessionEvent(this),
-      );
-    } else {
-
-    }
   }
 
   /**
@@ -435,6 +445,22 @@ export class Config {
       setSilentMode(true);
     }
 
+    // 🧹 异步清理 ~/.deepv/last-requests/ 内超过 3 天的旧 dump 文件。
+    // 进程内只跑一次，不阻塞 initialize；失败不影响启动。
+    void (async () => {
+      try {
+        const { cleanupLastRequestsDir } = await import('../utils/lastRequestsCleanup.js');
+        const removed = await cleanupLastRequestsDir();
+        if (removed > 0) {
+          // 用 console.log 而不是 logger，避免与 silentMode 互锁。
+          // 信息量很小，启动期带一行无害。
+          console.log(`[deepv] last-requests cleanup: removed ${removed} stale dump file(s)`);
+        }
+      } catch {
+        // 清理失败永远不能阻塞或抛错。
+      }
+    })();
+
     // Initialize centralized FileDiscoveryService
     this.getFileService();
     if (this.getCheckpointingEnabled()) {
@@ -480,7 +506,14 @@ export class Config {
     }
   }
 
-  async refreshAuth(authMethod: AuthType) {
+  async refreshAuth(
+    authMethod: AuthType,
+    options?: {
+      apiKey?: string;
+      baseUrl?: string;
+      customHeaders?: Record<string, string>;
+    },
+  ) {
     // BUG修复: 保存当前模型设置，防止在重新配置时丢失
     // 修复策略: 在refreshAuth前保存模型，重新配置后恢复
     // 影响范围: packages/core/src/config/config.ts:refreshAuth方法
@@ -493,6 +526,19 @@ export class Config {
       authMethod,
     );
 
+    // 允许 ACP 客户端在认证时覆盖 apiKey / baseUrl / headers。
+    // DeepCode 的 ContentGeneratorConfig 目前只承载 authType / proxy，
+    // 这些扩展字段先存到 Config 实例上，供 ACP 适配层读取。
+    if (options?.apiKey !== undefined) {
+      this.acpAuthApiKey = options.apiKey;
+    }
+    if (options?.baseUrl !== undefined) {
+      this.acpAuthBaseUrl = options.baseUrl;
+    }
+    if (options?.customHeaders !== undefined) {
+      this.acpAuthCustomHeaders = options.customHeaders;
+    }
+
     // 恢复之前设置的模型（特别是Claude模型）
     // if (currentModel && this.contentGeneratorConfig) {
     //   this.contentGeneratorConfig.model = currentModel;
@@ -501,6 +547,21 @@ export class Config {
 
     this.geminiClient = new GeminiClient(this);
     await this.geminiClient.initialize(this.contentGeneratorConfig);
+  }
+
+  /** ACP 认证时透传的 API Key（可空）。 */
+  getAcpAuthApiKey(): string | undefined {
+    return this.acpAuthApiKey;
+  }
+
+  /** ACP 认证时透传的 base URL（可空）。 */
+  getAcpAuthBaseUrl(): string | undefined {
+    return this.acpAuthBaseUrl;
+  }
+
+  /** ACP 认证时透传的自定义 HTTP headers（可空）。 */
+  getAcpAuthCustomHeaders(): Record<string, string> | undefined {
+    return this.acpAuthCustomHeaders;
   }
 
   getSessionId(): string {
@@ -531,7 +592,7 @@ export class Config {
     this.cloudModels = models;
   }
 
-  getCustomModels(): import('../types/customModel.js').CustomModelConfig[] | undefined {
+  getCustomModels(): Array<import('../types/customModel.js').CustomModelConfig> | undefined {
     return this.customModels;
   }
 
@@ -555,7 +616,7 @@ export class Config {
     return undefined;
   }
 
-  setCustomModels(models: import('../types/customModel.js').CustomModelConfig[]): void {
+  setCustomModels(models: Array<import('../types/customModel.js').CustomModelConfig>): void {
     this.customModels = models;
   }
 
@@ -673,6 +734,15 @@ export class Config {
     this.memoryTokenCount = count;
   }
 
+  // 🎯 用户规则相关
+  getUserRules(): string {
+    return this.userRules;
+  }
+
+  setUserRules(rules: string): void {
+    this.userRules = rules;
+  }
+
   getGeminiMdFileCount(): number {
     return this.geminiMdFileCount;
   }
@@ -781,6 +851,22 @@ export class Config {
     this.projectSettingsManager.setAgentStyle(style);
   }
 
+  /**
+   * 获取当前思考配置（来自项目设置，可被 /thinking 命令修改）
+   * 返回 undefined 表示用户未显式设置，应使用模型/provider 默认值
+   */
+  getThinkingConfig(): import('../types/customModel.js').ThinkingConfig | undefined {
+    return this.projectSettingsManager.getThinkingConfig();
+  }
+
+  /**
+   * 设置思考配置并持久化
+   * 传入 undefined 可清除项目级配置（恢复为模型默认）
+   */
+  setThinkingConfig(config: import('../types/customModel.js').ThinkingConfig | undefined): void {
+    this.projectSettingsManager.setThinkingConfig(config);
+  }
+
   getShowMemoryUsage(): boolean {
     return this.showMemoryUsage;
   }
@@ -869,6 +955,23 @@ export class Config {
       this.fileDiscoveryService = new FileDiscoveryService(this.targetDir);
     }
     return this.fileDiscoveryService;
+  }
+
+  /**
+   * The text file read/write provider. Defaults to {@link StandardFileSystemService}
+   * (Node `fs/promises`). ACP clients can install an editor-backed provider
+   * via {@link setFileSystemService}.
+   */
+  getFileSystemService(): FileSystemService {
+    if (!this.fileSystemService) {
+      this.fileSystemService = new StandardFileSystemService();
+    }
+    return this.fileSystemService;
+  }
+
+  /** Replace the active {@link FileSystemService}. */
+  setFileSystemService(service: FileSystemService): void {
+    this.fileSystemService = service;
   }
 
   getUsageStatisticsEnabled(): boolean {
@@ -999,12 +1102,16 @@ export class Config {
     registerCoreTool(ShellTool, this);
     registerCoreTool(MemoryTool, this);
     registerCoreTool(WebSearchTool, this);
+    registerCoreTool(ImageReaderTool, this);
     registerCoreTool(TodoWriteTool, this);
-    registerCoreTool(ReadLintsTool, this);
+    if (this.getVsCodePluginMode()) {
+      registerCoreTool(ReadLintsTool, this);
+    }
     registerCoreTool(LintFixTool, this);
     registerCoreTool(UseSkillTool, this);
     registerCoreTool(ListSkillsTool, this);
     registerCoreTool(GetSkillDetailsTool, this);
+
     // Old individual LSP tools registration removed in favor of unified LspTool
 
     registerCoreTool(PptOutlineTool, this);
@@ -1015,10 +1122,22 @@ export class Config {
     registerCoreTool(PatchTool, this);
     registerCoreTool(BatchTool, this);
 
-    // TaskTool (SubAgent) is disabled in VSCode plugin mode
-    // but remains available in CLI mode and other IDE environments
+    // AskUserQuestion interactive dialog is only available in CLI mode;
+    // it performs poorly in VSCode plugin environment
     if (!this.getVsCodePluginMode()) {
-      registerCoreTool(TaskTool, this, registry);
+      registerCoreTool(AskUserQuestionTool, this);
+    }
+
+    registerCoreTool(LocalTimeTool, this);
+    registerCoreTool(LarkCliTool, this);
+
+    // TaskTool (SubAgent) is available in both CLI and VSCode environments
+    registerCoreTool(TaskTool, this, registry);
+
+    // WorkflowTool is disabled in VSCode plugin mode (not yet adapted)
+    // but remains available in CLI mode
+    if (!this.getVsCodePluginMode()) {
+      registerCoreTool(WorkflowTool, this, registry);
     }
 
     // 快速启动优化：只发现命令行工具，MCP工具将在后台异步加载

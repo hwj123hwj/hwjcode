@@ -14,7 +14,7 @@ import Gradient from 'ink-gradient';
 import { MemoryUsageDisplay } from './MemoryUsageDisplay.js';
 import { t } from '../utils/i18n.js';
 import { getModelDisplayName } from '../commands/modelCommand.js';
-import { getFooterDisplayConfig, getShortVersion, getShortModelName, getContextDisplay } from '../utils/footerUtils.js';
+import { getFooterDisplayConfig, getShortVersion, getShortModelName, getContextDisplay, getThinkingEffortLabel } from '../utils/footerUtils.js';
 
 interface FooterProps {
   model: string;
@@ -33,6 +33,7 @@ interface FooterProps {
   ideConnectionStatus?: IDEConnectionStatus;
   config?: Config;
   terminalWidth?: number;
+  isFeishuProcessing?: boolean;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -52,6 +53,7 @@ export const Footer: React.FC<FooterProps> = ({
   ideConnectionStatus,
   config,
   terminalWidth = 80,
+  isFeishuProcessing = false,
 }) => {
   const limit = tokenLimit(model, config);
   const percentage = promptTokenCount / limit;
@@ -68,6 +70,9 @@ export const Footer: React.FC<FooterProps> = ({
 
   // 获取 Agent Style
   const agentStyle = config?.getAgentStyle() ?? 'default';
+
+  // 获取 Thinking Config
+  const thinkingConfig = config?.getThinkingConfig();
 
   return (
     <Box justifyContent="space-between" width="100%" marginTop={1}>
@@ -135,24 +140,37 @@ export const Footer: React.FC<FooterProps> = ({
         {versionDisplay ? (
           <Box>
             <Text color={Colors.Gray}>{versionDisplay}</Text>
-            <Text color={Colors.Gray}> | </Text>
+            {!isFeishuProcessing && (contextDisplay || model) ? (
+              <Text color={Colors.Gray}> | </Text>
+            ) : null}
           </Box>
         ) : null}
-        {contextDisplay ? (
+        {contextDisplay && !isFeishuProcessing ? (
           <Text color={Colors.Gray}>
             {contextDisplay}
           </Text>
         ) : null}
 
         {/* Current Model Display */}
-        {model ? (
+        {model && !isFeishuProcessing ? (
           <Box>
             {contextDisplay ? <Text color={Colors.Gray}> | </Text> : null}
-            {displayConfig.simplifyModel ? (
-              <Text color={Colors.Gray}>{modelShortDisplay}</Text>
-            ) : (
-              <Text color={Colors.Gray}>{t('footer.current.model')}: {modelDisplay}</Text>
-            )}
+            <Text color={Colors.Gray}>
+              {displayConfig.simplifyModel ? modelShortDisplay : modelDisplay}
+            </Text>
+            {/* Thinking effort suffix — dimmed so it visually steps back from
+                the model name. The bracket label (e.g. "max", "med") replaces
+                the long word "thinking" while still telling the user what
+                effort tier is active. */}
+            {(() => {
+              const effortLabel = getThinkingEffortLabel(thinkingConfig);
+              if (!effortLabel) return null;
+              return (
+                <Text color={Colors.Gray} dimColor>
+                  {' '}🧠 {effortLabel}
+                </Text>
+              );
+            })()}
           </Box>
         ) : null}
 

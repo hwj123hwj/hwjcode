@@ -650,6 +650,9 @@ This tool automatically enables external file access when absolute paths are det
           mimetype,
           path.extname(filePath),
         );
+
+        // 追踪文件读取，用于压缩后上下文恢复
+        this.config.getGeminiClient?.()?.trackFileRead(filePath);
       }
     }
 

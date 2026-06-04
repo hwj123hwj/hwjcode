@@ -11,7 +11,7 @@ import { URL } from 'url';
 import * as crypto from 'crypto';
 
 import { createDeepvlabAuthHandler } from './deepvlabAuth.js';
-import { getFeishuConfigFromServer } from '../../config/serverConfig.js';
+import { getFeishuConfigFromServer, getFeishuTenantsFromServer } from '../../config/serverConfig.js';
 import { ProxyAuthManager } from '../../core/proxyAuth.js';
 import { AuthTemplates } from './templates/index.js';
 
@@ -79,7 +79,17 @@ export class AuthServer {
         if (reqUrl.pathname === '/' || reqUrl.pathname === '/auth-select') {
           await this.sendAuthSelectPage(res);
         } else if (reqUrl.pathname === '/start-feishu-auth' && req.method === 'POST') {
-          await this.handleStartFeishuAuth(res);
+          // 解析body获取可选的appId（多租户支持）
+          let body = '';
+          req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+          req.on('end', async () => {
+            try {
+              const parsed = body ? JSON.parse(body) : {};
+              await this.handleStartFeishuAuth(res, parsed);
+            } catch {
+              await this.handleStartFeishuAuth(res);
+            }
+          });
         } else if (reqUrl.pathname === '/start-deepvlab-auth' && req.method === 'POST') {
           await this.handleStartDeepvlabAuth(res);
         } else if (reqUrl.pathname === '/start-cheetah-auth' && req.method === 'POST') {
@@ -88,6 +98,8 @@ export class AuthServer {
           await this.handleStartVipCardAuth(req, res);
         } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
           await this.handleFeishuAllowedCheck(res);
+        } else if (reqUrl.pathname === '/api/backend/feishu-tenants' && req.method === 'GET') {
+          await this.handleFeishuTenants(res);
         } else {
           this.sendErrorResponse(res, 'Not found');
         }
@@ -120,7 +132,16 @@ export class AuthServer {
             if (reqUrl.pathname === '/' || reqUrl.pathname === '/auth-select') {
               await this.sendAuthSelectPage(res);
             } else if (reqUrl.pathname === '/start-feishu-auth' && req.method === 'POST') {
-              await this.handleStartFeishuAuth(res);
+              let body = '';
+              req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+              req.on('end', async () => {
+                try {
+                  const parsed = body ? JSON.parse(body) : {};
+                  await this.handleStartFeishuAuth(res, parsed);
+                } catch {
+                  await this.handleStartFeishuAuth(res);
+                }
+              });
             } else if (reqUrl.pathname === '/start-deepvlab-auth' && req.method === 'POST') {
               await this.handleStartDeepvlabAuth(res);
             } else if (reqUrl.pathname === '/start-cheetah-auth' && req.method === 'POST') {
@@ -129,6 +150,8 @@ export class AuthServer {
               await this.handleStartVipCardAuth(req, res);
             } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
               await this.handleFeishuAllowedCheck(res);
+            } else if (reqUrl.pathname === '/api/backend/feishu-tenants' && req.method === 'GET') {
+              await this.handleFeishuTenants(res);
             } else {
               this.sendErrorResponse(res, 'Not found');
             }
@@ -335,17 +358,47 @@ export class AuthServer {
   }
 
   /**
+   * 处理获取飞书租户列表请求
+   */
+  private async handleFeishuTenants(res: http.ServerResponse): Promise<void> {
+    try {
+      const tenants = await getFeishuTenantsFromServer();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify(tenants));
+    } catch (error) {
+      console.error('❌ [Auth Server] 获取飞书租户列表失败:', error);
+      // 失败时返回空数组，前端会 fallback 到默认按钮
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify([]));
+    }
+  }
+
+  /**
    * 处理启动飞书认证请求
    */
-  private async handleStartFeishuAuth(res: http.ServerResponse): Promise<void> {
+  private async handleStartFeishuAuth(res: http.ServerResponse, reqBody?: any): Promise<void> {
     try {
       console.log('🚀 [Auth Server] 启动飞书认证流程');
 
-      // 获取飞书配置（只需要appId）
-      const feishuConfig = await getFeishuConfigFromServer();
+      // 支持多租户：客户端可传入 appId 指定租户
+      const targetAppId = reqBody?.appId;
+      let appId: string;
 
-      // 直接构建飞书认证URL，只使用appId
-      const authUrl = this.buildFeishuAuthUrl(feishuConfig.appId);
+      if (targetAppId) {
+        appId = targetAppId;
+      } else {
+        const feishuConfig = await getFeishuConfigFromServer();
+        appId = feishuConfig.appId;
+      }
+
+      // 直接构建飞书认证URL
+      const authUrl = this.buildFeishuAuthUrl(appId);
 
       const response = {
         success: true,
@@ -377,7 +430,8 @@ export class AuthServer {
    * 构建飞书认证URL
    */
   private buildFeishuAuthUrl(appId: string): string {
-    const state = this.generateState();
+    // state 中编码 appId（格式: randomStr_appId），回调时解析
+    const state = `${this.generateState()}_${appId}`;
     const params = new URLSearchParams({
       app_id: appId,
       redirect_uri: `http://localhost:${this.actualCallbackPort}/callback`,
@@ -1095,6 +1149,9 @@ export class AuthServer {
 
       console.log('🔄 [Auth Server] 调用服务端exchange接口交换飞书token');
 
+      // 从 state 中解析多租户 appId（格式: randomStr_appId）
+      const stateAppId = state && state.includes('_') ? state.split('_').slice(1).join('_') : undefined;
+
       // 调用服务端的飞书token交换接口（与官网相同的流程）
       const proxyServerUrl = process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai';
       console.log('飞书token交换，proxyServerUrl:', `${proxyServerUrl}/api/auth/feishu/exchange`);
@@ -1109,7 +1166,8 @@ export class AuthServer {
           },
           body: JSON.stringify({
             code: code,
-            redirect_uri: `http://localhost:${this.actualCallbackPort}/callback`
+            redirect_uri: `http://localhost:${this.actualCallbackPort}/callback`,
+            app_id: stateAppId,
           })
         });
       } catch (fetchError: any) {

@@ -200,6 +200,9 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
       path.extname(params.absolute_path),
     );
 
+    // 追踪文件读取，用于压缩后上下文恢复
+    this.config.getGeminiClient?.()?.trackFileRead(params.absolute_path);
+
     if (typeof result.llmContent === 'string' && result.llmContent.length == 0) {
       result.llmContent = 'ReadFile Success, but Content is empty!';
     }

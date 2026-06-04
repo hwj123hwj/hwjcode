@@ -8,9 +8,10 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { IndividualToolCallDisplay, ToolCallStatus } from '../../types.js';
 import { DiffRenderer } from './DiffRenderer.js';
-import { TodoDisplayRenderer } from './TodoDisplayRenderer.js';
+import { TodoSummaryLine } from './TodoDisplayRenderer.js';
 import { SubAgentDisplayRenderer } from './SubAgentDisplayRenderer.js';
 import { McpThinkingDisplayRenderer } from './McpThinkingDisplayRenderer.js';
+import { GoalAchievedDisplayRenderer } from './GoalAchievedDisplayRenderer.js';
 import { Colors } from '../../colors.js';
 import { MarkdownDisplay } from '../../utils/MarkdownDisplay.js';
 import { GeminiRespondingSpinner } from '../GeminiRespondingSpinner.js';
@@ -20,6 +21,7 @@ import { getLocalizedToolName, isChineseLocale, t } from '../../utils/i18n.js';
 import { useSmallWindowOptimization, WindowSizeLevel } from '../../hooks/useSmallWindowOptimization.js';
 import stringWidth from 'string-width';
 import { truncateText } from '../../utils/textTruncator.js';
+import { shouldCollapseToolResult } from './toolResultCollapse.js';
 
 const STATIC_HEIGHT = 1;
 const RESERVED_LINE_COUNT = 5; // for tool name, status, padding etc.
@@ -167,6 +169,82 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
   const shouldSimplifyDiff = smallWindowConfig.sizeLevel === WindowSizeLevel.SMALL ||
     smallWindowConfig.sizeLevel === WindowSizeLevel.TINY;
 
+  // 🎯 已完成的读取/搜索/列目录类工具：标题行已说明动作+目标，
+  //    结果体（行数、文件清单等）是冗余确认，完成后收起，只保留标题一行。
+  const collapseResult = shouldCollapseToolResult({ toolId, status, resultDisplay });
+
+  // 🎯 为折叠成功的工具提取精简结果，优化用户界面展示
+  let compactResultText = '';
+  if (collapseResult && status === ToolCallStatus.Success && resultDisplay) {
+    const isZh = isChineseLocale();
+    if (toolId === 'read_file') {
+      let lineCount = 0;
+      if (typeof resultDisplay === 'string') {
+        const linesMatch = resultDisplay.match(/\b(\d+)\s+lines\b/i);
+        const rangeMatch = resultDisplay.match(/read\s+lines:\s*(\d+)-(\d+)/i);
+        if (linesMatch) {
+          lineCount = parseInt(linesMatch[1], 10);
+        } else if (rangeMatch) {
+          const start = parseInt(rangeMatch[1], 10);
+          const end = parseInt(rangeMatch[2], 10);
+          lineCount = Math.max(0, end - start + 1);
+        } else {
+          lineCount = resultDisplay.split('\n').length;
+        }
+      }
+      compactResultText = isZh ? `(读了 ${lineCount} 行)` : `(${lineCount} lines read)`;
+    } else if (toolId === 'search_file_content') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Found (\d+) matches/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(匹配到 ${count} 个)` : `(${count} matches found)`;
+        } else if (resultDisplay.includes('No matches found')) {
+          compactResultText = isZh ? `(未找到匹配)` : `(No matches found)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'read_many_files') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/content from \*\*(\d+) file/i) ||
+                      resultDisplay.match(/content from \*\*(\d+)\*\* file/i) ||
+                      resultDisplay.match(/Successfully read and concatenated content from \*\*(\d+) file/i) ||
+                      resultDisplay.match(/(\d+) file\(s\)/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(读取了 ${count} 个文件)` : `(${count} files read)`;
+        } else {
+          compactResultText = isZh ? `(多文件读取完成)` : `(Files read completed)`;
+        }
+      }
+    } else if (toolId === 'glob') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Found (\d+) matching/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(找到 ${count} 个匹配文件)` : `(${count} matching files found)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'list_directory') {
+      if (typeof resultDisplay === 'string') {
+        const match = resultDisplay.match(/Listed (\d+) item/i);
+        if (match) {
+          const count = match[1];
+          compactResultText = isZh ? `(列出 ${count} 个子项)` : `(${count} items listed)`;
+        } else {
+          compactResultText = `(${resultDisplay})`;
+        }
+      }
+    } else if (toolId === 'web_search' || toolId === 'web_fetch') {
+      if (typeof resultDisplay === 'string') {
+        compactResultText = `(${resultDisplay})`;
+      }
+    }
+  }
+
   const availableHeight = availableTerminalHeight
     ? Math.max(
       availableTerminalHeight - STATIC_HEIGHT - RESERVED_LINE_COUNT,
@@ -182,7 +260,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
     renderOutputAsMarkdown = false;
   }
 
-  const childWidth = terminalWidth - 3; // account for padding.
+  const childWidth = terminalWidth - 2; // account for right padding and safety.
 
   // Special handling for Sequential thinking - convert to mcp_thinking_display
   const normalizedToolName = name?.toLowerCase().replace(/[_-]/g, '');
@@ -221,7 +299,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
     }
   }
   return (
-    <Box paddingX={1} paddingY={0} flexDirection="column" width={terminalWidth}>
+    <Box paddingLeft={0} paddingRight={1} paddingY={0} flexDirection="column" width={terminalWidth}>
       <Box minHeight={1} width="100%">
         <ToolStatusIndicator status={status} />
         <ToolInfo
@@ -229,7 +307,8 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
           status={status}
           description={description}
           emphasis={emphasis}
-          terminalWidth={terminalWidth - 2} // 减去 paddingX={1} 的两列
+          terminalWidth={terminalWidth - 1} // 减去 paddingRight={1} 的一列
+          compactResultText={compactResultText} // 🎯 传递精简结果
         />
         {emphasis === 'high' ? <TrailingIndicator /> : null}
       </Box>
@@ -280,7 +359,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
         </Box>
       ) : null}
       {/* Show regular resultDisplay if no thinking display and NOT background running */}
-      {!thinkingDisplayData && resultDisplay && status !== ToolCallStatus.BackgroundRunning ? (
+      {!thinkingDisplayData && resultDisplay && status !== ToolCallStatus.BackgroundRunning && !collapseResult ? (
         <Box paddingLeft={RESULT_DISPLAY_INDENT} width="100%">
           <Box flexDirection="column">
             {typeof resultDisplay === 'string' && renderOutputAsMarkdown ? (
@@ -362,7 +441,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
               <Box flexDirection="row">
                 <Text color={Colors.Gray}>└ </Text>
                 <Box flexGrow={1}>
-                  <TodoDisplayRenderer data={resultDisplay as any} />
+                  <TodoSummaryLine data={resultDisplay as any} />
                 </Box>
               </Box>
             ) : null}
@@ -382,6 +461,14 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
                 </Box>
               </Box>
             ) : null}
+            {typeof resultDisplay !== 'string' && (resultDisplay as any).type === 'goal_achieved_display' ? (
+              <Box flexDirection="row">
+                <Text color={Colors.Gray}>└ </Text>
+                <Box flexGrow={1}>
+                  <GoalAchievedDisplayRenderer data={resultDisplay as any} />
+                </Box>
+              </Box>
+            ) : null}
           </Box>
         </Box>
       ) : null}
@@ -398,7 +485,7 @@ const ToolStatusIndicator: React.FC<ToolStatusIndicatorProps> = ({
 }) => (
   <Box minWidth={STATUS_INDICATOR_WIDTH}>
     {status === ToolCallStatus.Pending ? (
-      <Text color={Colors.AccentGreen}>o</Text>
+      <Text color={Colors.Gray}>o</Text>
     ) : null}
     {status === ToolCallStatus.Executing ? (
       <GeminiRespondingSpinner
@@ -412,7 +499,7 @@ const ToolStatusIndicator: React.FC<ToolStatusIndicatorProps> = ({
       <Text color={Colors.AccentYellow}>▸</Text>
     ) : null}
     {status === ToolCallStatus.Success ? (
-      <Text color={Colors.AccentGreen}>•</Text>
+      <Text color={Colors.Gray}>•</Text>
     ) : null}
     {status === ToolCallStatus.Confirming ? (
       <Text color={Colors.AccentYellow}>?</Text>
@@ -436,6 +523,7 @@ type ToolInfoProps = {
   status: ToolCallStatus;
   emphasis: TextEmphasis;
   terminalWidth: number;
+  compactResultText?: string; // 🎯 新增：精简结果文本
 };
 const ToolInfo: React.FC<ToolInfoProps> = ({
   name,
@@ -443,6 +531,7 @@ const ToolInfo: React.FC<ToolInfoProps> = ({
   status,
   emphasis,
   terminalWidth,
+  compactResultText, // 🎯 新增：接收精简结果文本
 }) => {
   // Special handling for Sequential thinking tool - show summary instead of full thought
   let displayDescription = description;
@@ -495,6 +584,11 @@ const ToolInfo: React.FC<ToolInfoProps> = ({
           {getLocalizedToolName(name)}
         </Text>{' '}
         {displayDescription}
+        {compactResultText ? (
+          <Text color={Colors.Gray} bold={false}>
+            {' '}{compactResultText}
+          </Text>
+        ) : null}
       </Text>
     </Box>
   );

@@ -73,6 +73,8 @@ export class SkillsPaths {
 export class SettingsManager {
   private settingsCache: SkillsSettings | null = null;
   private installedPluginsCache: InstalledPluginsRecord | null = null;
+  private settingsFileMtime: number = 0; // settings.json 最后修改时间
+  private installedPluginsFileMtime: number = 0; // installed_plugins.json 最后修改时间
   private readonly backupRetention = 10; // 保留最近 10 个备份
 
   constructor() {}
@@ -164,18 +166,27 @@ export class SettingsManager {
 
   /**
    * 读取 settings.json
+   * @param forceReload 强制重新加载，忽略缓存（用于长驻进程）
    */
-  async readSettings(): Promise<SkillsSettings> {
-    if (this.settingsCache) {
-      return this.settingsCache;
-    }
-
+  async readSettings(forceReload = false): Promise<SkillsSettings> {
     try {
-      const content = await fs.readFile(SkillsPaths.SETTINGS_FILE, 'utf-8');
-      const settings = JSON.parse(content) as SkillsSettings;
-      this.settingsCache = settings;
-      return settings;
+      // 检查文件修改时间，如果文件被外部修改则清除缓存
+      const stat = await fs.stat(SkillsPaths.SETTINGS_FILE);
+      const fileMtime = stat.mtimeMs;
+
+      if (forceReload || !this.settingsCache || fileMtime > this.settingsFileMtime) {
+        const content = await fs.readFile(SkillsPaths.SETTINGS_FILE, 'utf-8');
+        const settings = JSON.parse(content) as SkillsSettings;
+        this.settingsCache = settings;
+        this.settingsFileMtime = fileMtime;
+      }
+
+      return this.settingsCache!;
     } catch (error) {
+      // 清除缓存和 mtime，避免残留状态影响后续判断
+      this.settingsCache = null;
+      this.settingsFileMtime = 0;
+
       throw new SkillError(
         `Failed to read settings.json: ${error instanceof Error ? error.message : String(error)}`,
         SkillErrorCode.FILE_READ_FAILED,
@@ -204,8 +215,10 @@ export class SettingsManager {
         'utf-8',
       );
 
-      // 更新缓存
+      // 更新缓存和文件修改时间
       this.settingsCache = settings;
+      const stat = await fs.stat(SkillsPaths.SETTINGS_FILE);
+      this.settingsFileMtime = stat.mtimeMs;
 
       // 清理旧备份
       await this.cleanupBackups();
@@ -341,18 +354,27 @@ export class SettingsManager {
 
   /**
    * 读取 installed_plugins.json
+   * @param forceReload 强制重新加载，忽略缓存（用于长驻进程）
    */
-  async readInstalledPlugins(): Promise<InstalledPluginsRecord> {
-    if (this.installedPluginsCache) {
-      return this.installedPluginsCache;
-    }
-
+  async readInstalledPlugins(forceReload = false): Promise<InstalledPluginsRecord> {
     try {
-      const content = await fs.readFile(SkillsPaths.INSTALLED_PLUGINS_FILE, 'utf-8');
-      const record = JSON.parse(content) as InstalledPluginsRecord;
-      this.installedPluginsCache = record;
-      return record;
+      // 检查文件修改时间，如果文件被外部修改则清除缓存
+      const stat = await fs.stat(SkillsPaths.INSTALLED_PLUGINS_FILE);
+      const fileMtime = stat.mtimeMs;
+
+      if (forceReload || !this.installedPluginsCache || fileMtime > this.installedPluginsFileMtime) {
+        const content = await fs.readFile(SkillsPaths.INSTALLED_PLUGINS_FILE, 'utf-8');
+        const record = JSON.parse(content) as InstalledPluginsRecord;
+        this.installedPluginsCache = record;
+        this.installedPluginsFileMtime = fileMtime;
+      }
+
+      return this.installedPluginsCache!;
     } catch (error) {
+      // 清除缓存和 mtime，避免残留状态影响后续判断
+      this.installedPluginsCache = null;
+      this.installedPluginsFileMtime = 0;
+
       throw new SkillError(
         `Failed to read installed_plugins.json: ${error instanceof Error ? error.message : String(error)}`,
         SkillErrorCode.FILE_READ_FAILED,
@@ -376,8 +398,10 @@ export class SettingsManager {
         'utf-8',
       );
 
-      // 更新缓存
+      // 更新缓存和文件修改时间
       this.installedPluginsCache = record;
+      const stat = await fs.stat(SkillsPaths.INSTALLED_PLUGINS_FILE);
+      this.installedPluginsFileMtime = stat.mtimeMs;
     } catch (error) {
       throw new SkillError(
         `Failed to write installed_plugins.json: ${error instanceof Error ? error.message : String(error)}`,
@@ -533,11 +557,13 @@ export class SettingsManager {
   // ============================================================================
 
   /**
-   * 清除缓存
+   * 清除缓存（强制下次读取从文件加载）
    */
   clearCache(): void {
     this.settingsCache = null;
     this.installedPluginsCache = null;
+    this.settingsFileMtime = 0;
+    this.installedPluginsFileMtime = 0;
   }
 
   /**

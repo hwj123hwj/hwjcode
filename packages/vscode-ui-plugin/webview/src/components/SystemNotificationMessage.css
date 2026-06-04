@@ -51,6 +51,38 @@
   flex-shrink: 0;
 }
 
+/* 进行中状态的内联 spinner（替代图标，体现"正在处理"） */
+.notification-spinner {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  border: 2px solid var(--vscode-editorInfo-foreground, #469af8);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: notification-spin 0.8s linear infinite;
+}
+
+@keyframes notification-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 进行中通知整体轻微脉动，强化"还在进行"的感知 */
+.system-notification.notification-in-progress {
+  animation: notification-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes notification-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 .notification-title {
   flex: 1;
 }

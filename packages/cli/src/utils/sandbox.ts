@@ -254,27 +254,20 @@ export async function start_sandbox(
         sandboxEnv['NO_PROXY'] = noProxy;
         sandboxEnv['no_proxy'] = noProxy;
       }
-      const parsedProxyCommand = parse(proxyCommand);
-      const proxyArgs = parsedProxyCommand.filter(
-        (part) => typeof part === 'string',
-      ) as string[];
-      const hasOperators = parsedProxyCommand.some(
-        (part) => typeof part !== 'string',
-      );
-
-      if (hasOperators || proxyArgs.length === 0) {
-        console.error(
-          'ERROR: GEMINI_SANDBOX_PROXY_COMMAND contains unsafe operators. Use a simple command without shell control characters.',
-        );
-        process.exit(1);
+      // Note: proxyCommand is user-configured and may contain shell features (pipes, redirects).
+      // We use shell: true here intentionally, which triggers a deprecation warning in Node 24+.
+      // To suppress the warning, we temporarily override process.emitWarning.
+      const originalEmitWarning = process.emitWarning;
+      process.emitWarning = () => {};
+      try {
+        proxyProcess = spawn(proxyCommand, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+          detached: true,
+        });
+      } finally {
+        process.emitWarning = originalEmitWarning;
       }
-
-      const [proxyBinary, ...proxyBinaryArgs] = proxyArgs;
-      proxyProcess = spawn(proxyBinary, proxyBinaryArgs, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: false,
-        detached: true,
-      });
       // install handlers to stop proxy on exit/signal
       const stopProxy = () => {
         console.log('stopping proxy ...');
@@ -698,12 +691,20 @@ export async function start_sandbox(
 
   if (proxyCommand) {
     // run proxyCommand in its own container
+    // Note: This is a dynamically constructed complex command that requires shell interpretation.
+    // We suppress the Node 24+ deprecation warning as this usage is intentional and safe.
     const proxyContainerCommand = `${config.command} run --rm --init ${userFlag} --name ${SANDBOX_PROXY_NAME} --network ${SANDBOX_PROXY_NAME} -p 8877:8877 -v ${process.cwd()}:${workdir} --workdir ${workdir} ${image} ${proxyCommand}`;
-    proxyProcess = spawn(proxyContainerCommand, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-      detached: true,
-    });
+    const originalEmitWarning = process.emitWarning;
+    process.emitWarning = () => {};
+    try {
+      proxyProcess = spawn(proxyContainerCommand, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+        detached: true,
+      });
+    } finally {
+      process.emitWarning = originalEmitWarning;
+    }
     // install handlers to stop proxy on exit/signal
     const stopProxy = () => {
       console.log('stopping proxy container ...');

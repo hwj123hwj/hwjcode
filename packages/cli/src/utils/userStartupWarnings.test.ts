@@ -133,36 +133,48 @@ describe('getUserStartupWarnings', () => {
   });
 
   describe('low credits check', () => {
+    // 业务变更说明：lowCreditsCheck 已从 getUserStartupWarnings 移走，迁移到
+    // App 组件内异步、非阻塞地拉取并显示积分（避免启动时 1-2s 网络延迟）。
+    // 见 packages/cli/src/utils/userStartupWarnings.ts 注释（"lowCreditsCheck removed -
+    // moved to App for non-blocking startup"）以及 packages/cli/src/ui/App.tsx 中的
+    // fetchCredits useEffect。因此这里的所有用例都断言：getUserStartupWarnings
+    // 不再返回任何 credits 相关警告（无论 mock 的 usagePercentage 是多少）。
     beforeEach(() => {
       mockGetCreditsInfo.mockReset();
       mockIsCreditsLow.mockReset();
     });
 
-    it('should show warning when remaining credits is exactly 5%', async () => {
+    it('should NOT show warning when remaining credits is exactly 5% (moved to App)', async () => {
       // usagePercentage = 95%, remaining = 5%
       mockGetCreditsInfo.mockResolvedValue({ usagePercentage: 95 });
       const projectDir = path.join(testRootDir, 'project');
       await fs.mkdir(projectDir, { recursive: true });
       const warnings = await getUserStartupWarnings(projectDir, emptySettings);
-      expect(warnings).toContainEqual(expect.stringContaining('5%'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('credits'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('积分'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('5%'));
     });
 
-    it('should show warning when remaining credits is exactly 1%', async () => {
+    it('should NOT show warning when remaining credits is exactly 1% (moved to App)', async () => {
       // usagePercentage = 99%, remaining = 1%
       mockGetCreditsInfo.mockResolvedValue({ usagePercentage: 99 });
       const projectDir = path.join(testRootDir, 'project');
       await fs.mkdir(projectDir, { recursive: true });
       const warnings = await getUserStartupWarnings(projectDir, emptySettings);
-      expect(warnings).toContainEqual(expect.stringContaining('1%'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('credits'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('积分'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('1%'));
     });
 
-    it('should show warning when remaining credits rounds to 5% (e.g., 5.99%)', async () => {
+    it('should NOT show warning when remaining credits rounds to 5% (moved to App)', async () => {
       // usagePercentage = 94.01%, remaining = 5.99% -> floor to 5%
       mockGetCreditsInfo.mockResolvedValue({ usagePercentage: 94.01 });
       const projectDir = path.join(testRootDir, 'project');
       await fs.mkdir(projectDir, { recursive: true });
       const warnings = await getUserStartupWarnings(projectDir, emptySettings);
-      expect(warnings).toContainEqual(expect.stringContaining('5%'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('credits'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('积分'));
+      expect(warnings).not.toContainEqual(expect.stringContaining('5%'));
     });
 
     it('should NOT show warning when remaining credits is 6%', async () => {
@@ -202,6 +214,19 @@ describe('getUserStartupWarnings', () => {
       const warnings = await getUserStartupWarnings(projectDir, emptySettings);
       expect(warnings).not.toContainEqual(expect.stringContaining('credits'));
       expect(warnings).not.toContainEqual(expect.stringContaining('积分'));
+    });
+
+    // ─────────── 回归测试：迁移后契约 ───────────
+    it('should NOT call getCreditsInfo at all from getUserStartupWarnings (moved to App)', async () => {
+      // 关键回归契约：lowCreditsCheck 已彻底从 getUserStartupWarnings 移走，
+      // 因此 getUserStartupWarnings 的执行路径不应再调用 creditsService。
+      // 这道断言可以防止"代码回滚把 creditsService 调用放回 startup warning"导致 1-2s 启动延迟。
+      mockGetCreditsInfo.mockResolvedValue({ usagePercentage: 99 });
+      const projectDir = path.join(testRootDir, 'project');
+      await fs.mkdir(projectDir, { recursive: true });
+      await getUserStartupWarnings(projectDir, emptySettings);
+      expect(mockGetCreditsInfo).not.toHaveBeenCalled();
+      expect(mockIsCreditsLow).not.toHaveBeenCalled();
     });
   });
 });

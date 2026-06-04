@@ -42,10 +42,14 @@ export const SystemNotificationMessage: React.FC<SystemNotificationMessageProps>
   };
 
   return (
-    <div className={`system-notification ${getNotificationStyle()}`}>
-      {/* 通知头部 - 图标 + 标题 */}
+    <div className={`system-notification ${getNotificationStyle()}${message.notificationInProgress ? ' notification-in-progress' : ''}`}>
+      {/* 通知头部 - 图标/spinner + 标题 */}
       <div className="notification-header">
-        <span className="notification-icon" aria-hidden="true">{getNotificationIcon()}</span>
+        {message.notificationInProgress ? (
+          <span className="notification-spinner" aria-label="loading" role="status" />
+        ) : (
+          <span className="notification-icon" aria-hidden="true">{getNotificationIcon()}</span>
+        )}
         <span className="notification-title">{message.notificationTitle}</span>
       </div>
 

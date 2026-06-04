@@ -7,10 +7,11 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Settings, History } from 'lucide-react';
+import { Settings, History, Target } from 'lucide-react';
 import { useMultiSessionState } from '../hooks/useMultiSessionState';
 import { getGlobalMessageService } from '../services/globalMessageService';
 import { webviewModelService } from '../services/webViewModelService';
+import { customModelsService } from '../services/customModelsService';
 import { useTranslation } from '../hooks/useTranslation';
 import { useYoloMode } from '../hooks/useProjectSettings';
 import { SessionSwitcher } from './SessionSwitcher';
@@ -28,6 +29,7 @@ import { ChatHistoryModal } from './ChatHistoryModal';
 import { NanoBananaDialog } from './NanoBananaDialog';
 import { NanoBananaIcon } from './NanoBananaIcon';
 import { PPTGeneratorDialog } from './PPTGeneratorDialog';
+import { GoalWizardDialog } from './GoalWizardDialog';
 import { PPTGeneratorIcon } from './PPTGeneratorIcon';
 import { CompressionConfirmationDialog } from './CompressionConfirmationDialog';
 import { HealthyUseReminder } from './HealthyUseReminder';
@@ -66,6 +68,12 @@ export const MultiSessionApp: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = 检查中, false = 未登录, true = 已登录
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>();
+  const [currentUserInfo, setCurrentUserInfo] = useState<any>(null); // 当前登录用户信息
+  // 🟢 自定义模型专用模式 — 与 CLI 的 useAuthCommand.isCustomModelOnlyMode 对齐。
+  // 用户在登录页选 "Use Custom Model" 后置 true，让其绕过 OAuth 直接进入主界面。
+  // 仅影响 LoginPage 的 gating；下游（聊天/模型选择）已经原生支持自定义模型，
+  // 无需再在每条 RPC 上手动透传此标志。
+  const [isCustomModelOnlyMode, setIsCustomModelOnlyMode] = useState(false);
 
   // 🎯 启动流程状态管理
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
@@ -168,13 +176,18 @@ export const MultiSessionApp: React.FC = () => {
   const [isNanoBananaOpen, setIsNanoBananaOpen] = useState(false);
   // 🎯 PPT生成对话框状态
   const [isPPTGeneratorOpen, setIsPPTGeneratorOpen] = useState(false);
+  const [isGoalWizardOpen, setIsGoalWizardOpen] = useState(false);
+
+  // 🎯 Goal 模式看门狗状态
+  const GOAL_IDLE_TIMEOUT_MS = 60_000;
+  const [goalActiveSessions, setGoalActiveSessions] = useState<Record<string, boolean>>({});
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const goalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 🎯 压缩确认弹窗状态（模型切换时上下文超限）
   const [compressionConfirmation, setCompressionConfirmation] = useState<CompressionConfirmationRequest | null>(null);
   // 🎯 压缩进行中状态
   const [isCompressing, setIsCompressing] = useState(false);
-  // 🎯 保存取消压缩时需要回滚到的原模型
-  const [previousModelBeforeSwitch, setPreviousModelBeforeSwitch] = useState<string | null>(null);
 
   // 🆕 流中断恢复状态
   const [streamRecoveryVisible, setStreamRecoveryVisible] = useState(false);
@@ -245,6 +258,15 @@ export const MultiSessionApp: React.FC = () => {
   // 流式聊天支持：维护正在流式接收的消息
   const streamingMessages = useRef<Map<string, { messageId: string; content: string; sessionId: string }>>(new Map());
 
+  // 🟢 isCustomModelOnlyMode 的最新值 ref —— 让 checkAuthenticationError 这种
+  // 用 useCallback([], …) 固定身份的回调，也能读到当前值。
+  // 不能直接放进 deps（会让所有订阅 checkAuthenticationError 的 effect 重连），
+  // 也不能直接读 state（闭包陷阱）—— 所以走 ref。
+  const isCustomModelOnlyModeRef = useRef(isCustomModelOnlyMode);
+  React.useEffect(() => {
+    isCustomModelOnlyModeRef.current = isCustomModelOnlyMode;
+  }, [isCustomModelOnlyMode]);
+
   // 🎯 认证错误检查助手函数
   const checkAuthenticationError = React.useCallback((error: string): boolean => {
     if (error && (
@@ -254,6 +276,15 @@ export const MultiSessionApp: React.FC = () => {
       error.includes('requireReAuth":true') ||
       error.includes('authentication session is outdated')
     )) {
+      // 🟢 自定义模型专用模式下，不要把用户踢回登录页 —— 与 CLI 的
+      // isCustomModelOnlyMode 行为对齐：用户主动绕过 OAuth，cloud 模型的
+      // 401/refresh 失败属于"预期"——应该作为聊天错误冒泡，不应改变 gating。
+      // （后端 LoginService.checkLoginStatus 永远会回 false，但前端只要不据
+      // 此踢人，主界面就能继续用。下游 RPC 已经原生支持 custom: 模型。）
+      if (isCustomModelOnlyModeRef.current) {
+        console.log('🟢 [MultiSessionApp] Auth error in custom-model-only mode, NOT switching to login:', error);
+        return false;
+      }
       console.log('🔐 [MultiSessionApp] Authentication error detected, switching to login page:', error);
       setIsLoggedIn(false);
       setLoginError('Your login session has expired. Please log in again.');
@@ -419,7 +450,6 @@ export const MultiSessionApp: React.FC = () => {
     setIsModelSwitching(false);
     setCompressionConfirmation(null);
     setIsCompressing(false);
-    setPreviousModelBeforeSwitch(null);
 
     // 4. 通知后端切换session
     getGlobalMessageService().switchSession(sessionId);
@@ -449,25 +479,28 @@ export const MultiSessionApp: React.FC = () => {
     console.log('🚀 初始化主应用消息服务...');
     const messageService = getGlobalMessageService();
 
+    // 🎯 收集所有监听器的取消订阅函数，用于清理
+    const cleanups: (() => void)[] = [];
+
     // 🎯 压缩确认请求监听器（模型切换时上下文超限）
-    webviewModelService.onCompressionConfirmationRequest((request) => {
+    cleanups.push(webviewModelService.onCompressionConfirmationRequest((request) => {
       console.log('📊 [MultiSessionApp] Received compression confirmation request:', request);
       setCompressionConfirmation(request);
       setIsModelSwitching(true); // 🎯 进入确认阶段，保持切换状态
-    });
+    }));
 
     // 🎯 压缩错误处理器
-    webviewModelService.onCompressionError((error) => {
+    cleanups.push(webviewModelService.onCompressionError((error) => {
       console.error('📊 [MultiSessionApp] Compression error:', error);
       setIsCompressing(false);
       setCompressionConfirmation(null);
-    });
+    }));
 
     // =============================================================================
     // Session管理事件监听器
     // =============================================================================
 
-    messageService.onSessionListUpdate(({ sessions, currentSessionId }) => {
+    cleanups.push(messageService.onSessionListUpdate(({ sessions, currentSessionId }) => {
       console.log('🔍 [DEBUG-UI-FLOW] [MultiSessionApp] onSessionListUpdate received:', sessions.length, 'sessions');
 
 
@@ -526,9 +559,9 @@ export const MultiSessionApp: React.FC = () => {
 
       // 🎯 会话列表加载完成（loading screen 由 onLoadingComplete 的一次性监听器处理）
       console.log('🎯 [SESSION-LOADED] Sessions loaded');
-    });
+    }));
 
-    messageService.onSessionCreated(({ session }) => {
+    cleanups.push(messageService.onSessionCreated(({ session }) => {
       console.log('🆕 [NEW-SESSION] Creating new session with content loaded:', session.id);
       createSession(session, true); // 🎯 新建session立即加载内容
 
@@ -558,9 +591,9 @@ export const MultiSessionApp: React.FC = () => {
         // 不操作LoadingScreen的显示/隐藏，让升级逻辑自己处理
         console.log('🎯 [NEW-SESSION] Letting upgrade logic handle LoadingScreen visibility');
       }
-    });
+    }));
 
-    messageService.onSessionUpdated(({ sessionId, session }) => {
+    cleanups.push(messageService.onSessionUpdated(({ sessionId, session }) => {
       console.log('🔄 [BACKEND] Session updated:', sessionId, 'session.name:', session.name);
       // 更新 state（这会更新顶部标签页）
       updateSessionInfo(sessionId, session);
@@ -603,9 +636,9 @@ export const MultiSessionApp: React.FC = () => {
         console.log('⚠️ [HISTORY] Not updating - list empty');
         return prev;
       });
-    });
+    }));
 
-    messageService.onSessionDeleted(({ sessionId }) => {
+    cleanups.push(messageService.onSessionDeleted(({ sessionId }) => {
       console.log('🗑️ [BACKEND] Session deleted:', sessionId);
       // 删除 state 中的 session
       deleteSession(sessionId);
@@ -615,9 +648,9 @@ export const MultiSessionApp: React.FC = () => {
       setTimeout(() => {
         getGlobalMessageService().requestSessionList();
       }, 100);
-    });
+    }));
 
-    messageService.onSessionSwitched(({ sessionId, session }) => {
+    cleanups.push(messageService.onSessionSwitched(({ sessionId, session }) => {
       const existingSession = getSession(sessionId);
       if (!existingSession && session) {
         createSession(session, false);
@@ -626,10 +659,10 @@ export const MultiSessionApp: React.FC = () => {
       if (session && existingSession) {
         updateSessionInfo(sessionId, session);
       }
-    });
+    }));
 
     // 🎯 监听历史列表分页响应
-    messageService.onSessionHistoryResponse(({ sessions, total, hasMore, offset }) => {
+    cleanups.push(messageService.onSessionHistoryResponse(({ sessions, total, hasMore, offset }) => {
       setHistorySessionsList((prev) => {
         const newItems = sessions.map(s => {
           // 🔥 关键修复：如果内存中有这个session，优先使用内存中的标题
@@ -672,23 +705,23 @@ export const MultiSessionApp: React.FC = () => {
       setHistoryTotal(total);
       setHistoryHasMore(hasMore);
       setIsLoadingHistory(false);
-    });
+    }));
 
     // 🎯 监听UI历史恢复
-    messageService.onRestoreUIHistory(({ sessionId, messages, rollbackableMessageIds }) => {
+    cleanups.push(messageService.onRestoreUIHistory(({ sessionId, messages, rollbackableMessageIds }) => {
       restoreSessionMessages(sessionId, messages);
       updateRollbackableIds(sessionId, rollbackableMessageIds || []);
-    });
+    }));
 
     // 🎯 监听消息预填充（右键菜单快捷操作 - 自动发送）
-    messageService.onPrefillMessage(({ message }) => {
+    cleanups.push(messageService.onPrefillMessage(({ message }) => {
       console.log('📝 [PREFILL] Received prefill message, auto-sending:', message.substring(0, 50) + '...');
       // 🎯 直接发送消息到当前session
       handleSendMessage([{ type: 'text', value: message }]);
-    });
+    }));
 
     // 🎯 监听插入代码到输入框（只插入，不自动发送）
-    messageService.onInsertCodeToInput(({ fileName, filePath, code, startLine, endLine }) => {
+    cleanups.push(messageService.onInsertCodeToInput(({ fileName, filePath, code, startLine, endLine }) => {
       console.log('📝 [INSERT CODE] Received code to insert:', fileName, startLine, '-', endLine);
 
       // 🎯 调用 MessageInput 的方法插入代码引用
@@ -703,15 +736,15 @@ export const MultiSessionApp: React.FC = () => {
       } else {
         console.warn('MessageInput ref not available, cannot insert code');
       }
-    });
+    }));
 
     // 🎯 监听可回滚消息ID列表更新
-    messageService.onUpdateRollbackableIds(({ sessionId, rollbackableMessageIds }) => {
+    cleanups.push(messageService.onUpdateRollbackableIds(({ sessionId, rollbackableMessageIds }) => {
       updateRollbackableIds(sessionId, rollbackableMessageIds);
-    });
+    }));
 
     // 🎯 监听后端请求UI历史记录
-    messageService.onRequestUIHistory(({ sessionId }) => {
+    cleanups.push(messageService.onRequestUIHistory(({ sessionId }) => {
 
       // 🎯 使用ref获取最新状态，解决闭包问题
       const currentState = stateRef.current;
@@ -739,13 +772,13 @@ export const MultiSessionApp: React.FC = () => {
         // 即使没有找到session也要发送空数组，让后端知道已处理
         messageService.saveSessionUIHistory(sessionId, []);
       }
-    });
+    }));
 
     // =============================================================================
     // 聊天和工具调用事件监听器
     // =============================================================================
 
-    messageService.onChatStart(({ sessionId, messageId }) => {
+    cleanups.push(messageService.onChatStart(({ sessionId, messageId }) => {
 
       // 🎯 开始处理：设置Session为处理状态
       setProcessingState(sessionId, true, messageId, true);
@@ -774,9 +807,9 @@ export const MultiSessionApp: React.FC = () => {
 
       addMessage(sessionId, streamingMessage);
       streamingMessages.current.set(messageId, { messageId, content: '', sessionId });
-    });
+    }));
 
-    messageService.onChatChunk(({ sessionId, content, messageId, isComplete }) => {
+    cleanups.push(messageService.onChatChunk(({ sessionId, content, messageId, isComplete }) => {
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
         // 累积内容
@@ -785,18 +818,18 @@ export const MultiSessionApp: React.FC = () => {
         // 更新消息内容
         updateMessageContent(sessionId, messageId, streamingMsg.content, !isComplete);
       }
-    });
+    }));
 
     // 🎯 处理AI思考过程（reasoning）
-    messageService.onChatReasoning(({ sessionId, content, messageId }) => {
+    cleanups.push(messageService.onChatReasoning(({ sessionId, content, messageId }) => {
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
         // 使用新的 updateMessageReasoning 方法累积思考内容
         updateMessageReasoning(sessionId, messageId, content);
       }
-    });
+    }));
 
-    messageService.onChatComplete(({ sessionId, messageId, tokenUsage }) => {
+    cleanups.push(messageService.onChatComplete(({ sessionId, messageId, tokenUsage }) => {
 
       const streamingMsg = streamingMessages.current.get(messageId);
       if (streamingMsg && streamingMsg.sessionId === sessionId) {
@@ -840,20 +873,20 @@ export const MultiSessionApp: React.FC = () => {
         clearTimeout(timeout);
         loadingTimeoutsRef.current.delete(sessionId);
       }
-    });
+    }));
 
     // 🎯 监听 Token 使用情况更新（压缩后更新前端显示）
-    messageService.onExtensionMessage('token_usage_update', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('token_usage_update', (payload: any) => {
       console.log('📊 [MultiSessionApp] Received token_usage_update:', payload);
       if (payload.sessionId && payload.tokenUsage) {
         updateSessionInfo(payload.sessionId, {
           tokenUsage: payload.tokenUsage
         });
       }
-    });
+    }));
 
     // 🎯 监听模型切换完成（压缩成功后更新模型选择器）
-    messageService.onExtensionMessage('model_switch_complete', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('model_switch_complete', (payload: any) => {
       console.log('📊 [MultiSessionApp] Received model_switch_complete:', payload);
       console.log('📊 [MultiSessionApp] payload.sessionId:', payload.sessionId, 'payload.modelName:', payload.modelName);
       if (payload.sessionId && payload.modelName) {
@@ -864,34 +897,122 @@ export const MultiSessionApp: React.FC = () => {
         setIsCompressing(false);
         setIsModelSwitching(false); // 🎯 切换彻底完成
         setCompressionConfirmation(null);
-        setPreviousModelBeforeSwitch(null); // 🎯 清除保存的原模型
       } else {
         console.warn('📊 [MultiSessionApp] Missing sessionId or modelName in payload!');
       }
-    });
+    }));
 
     // 🚨 REMOVED: onChatResponse 监听器已移除
     // 原因: 与 onChatStart 重复创建消息，我们只使用流式路径 (onChatStart + onChatChunk + onChatComplete)
     // messageService.onChatResponse(...) - DELETED
 
     // 🆕 监听流中断恢复消息
-    messageService.onExtensionMessage('stream_recovery_start', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_start', (payload: any) => {
       console.log('🔄 [MultiSessionApp] Stream recovery started:', payload);
       setStreamRecoveryTotal(payload.total || 10);
       setStreamRecoveryRemaining(payload.total || 10);
       setStreamRecoveryVisible(true);
-    });
+    }));
 
-    messageService.onExtensionMessage('stream_recovery_countdown', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_countdown', (payload: any) => {
       setStreamRecoveryRemaining(payload.remaining || 0);
-    });
+    }));
 
-    messageService.onExtensionMessage('stream_recovery_end', () => {
+    cleanups.push(messageService.onExtensionMessage('stream_recovery_end', () => {
       console.log('🔄 [MultiSessionApp] Stream recovery ended');
       setStreamRecoveryVisible(false);
-    });
+    }));
 
-    messageService.onChatError(({ sessionId, error }) => {
+    // 🎯 监听手动 /compress 的状态推送（start → done/error/skipped）。
+    // 目标：用户敲 /compress 后不再面对空白干等 —— 在对话流里插入一条
+    // 持久的 in-chat 通知（带 spinner），压缩结束后原地更新为最终结果，
+    // 同时复用底部 compression-progress-bar 作为全局进度提示。
+    cleanups.push(messageService.onExtensionMessage('compress_status', (payload: any) => {
+      console.log('🗜️ [MultiSessionApp] Received compress_status:', payload);
+      const targetSessionId: string | undefined =
+        payload?.sessionId || stateRef.current.currentSessionId || undefined;
+      if (!targetSessionId) {
+        console.warn('🗜️ [MultiSessionApp] compress_status without resolvable sessionId, ignoring');
+        return;
+      }
+      // 用 statusId 派生稳定的消息 id，保证 start/done/error 落到同一条通知。
+      const statusId: string = payload?.statusId || `compress-${Date.now()}`;
+      const notificationId = `notif-${statusId}`;
+
+      if (payload?.phase === 'start') {
+        // 底部进度条
+        setIsCompressing(true);
+        // in-chat 持久通知（进行中）
+        addMessage(targetSessionId, {
+          id: notificationId,
+          type: 'notification',
+          content: createTextMessageContent(''),
+          timestamp: Date.now(),
+          notificationType: 'compression',
+          notificationTitle: t('compression.manualTitle', {}, 'Context Compression'),
+          notificationDescription: t(
+            'compression.manualInProgressDesc',
+            {},
+            'Summarizing older messages while preserving recent context. This may take a moment.'
+          ),
+          severity: 'info',
+          notificationInProgress: true,
+          statusId,
+        } as any);
+        return;
+      }
+
+      // 任何结束态都要收起底部进度条
+      setIsCompressing(false);
+
+      if (payload?.phase === 'done') {
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationTitle: t('compression.manualDone', {}, 'Context compressed'),
+          notificationDescription: t(
+            'compression.manualDoneDesc',
+            {},
+            'Conversation history compressed successfully.'
+          ),
+          severity: 'info',
+        } as any);
+        return;
+      }
+
+      if (payload?.phase === 'skipped') {
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationTitle: t('compression.manualSkipped', {}, 'Compression skipped'),
+          notificationDescription: t(
+            'compression.manualSkippedDesc',
+            {},
+            'The conversation history is already small enough — nothing to compress.'
+          ),
+          severity: 'info',
+        } as any);
+        return;
+      }
+
+      if (payload?.phase === 'error') {
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationType: 'warning',
+          notificationTitle: t('compression.manualFailed', {}, 'Compression failed'),
+          notificationDescription: String(payload?.error || 'Compression failed.'),
+          severity: 'error',
+        } as any);
+        return;
+      }
+    }));
+
+    // 🔐 监听认证过期通知（服务端返回 HTTP 401 时由 extension 主动推送）
+    cleanups.push(messageService.onAuthExpired(({ reason }) => {
+      console.log('🔐 [MultiSessionApp] Auth expired notification received:', reason);
+      setIsLoggedIn(false);
+      setLoginError('Your login session has expired. Please log in again.');
+    }));
+
+    cleanups.push(messageService.onChatError(({ sessionId, error }) => {
       // 🎯 检测认证错误，切换到登录页面
       if (checkAuthenticationError(error)) {
         return; // 不显示错误消息，直接跳转到登录页
@@ -923,9 +1044,9 @@ export const MultiSessionApp: React.FC = () => {
           streamingMessages.current.delete(messageId);
         }
       }
-    });
+    }));
 
-    messageService.onToolCallsUpdate(({ sessionId, toolCalls, associatedMessageId }) => {
+    cleanups.push(messageService.onToolCallsUpdate(({ sessionId, toolCalls, associatedMessageId }) => {
       // 🎯 检查是否有subagent_update类型的工具，如果有，创建消息来显示进度
       toolCalls.forEach(t => {
         const resultStr = typeof t.result === 'string' ? t.result : JSON.stringify(t.result || '');
@@ -1014,9 +1135,9 @@ export const MultiSessionApp: React.FC = () => {
       } else {
         console.warn('⚠️ No target message found for tool calls update');
       }
-    });
+    }));
 
-    messageService.onToolConfirmationRequest(({ sessionId, toolCall }) => {
+    cleanups.push(messageService.onToolConfirmationRequest(({ sessionId, toolCall }) => {
       console.log('🔍 [ToolConfirmation] Received confirmation request:', {
         sessionId,
         toolId: toolCall.toolId,
@@ -1067,10 +1188,10 @@ export const MultiSessionApp: React.FC = () => {
       }
 
       showConfirmationFor(sessionId, confirmationTool);
-    });
+    }));
 
     // 🎯 添加工具实时输出监听
-    messageService.onToolMessage((data) => {
+    cleanups.push(messageService.onToolMessage((data) => {
       console.log('🔧 [onToolMessage] Received data:', data);
 
       if (!data) {
@@ -1084,51 +1205,57 @@ export const MultiSessionApp: React.FC = () => {
       if (toolMessageType === 'output' && toolId && content && sessionId) {
         updateToolLiveOutput(sessionId, toolId, content);
       }
-    });
+    }));
 
-    messageService.onContextUpdate(({ sessionId, context }) => {
+    cleanups.push(messageService.onContextUpdate(({ sessionId, context }) => {
 
       if (sessionId) {
         updateSessionContext(sessionId, context);
       } else {
         updateGlobalContext(context);
       }
-    });
+    }));
 
     // =============================================================================
     // 导入导出事件监听器
     // =============================================================================
 
-    messageService.onSessionExportComplete(() => {
+    cleanups.push(messageService.onSessionExportComplete(() => {
       // TODO: 显示成功通知
-    });
+    }));
 
-    messageService.onSessionImportComplete(() => {
+    cleanups.push(messageService.onSessionImportComplete(() => {
       // TODO: 显示成功通知
-    });
+    }));
 
     // =============================================================================
     // 🎯 流程状态事件监听器
     // =============================================================================
 
-    messageService.onFlowStateUpdate(({ sessionId, isProcessing, currentProcessingMessageId, canAbort }) => {
+    cleanups.push(messageService.onFlowStateUpdate(({ sessionId, isProcessing, currentProcessingMessageId, canAbort }) => {
       // 更新Session的流程状态
       setProcessingState(sessionId, isProcessing, currentProcessingMessageId || null, canAbort);
-    });
+    }));
 
-    messageService.onFlowAborted(({ sessionId }) => {
+    cleanups.push(messageService.onFlowAborted(({ sessionId }) => {
       // 重置Session状态
       setProcessingState(sessionId, false, null, false);
-    });
+    }));
 
     // =============================================================================
     // 🎯 自定义规则管理监听器
     // =============================================================================
 
-    messageService.onOpenRulesManagement(() => {
+    cleanups.push(messageService.onOpenRulesManagement(() => {
       console.log('📋 Opening rules management dialog');
       setIsRulesManagementOpen(true);
-    });
+    }));
+
+    // 🎯 监听 extension 端的"打开 Goal Wizard"指令（命令面板触发）
+    cleanups.push(messageService.onOpenGoalWizard(() => {
+      console.log('🎯 Opening goal wizard dialog');
+      setIsGoalWizardOpen(true);
+    }));
 
     // =============================================================================
     // 🎯 MCP 状态管理监听器（带防抖稳定化）
@@ -1137,7 +1264,7 @@ export const MultiSessionApp: React.FC = () => {
     let mcpUpdateTimer: NodeJS.Timeout | null = null;
     let pendingMcpPayload: any = null;
 
-    messageService.onMcpStatusUpdate((payload: any) => {
+    cleanups.push(messageService.onMcpStatusUpdate((payload: any) => {
       console.log('🔌 [MCP] Received MCP status update:', JSON.stringify(payload, null, 2));
       console.log('🔌 [MCP] Servers in payload:', payload.servers?.map((s: any) => `${s.name}(tools:${s.toolCount}, enabled:${s.enabled})`).join(', '));
 
@@ -1170,26 +1297,26 @@ export const MultiSessionApp: React.FC = () => {
           }, 500);
         }
       }, 150);
-    });
+    }));
 
     // 🔌 监听 MCP enabled 状态更新
-    messageService.onMcpEnabledStates((payload: { states: Record<string, boolean> }) => {
+    cleanups.push(messageService.onMcpEnabledStates((payload: { states: Record<string, boolean> }) => {
       console.log('🔌 [MCP] Received enabled states update:', payload);
       setMcpServers(prev => prev.map(server => ({
         ...server,
         enabled: payload.states[server.name] ?? server.enabled ?? true
       })));
-    });
+    }));
 
     // 📝 监听记忆文件路径更新
-    messageService.onMemoryFilesUpdate((payload: { filePaths: string[]; fileCount: number }) => {
+    cleanups.push(messageService.onMemoryFilesUpdate((payload: { filePaths: string[]; fileCount: number }) => {
       console.log('📝 [Memory] Received memory files update:', payload);
       setMemoryFilePaths(payload.filePaths);
       setMemoryFileCount(payload.fileCount);
-    });
+    }));
 
     // 🎯 监听后台任务结果（在聊天界面显示任务输出）
-    messageService.onExtensionMessage('background_task_result', (payload: any) => {
+    cleanups.push(messageService.onExtensionMessage('background_task_result', (payload: any) => {
       console.log('🎯 [Background] Received task result:', payload);
       const { sessionId, taskId, command, status, exitCode, output } = payload;
 
@@ -1220,9 +1347,10 @@ export const MultiSessionApp: React.FC = () => {
       console.log('🎯 [Background] Adding tool message to session:', sessionId, toolMessage);
       addMessage(sessionId, toolMessage);
       console.log('🎯 [Background] Tool message added');
-    });
+    }));
 
     return () => {
+      cleanups.forEach(fn => fn?.());
     };
 
   }, []);
@@ -1275,6 +1403,20 @@ export const MultiSessionApp: React.FC = () => {
   // 注意：消息监听器在前面的独立useEffect中已注册，不需要再次注册
 
   // =============================================================================
+  // 🎯 监听登录状态响应，捕获 userInfo
+  // =============================================================================
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'login_status_response' && event.data?.payload?.userInfo) {
+        console.log('📋 [MultiSessionApp] Captured userInfo from login_status_response');
+        setCurrentUserInfo(event.data.payload.userInfo);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // =============================================================================
   // 登录事件处理方法
   // =============================================================================
 
@@ -1300,6 +1442,8 @@ export const MultiSessionApp: React.FC = () => {
         if (data.success) {
           setIsLoggedIn(true);
           setLoginError(undefined);
+          // 登录成功后，请求一次登录状态以获取 userInfo
+          messageService.checkLoginStatus();
           console.log('✅ 登录成功');
         } else {
           setLoginError(data.error || '登录失败');
@@ -1307,13 +1451,40 @@ export const MultiSessionApp: React.FC = () => {
         }
       };
 
-      messageService.onLoginResponse(handleLoginResponse);
+      const unsubscribe = messageService.onLoginResponse((data) => {
+        unsubscribe();
+        handleLoginResponse(data);
+      });
 
     } catch (error) {
       console.error('❌ 启动登录流程失败:', error);
       setIsLoggingIn(false);
       setLoginError('启动登录流程失败');
     }
+  };
+
+  /**
+   * 🎯 处理退出登录
+   */
+  const handleLogout = () => {
+    console.log('🚪 开始退出登录...');
+    const messageService = getGlobalMessageService();
+    messageService.logout();
+
+    // 监听退出结果
+    const unsubscribe = messageService.onLogoutResponse((data: { success: boolean; error?: string }) => {
+      unsubscribe();
+      console.log('📄 收到退出结果:', data);
+      if (data.success) {
+        console.log('✅ 退出登录成功');
+        setCurrentUserInfo(null);
+        setIsLoggedIn(false);
+        setLoginError(undefined);
+        toggleProjectSettings(false);
+      } else {
+        console.error('❌ 退出登录失败:', data.error);
+      }
+    });
   };
 
   /**
@@ -1325,6 +1496,64 @@ export const MultiSessionApp: React.FC = () => {
     setLoginError(undefined);
     // 重置任何登录相关的状态
   };
+
+  /**
+   * 🟢 处理"使用自定义模型"绕过登录
+   * 与 CLI 的 useAuthCommand.handleUseCustomModel 对齐：
+   *   - 标记 customModelOnlyMode = true，让 LoginPage 不再拦人
+   *   - 把 isLoggedIn 视为 true，进入主界面（webview 没有 OAuth token，
+   *     但聊天/RPC 路径都通过 custom: 协议直连第三方 API，无需 deepv token）
+   *   - 清掉 loginError，避免主界面顶上还挂着旧错误
+   *
+   * 注意：扩展宿主端 (extension.ts) 的 LoginService.checkLoginStatus 仍会
+   * 返回 isLoggedIn=false，但只要前端不再据此 gate UI，体验就和登录用户一样。
+   * 后续聊天若使用了 cloud 模型，DeepVServerAdapter 仍会触发认证错误，
+   * 由 checkAuthenticationError 自动把用户带回登录页 — 这是预期行为。
+   */
+  const handleUseCustomModel = React.useCallback(() => {
+    console.log('🟢 [LoginPage] User chose to use custom model — bypassing login gate');
+    setIsCustomModelOnlyMode(true);
+    setIsLoggedIn(true);
+    setLoginError(undefined);
+    setIsLoggingIn(false);
+
+    // 🟢 自动把当前模型切到第一个启用的自定义模型 —— 否则 selectedModelId
+    // 仍是默认 'auto'，下游 DeepVServerAdapter 会要求 OAuth token，
+    // 用户立刻就会看到 401，体验和"没绕过登录"几乎一样。
+    //
+    // 之所以放在这里：触发点只有"用户主动选择 Use Custom Model"，
+    // 不会误伤已登录用户的模型选择；用户进入主界面后仍可在 ModelSelector
+    // 里换回 auto / cloud（前提是他们已登录，否则会被踢回登录页）。
+    //
+    // 实现细节：
+    //   - listCustomModels() 走 IPC，可能失败（超时/扩展未就绪）—— 失败时
+    //     就维持 'auto'，让用户自己在主界面选；不要 throw，否则点 Continue
+    //     按钮就什么都不发生。
+    //   - setCurrentModel 是 best-effort —— 后端如果还没准备好接 set_current_model，
+    //     前端 setSelectedModelId 已经更新，等后端就绪后下次 setCurrentModel 也会同步。
+    void (async () => {
+      try {
+        const models = await customModelsService.listCustomModels();
+        const firstEnabled = (models || []).find((m) => m && m.enabled !== false && m.displayName);
+        if (!firstEnabled) {
+          console.warn('🟡 [LoginPage] No enabled custom model found — leaving model on default');
+          return;
+        }
+        const targetModelId = `custom:${firstEnabled.displayName}`;
+        console.log('🟢 [LoginPage] Auto-switching model to first custom:', targetModelId);
+        setSelectedModelId(targetModelId);
+        // 不传 sessionId —— 此时 state.currentSessionId 可能还没就绪；
+        // 后端 set_current_model 在 sessionId 缺省时会走全局/默认 session。
+        try {
+          await webviewModelService.setCurrentModel(targetModelId);
+        } catch (err) {
+          console.warn('🟡 [LoginPage] setCurrentModel failed (best-effort):', err);
+        }
+      } catch (err) {
+        console.warn('🟡 [LoginPage] Failed to list custom models for auto-switch:', err);
+      }
+    })();
+  }, []);
 
   // =============================================================================
   // 事件处理方法
@@ -1372,13 +1601,47 @@ export const MultiSessionApp: React.FC = () => {
   }, [state.currentSessionId, togglePlanMode]);
 
   // 🎯 处理发送消息
-  const handleSendMessage = React.useCallback((content: MessageContent, targetSessionId?: string) => {
+  const handleSendMessage = React.useCallback((
+    content: MessageContent,
+    targetSessionId?: string,
+    opts?: {
+      silent?: boolean;
+      /**
+       * 🎯 /goal 模式启动元数据。
+       *
+       * 仅由 GoalWizardDialog 的 onSubmit 路径传入。该字段会随同 chat_message
+       * 一起送到 extension 端，extension 在 onChatMessage 入口看到该字段后会
+       * 先调用 GeminiClient.setGoalContext(...) 再处理消息——保证后续自动/
+       * 手动压缩能触发 goal prompt 重新注入，避免 agent 在压缩后停摆。
+       *
+       * 设计上把 goal-context 注册和 prompt 发送绑定在同一条消息里，
+       * 而不是独立发 register/chat 两条 —— 这样不需要 round-trip 等待
+       * 也不存在到达顺序竞态。
+       */
+      goalContext?: { startedAt: number; hours: number; task: string };
+    },
+  ) => {
+    // silent=true：消息照样发到后端触发一轮 AI 回复，但不在前端 UI 上
+    // 添加用户消息气泡。用于 /goal 之类把内部 prompt 发给模型、又不希望
+    // prompt 内容（含契约 / 系统硬红线等内部资产）泄漏到聊天历史的场景。
+    const silent = opts?.silent === true;
+    const goalContext = opts?.goalContext;
     // 优先使用目标 Session ID，否则使用当前 Session ID
     const sessionId = targetSessionId || state.currentSessionId;
     if (!sessionId) return;
 
-    // 🎯 拦截 /plan off 命令
+    // 🎯 更新用户最后活动时间（看门狗用）
+    lastUserInteractionRef.current = Date.now();
+
+    // 🎯 拦截 /goal clear 或者目标驱动启动，用于更新看门狗状态
     const textContent = messageContentToString(content).trim();
+    if (textContent.trim() === '/goal clear') {
+      setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+    } else if (opts?.goalContext) {
+      setGoalActiveSessions(prev => ({ ...prev, [sessionId]: true }));
+    }
+
+    // 🎯 拦截 /plan off 命令
     if (textContent.toLowerCase() === '/plan off') {
       console.log('🎯 [PLAN-MODE] Intercepted /plan off command');
 
@@ -1413,7 +1676,10 @@ export const MultiSessionApp: React.FC = () => {
       timestamp: Date.now()
     };
 
-    addMessage(sessionId, userMessage);
+    // silent 模式：跳过 UI 渲染，但仍走 sendChatMessage 触发 AI 回复
+    if (!silent) {
+      addMessage(sessionId, userMessage);
+    }
     setSessionLoading(sessionId, true);
 
     // 🎯 不在前端手动生成标题，让后端在保存时自动提取第一条消息作为标题
@@ -1455,7 +1721,7 @@ User question: ${contentStr}`;
     }
 
     // 发送到Extension
-    getGlobalMessageService().sendChatMessage(sessionId, messageContentToSend, userMessage.id);
+    getGlobalMessageService().sendChatMessage(sessionId, messageContentToSend, userMessage.id, goalContext);
   }, [state.currentSessionId, state.sessions, addMessage, setSessionLoading]);
 
   // 🎯 全局队列处理器：监控所有 Session 的队列并自动发送
@@ -1502,6 +1768,92 @@ User question: ${contentStr}`;
       }
     });
   }, [state.sessions, handleSendMessage, removeMessageFromQueue]);
+
+  // ──── Goal 模式看门狗自动校准 ────
+  // 如果收到含有 goal_achieved 成功状态的 AI 工具调用返回，自动在前端释放看门狗状态
+  useEffect(() => {
+    const currentSession = state.currentSessionId ? state.sessions.get(state.currentSessionId) || null : null;
+    if (!currentSession) return;
+    const sessionId = currentSession.info.id;
+    const messages = currentSession.messages || [];
+
+    if (messages.length === 0) {
+      if (goalActiveSessions[sessionId]) {
+        setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+      }
+      return;
+    }
+
+    // 检查最新一条 AI 消息（在 VS Code 端类型为 assistant）中是否有 goal_achieved 标识
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.type === 'assistant') {
+      const hasGoalAchieved = lastMessage.associatedToolCalls?.some(t => t.toolName === 'goal_achieved');
+      if (hasGoalAchieved && goalActiveSessions[sessionId]) {
+        setGoalActiveSessions(prev => ({ ...prev, [sessionId]: false }));
+      }
+    }
+  }, [state.currentSessionId, state.sessions, goalActiveSessions]);
+
+  // ──── Goal 模式 Idle 看门狗 ────
+  // 问题：某些 AI 模型在 /goal 模式下会"发呆"——既不继续工作，也不调用
+  // goal_achieved。表现为 AI 响应进入 Idle 但 goal 契约未释放。
+  // 解决：跟踪上次用户交互时间；如果 goal active + idle + 60s 无交互，
+  // 自动 silent-submit 一条提示消息让 AI 继续。
+  useEffect(() => {
+    const currentSession = state.currentSessionId ? state.sessions.get(state.currentSessionId) || null : null;
+    if (!currentSession) return;
+    const sessionId = currentSession.info.id;
+    const isGoalActive = !!goalActiveSessions[sessionId];
+    const isIdle = !currentSession.isProcessing && !currentSession.isLoading;
+
+    // 卫语句：只有在 goal 活跃、当前空闲时，才需要开启看门狗
+    if (!isGoalActive || !isIdle) {
+      return;
+    }
+
+    const elapsed = Date.now() - lastUserInteractionRef.current;
+    const remainingTime = Math.max(0, GOAL_IDLE_TIMEOUT_MS - elapsed);
+
+    goalIdleTimerRef.current = setTimeout(() => {
+      goalIdleTimerRef.current = null;
+
+      // 触发时二次确认条件仍然满足
+      const session = state.sessions.get(sessionId);
+      const isStillEligible =
+        session &&
+        goalActiveSessions[sessionId] &&
+        !session.isProcessing &&
+        !session.isLoading;
+
+      if (!isStillEligible) {
+        return;
+      }
+
+      // 发送前更新时间戳，避免消息发出后立即又触发（防抖）
+      lastUserInteractionRef.current = Date.now();
+
+      const goalContinuePrompt =
+        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
+        '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
+        '请立即执行以下检查：\n' +
+        '1. 调用 local_time 确认当前时间和你的工作时长\n' +
+        '2. 对照目标契约检查完成情况——哪些达标、哪些还差\n' +
+        '3. 如果全部达标 → 调用 goal_achieved 声明完成\n' +
+        '4. 如果未达标 → 继续执行剩余工作（调用工具、写代码、运行测试等）\n\n' +
+        '目标契约仍在生效中，请继续工作。';
+
+      handleSendMessage([{ type: 'text', value: goalContinuePrompt }], sessionId, { silent: true });
+    }, remainingTime);
+
+    return () => {
+      if (goalIdleTimerRef.current) {
+        clearTimeout(goalIdleTimerRef.current);
+        goalIdleTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentSessionId, state.sessions, goalActiveSessions, handleSendMessage]);
 
 
   /**
@@ -1713,8 +2065,19 @@ User question: ${contentStr}`;
 
   /**
    * 处理工具确认响应
+   * 🎯 extra 是 AskUserQuestion 的结构化载荷（answers / annotations / feedback）
    */
-  const handleToolConfirmationResponse = (toolId: string, confirmed: boolean, userInput?: string, outcome?: string) => {
+  const handleToolConfirmationResponse = (
+    toolId: string,
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) => {
     const currentSession = getCurrentSession();
     if (!currentSession) return;
 
@@ -1723,7 +2086,8 @@ User question: ${contentStr}`;
       toolId,
       confirmed,
       userInput,
-      outcome
+      outcome,
+      extra
     );
 
     // 🎯 工具状态更新现在通过updateMessageToolCalls处理
@@ -1759,27 +2123,26 @@ User question: ${contentStr}`;
       return;
     }
 
-    // 🎯 记录旧模型，以便回滚
-    const previousModelId = selectedModelId;
+    // 🎯 已经是当前模型，无需切换
+    if (modelId === selectedModelId) return;
 
-    console.log('🤖 Attempting to change model:', previousModelId, '→', modelId);
-    setSelectedModelId(modelId);
-    setPreviousModelBeforeSwitch(previousModelId); // 🎯 保存原模型用于取消时回滚
-    setIsModelSwitching(true); // 🎯 开始切换
+    console.log('🤖 Attempting to change model:', selectedModelId, '→', modelId);
+
+    // 🎯 不做乐观更新：仅显示 loading，selectedModelId 保持原值
+    // 等后端 switchModel 真正成功（model_switch_complete 事件）时才更新 selectedModelId
+    // 这样保证：UI显示 = modelConfig = runtime，永远三者一致
+    setIsModelSwitching(true);
 
     try {
       await webviewModelService.setCurrentModel(modelId, state.currentSessionId || undefined);
-
-      // 🎯 如果调用 setCurrentModel 成功但没有抛异常，说明请求已发送
-      // 后续的处理由以下几种情况处理：
-      // 1. 如果需要压缩，onCompressionConfirmationRequest 会被触发
-      // 2. 如果不需要压缩或压缩完成，轮询会检测到模型已切换并清除 isModelSwitching
-      // 3. 前端的轮询机制（1000ms）会定期检查当前模型是否匹配预期模型
+      // 🎯 请求已发送，后续由以下机制驱动 UI 更新：
+      // 1. 不需要压缩 → 后端发 model_switch_complete → 前端 setSelectedModelId(目标模型)
+      // 2. 需要压缩 → onCompressionConfirmationRequest → 用户确认/取消 → 走对应分支
+      // 3. 兜底：1000ms 轮询检查 modelConfig 是否已变（防止事件丢失导致界面卡死）
     } catch (error) {
-      console.error('❌ Failed to change model, rolling back:', error);
-      setSelectedModelId(previousModelId); // 🎯 失败回滚
+      // 🎯 失败：什么都不动（selectedModelId 本就是旧值），仅关闭 loading
+      console.error('❌ Failed to change model:', error);
       setIsModelSwitching(false);
-      setPreviousModelBeforeSwitch(null);
     }
   };
 
@@ -1976,6 +2339,7 @@ User question: ${contentStr}`;
         isCheckingAuth={true}
         loginError={loginError}
         onCancelLogin={handleCancelLogin}
+        onUseCustomModel={handleUseCustomModel}
       />
     );
   }
@@ -1989,6 +2353,7 @@ User question: ${contentStr}`;
         isCheckingAuth={false}
         loginError={loginError}
         onCancelLogin={handleCancelLogin}
+        onUseCustomModel={handleUseCustomModel}
       />
     );
   }
@@ -2103,24 +2468,37 @@ User question: ${contentStr}`;
         </div>
 
         <div className="multi-session-app__header-right">
-          {/* 🎯 PPT 生成入口 */}
+          {/* 🎯 PPT 生成入口 —— 自定义模型下隐藏（依赖 DeepV 云服务） */}
+          {!isCustomModelOnlyMode && !selectedModelId?.startsWith('custom:') && (
+            <button
+              className="multi-session-app__manage-btn multi-session-app__ppt-btn"
+              onClick={() => setIsPPTGeneratorOpen(true)}
+              title={t('pptGenerator.buttonTooltip', {}, 'Generate PPT with AI')}
+              style={{ marginRight: '8px' }}
+            >
+              <PPTGeneratorIcon size={18} />
+            </button>
+          )}
+          {/* 🎯 目标驱动模式入口 */}
           <button
-            className="multi-session-app__manage-btn multi-session-app__ppt-btn"
-            onClick={() => setIsPPTGeneratorOpen(true)}
-            title={t('pptGenerator.buttonTooltip', {}, 'Generate PPT with AI')}
+            className="multi-session-app__manage-btn multi-session-app__goal-btn"
+            onClick={() => setIsGoalWizardOpen(true)}
+            title={t('goalWizard.buttonTooltip', {}, 'Goal-Driven Mode (auto YOLO + persistent)')}
             style={{ marginRight: '8px' }}
           >
-            <PPTGeneratorIcon size={18} />
+            <Target size={18} />
           </button>
-          {/* 🎯 NanoBanana 图像生成入口 */}
-          <button
-            className="multi-session-app__manage-btn multi-session-app__nanobanana-btn"
-            onClick={() => setIsNanoBananaOpen(true)}
-            title={t('nanoBanana.buttonTooltip', {}, 'Generate images with AI')}
-            style={{ marginRight: '8px' }}
-          >
-            <NanoBananaIcon size={18} />
-          </button>
+          {/* 🎯 NanoBanana 图像生成入口 —— 自定义模型下隐藏（依赖 DeepV 云服务） */}
+          {!isCustomModelOnlyMode && !selectedModelId?.startsWith('custom:') && (
+            <button
+              className="multi-session-app__manage-btn multi-session-app__nanobanana-btn"
+              onClick={() => setIsNanoBananaOpen(true)}
+              title={t('nanoBanana.buttonTooltip', {}, 'Generate images with AI')}
+              style={{ marginRight: '8px' }}
+            >
+              <NanoBananaIcon size={18} />
+            </button>
+          )}
           <button
             className="multi-session-app__manage-btn multi-session-app__history-btn"
             onClick={() => {
@@ -2237,6 +2615,8 @@ User question: ${contentStr}`;
         onToggleMcpEnabled={handleToggleMcpEnabled}
         memoryFilePaths={memoryFilePaths}
         memoryFileCount={memoryFileCount}
+        userInfo={currentUserInfo}
+        onLogout={handleLogout}
       />
 
       {/* 自定义规则管理对话框 */}
@@ -2329,6 +2709,16 @@ User question: ${contentStr}`;
         onClose={() => setIsPPTGeneratorOpen(false)}
       />
 
+      {/* 🎯 目标驱动模式对话框 — 内部 prompt 含契约 / 系统硬红线等不公开内容，
+          走 silent 路径：发到后端触发 AI，但不在 UI 渲染用户气泡。 */}
+      <GoalWizardDialog
+        isOpen={isGoalWizardOpen}
+        onClose={() => setIsGoalWizardOpen(false)}
+        onSubmit={(content, goalContext) =>
+          handleSendMessage(content, undefined, { silent: true, goalContext })
+        }
+      />
+
       {/* 🎯 压缩确认弹窗（模型切换时上下文超限） */}
       <CompressionConfirmationDialog
         isOpen={!!compressionConfirmation && !isCompressing}
@@ -2356,16 +2746,12 @@ User question: ${contentStr}`;
               confirmed: false
             });
 
-            // 🎯 立即回滚到原模型
-            console.log('🔄 [Compression] User cancelled, rolling back to:', previousModelBeforeSwitch);
-            if (previousModelBeforeSwitch) {
-              setSelectedModelId(previousModelBeforeSwitch);
-            }
+            // 🎯 不需要回滚 selectedModelId：因为新模式下没做乐观更新，它本就是旧模型
+            console.log('🔄 [Compression] User cancelled, staying on:', selectedModelId);
 
-            // 🎯 立即清除所有状态，停止模型切换流程
+            // 🎯 立即清除所有切换流程状态
             setIsModelSwitching(false);
             setCompressionConfirmation(null);
-            setPreviousModelBeforeSwitch(null);
           }
         }}
       />

@@ -16,7 +16,7 @@ import { SceneType } from '../core/sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
 import { proxyAuthManager } from '../core/proxyAuth.js';
 import { isDeepXQuotaError } from '../utils/quotaErrorDetection.js';
-import { isCustomModel } from '../types/customModel.js';
+import { isCustomModel, generateCustomModelId } from '../types/customModel.js';
 
 // 最大内容长度限制（10K字符），防止token爆炸
 const MAX_CONTENT_LENGTH = 10000;
@@ -153,6 +153,31 @@ export class WebSearchTool extends BaseTool<
         returnDisplay: validationError,
       };
     }
+
+    // Check if using a custom model
+    const currentModel = typeof this.config.getModel === 'function' ? this.config.getModel() : undefined;
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+    let resolvedModel: string | undefined = undefined;
+
+    if (isUsingCustomModel && typeof this.config.getCustomModels === 'function') {
+      const customModels = this.config.getCustomModels() || [];
+      const geminiFlashModel = customModels.find(m => {
+        if (m.enabled === false) return false;
+        const modelIdLower = (m.modelId || '').toLowerCase();
+        const displayNameLower = (m.displayName || '').toLowerCase();
+        return (modelIdLower.includes('gemini') && modelIdLower.includes('flash')) ||
+               (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
+      });
+
+      if (!geminiFlashModel) {
+        return {
+          llmContent: `This tool (${WebSearchTool.Name}) is currently unavailable because you are using custom models, but no custom Gemini Flash model (e.g., gemini-2.5-flash) was found in your custom models list to execute this tool. Please configure a custom Gemini Flash model to use this feature.`,
+          returnDisplay: `Tool unavailable: Gemini Flash required`
+        };
+      }
+      resolvedModel = generateCustomModelId(geminiFlashModel);
+    }
+
     const geminiClient = this.config.getGeminiClient();
 
     // 🚨 创建超时保护：web search最多30秒
@@ -167,7 +192,7 @@ export class WebSearchTool extends BaseTool<
       // 创建临时Chat获得完整的API日志、Token统计、错误处理等功能
       const temporaryChat = await geminiClient.createTemporaryChat(
         SceneType.WEB_SEARCH,
-        undefined, // 使用场景推荐的模型
+        resolvedModel, // 使用场景推荐的模型 or 自定义 Gemini Flash 模型
         { type: 'sub', agentId: 'WebSearch' }
       );
 

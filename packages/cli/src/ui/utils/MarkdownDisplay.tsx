@@ -27,6 +27,58 @@ const CODE_BLOCK_PREFIX_PADDING = 1;
 const LIST_ITEM_PREFIX_PADDING = 1;
 const LIST_ITEM_TEXT_FLEX_GROW = 1;
 
+// Known language identifiers accepted on a fenced code block opener.
+// Keep lowercase. Includes lowlight `common` languages plus popular aliases
+// LLMs frequently emit (sh/zsh/dart/tsx/jsx/text/c++/c#/etc.). Tokens NOT in
+// this set are treated as glued body content rather than as a language tag —
+// this protects against malformed openers like ```bashopen,  ```Unable to ...
+// observed in production user bug reports.
+const KNOWN_FENCE_LANGS = new Set<string>([
+  // lowlight "common" set
+  'arduino', 'bash', 'c', 'cpp', 'csharp', 'css', 'diff', 'go', 'graphql',
+  'ini', 'java', 'javascript', 'json', 'kotlin', 'less', 'lua', 'makefile',
+  'markdown', 'objectivec', 'perl', 'php', 'php-template', 'plaintext',
+  'python', 'python-repl', 'r', 'ruby', 'rust', 'scss', 'shell', 'sql',
+  'swift', 'typescript', 'vbnet', 'wasm', 'xml', 'yaml',
+  // Common aliases / extensions
+  'js', 'jsx', 'ts', 'tsx', 'sh', 'zsh', 'fish', 'powershell', 'ps1', 'pwsh',
+  'bat', 'cmd', 'cs', 'fs', 'fsharp', 'kt', 'kts', 'rb', 'py', 'rs', 'dart',
+  'flutter', 'dockerfile', 'docker', 'toml', 'csv', 'tsv', 'log', 'md', 'mdx',
+  'html', 'htm', 'svg', 'vue', 'svelte', 'astro', 'tex', 'latex', 'bibtex',
+  'asm', 'nasm', 'gas', 'vim', 'viml', 'lisp', 'clojure', 'clj', 'cljs',
+  'elixir', 'ex', 'exs', 'erlang', 'erl', 'haskell', 'hs', 'ocaml', 'ml',
+  'scala', 'groovy', 'gradle', 'cmake', 'mermaid', 'plantuml', 'graphviz',
+  'dot', 'protobuf', 'proto', 'thrift', 'capnp', 'nginx', 'apache', 'caddy',
+  'env', 'conf', 'config', 'properties', 'gitignore', 'gitconfig',
+  // Generic/text-y
+  'text', 'plain', 'plaintext', 'txt', 'console', 'output', 'terminal',
+  'c++', 'c#', 'obj-c', 'objective-c',
+]);
+
+// Sorted descending by length: needed for longest-known-prefix matching so
+// that e.g. "javascript" is matched before "java", "typescript" before "ts".
+const KNOWN_FENCE_LANGS_BY_LEN = [...KNOWN_FENCE_LANGS].sort(
+  (a, b) => b.length - a.length,
+);
+
+/**
+ * When the LLM glued the first body token onto the language tag (e.g.
+ * ```bashopen, ```textci, ```bash.), try to recover the real language by
+ * matching the LONGEST known language as a prefix of the captured token.
+ * Returns { lang, leftover } where `leftover` should be re-glued onto the
+ * body. Returns null if no known language is a prefix.
+ */
+function splitGluedLang(token: string): { lang: string; leftover: string } | null {
+  if (!token) return null;
+  const lower = token.toLowerCase();
+  for (const known of KNOWN_FENCE_LANGS_BY_LEN) {
+    if (lower.startsWith(known) && lower.length > known.length) {
+      return { lang: token.slice(0, known.length), leftover: token.slice(known.length) };
+    }
+  }
+  return null;
+}
+
 const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
   text,
   isPending,
@@ -35,9 +87,30 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
 }) => {
   if (!text) return <></>;
 
-  const lines = text.split('\n');
+  // Normalize CRLF (and bare CR) so downstream split('\n') works on Windows-origin streams.
+  // Also recover from JSON-escape leaks where "\n" was emitted as a literal backslash-n
+  // immediately after a fence opener (e.g. ```bash\nchmod 600 ...). We unescape only
+  // when the literal \n appears within the same line as the fence opener — never in arbitrary
+  // body content — to avoid corrupting genuine "\n" characters discussed in prose.
+  const normalizedText = text
+    .replace(/\r\n?/g, '\n')
+    .replace(/^( *(?:`{3,}|~{3,})[^\n]*?)\\n/gm, '$1\n');
+
+  const lines = normalizedText.split('\n');
   const headerRegex = /^ *(#{1,4}) +(.*)/;
-  const codeFenceRegex = /^ *(`{3,}|~{3,}) *(\w*?) *$/;
+  // Fenced code block opener:
+  //   group 1: fence run (``` or ~~~ or longer)
+  //   group 2: language identifier — restricted to chars typically seen in
+  //            language names. We accept letters, digits, underscore, plus,
+  //            hash and hyphen. We deliberately EXCLUDE '.' and '/' so that
+  //            ```bash./ci/x.sh is parsed with lang="bash" and the rest
+  //            captured into group 3 as glued content.
+  //   group 3: trailing content glued on the same line — recovered as the first body line.
+  // The closing-fence check (in `inCodeBlock` branch below) requires group 3 to be empty,
+  // so this relaxed regex does not accidentally swallow lines that look like fences but
+  // carry trailing content inside an open block.
+  const codeFenceRegex =
+    /^ *(`{3,}|~{3,})[ \t]*([A-Za-z0-9_+#-]*)[ \t]*(.*?)[ \t]*$/;
   const ulItemRegex = /^([ \t]*)([-*+]) +(.*)/;
   const olItemRegex = /^([ \t]*)(\d+)\. +(.*)/;
   const hrRegex = /^ *([-*_] *){3,} *$/;
@@ -87,10 +160,16 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
 
     if (inCodeBlock) {
       const fenceMatch = line.match(codeFenceRegex);
+      // Closing fence requirements:
+      //   * Same fence char family (``` vs ~~~).
+      //   * Fence run length >= the opening run length.
+      //   * No trailing content glued on the same line — otherwise this is just a body line
+      //     that happens to contain backticks (e.g. ` ```bash some code `).
       if (
         fenceMatch &&
         fenceMatch[1].startsWith(codeBlockFence[0]) &&
-        fenceMatch[1].length >= codeBlockFence.length
+        fenceMatch[1].length >= codeBlockFence.length &&
+        (fenceMatch[3] ?? '').trim() === ''
       ) {
         addContentBlock(
           <RenderCodeBlock
@@ -159,9 +238,80 @@ const MarkdownDisplayInternal: React.FC<MarkdownDisplayProps> = ({
     const tableSeparatorMatch = line.match(tableSeparatorRegex);
 
     if (codeFenceMatch) {
-      inCodeBlock = true;
-      codeBlockFence = codeFenceMatch[1];
-      codeBlockLang = codeFenceMatch[2] || null;
+      const fenceRun = codeFenceMatch[1];
+      const fenceChar = fenceRun[0];
+      let lang = codeFenceMatch[2] || '';
+      let remainder = codeFenceMatch[3] ?? '';
+
+      // Heuristic: only trust the captured token as a language if it is in the
+      // known-language allowlist. Otherwise try to split it as
+      // "<known-language>+<glued body prefix>" (e.g. "bashopen" → "bash"+"open",
+      // "textci" → "text"+"ci"). If neither works, push the whole token back
+      // into the body. This protects against real-world LLM outputs observed
+      // in production user reports where the model glued the first line of
+      // code onto the fence opener with no separator.
+      if (lang) {
+        const normalized = lang.toLowerCase();
+        if (!KNOWN_FENCE_LANGS.has(normalized)) {
+          const split = splitGluedLang(lang);
+          if (split) {
+            // "bashopen" → lang="bash", leftover="open" — re-glue leftover to
+            // the front of remainder. Insert a space ONLY if remainder doesn't
+            // already start with a separator (whitespace or path char) — many
+            // real LLM outputs are like "bashopen ios/foo" where remainder
+            // already has its own leading space, so adding another would be wrong.
+            const needsSpace =
+              remainder.length > 0 && !/^[\s/.]/.test(remainder);
+            remainder = remainder.length > 0
+              ? `${split.leftover}${needsSpace ? ' ' : ''}${remainder}`
+              : split.leftover;
+            lang = split.lang;
+          } else {
+            // "Unable to install..." → no known prefix, push whole token back.
+            const needsSpace =
+              remainder.length > 0 && !/^[\s/.]/.test(remainder);
+            remainder = remainder.length > 0
+              ? `${lang}${needsSpace ? ' ' : ''}${remainder}`
+              : lang;
+            lang = '';
+          }
+        }
+      }
+
+      // Same-line closing fence: ```bash...``` (no newline anywhere).
+      // Detect ≥-fence-length run of the same fence char at the END of remainder.
+      // If found, emit the code block immediately and DON'T enter inCodeBlock state.
+      const closerPattern = new RegExp(
+        `^(.*?)\\s*(${fenceChar === '`' ? '`' : '~'}{${fenceRun.length},})\\s*$`,
+      );
+      const closedMatch = remainder ? remainder.match(closerPattern) : null;
+
+      if (closedMatch) {
+        // Single-line fenced block: render and stay out of code-block state.
+        const innerBody = closedMatch[1] ?? '';
+        addContentBlock(
+          <RenderCodeBlock
+            key={key}
+            content={innerBody.length > 0 ? [innerBody] : []}
+            lang={lang || null}
+            isPending={isPending}
+            availableTerminalHeight={availableTerminalHeight}
+            terminalWidth={terminalWidth}
+          />,
+        );
+        // Do NOT set inCodeBlock — this fence is already closed.
+      } else {
+        inCodeBlock = true;
+        codeBlockFence = fenceRun;
+        codeBlockLang = lang || null;
+        // Defensive: if the LLM glued the first code line onto the fence opener
+        // (e.g. ```text/Users/foo or after a JSON-escaped "\n" leak that we already
+        // normalized above), recover that glued tail as the first body line so
+        // it is rendered as code, not paragraph text.
+        if (remainder.length > 0) {
+          codeBlockContent.push(remainder);
+        }
+      }
     } else if (thinkStartMatch) {
       const startTagIndex = line.toLowerCase().indexOf('<think>');
       const beforeTag = line.substring(0, startTagIndex);
@@ -439,9 +589,46 @@ const RenderThinkBlockInternal: React.FC<RenderThinkBlockProps> = ({
         </Text>
       </Box>
       <Box paddingX={1} flexDirection="column" width={terminalWidth}>
-        <Text color={Colors.Comment} italic wrap="wrap">
-          {displayLines.join('\n')}
-        </Text>
+        {displayLines.map((line, idx) => {
+          const ulMatch = line.match(/^(\s*)([-*+])\s+(.*)$/);
+          const olMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+
+          if (ulMatch) {
+            const leadingWhitespace = ulMatch[1];
+            const marker = ulMatch[2];
+            const itemText = ulMatch[3];
+            return (
+              <Box key={idx} marginLeft={leadingWhitespace.length}>
+                <Text color={Colors.Comment} italic>
+                  {marker}{' '}
+                  <RenderInline text={itemText} />
+                </Text>
+              </Box>
+            );
+          }
+
+          if (olMatch) {
+            const leadingWhitespace = olMatch[1];
+            const num = olMatch[2];
+            const itemText = olMatch[3];
+            return (
+              <Box key={idx} marginLeft={leadingWhitespace.length}>
+                <Text color={Colors.Comment} italic>
+                  {num}.{' '}
+                  <RenderInline text={itemText} />
+                </Text>
+              </Box>
+            );
+          }
+
+          return (
+            <Box key={idx}>
+              <Text color={Colors.Comment} italic wrap="wrap">
+                <RenderInline text={line} />
+              </Text>
+            </Box>
+          );
+        })}
         {isPending ? (
           <Text color={Colors.Comment}>
             ...

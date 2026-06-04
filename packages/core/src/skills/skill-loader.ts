@@ -25,6 +25,7 @@ import {
   SkillSource,
 } from './skill-types.js';
 import { SettingsManager, SkillsPaths } from './settings-manager.js';
+import { isDirentDirectoryFollowingSymlinks } from './utils/fs-helpers.js';
 import { MarketplaceManager } from './marketplace-manager.js';
 import { MarketplaceLoader } from './loaders/marketplace-loader.js';
 import { UnifiedComponent, ComponentType } from './models/unified.js';
@@ -54,13 +55,16 @@ export class SkillLoader {
   private readonly cacheTTL: number;
   private marketplaceLoader: MarketplaceLoader;
   private customSkillPaths: Map<SkillSource, string> = new Map();
+  private projectRoot: string;
 
   constructor(
     private settingsManager: SettingsManager,
     private marketplaceManager: MarketplaceManager,
     cacheTTL = 3600000, // 默认 1 小时
+    projectRoot?: string,
   ) {
     this.cacheTTL = cacheTTL;
+    this.projectRoot = projectRoot || process.cwd();
     this.marketplaceLoader = new MarketplaceLoader(settingsManager);
     this.initializeCustomSkillPaths();
   }
@@ -73,7 +77,7 @@ export class SkillLoader {
     this.customSkillPaths.set(SkillSource.USER_GLOBAL, path.join(process.env.HOME || '', '.deepv', 'skills'));
 
     // 项目技能路径（使用工具函数，与命令处理保持一致）
-    this.customSkillPaths.set(SkillSource.USER_PROJECT, getProjectSkillsDir(process.cwd()));
+    this.customSkillPaths.set(SkillSource.USER_PROJECT, getProjectSkillsDir(this.projectRoot));
   }
 
   // ============================================================================
@@ -142,6 +146,10 @@ export class SkillLoader {
 
   /**
    * 扫描技能目录
+   *
+   * 注意：必须跟随 symlink —— 用户用 `ln -s` 把 skill 指到 `~/.deepv/skills/` 的
+   * 场景很常见（尤其开发者在 monorepo 里软链接多套技能），若直接用
+   * `entry.isDirectory()` 会把 symlink 全部漏掉。
    */
   private async scanSkillDirectories(rootPath: string): Promise<string[]> {
     const skillDirs: string[] = [];
@@ -150,13 +158,14 @@ export class SkillLoader {
       const entries = await fs.readdir(rootPath, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const skillDir = path.join(rootPath, entry.name);
-          const skillPath = path.join(skillDir, 'SKILL.md');
+        const isDir = await isDirentDirectoryFollowingSymlinks(entry, rootPath);
+        if (!isDir) continue;
 
-          if (await fs.pathExists(skillPath)) {
-            skillDirs.push(skillDir);
-          }
+        const skillDir = path.join(rootPath, entry.name);
+        const skillPath = path.join(skillDir, 'SKILL.md');
+
+        if (await fs.pathExists(skillPath)) {
+          skillDirs.push(skillDir);
         }
       }
     } catch (error) {
@@ -178,10 +187,13 @@ export class SkillLoader {
       const skillName = path.basename(skillPath);
       const skillId = this.generateCustomSkillId(skillPath, source);
 
+      // 使用统一的 marketplaceId 以便正确分组
+      const marketplaceId = source === SkillSource.USER_GLOBAL ? 'user-global' : 'user-project';
+
       const skill = await this.parseSkillFile(
         path.join(skillPath, 'SKILL.md'),
         skillName,
-        skillName,
+        marketplaceId,
         loadLevel,
         SkillType.SKILL,
       );
@@ -226,7 +238,8 @@ export class SkillLoader {
       case SkillSource.USER_GLOBAL:
         return `user:${relativePath}`;
       case SkillSource.USER_PROJECT:
-        const projectName = path.basename(process.cwd());
+        // 使用 this.projectRoot 而非 process.cwd()，避免 cwd 切换导致 ID 不稳定
+        const projectName = path.basename(this.projectRoot);
         return `project:${projectName}:${relativePath}`;
       default:
         return relativePath;
@@ -234,26 +247,33 @@ export class SkillLoader {
   }
 
   /**
-   * 加载市场技能（保持现有逻辑）
+   * 加载市场技能
+   * 一次性加载所有插件，按启用状态过滤，避免 O(N²) 重复扫描
    */
   private async loadMarketplaceSkills(loadLevel: SkillLoadLevel): Promise<Skill[]> {
     try {
       const skills: Skill[] = [];
 
       // 获取已启用的 Plugins
-      const enabledPluginIds = await this.settingsManager.getEnabledPlugins();
+      const enabledPluginIds = new Set(await this.settingsManager.getEnabledPlugins());
 
-      // 遍历每个 Plugin，加载其 Skills
-      for (const pluginId of enabledPluginIds) {
+      // 一次性加载所有插件（避免循环中重复调用 loadPlugins）
+      const allPlugins = await this.marketplaceLoader.loadPlugins();
+
+      for (const plugin of allPlugins) {
+        // 按启用状态过滤
+        if (!enabledPluginIds.has(plugin.id)) continue;
+
         try {
-          const pluginSkills = await this.loadPluginSkills(pluginId, loadLevel);
-          skills.push(...pluginSkills.map(skill => ({
-            ...skill,
-            isCustom: false,
-            isBuiltIn: true,
-          })));
+          for (const comp of plugin.components) {
+            const skill = this.convertToSkill(comp, loadLevel);
+            skill.isCustom = false;
+            skill.isBuiltIn = true;
+            this.addToCache(skill);
+            skills.push(skill);
+          }
         } catch (error) {
-          console.warn(`Failed to load skills for plugin ${pluginId}:`, error);
+          console.warn(`Failed to load skills for plugin ${plugin.id}:`, error);
         }
       }
 
@@ -265,21 +285,19 @@ export class SkillLoader {
   }
 
   /**
-   * 加载指定 Plugin 的所有 Skills（保持现有逻辑）
+   * 加载指定 Plugin 的所有 Skills
    */
   async loadPluginSkills(
     pluginId: string,
     loadLevel: SkillLoadLevel = SkillLoadLevel.METADATA,
   ): Promise<Skill[]> {
     try {
-      // 使用新的 MarketplaceLoader 加载
       const plugins = await this.marketplaceLoader.loadPlugins();
       const targetPlugin = plugins.find(p => p.id === pluginId);
 
       if (targetPlugin) {
         return targetPlugin.components.map(comp => {
           const skill = this.convertToSkill(comp, loadLevel);
-          // 添加到缓存，确保后续 loadSkill 能命中
           this.addToCache(skill);
           return skill;
         });
@@ -716,12 +734,18 @@ export class SkillLoader {
 
   /**
    * 获取 Skill 统计信息
+   * @param forceReload 强制重新加载配置（避免缓存导致的统计不一致）
    */
-  async getSkillStats(): Promise<{
+  async getSkillStats(forceReload = false): Promise<{
     total: number;
     byMarketplace: Record<string, number>;
     byPlugin: Record<string, number>;
   }> {
+    // 强制重新加载配置以避免缓存问题
+    if (forceReload) {
+      await this.settingsManager.readSettings(true);
+    }
+
     const skills = await this.loadEnabledSkills(SkillLoadLevel.METADATA);
 
     const byMarketplace: Record<string, number> = {};

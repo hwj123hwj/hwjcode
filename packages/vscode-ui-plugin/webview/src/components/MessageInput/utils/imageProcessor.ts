@@ -12,6 +12,7 @@ export interface ImageReference {
   compressedSize: number;
   width?: number;
   height?: number;
+  filePath?: string;   // 原始文件路径（可从拖拽/文件上传中获取；粘贴时为空）
 }
 
 // 🎯 图片文件名序列生成器
@@ -272,7 +273,7 @@ export async function compressImageInBrowser(
 }
 
 // 🎯 处理剪切板图片
-export async function processClipboardImage(file: File): Promise<ImageReference | null> {
+export async function processClipboardImage(file: File, sourcePath?: string): Promise<ImageReference | null> {
   try {
     console.log('🎯 Processing clipboard image:', {
       fileName: file.name,
@@ -350,7 +351,8 @@ export async function processClipboardImage(file: File): Promise<ImageReference 
       originalSize: file.size,
       compressedSize,
       width,
-      height
+      height,
+      filePath: sourcePath || (file as any).path || undefined, // 🎯 保留原始文件路径
     };
 
     console.log('🎯 Image processed successfully:', {

@@ -24,6 +24,7 @@ import {
 } from '../index.js';
 import { PartListUnion, Part } from '@google/genai';
 import { convertToFunctionResponse } from './coreToolScheduler.js';
+import { todoStore, checkTodoStaleness } from '../tools/todo-store.js';
 import {
   ToolSchedulerAdapter,
   ToolExecutionContext,
@@ -672,8 +673,21 @@ export class ToolExecutionEngine {
           confirmationDetails &&
           (confirmationDetails as any).warning;
 
-        // If dangerous command, always require confirmation (skip YOLO mode)
-        if (isDangerousCommand) {
+        // 🎯 AskUserQuestion: even in YOLO mode we MUST pop the dialog — the
+        // whole point of this tool is to ask the user, so bypassing confirmation
+        // would make it useless (execute() would see no answers and LLM would
+        // get "User declined").
+        const isAskUserQuestion =
+          confirmationDetails &&
+          (confirmationDetails as any).type === 'question';
+
+        // If dangerous command or a user-question tool, always require confirmation (skip YOLO mode)
+        // Workflow confirmation is also mandatory — it spins up many sub-agents and burns tokens.
+        const isWorkflowConfirm =
+          confirmationDetails &&
+          (confirmationDetails as any).type === 'workflow';
+
+        if (isDangerousCommand || isAskUserQuestion || isWorkflowConfirm) {
           // 🎯 保存原始onConfirm以避免递归
           const originalOnConfirm = (confirmationDetails as any).onConfirm;
 
@@ -1053,6 +1067,19 @@ export class ToolExecutionEngine {
       }
 
       // 转换为响应格式
+      // 📋 Todo staleness: count non-todo_write tool calls and inject reminder if stale
+      if (reqInfo.name !== 'todo_write') {
+        todoStore.incrementToolCallsSinceLastUpdate();
+        const stalenessReminder = checkTodoStaleness();
+        if (stalenessReminder) {
+          if (typeof guardedLlmContent === 'string') {
+            guardedLlmContent = guardedLlmContent + '\n\n' + stalenessReminder;
+          } else if (Array.isArray(guardedLlmContent)) {
+            guardedLlmContent = [...guardedLlmContent, stalenessReminder];
+          }
+        }
+      }
+
       const responseParts = convertToFunctionResponse(
         reqInfo.name,
         reqInfo.callId,

@@ -316,6 +316,7 @@ export const translations = {
     'subagent.execution.time': 'Execution Time:',
     'subagent.token.consumption': 'Token Usage:',
     'subagent.tool.calls.count': '{count} calls',
+    'subagent.turns': 'Turns:',
 
     // Tool Stats Display
     'tool.stats.no.calls': 'No tool calls have been made in this session yet.',
@@ -363,14 +364,19 @@ export const translations = {
     'subagent.avg.latency': 'Avg Latency: ',
 
     // Task execution
-    'task.timeout.warning':
-      '⚠️ Task execution timeout: Completed {turns} conversation turns but task remains unfinished',
-    'task.timeout.credits.notice':
-      'Continuing may consume additional credits. Please review carefully.',
+    'task.timeout.warning': '⚠️ Task execution timeout: Completed {turns} conversation turns but task remains unfinished',
+    'task.timeout.credits.notice': 'Continuing may consume additional credits. Please review carefully.',
+    'task.timeout.partial.header': '⚠️ Reached max turns ({turns}). Partial findings from sub-agent below:',
+    'task.timeout.partial.no_summary': '(Sub-agent did not produce a final summary before reaching the turn limit.)',
 
     // Conversation limits
-    'conversation.token.limit.warning':
-      'IMPORTANT: Context approaching limit. Conversation context will be compressed for future messages.\nIf you notice the model becomes less focused, use "/session new" to start a fresh conversation.',
+    'conversation.token.limit.warning': 'IMPORTANT: Context approaching limit. Conversation context will be compressed for future messages.\nIf you notice the model becomes less focused, use "/session new" to start a fresh conversation.',
+    'conversation.compress.failed.generic': '⚠️ Auto-compression failed ({reason}). The conversation may be too long to continue safely.\nPlease run /compress manually, or start a fresh conversation with /session new.',
+    'conversation.compress.failed.circuit_breaker': '⚠️ Auto-compression has failed repeatedly and is temporarily disabled ({reason}).\nPlease run /compress manually to force a compression, or start a fresh conversation with /session new.',
+    'conversation.compress.failed.unknown': '⚠️ Auto-compression failed unexpectedly. Please run /compress manually, or start a fresh conversation with /session new.',
+    'conversation.compress.degraded': 'ℹ️ Full compression unavailable — continuing in lightweight mode (cleared {clearedCount} old tool outputs to free context).\nIf responses become less focused, run /compress manually or start a fresh conversation with /session new.',
+    'compression.in_progress': 'Compressing chat history...',
+    'compression.success': 'Chat history compressed successfully.',
 
     // Tool Names
     'tool.edit': 'Edit',
@@ -394,11 +400,14 @@ export const translations = {
     'tool.findfiles': 'FindFiles',
     'tool.readfolder': 'ReadFolder',
     'tool.readmanyfiles': 'ReadManyFiles',
-    'tool.shell': 'Shell',
+    'tool.shell': 'Bash',
     'tool.webfetch': 'WebFetch',
     'tool.websearch': 'Web Search',
     'tool.savememory': 'Save Memory',
     'tool.task': 'Task',
+
+    // Aggregated read_file group header (Claude-Code style "Reading N files…")
+    'tool.aggregate.reading_files': 'Reading {count} files…',
 
     // Shell output
     'shell.output.truncated':
@@ -973,15 +982,15 @@ export const translations = {
 
     // Slash command descriptions
     'command.help.description': 'Get deepv-code help',
-    'command.report.description': 'Generate a diagnostic report for sharing',
-    'command.history.description': 'Show recent input history',
-    'command.clear.description':
-      'Clear terminal screen (keeps conversation context)',
+    'command.clear.description': 'Clear terminal screen (keeps conversation context)',
+    'command.todo.description': 'Clear or hide the pinned tasks (todo list) panel',
+    'command.todo.cleared': 'Tasks panel has been successfully cleared and hidden.',
+    'command.todo.unknown': 'Unknown subcommand. Use "/todo clear" to hide current tasks.',
     'command.queue.description': 'Manage prompt queue',
     'command.queue.clear.description': 'Clear all queued prompts',
     'command.quit.description': 'Exit command line interface',
     'command.export.description': 'Export session',
-    'command.export_debug.description': 'Export debug logs',
+    'command.export_debug.description': 'Export debug logs (default: all; pass `errors` for errors/warnings only)',
     'command.issue.description': 'Submit a GitHub issue with error logs',
     'command.issue.missing_description':
       'Please provide a short issue description after /issue.',
@@ -1010,10 +1019,15 @@ export const translations = {
     'command.copy.success': '📋 Copied to clipboard',
     'command.editor.description': 'Set external editor preferences',
     'command.memory.description': 'Commands to interact with memory',
-    'command.stats.description':
-      'View all statistics (session, model, and tools). Usage: /stats [model [name]|tools]',
-    'command.context.description':
-      'View detailed context token usage breakdown',
+    'command.wiki.description': 'LLM Wiki - build and maintain a project knowledge base',
+    'command.wiki.init.description': 'Initialize wiki directory structure',
+    'command.wiki.ingest.description': 'Ingest source files into the wiki (no args = ingest all from raw/)',
+    'command.wiki.query.description': 'Query the wiki knowledge base',
+    'command.wiki.lint.description': 'Health-check the wiki (find orphans, contradictions, gaps)',
+    'command.wiki.status.description': 'Show wiki status and recent activity',
+    'command.wiki.log.description': 'Show the full wiki operation log',
+    'command.stats.description': 'View all statistics (session, model, and tools). Usage: /stats [model [name]|tools]',
+    'command.context.description': 'View detailed context token usage breakdown',
     'command.tools.description': 'List available tools and their descriptions',
     'command.vim.description': 'Toggle vim mode',
     'command.yolo.description':
@@ -1086,31 +1100,35 @@ export const translations = {
     'config.hint.language.help': 'Leave empty for default (AI decided)',
     'config.hint.confirm.cancel': 'Enter to confirm · escape to cancel',
 
-    'command.healthyUse.description': 'Manage healthy use reminders',
-    'command.healthyUse.status': 'Healthy use reminder is currently {status}',
-    'command.healthyUse.on': 'Healthy use reminder turned ON',
-    'command.healthyUse.off': 'Healthy use reminder turned OFF',
-    'command.healthyUse.usage.title': 'Usage:',
-    'command.healthyUse.usage.on':
-      '  /healthy-use on   - Turn on healthy use reminder',
-    'command.healthyUse.usage.off':
-      '  /healthy-use off  - Turn off healthy use reminder',
-    'command.healthyUse.usage.status':
-      '  /healthy-use      - View current status',
-    'command.healthyUse.error.invalid_args': '❌ Invalid arguments: {args}',
-    'healthy.reminder.title': "It's late, time to rest",
-    'healthy.reminder.content':
-      'Work is important, but your health is priceless.',
-    'healthy.reminder.suggestion':
-      "It's late night (22:00 - 06:00), we suggest saving your progress and resting.",
-    'healthy.reminder.agentRunning':
-      "Agent is working in the background and won't be affected.",
-    'healthy.reminder.waiting': 'Please wait {{seconds}}s to confirm...',
-    'healthy.reminder.dismiss': ' Press [Enter] or [Space] to remind later ',
-    'command.ppt.description':
-      'Create PowerPoint presentations with AI-assisted outline design',
-    'command.ppt.prompt':
-      'What topic would you like to create a PPT for?\n\nExamples:\n  /ppt "AI in Education"\n  /ppt "2025 Annual Summary" --pages 15',
+    // Project Memory Mode
+    'config.menu.project.memory': '📂 Project Memory',
+    'config.submenu.project.memory.title': 'Project Memory - Choose which memory files to load',
+    'config.option.project.memory.all': '📂 DEEPV.md + AGENTS.md (Default)',
+    'config.option.project.memory.deepvOnly': '📄 DEEPV.md only',
+    'config.option.project.memory.none': '🚫 Don\'t load',
+    'config.value.project.memory.all': 'DEEPV.md + AGENTS.md',
+    'config.value.project.memory.deepvOnly': 'DEEPV.md only',
+    'config.value.project.memory.none': 'Disabled',
+    'config.status.project.memory.updated': '✅ Project memory mode updated to {mode}',
+    'config.status.project.memory.reloading': '🔄 Reloading memory...',
+
+  'command.healthyUse.description': 'Manage healthy use reminders',
+  'command.healthyUse.status': 'Healthy use reminder is currently {status}',
+  'command.healthyUse.on': 'Healthy use reminder turned ON',
+  'command.healthyUse.off': 'Healthy use reminder turned OFF',
+  'command.healthyUse.usage.title': 'Usage:',
+  'command.healthyUse.usage.on': '  /healthy-use on   - Turn on healthy use reminder',
+  'command.healthyUse.usage.off': '  /healthy-use off  - Turn off healthy use reminder',
+  'command.healthyUse.usage.status': '  /healthy-use      - View current status',
+  'command.healthyUse.error.invalid_args': '❌ Invalid arguments: {args}',
+  'healthy.reminder.title': "It's late, time to rest",
+  'healthy.reminder.content': 'Work is important, but your health is priceless.',
+  'healthy.reminder.suggestion': "It's late night (22:00 - 06:00), we suggest saving your progress and resting.",
+  'healthy.reminder.agentRunning': "Agent is working in the background and won't be affected.",
+  'healthy.reminder.waiting': 'Please wait {{seconds}}s to confirm...',
+  'healthy.reminder.dismiss': ' Press [Enter] or [Space] to remind later ',
+    'command.ppt.description': 'Create PowerPoint presentations with AI-assisted outline design',
+    'command.ppt.prompt': 'What topic would you like to create a PPT for?\n\nExamples:\n  /ppt "AI in Education"\n  /ppt "2025 Annual Summary" --pages 15',
     'command.ppt.expected_pages': '\n\nExpected pages: {count}',
     'command.session.description':
       'Session management - list, select and create conversation sessions',
@@ -1214,18 +1232,12 @@ export const translations = {
       'AI is refining your text, please wait...',
 
     // NanoBanana Command
-    'command.nanobanana.description':
-      'Generate images using NanoBanana. Usage: /NanoBanana <ratio> <size> <prompt> [@image]',
-    'nanobanana.usage.error':
-      'Usage: /NanoBanana <ratio> <size> <prompt> [@image]\nRatio: 1:1, 16:9, 9:16, etc.\nSize: 1K or 2K\n@image can appear anywhere in the command\nExample: /NanoBanana 16:9 2K A futuristic city @ref.jpg',
-    'nanobanana.missing.prompt':
-      'Missing required parameters. Usage: /NanoBanana <ratio> <size> <prompt> [@image]',
-    'nanobanana.invalid.size':
-      'Invalid image size. Use 1K or 2K. Usage: /NanoBanana <ratio> <size> <prompt>',
-    'nanobanana.submitting':
-      'Submitting image generation task...\nPrompt: "{prompt}"\nRatio: {ratio}',
-    'nanobanana.submitted':
-      'Task submitted (ID: {taskId}).\nEstimated Credits: {credits} (Subject to actual deduction)\nWaiting for image generation...',
+    'command.nanobanana.description': 'Generate images using NanoBanana. Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]',
+    'nanobanana.usage.error': 'Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]\nRatio: 1:1, 16:9, 9:16, etc.\nSize: 1K or 2K\n@image can appear anywhere, up to 5 reference images\nExample: /NanoBanana 16:9 2K A futuristic city @ref.jpg\nMulti-image: /NanoBanana auto 2K Merge these images @a.jpg @b.png',
+    'nanobanana.missing.prompt': 'Missing required parameters. Usage: /NanoBanana <ratio> <size> <prompt> [@image ...]',
+    'nanobanana.invalid.size': 'Invalid image size. Use 1K or 2K. Usage: /NanoBanana <ratio> <size> <prompt>',
+    'nanobanana.submitting': 'Submitting image generation task...\nPrompt: "{prompt}"\nRatio: {ratio}',
+    'nanobanana.submitted': 'Task submitted (ID: {taskId}).\nEstimated Credits: {credits} (Subject to actual deduction)\nWaiting for image generation...',
     'nanobanana.timeout': 'Image generation timed out after {seconds}s.',
     'nanobanana.completed':
       'Image generation completed!\nActual Credits: {credits}\n{urlText}',
@@ -1313,12 +1325,25 @@ export const translations = {
     'memory.refreshed':
       'Loaded {charCount} characters from {fileCount} file(s).',
     'memory.refresh.refreshing': 'Refreshing memory from source files...',
-    'memory.refresh.success':
-      'Memory refreshed and updated to AI model successfully.',
-    'memory.refresh.noContent':
-      'Memory refreshed successfully. No memory content found.',
-    'command.stats.model.description':
-      'Show model-specific usage statistics. Usage: /stats model [model name]',
+    'memory.refresh.success': 'Memory refreshed and updated to AI model successfully.',
+    'memory.refresh.noContent': 'Memory refreshed successfully. No memory content found.',
+
+    // Wiki command messages
+    'wiki.init.alreadyExists': 'Wiki already initialized at {path}. Use /wiki status to view.',
+    'wiki.init.starting': 'Initializing LLM Wiki...',
+    'wiki.notInitialized': 'Wiki not initialized. Run /wiki init first.',
+    'wiki.ingest.usage': 'Usage: /wiki ingest <file-path>',
+    'wiki.ingest.starting': 'Ingesting into wiki: {path}',
+    'wiki.ingest.startingAll': 'Ingesting all raw sources into wiki ({count} files)...',
+    'wiki.ingest.rawEmpty': 'No files found in raw/ directory. Place source files in .llm-wiki/raw/ or specify a file path: /wiki ingest <file>',
+    'wiki.query.usage': 'Usage: /wiki query <your question>',
+    'wiki.query.searching': 'Querying wiki: {question}',
+    'wiki.lint.starting': 'Running wiki health check...',
+    'wiki.status.notInitialized': 'Wiki not initialized. Run /wiki init to create the knowledge base.',
+    'wiki.status.noLogEntries': '(no entries yet)',
+    'wiki.log.readError': 'Failed to read wiki log.',
+
+    'command.stats.model.description': 'Show model-specific usage statistics. Usage: /stats model [model name]',
     'command.stats.tools.description': 'Show tool-specific usage statistics',
     'command.stats.error.noSessionStartTime':
       'Session start time is unavailable, cannot calculate stats.',
@@ -1413,7 +1438,7 @@ export const translations = {
     'mcp.status.help.templates': 'Predefined template list',
     'mcp.status.help.examples': 'Configuration examples',
     'mcp.status.tip': '💡 Tip: Configuration will be saved in',
-    'mcp.status.config.file': '.deepv/settings.json',
+    'mcp.status.config.file': '.deepvcode/settings.json',
     'mcp.status.run.after.config': 'After configuration, run',
     'mcp.status.view.status': 'to view server status',
 
@@ -1684,6 +1709,203 @@ export const translations = {
     'agentStyle.codex.yolo.enabled':
       '🚀 YOLO mode auto-enabled (all tool calls will execute without confirmation)',
 
+    // Thinking Config
+    'command.thinking.description': 'Configure AI thinking mode and depth: on, off, auto, low, medium, high, max',
+    'thinking.error.config.unavailable': 'Configuration unavailable',
+    'thinking.status.current': 'Current Thinking Configuration: Mode={mode}, Effort={effort}',
+    'thinking.provider.openai.warning': 'Standard OpenAI Chat protocol does not support direct thinking tuning (e.g. DeepSeek-Reasoner has its own forced-thinking behavior). This configuration will apply when you switch to Anthropic or OpenAI Responses (o-series).',
+    'thinking.provider.anthropic.ok': 'Your Anthropic model fully supports adaptive thinking and effort level tuning!',
+    'thinking.provider.openaiResponses.ok': 'Your OpenAI o-series model fully supports reasoning effort tuning!',
+    'thinking.usage.title': 'Usage:',
+    'thinking.usage.on': 'Force-enable thinking mode',
+    'thinking.usage.off': 'Force-disable thinking mode',
+    'thinking.usage.auto': 'Let model/provider default decide (Recommended)',
+    'thinking.usage.effort': 'Set thinking effort depth',
+    'thinking.usage.status': 'Show current thinking status',
+    'thinking.usage.error': 'Usage: /thinking [on|off|auto|low|medium|high|max|status]',
+    'thinking.switched.success': 'Thinking configuration updated: Mode={mode}, Effort={effort}',
+    'thinking.error.switch.failed': 'Failed to update thinking configuration',
+    'thinking.mode.on': 'On',
+    'thinking.mode.off': 'Off',
+    'thinking.mode.auto': 'Auto',
+    'thinking.effort.low': 'Low',
+    'thinking.effort.medium': 'Medium',
+    'thinking.effort.high': 'High',
+    'thinking.effort.max': 'Max',
+    'thinking.effort.xhigh': 'Extended High',
+    'thinking.effort.auto': 'Auto',
+
+    // Feishu Bot Integration
+    'feishu.command.description': 'Integrate Feishu Bot, let dvcode answer code questions in Feishu',
+    'feishu.subcmd.setup.description': 'Configure Feishu app credentials (QR scan or manual)',
+    'feishu.subcmd.start.description': 'Start the Feishu Bot (WebSocket long connection)',
+    'feishu.subcmd.stop.description': 'Stop the Feishu Bot',
+    'feishu.subcmd.status.description': 'Show the Feishu Bot connection status',
+    'feishu.subcmd.logout.description': 'Clear Feishu credentials and disconnect',
+    'feishu.subcmd.allow.description': 'Add a Feishu open_id to the authorization allowlist',
+    'feishu.subcmd.deny.description': 'Remove an open_id from the authorization allowlist',
+    'feishu.subcmd.allowlist.description': 'List the current Bot Owner and authorization allowlist',
+    'feishu.subcmd.help.description': 'Show Feishu help',
+
+    'feishu.help.text': 'Feishu Bot Integration — let dvcode answer questions inside Feishu\n\nUsage:\n  /feishu                Interactive setup and start\n  /feishu setup          Mode 1: scan QR code to auto-create app (recommended)\n  /feishu setup --manual <appId> <appSecret>  Mode 3: manual credentials\n  /feishu start          Start the Feishu Bot (credentials required)\n  /feishu stop           Stop the Feishu Bot\n  /feishu status         Show current status\n  /feishu logout         Clear credentials and disconnect\n\nAuthorization (important):\n  /feishu allow <openId> Allow a specific Feishu user to invoke the Bot\n  /feishu deny  <openId> Remove from the authorization allowlist\n  /feishu allowlist      Show current Owner and allowlist\n\nFirst-time use:\n  1. /feishu setup              # Scan QR (the scanner becomes the Owner)\n  2. /feishu start              # Start the Bot\n  3. Send a message to the Bot in Feishu — dvcode answers in the background\n\n⚠️  By default the Bot only responds to the Owner / allowlisted users; unauthorized senders are rejected.',
+
+    // QR setup flow (Mode 1)
+    'feishu.setup.qr.title': '📱 Mode 1: Scan QR to auto-create app',
+    'feishu.setup.qr.connecting': '  Connecting to Feishu...',
+    'feishu.setup.qr.generated': '  QR code generated',
+    'feishu.setup.qr.url': '  URL: {url}',
+    'feishu.setup.qr.scan_hint': '  Scan the QR code above with the Feishu mobile app',
+    'feishu.setup.qr.browser_hint': '  Or open the link in a browser to complete authorization',
+    'feishu.setup.qr.browser_opened': '  → Browser opened automatically',
+    'feishu.setup.qr.browser_failed': '  (Could not open browser automatically — please copy the link manually)',
+    'feishu.setup.qr.waiting': '  ⏳ Waiting for QR scan...',
+    'feishu.setup.qr.cancel_hint': '  (Press Ctrl+C to cancel)',
+    'feishu.setup.qr.timeout': '❌ Feishu QR scan timed out or was cancelled.',
+    'feishu.setup.qr.retry_hint': '  Run /feishu setup to try again.',
+    'feishu.setup.qr.success': '✅ Feishu app created successfully!',
+    'feishu.setup.qr.bot_name': '  Bot name:    {name}',
+    'feishu.setup.qr.creds_saved': '  Credentials saved to ~/.deepv/feishu-credentials.json',
+    'feishu.setup.qr.next_step_start': '  Next: run /feishu start to start the Bot',
+    'feishu.setup.qr.failed_title': '❌ Failed to create app via QR scan:',
+    'feishu.setup.qr.fallback_hint': '  Try /feishu setup --manual <AppId> <AppSecret> to enter credentials manually',
+
+    // Manual setup flow (Mode 3)
+    'feishu.setup.manual.title': '📝 Mode 3: Manual credentials',
+    'feishu.setup.manual.usage': '  Usage: /feishu setup --manual <AppId> <AppSecret>',
+    'feishu.setup.manual.example': '  Example: /feishu setup --manual cli_xxxxx xxxxxxxxxxxxxx',
+    'feishu.setup.manual.where_to_find': '  (Get these at https://open.feishu.cn/app → your app → Credentials & Basic Info)',
+    'feishu.setup.manual.tip_qr': '  💡 You can also use /feishu setup (Mode 1) to scan a QR — easier',
+    'feishu.setup.manual.validating': '📝 Mode 3: Validating credentials...',
+    'feishu.setup.manual.creds_valid': '  ✅ Credentials valid',
+    'feishu.setup.manual.creds_invalid': '  ⚠️ Credentials saved but validation failed (check Bot capability is enabled on the open platform)',
+    'feishu.setup.manual.owner_warning': '  ⚠️ Manual setup did not auto-bind a Bot Owner. After /feishu start,',
+    'feishu.setup.manual.owner_warning_2': '     the first message will be rejected with a hint to allowlist yourself.',
+
+    // Send detected files (LLM output → Feishu)
+    'feishu.send.image': '📎 Sent image: {path}',
+    'feishu.send.file': '📎 Sent file: {path}',
+
+    // Slash commands inside Feishu chat (help text shown to remote user — KEEP CHINESE)
+    // We do NOT translate the bot's outgoing replies; the in-Feishu help is rendered
+    // by the bot itself, not by the dvcode TUI. See feishu.handlers below for TUI side.
+
+    // Start handler
+    'feishu.start.creds_load_failed': '❌ Failed to read Feishu credentials: {error}\n\nTo reconfigure: /feishu logout then /feishu setup',
+    'feishu.start.no_creds_title': '⚠️ Feishu credentials not found',
+    'feishu.start.no_creds_setup': 'Please configure first:',
+    'feishu.start.no_creds_qr': '  /feishu setup          # Scan QR to auto-create app',
+    'feishu.start.no_creds_or': '  or',
+    'feishu.start.no_creds_manual': '  /feishu setup --manual # Manual credentials',
+    'feishu.start.already_running': '⚠️ Feishu Bot is already running. Run /feishu stop first.',
+    'feishu.start.tool_registered': '✅ Registered Feishu file-send tool (send_feishu_file)',
+    'feishu.start.tool_register_failed': '⚠️ Failed to register Feishu tool (continuing): {error}',
+    'feishu.start.success_title': '✅ Feishu Bot started!',
+    'feishu.start.success_bot': '  Bot:     {name}',
+    'feishu.start.success_platform': '  Platform: {platform}',
+    'feishu.start.success_hint_chat': '  Now send a message to the Bot in Feishu to try it 👋',
+    'feishu.start.success_hint_stop': '  Run /feishu stop to stop',
+    'feishu.start.failed': '❌ Failed to start Feishu Bot: {error}',
+    'feishu.start.bot_unknown': '(unknown)',
+    'feishu.start.platform.lark': 'Lark',
+    'feishu.start.platform.feishu': 'Feishu',
+    'feishu.start.ready': '✅ Feishu Bot ready, you can start chatting!',
+    'feishu.start.disconnected': '🔌 Feishu connection closed',
+
+    // Stop handler
+    'feishu.stop.not_running': '⚠️ Feishu Bot is not running.',
+    'feishu.stop.tool_unregistered': '✅ Unregistered Feishu file-send tool (send_feishu_file)',
+    'feishu.stop.tool_unregister_failed': '⚠️ Failed to unregister Feishu tool: {error}',
+    'feishu.stop.stopped': '🛑 Feishu Bot stopped.',
+
+    // Status handler
+    'feishu.status.title': '📊 Feishu status:',
+    'feishu.status.creds_configured': '  Credentials: ✅ Configured',
+    'feishu.status.bot_name': '  Bot name:    {name}',
+    'feishu.status.platform': '  Platform:    {platform}',
+    'feishu.status.owner': '  Bot Owner:   {owner}',
+    'feishu.status.owner_unbound': '(unbound — first QR scanner becomes Owner)',
+    'feishu.status.allowlist_count': '  Allowlist:   {count} user(s) (use /feishu allowlist to view)',
+    'feishu.status.creds_missing': '  Credentials: not configured',
+    'feishu.status.run_setup': '  Run /feishu setup to configure credentials',
+    'feishu.status.bot_status_running': '🟢 Running',
+    'feishu.status.bot_status_stopped': '🔴 Stopped',
+    'feishu.status.bot_status_label': '  Bot status:  {status}',
+    'feishu.status.run_start': '  Run /feishu start to start the Bot',
+    'feishu.status.bound_projects_title': '🔗 Bound Projects ({count})',
+    'feishu.status.bound_projects_none': '  No projects bound yet. Send /bind <path> in a group chat to link a workspace.',
+    'feishu.status.bound_active_suffix': '(Active)',
+    'feishu.status.bound_resolving_names': '  (resolving group names…)',
+
+    // Logout handler
+    'feishu.logout.cleared': '🗑️ Feishu credentials cleared, Bot disconnected.',
+
+    // Interactive entry
+    'feishu.interactive.welcome': '👋 Welcome to the Feishu Bot!',
+    'feishu.interactive.first_time': '  First-time setup — please configure credentials:',
+    'feishu.interactive.setup_qr': '    /feishu setup          # Scan QR to auto-create app (recommended)',
+    'feishu.interactive.setup_manual': '    /feishu setup --manual # Manual credentials',
+    'feishu.interactive.help_hint': '  Or run /feishu help for help',
+    'feishu.interactive.creds_ready': '✅ Credentials configured',
+    'feishu.interactive.creds_bot': '  Bot:    {name}',
+    'feishu.interactive.start_hint': '  Run /feishu start to start the Bot',
+    'feishu.interactive.logout_hint': '  Run /feishu logout to clear credentials',
+    'feishu.interactive.already_running': '✅ Feishu Bot is already running. Run /feishu stop to stop.',
+
+    // Allow handler
+    'feishu.allow.usage_title': 'Usage: /feishu allow <openId>',
+    'feishu.allow.usage_body': 'Allow the specified Feishu open_id to send messages to the Bot and trigger LLM/tool calls.',
+    'feishu.allow.usage_where': 'You can find an open_id in the Bot rejection hint, or via Feishu Open Platform → Contacts.',
+    'feishu.allow.creds_load_failed': '❌ Failed to read credentials: {error}',
+    'feishu.allow.creds_missing': '⚠️ Feishu credentials not found. Run /feishu setup first.',
+    'feishu.allow.already_owner': 'ℹ️ {openId} is already the Bot Owner — no allowlist entry needed.',
+    'feishu.allow.set_as_owner': '✅ Set {openId} as Bot Owner.',
+    'feishu.allow.already_in_list': 'ℹ️ {openId} is already in the authorization allowlist.',
+    'feishu.allow.added': '✅ Added {openId} to the authorization allowlist (total {count}).',
+
+    // Deny handler
+    'feishu.deny.usage': 'Usage: /feishu deny <openId>',
+    'feishu.deny.cannot_remove_owner': '❌ Cannot directly remove the Bot Owner ({openId}).\n\nTo change the Owner:\n  1. /feishu allow <new-owner-openId> first add the new owner to allowlist\n  2. /feishu logout clear all credentials and re-run setup',
+    'feishu.deny.not_in_list': 'ℹ️ {openId} is not in the authorization allowlist.',
+    'feishu.deny.removed': '✅ Removed {openId} from the authorization allowlist (remaining {count}).',
+
+    // Allowlist handler
+    'feishu.allowlist.title': '🛡️ Feishu Bot authorization list:',
+    'feishu.allowlist.owner': '  Owner:       {owner}',
+    'feishu.allowlist.owner_unbound': '(unbound)',
+    'feishu.allowlist.list_header': '  Allowlist:',
+    'feishu.allowlist.list_empty': '  Allowlist:   (empty)',
+    'feishu.allowlist.manage_hint': 'Manage: /feishu allow <openId>  /  /feishu deny <openId>',
+
+    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    'feishu.tui.incoming_prefix': '[Feishu] {text}',
+    'feishu.tui.context_compressed': '📦 Context auto-compressed',
+    'feishu.tui.agent_working': '🤖 Agent is working...',
+    'feishu.tui.tool_running': '🔧 Running tool: {names}',
+    'feishu.tui.tool_running_with_args': '🔧 Running tool: {name} {args}',
+    'feishu.tui.tool_user_answered': '✅ User answered',
+    'feishu.tui.tool_done': '✅ Tool done: {name}',
+    'feishu.tui.tool_failed': '❌ Tool failed: {name} — {error}',
+    'feishu.tui.processing_error': '❌ Error processing message: {error}',
+    'feishu.tui.unauthorized_log': '🛡️ Rejected unauthorized message: openId={openId} text="{text}"',
+
+    // Lifecycle commands intercepted on the Feishu side (start/stop must run in the local CLI)
+    'feishu.lifecycle.start_blocked': '⚠️ **The Bot is already running** — that\'s exactly how this message reached me.\n\n`/feishu start` manages the Bot\'s lifecycle and must be run from the **local dvcode terminal**, not here in Feishu.\n\n💡 If you want to work, just talk to me directly, or use `/feishu status` to view connection and bound projects.',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` cannot be run from Feishu.**\n\nThis command stops the very gateway that is relaying your message — running it here would disconnect the Bot and you could not restart it from Feishu.\n\n💡 To stop the Bot, run `/feishu stop` in the **local dvcode terminal**.\n🛑 To abort the current running task instead, use `/stop`.',
+
+    // Feishu Dashboard
+    'feishu.dashboard.connected': 'Connected',
+    'feishu.dashboard.disconnected': 'Disconnected',
+    'feishu.dashboard.bot_name': 'Bot',
+    'feishu.dashboard.bound_projects': 'Bound Projects',
+    'feishu.dashboard.no_projects': 'No projects bound yet. Send /bind <path> in group chat to link a workspace.',
+    'feishu.dashboard.active': '🟢 Active',
+    'feishu.dashboard.message_log': 'Message Log',
+    'feishu.dashboard.waiting': '⏳ Waiting for message...',
+    'feishu.dashboard.idle': '💤 No active tasks',
+    'feishu.dashboard.hint_stop': '/feishu stop — Stop the Bot',
+    'feishu.dashboard.welcome_title': '🚀 Feishu Bot Ready!',
+    'feishu.dashboard.welcome_message': 'WebSocket connected to Feishu. Send messages to your Bot in Feishu client to start.',
+
     // Error messages
     'error.config.not.loaded': 'Configuration not loaded.',
     'error.tool.registry.unavailable': 'Unable to retrieve tool registry.',
@@ -1781,6 +2003,7 @@ export const translations = {
       'No plugins installed.\n\nInstall one:\n  /skill plugin install <plugin-name>',
     'skill.plugin.list.installed.found': 'Installed plugins ({count}):\n',
     'skill.plugin.list.failed': 'Failed to list plugins: {error}',
+    'skill.plugin.list.duplicates.warning': 'Duplicate plugin names detected (same plugin from different marketplaces):',
     'skill.plugin.install.description': 'Install a plugin from marketplace',
     'skill.plugin.install.usage':
       'Usage: /skill plugin install <plugin-name> or /skill plugin install <plugin-name@marketplace-id>',
@@ -1840,11 +2063,73 @@ export const translations = {
     'skill.label.skills': 'Skills: ',
     'skill.label.tools': 'Tools: ',
     'skill.label.name': 'Name: ',
+    'skill.label.version': 'Version: ',
     'skill.label.marketplace': 'Marketplace: ',
     'skill.label.status': 'Status: ',
     'skill.label.enabled': '✅ Enabled',
     'skill.label.disabled': '❌ Disabled',
     'skill.label.parameters': 'Parameters:\n',
+
+    // /goal command + GoalWizard (UI labels only — the prompt itself is intentionally not i18n'd)
+    'goalCommand.description': 'Start Goal-Driven Mode (auto YOLO + persistence-time floor)',
+    'goalCommand.config_not_ready': 'Configuration not ready. Try again after the CLI finishes loading.',
+    'goalCommand.new.description': 'Open the Goal-Driven Mode wizard to start a new goal',
+    'goalCommand.clear.description': 'Clear the active /goal contract (release the no-stop discipline)',
+    'goalCommand.clear.not_active': 'No active /goal mode to clear.',
+    'goalCommand.clear.cleared_announce': '🎯 /goal cleared. Contract released; goal-mode discipline no longer applies. Subsequent compressions will not re-inject the goal prompt.',
+    'goalWizard.title': '🎯 Goal-Driven Mode',
+    'goalWizard.intensity.steady': 'Steady — calmer pace, self-check elapsed every completed todo',
+    'goalWizard.intensity.standard': 'Standard (Recommended) — proactive, self-check every 3 todos / milestone',
+    'goalWizard.intensity.intense': 'Intense — never wait for user, switch routes on block, never idle',
+    'goalWizard.step.task.title': 'Task description',
+    'goalWizard.step.task.help': 'Describe the goal the AI should pursue autonomously. One Enter per line; empty line ends this field.',
+    'goalWizard.step.forbidden.title': 'User forbidden items',
+    'goalWizard.step.forbidden.help': 'Optional red lines the AI must not cross. One Enter per line; empty line ends this field.',
+    'goalWizard.step.criteria.title': 'Completion criteria (objective judges)',
+    'goalWizard.step.criteria.help': 'Objective signals that count as "done" (tests pass, file exists, behavior correct). One per line; empty line ends.',
+    'goalWizard.step.hours.title': 'Minimum continuous-work duration (hours)',
+    'goalWizard.step.hours.help': 'A positive number; the AI must keep working at least this long unless criteria are fully met. Range 0.5–24.',
+    'goalWizard.step.intensity.title': 'Intensity tier',
+    'goalWizard.step.intensity.help': "Pick the AI's working discipline.",
+    'goalWizard.step.confirm.title': 'Confirm and launch',
+    'goalWizard.step.confirm.help': 'Review the prompt below; Enter to launch, Esc to step back.',
+    'goalWizard.empty_input_hint': '(no input yet — required)',
+    'goalWizard.optional_input_hint': '(no input yet — optional, leave empty if not needed)',
+    'goalWizard.current_default': 'Current default: ',
+    'goalWizard.hours_display': '{hours} hours',
+    'goalWizard.hours_placeholder': 'leave empty to use default {hours}',
+    'goalWizard.hours_input_actions': 'Enter to confirm (empty = default); Esc to go back',
+    'goalWizard.multiline_input_actions_cancel': 'Enter to submit a line; empty line ends this field; Esc cancels',
+    'goalWizard.multiline_input_actions_goback': 'Enter to submit a line; empty line ends this field; Esc goes back',
+    'goalWizard.error.required_field': 'This field is required. Type at least one line, then submit an empty line.',
+    'goalWizard.error.invalid_hours': 'Please enter a number between 0.5 and 24.',
+    'goalWizard.confirm.start_goal_mode': '🚀 Launch Goal-Driven Mode (auto-enable YOLO and submit prompt)',
+    'goalWizard.confirm.back_to_edit': '↩️  Back to edit',
+    'goalWizard.confirm.cancel': '✗ Cancel',
+    'goalWizard.confirm.yolo_warning': '⚠️ Launch will auto-enable YOLO mode (no per-tool confirmations).',
+    'goalWizard.confirm.summary_title': '── Inputs you provided ──',
+    'goalWizard.confirm.summary.task': 'Task description:',
+    'goalWizard.confirm.summary.forbidden': 'Your forbidden items:',
+    'goalWizard.confirm.summary.criteria': 'Completion criteria:',
+    'goalWizard.confirm.summary.hours': 'Persistence floor (hours):',
+    'goalWizard.confirm.summary.intensity': 'Intensity tier:',
+    'goalWizard.confirm.summary.none': '(none)',
+    'goalWizard.cancelled': 'ℹ️ Goal-Driven Mode cancelled.',
+    'goalWizard.yolo_auto_enabled':
+      '🚀 YOLO mode auto-enabled (Goal-Driven Mode requires per-tool confirmations to be off).\n   Use /yolo after exit to toggle again.',
+    'goalWizard.yolo_enable_failed':
+      '⚠️ Failed to auto-enable YOLO: {error}. Please run /yolo manually and retry.',
+    'goalWizard.launched_announce':
+      '🎯 Goal-Driven Mode launched\n   Persistence floor: {hours} hours\n   Tier: {intensity}\n   The AI will first call local_time to record T0, then plan a todo list and drive autonomously.',
+    'goalWizard.submit_not_ready':
+      '❌ Goal-Driven Mode launch failed: submitQuery not ready (1s timeout). Please run /goal again.',
+
+    // Memory refresh (finishing earlier i18n migration)
+    'memory.refreshing': 'Refreshing hierarchical memory (DEEPV.md or other context files)...',
+    'memory.refresh_success_loaded': 'Memory refreshed successfully. Loaded {characters} characters from {count} file(s).',
+    'memory.refresh_success_no_content': 'Memory refreshed successfully. No memory content found.',
+    'memory.files_list': '\nMemory files:\n{files}',
+    'memory.refresh_error': 'Error refreshing memory: {errorMessage}',
   },
   zh: {
     // Update flow
@@ -1990,6 +2275,7 @@ export const translations = {
     'subagent.execution.time': '执行时间:',
     'subagent.token.consumption': 'Token消耗:',
     'subagent.tool.calls.count': '{count}次',
+    'subagent.turns': '轮次:',
 
     // Tool Stats Display
     'tool.stats.no.calls': '本次会话中尚未进行工具调用。',
@@ -2040,10 +2326,17 @@ export const translations = {
     'task.timeout.warning':
       '⚠️ 任务执行超时：已执行{turns}轮对话但任务仍未完成',
     'task.timeout.credits.notice': '继续执行可能消耗更多 Credits，请谨慎审视。',
+    'task.timeout.partial.header': '⚠️ 已达到最大轮数 ({turns})。子 Agent 的部分发现如下：',
+    'task.timeout.partial.no_summary': '（子 Agent 未能在轮数耗尽前产生最终总结。）',
 
     // Conversation limits
-    'conversation.token.limit.warning':
-      '重要提示：上下文即将达到限制，对话上下文将被压缩以继续会话。\n如果你发现模型变得不够专注，可以使用 "/session new" 开启全新对话。',
+    'conversation.token.limit.warning': '重要提示：上下文即将达到限制，对话上下文将被压缩以继续会话。\n如果你发现模型变得不够专注，可以使用 "/session new" 开启全新对话。',
+    'conversation.compress.failed.generic': '⚠️ 自动压缩失败（{reason}）。当前对话可能已超长无法安全继续。\n请手动运行 /compress 强制压缩，或使用 /session new 开启全新对话。',
+    'conversation.compress.failed.circuit_breaker': '⚠️ 自动压缩连续失败，已被临时禁用（{reason}）。\n请手动运行 /compress 强制压缩，或使用 /session new 开启全新对话。',
+    'conversation.compress.failed.unknown': '⚠️ 自动压缩异常失败。请手动运行 /compress，或使用 /session new 开启全新对话。',
+    'conversation.compress.degraded': 'ℹ️ 完整压缩不可用，已切换到精简模式继续（清理了 {clearedCount} 条旧工具输出以释放上下文）。\n如果模型变得不够专注，可以手动运行 /compress，或使用 /session new 开启全新对话。',
+    'compression.in_progress': '正在压缩对话历史...',
+    'compression.success': '对话历史压缩成功。',
 
     // Tool Names
     'tool.edit': '编辑',
@@ -2066,11 +2359,14 @@ export const translations = {
     'tool.findfiles': '查找文件',
     'tool.readfolder': '读取文件夹',
     'tool.readmanyfiles': '批量读取',
-    'tool.shell': '命令行',
+    'tool.shell': 'Bash',
     'tool.webfetch': '网页获取',
     'tool.websearch': '网络搜索',
     'tool.savememory': '保存记忆',
     'tool.task': '任务',
+
+    // Aggregated read_file group header (Claude-Code style "Reading N files…")
+    'tool.aggregate.reading_files': '读取 {count} 个文件…',
 
     // Shell output
     'shell.output.truncated':
@@ -2582,11 +2878,14 @@ export const translations = {
     'command.report.description': '生成可分享的诊断报告',
     'command.history.description': '显示最近的输入历史',
     'command.clear.description': '清除终端屏幕（保留对话上下文）',
+    'command.todo.description': '清除并隐藏当前的任务面板 (Todo List)',
+    'command.todo.cleared': '任务面板已成功清空并隐藏。',
+    'command.todo.unknown': '未知的子命令。使用 "/todo clear" 可以隐藏当前任务面板。',
     'command.queue.description': '管理提示队列',
     'command.queue.clear.description': '清空所有排队的提示',
     'command.quit.description': '退出命令行界面',
     'command.export.description': '导出会话',
-    'command.export_debug.description': '导出调试日志',
+    'command.export_debug.description': '导出调试日志（默认全部；传 `errors` 仅导出错误/警告）',
     'command.issue.description': '提交 GitHub Issue（附带错误日志）',
     'command.issue.missing_description': '请在 /issue 后提供简短的问题描述。',
     'command.issue.default_title': '问题反馈',
@@ -2611,8 +2910,14 @@ export const translations = {
     'command.copy.success': '📋已复制到粘贴板',
     'command.editor.description': '设置外部编辑器偏好',
     'command.memory.description': '与记忆交互的命令',
-    'command.stats.description':
-      '查看所有统计信息（会话、模型和工具）。用法：/stats [model [名称]|tools]',
+    'command.wiki.description': 'LLM Wiki - 构建和维护项目知识库',
+    'command.wiki.init.description': '初始化 Wiki 目录结构',
+    'command.wiki.ingest.description': '将源文件摄入知识库（不带参数 = 摄入 raw/ 下所有文件）',
+    'command.wiki.query.description': '查询知识库',
+    'command.wiki.lint.description': '知识库健康检查（查找孤页、矛盾、缺口）',
+    'command.wiki.status.description': '查看知识库状态和近期活动',
+    'command.wiki.log.description': '查看完整的知识库操作日志',
+    'command.stats.description': '查看所有统计信息（会话、模型和工具）。用法：/stats [model [名称]|tools]',
     'command.context.description': '查看详细的上下文Token占用分析',
     'command.tools.description': '列出可用的工具及其描述',
     'command.vim.description': '开启/关闭 vim 模式',
@@ -2683,23 +2988,34 @@ export const translations = {
     'config.hint.language.placeholder': '例如：English, 中文, Español...',
     'config.hint.language.help': '留空则由 AI 决定',
     'config.hint.confirm.cancel': 'Enter 确认 · escape 取消',
-    'command.healthyUse.description': '管理健康使用提醒',
-    'command.healthyUse.status': '健康使用提醒当前为 {status}',
-    'command.healthyUse.on': '已开启健康使用提醒',
-    'command.healthyUse.off': '已关闭健康使用提醒',
-    'command.healthyUse.usage.title': '使用方法：',
-    'command.healthyUse.usage.on': '  /healthy-use on   - 开启健康使用提醒',
-    'command.healthyUse.usage.off': '  /healthy-use off  - 关闭健康使用提醒',
-    'command.healthyUse.usage.status': '  /healthy-use      - 查看当前状态',
-    'command.healthyUse.error.invalid_args': '❌ 无效的参数：{args}',
-    'healthy.reminder.title': '夜深了，该休息了',
-    'healthy.reminder.content': '工作固然重要，但您的身体健康更珍贵。',
-    'healthy.reminder.suggestion':
-      '现在已经是深夜时段（22:00 - 06:00），建议您保存进度，早点休息。',
-    'healthy.reminder.agentRunning':
-      'Agent 正在后台处理任务，不会受此提醒影响。',
-    'healthy.reminder.waiting': '请在 {{seconds}} 秒后尝试确认...',
-    'healthy.reminder.dismiss': ' 按 [回车] 或 [空格] 稍后提醒 ',
+
+    // Project Memory Mode
+    'config.menu.project.memory': '📂 项目记忆',
+    'config.submenu.project.memory.title': '项目记忆 - 选择加载哪些记忆文件',
+    'config.option.project.memory.all': '📂 DEEPV.md + AGENTS.md（默认）',
+    'config.option.project.memory.deepvOnly': '📄 仅 DEEPV.md',
+    'config.option.project.memory.none': '🚫 不加载',
+    'config.value.project.memory.all': 'DEEPV.md + AGENTS.md',
+    'config.value.project.memory.deepvOnly': '仅 DEEPV.md',
+    'config.value.project.memory.none': '不加载',
+    'config.status.project.memory.updated': '✅ 项目记忆模式已更新为 {mode}',
+    'config.status.project.memory.reloading': '🔄 正在重新加载记忆...',
+
+  'command.healthyUse.description': '管理健康使用提醒',
+  'command.healthyUse.status': '健康使用提醒当前为 {status}',
+  'command.healthyUse.on': '已开启健康使用提醒',
+  'command.healthyUse.off': '已关闭健康使用提醒',
+  'command.healthyUse.usage.title': '使用方法：',
+  'command.healthyUse.usage.on': '  /healthy-use on   - 开启健康使用提醒',
+  'command.healthyUse.usage.off': '  /healthy-use off  - 关闭健康使用提醒',
+  'command.healthyUse.usage.status': '  /healthy-use      - 查看当前状态',
+  'command.healthyUse.error.invalid_args': '❌ 无效的参数：{args}',
+  'healthy.reminder.title': '夜深了，该休息了',
+  'healthy.reminder.content': '工作固然重要，但您的身体健康更珍贵。',
+  'healthy.reminder.suggestion': '现在已经是深夜时段（22:00 - 06:00），建议您保存进度，早点休息。',
+  'healthy.reminder.agentRunning': 'Agent 正在后台处理任务，不会受此提醒影响。',
+  'healthy.reminder.waiting': '请在 {{seconds}} 秒后尝试确认...',
+  'healthy.reminder.dismiss': ' 按 [回车] 或 [空格] 稍后提醒 ',
     'command.ppt.description': '通过AI辅助的大纲设计创建PowerPoint演示文稿',
     'command.ppt.prompt':
       '请告诉我你想创建的PPT主题是什么？\n\n示例:\n  /ppt "AI在教育中的应用"\n  /ppt "2025年度总结" --pages 15',
@@ -2794,18 +3110,12 @@ export const translations = {
     'command.refine.loading.message': 'AI 正在为您优化文本，请稍候...',
 
     // NanoBanana Command
-    'command.nanobanana.description':
-      '使用 NanoBanana 生成图像。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]',
-    'nanobanana.usage.error':
-      '用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]\n比例：1:1、16:9、9:16 等\n尺寸：1K 或 2K\n@参考图可以放在命令中的任意位置\n示例：/NanoBanana 16:9 2K 赛博朋克风格城市 @ref.jpg',
-    'nanobanana.missing.prompt':
-      '缺少必要参数。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图]',
-    'nanobanana.invalid.size':
-      '无效的图像尺寸。请使用 1K 或 2K。用法：/NanoBanana <比例> <尺寸> <提示词>',
-    'nanobanana.submitting':
-      '正在提交图像生成任务...\n提示词："{prompt}"\n比例：{ratio}',
-    'nanobanana.submitted':
-      '任务已提交 (ID: {taskId})。\n积分预估：{credits} (以实际完成扣为准)\n正在等待图像生成...',
+    'command.nanobanana.description': '使用 NanoBanana 生成图像。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]',
+    'nanobanana.usage.error': '用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]\n比例：1:1、16:9、9:16 等\n尺寸：1K 或 2K\n@参考图可以放在命令中的任意位置，最多 5 张\n示例：/NanoBanana 16:9 2K 赛博朋克风格城市 @ref.jpg\n多图：/NanoBanana auto 2K 将这两张图融合 @a.jpg @b.png',
+    'nanobanana.missing.prompt': '缺少必要参数。用法：/NanoBanana <比例> <尺寸> <提示词> [@参考图 ...]',
+    'nanobanana.invalid.size': '无效的图像尺寸。请使用 1K 或 2K。用法：/NanoBanana <比例> <尺寸> <提示词>',
+    'nanobanana.submitting': '正在提交图像生成任务...\n提示词："{prompt}"\n比例：{ratio}',
+    'nanobanana.submitted': '任务已提交 (ID: {taskId})。\n积分预估：{credits} (以实际完成扣为准)\n正在等待图像生成...',
     'nanobanana.timeout': '图像生成在 {seconds} 秒后超时。',
     'nanobanana.completed':
       '图像生成完成！\n实际消费积分：{credits}\n{urlText}',
@@ -2886,8 +3196,23 @@ export const translations = {
     'memory.refresh.refreshing': '正在从源文件刷新记忆...',
     'memory.refresh.success': '记忆刷新并更新到AI模型成功。',
     'memory.refresh.noContent': '记忆刷新成功。未找到记忆内容。',
-    'command.stats.model.description':
-      '显示模型特定的使用统计。用法：/stats model [模型名]',
+
+    // Wiki command messages
+    'wiki.init.alreadyExists': 'Wiki 已在 {path} 初始化。使用 /wiki status 查看。',
+    'wiki.init.starting': '正在初始化 LLM Wiki...',
+    'wiki.notInitialized': 'Wiki 尚未初始化。请先运行 /wiki init。',
+    'wiki.ingest.usage': '用法：/wiki ingest <文件路径>',
+    'wiki.ingest.starting': '正在摄入知识库：{path}',
+    'wiki.ingest.startingAll': '正在将 raw 目录下的所有源文件摄入知识库（共 {count} 个文件）...',
+    'wiki.ingest.rawEmpty': 'raw/ 目录下没有文件。请将源文件放入 .llm-wiki/raw/ 或指定文件路径：/wiki ingest <文件>',
+    'wiki.query.usage': '用法：/wiki query <你的问题>',
+    'wiki.query.searching': '正在查询知识库：{question}',
+    'wiki.lint.starting': '正在进行知识库健康检查...',
+    'wiki.status.notInitialized': 'Wiki 尚未初始化。运行 /wiki init 创建知识库。',
+    'wiki.status.noLogEntries': '（暂无记录）',
+    'wiki.log.readError': '读取 Wiki 日志失败。',
+
+    'command.stats.model.description': '显示模型特定的使用统计。用法：/stats model [模型名]',
     'command.stats.tools.description': '显示工具特定的使用统计',
     'command.stats.error.noSessionStartTime':
       '会话开始时间不可用，无法计算统计数据。',
@@ -2976,7 +3301,7 @@ export const translations = {
     'mcp.status.help.templates': '预定义模板列表',
     'mcp.status.help.examples': '配置示例',
     'mcp.status.tip': '💡 提示: 配置将保存在',
-    'mcp.status.config.file': '.deepv/settings.json',
+    'mcp.status.config.file': '.deepvcode/settings.json',
     'mcp.status.run.after.config': '文件中\n\n配置完成后再次运行',
     'mcp.status.view.status': '查看服务器状态',
 
@@ -3221,6 +3546,199 @@ export const translations = {
     'agentStyle.codex.yolo.enabled':
       '🚀 已自动开启 YOLO 模式（所有工具调用将自动执行）',
 
+    // Thinking Config
+    'command.thinking.description': '配置 AI 思考模式和深度：on, off, auto, low, medium, high, max',
+    'thinking.error.config.unavailable': '配置不可用',
+    'thinking.status.current': '当前思考配置：模式={mode}，思考深度={effort}',
+    'thinking.provider.openai.warning': '标准的 OpenAI 兼容协议不支持直接调节思考（例如 DeepSeek-Reasoner 为模型强制思考）。当您切换到 Anthropic 或 OpenAI Responses (o-series) 时，此配置将生效。',
+    'thinking.provider.anthropic.ok': '您的 Anthropic 模型完美支持自适应思考与思考深度调节！',
+    'thinking.provider.openaiResponses.ok': '您的 OpenAI o-series 模型完美支持推理深度调节！',
+    'thinking.usage.title': '用法：',
+    'thinking.usage.on': '强制开启思考模式',
+    'thinking.usage.off': '强制关闭思考模式',
+    'thinking.usage.auto': '由模型/提供商默认决定 (推荐)',
+    'thinking.usage.effort': '设置思考力度（深度）',
+    'thinking.usage.status': '显示当前思考状态',
+    'thinking.usage.error': '用法：/thinking [on|off|auto|low|medium|high|max|status]',
+    'thinking.switched.success': '思考配置已更新：模式={mode}，思考深度={effort}',
+    'thinking.error.switch.failed': '更新思考配置失败',
+    'thinking.mode.on': '开启',
+    'thinking.mode.off': '关闭',
+    'thinking.mode.auto': '自动',
+    'thinking.effort.low': '低强度',
+    'thinking.effort.medium': '中强度',
+    'thinking.effort.high': '高强度',
+    'thinking.effort.max': '最大强度',
+    'thinking.effort.xhigh': '超高强度',
+    'thinking.effort.auto': '自动',
+
+    // Feishu Bot Integration
+    'feishu.command.description': '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
+    'feishu.subcmd.setup.description': '配置飞书应用凭证（扫码或手动输入）',
+    'feishu.subcmd.start.description': '启动飞书 Bot（WS 长连接）',
+    'feishu.subcmd.stop.description': '停止飞书 Bot',
+    'feishu.subcmd.status.description': '查看飞书 Bot 连接状态',
+    'feishu.subcmd.logout.description': '清除飞书凭证并断开连接',
+    'feishu.subcmd.allow.description': '将飞书 open_id 加入授权白名单',
+    'feishu.subcmd.deny.description': '从授权白名单中移除指定 open_id',
+    'feishu.subcmd.allowlist.description': '列出当前 Bot 的 Owner 与授权白名单',
+    'feishu.subcmd.help.description': '显示飞书帮助',
+
+    'feishu.help.text': '飞书 Bot 接入 — 让 dvcode 在飞书里回答你的问题\n\n用法:\n  /feishu                交互式配置并启动\n  /feishu setup          档 1 扫码自动建应用（推荐）\n  /feishu setup --manual <appId> <appSecret>  档 3 手动输入凭证\n  /feishu start          启动飞书 Bot（需先配置凭证）\n  /feishu stop           停止飞书 Bot\n  /feishu status         查看当前状态\n  /feishu logout         清除凭证并断开\n\n授权管理（重要）:\n  /feishu allow <openId> 允许指定飞书用户调用 Bot\n  /feishu deny  <openId> 移出授权白名单\n  /feishu allowlist      查看当前 Owner 与白名单\n\n首次使用:\n  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）\n  2. /feishu start              # 启动 Bot\n  3. 去飞书给 Bot 发消息        # dvcode 将在后台回答\n\n⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
+
+    // QR setup flow (Mode 1)
+    'feishu.setup.qr.title': '📱 档 1: 扫码自动建应用',
+    'feishu.setup.qr.connecting': '  正在连接飞书...',
+    'feishu.setup.qr.generated': '  二维码已生成',
+    'feishu.setup.qr.url': '  URL: {url}',
+    'feishu.setup.qr.scan_hint': '  请用飞书手机 App 扫描上方二维码',
+    'feishu.setup.qr.browser_hint': '  或在浏览器打开链接完成授权',
+    'feishu.setup.qr.browser_opened': '  → 已自动打开浏览器',
+    'feishu.setup.qr.browser_failed': '  (未能自动打开浏览器，请手动复制链接)',
+    'feishu.setup.qr.waiting': '  ⏳ 正在等待扫码结果...',
+    'feishu.setup.qr.cancel_hint': '  （按 Ctrl+C 取消等待）',
+    'feishu.setup.qr.timeout': '❌ 飞书扫码超时或已被取消。',
+    'feishu.setup.qr.retry_hint': '  输入 /feishu setup 重新开始。',
+    'feishu.setup.qr.success': '✅ 飞书应用创建成功！',
+    'feishu.setup.qr.bot_name': '  Bot 名称:    {name}',
+    'feishu.setup.qr.creds_saved': '  凭证已保存到 ~/.deepv/feishu-credentials.json',
+    'feishu.setup.qr.next_step_start': '  下一步: 输入 /feishu start 启动 Bot',
+    'feishu.setup.qr.failed_title': '❌ 扫码建应用失败:',
+    'feishu.setup.qr.fallback_hint': '  可尝试 /feishu setup --manual <AppId> <AppSecret> 手动输入凭证',
+
+    // Manual setup flow (Mode 3)
+    'feishu.setup.manual.title': '📝 档 3: 手动输入凭证',
+    'feishu.setup.manual.usage': '  用法: /feishu setup --manual <AppId> <AppSecret>',
+    'feishu.setup.manual.example': '  示例: /feishu setup --manual cli_xxxxx xxxxxxxxxxxxxx',
+    'feishu.setup.manual.where_to_find': '  （获取方式：https://open.feishu.cn/app → 你的应用 → 凭证与基础信息）',
+    'feishu.setup.manual.tip_qr': '  💡 也可以先 /feishu setup 扫码自动建应用（档 1），更简单',
+    'feishu.setup.manual.validating': '📝 档 3: 正在验证凭证...',
+    'feishu.setup.manual.creds_valid': '  ✅ 凭证有效',
+    'feishu.setup.manual.creds_invalid': '  ⚠️ 凭证已保存但验证失败（可在开放平台检查是否已启用 Bot 能力）',
+    'feishu.setup.manual.owner_warning': '  ⚠️ 手动配置模式下未自动绑定 Bot 拥有者。在 /feishu start 之后，',
+    'feishu.setup.manual.owner_warning_2': '     首次给 Bot 发消息时会拒绝并提示你将自己加入授权白名单。',
+
+    // Send detected files (LLM output → Feishu)
+    'feishu.send.image': '📎 已发送图片: {path}',
+    'feishu.send.file': '📎 已发送文件: {path}',
+
+    // Start handler
+    'feishu.start.creds_load_failed': '❌ 读取飞书凭证失败：{error}\n\n如需重新配置：/feishu logout 然后 /feishu setup',
+    'feishu.start.no_creds_title': '⚠️ 未找到飞书凭证',
+    'feishu.start.no_creds_setup': '请先配置:',
+    'feishu.start.no_creds_qr': '  /feishu setup          # 扫码自动建应用',
+    'feishu.start.no_creds_or': '  或',
+    'feishu.start.no_creds_manual': '  /feishu setup --manual # 手动输入凭证',
+    'feishu.start.already_running': '⚠️ 飞书 Bot 已在运行中。输入 /feishu stop 停止后再启动。',
+    'feishu.start.tool_registered': '✅ 已注册飞书文件发送工具 (send_feishu_file)',
+    'feishu.start.tool_register_failed': '⚠️ 注册飞书工具失败（不影响主流程）：{error}',
+    'feishu.start.success_title': '✅ 飞书 Bot 已启动！',
+    'feishu.start.success_bot': '  Bot 名称: {name}',
+    'feishu.start.success_platform': '  连接: {platform}',
+    'feishu.start.success_hint_chat': '  现在去飞书给 Bot 发消息试试吧 👋',
+    'feishu.start.success_hint_stop': '  输入 /feishu stop 停止',
+    'feishu.start.failed': '❌ 启动飞书 Bot 失败: {error}',
+    'feishu.start.bot_unknown': '(未知)',
+    'feishu.start.platform.lark': 'Lark',
+    'feishu.start.platform.feishu': '飞书',
+    'feishu.start.ready': '✅ 飞书 Bot 已就绪，可以开始聊天了！',
+    'feishu.start.disconnected': '🔌 飞书连接已断开',
+
+    // Stop handler
+    'feishu.stop.not_running': '⚠️ 飞书 Bot 未运行。',
+    'feishu.stop.tool_unregistered': '✅ 已注销飞书文件发送工具 (send_feishu_file)',
+    'feishu.stop.tool_unregister_failed': '⚠️ 注销飞书工具失败：{error}',
+    'feishu.stop.stopped': '🛑 飞书 Bot 已停止。',
+
+    // Status handler
+    'feishu.status.title': '📊 飞书状态:',
+    'feishu.status.creds_configured': '  凭证:        ✅ 已配置',
+    'feishu.status.bot_name': '  Bot 名称:    {name}',
+    'feishu.status.platform': '  平台:        {platform}',
+    'feishu.status.owner': '  Bot Owner:   {owner}',
+    'feishu.status.owner_unbound': '(未绑定 — 首次扫码用户为 Owner)',
+    'feishu.status.allowlist_count': '  授权白名单:  {count} 人 (用 /feishu allowlist 查看)',
+    'feishu.status.creds_missing': '  凭证:        未配置',
+    'feishu.status.run_setup': '  请运行 /feishu setup 配置凭证',
+    'feishu.status.bot_status_running': '🟢 运行中',
+    'feishu.status.bot_status_stopped': '🔴 已停止',
+    'feishu.status.bot_status_label': '  Bot 状态:    {status}',
+    'feishu.status.run_start': '  运行 /feishu start 启动 Bot',
+    'feishu.status.bound_projects_title': '🔗 绑定项目 ({count})',
+    'feishu.status.bound_projects_none': '  暂无绑定项目。在群聊中发送 /bind <路径> 即可绑定工作区。',
+    'feishu.status.bound_active_suffix': '(活跃中)',
+    'feishu.status.bound_resolving_names': '  (正在解析群名称…)',
+
+    // Logout handler
+    'feishu.logout.cleared': '🗑️ 飞书凭证已清除，Bot 已断开。',
+
+    // Interactive entry
+    'feishu.interactive.welcome': '👋 欢迎使用飞书 Bot！',
+    'feishu.interactive.first_time': '  首次使用，请先配置凭证:',
+    'feishu.interactive.setup_qr': '    /feishu setup          # 扫码自动建应用（推荐）',
+    'feishu.interactive.setup_manual': '    /feishu setup --manual # 手动输入凭证',
+    'feishu.interactive.help_hint': '  或输入 /feishu help 查看帮助',
+    'feishu.interactive.creds_ready': '✅ 凭证已配置',
+    'feishu.interactive.creds_bot': '  Bot:    {name}',
+    'feishu.interactive.start_hint': '  输入 /feishu start 启动 Bot',
+    'feishu.interactive.logout_hint': '  输入 /feishu logout 清除凭证',
+    'feishu.interactive.already_running': '✅ 飞书 Bot 正在运行中。输入 /feishu stop 停止。',
+
+    // Allow handler
+    'feishu.allow.usage_title': '用法: /feishu allow <openId>',
+    'feishu.allow.usage_body': '允许指定 open_id 的飞书用户向 Bot 发送消息并触发 LLM/工具调用。',
+    'feishu.allow.usage_where': 'open_id 可在 Bot 拒绝消息时的提示中找到，或在飞书开放平台 → 通讯录中查询。',
+    'feishu.allow.creds_load_failed': '❌ 读取凭证失败: {error}',
+    'feishu.allow.creds_missing': '⚠️ 未找到飞书凭证。请先运行 /feishu setup。',
+    'feishu.allow.already_owner': 'ℹ️ {openId} 已是 Bot Owner，无需加入白名单。',
+    'feishu.allow.set_as_owner': '✅ 已将 {openId} 设为 Bot Owner。',
+    'feishu.allow.already_in_list': 'ℹ️ {openId} 已在授权白名单中。',
+    'feishu.allow.added': '✅ 已将 {openId} 加入授权白名单 (共 {count} 人)。',
+
+    // Deny handler
+    'feishu.deny.usage': '用法: /feishu deny <openId>',
+    'feishu.deny.cannot_remove_owner': '❌ 不能直接移除 Bot Owner ({openId})。\n\n如需更换 Owner，请：\n  1. /feishu allow <new-owner-openId> 先把新 Owner 加入白名单\n  2. /feishu logout 清除全部凭证后重新 setup',
+    'feishu.deny.not_in_list': 'ℹ️ {openId} 不在授权白名单中。',
+    'feishu.deny.removed': '✅ 已将 {openId} 移出授权白名单 (剩余 {count} 人)。',
+
+    // Allowlist handler
+    'feishu.allowlist.title': '🛡️ 飞书 Bot 授权列表:',
+    'feishu.allowlist.owner': '  Owner:       {owner}',
+    'feishu.allowlist.owner_unbound': '(未绑定)',
+    'feishu.allowlist.list_header': '  白名单:',
+    'feishu.allowlist.list_empty': '  白名单:      (空)',
+    'feishu.allowlist.manage_hint': '管理: /feishu allow <openId>  /  /feishu deny <openId>',
+
+    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    'feishu.tui.incoming_prefix': '[飞书] {text}',
+    'feishu.tui.context_compressed': '📦 上下文已自动压缩',
+    'feishu.tui.agent_working': '🤖 有Agent工作中...',
+    'feishu.tui.tool_running': '🔧 执行工具: {names}',
+    'feishu.tui.tool_running_with_args': '🔧 执行工具: {name} {args}',
+    'feishu.tui.tool_user_answered': '✅ 用户已回答问题',
+    'feishu.tui.tool_done': '✅ 工具完成: {name}',
+    'feishu.tui.tool_failed': '❌ 工具失败: {name} — {error}',
+    'feishu.tui.processing_error': '❌ 处理消息时出错: {error}',
+    'feishu.tui.unauthorized_log': '🛡️ 拒绝未授权消息: openId={openId} text="{text}"',
+
+    // 飞书侧拦截的生命周期命令（start/stop 必须在本地 CLI 执行）
+    'feishu.lifecycle.start_blocked': '⚠️ **Bot 已经在运行中** —— 您这条消息正是通过它转发给我的。\n\n`/feishu start` 用于管理 Bot 的生命周期，只能在 **本地 dvcode 终端** 执行，无法在飞书里运行。\n\n💡 想干活直接跟我说就行；或用 `/feishu status` 查看连接状态和绑定项目。',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` 不能在飞书里执行。**\n\n这个命令会停掉正在转发您消息的网关本身——在这里执行会导致 Bot 直接断连，而且您无法再从飞书侧重新启动它。\n\n💡 要停止 Bot，请在 **本地 dvcode 终端** 执行 `/feishu stop`。\n🛑 若只是想中止当前正在运行的任务，请使用 `/stop`。',
+
+    // Feishu Dashboard（飞书仪表板）
+    'feishu.dashboard.connected': '已连接',
+    'feishu.dashboard.disconnected': '已断开',
+    'feishu.dashboard.bot_name': 'Bot',
+    'feishu.dashboard.bound_projects': '已绑定项目',
+    'feishu.dashboard.no_projects': '暂无绑定项目。在群聊中发送 /bind <路径> 绑定工作区。',
+    'feishu.dashboard.active': '🟢 活跃中',
+    'feishu.dashboard.message_log': '消息日志',
+    'feishu.dashboard.waiting': '⏳ 等待消息中...',
+    'feishu.dashboard.idle': '💤 无活跃任务',
+    'feishu.dashboard.hint_stop': '/feishu stop — 停止 Bot',
+    'feishu.dashboard.welcome_title': '🚀 飞书 Bot 已就绪！',
+    'feishu.dashboard.welcome_message': 'WebSocket 已连接飞书。现在去飞书客户端给 Bot 发送消息吧。',
+
     // Error messages
     'error.config.not.loaded': '配置未加载。',
     'error.tool.registry.unavailable': '无法检索工具注册表。',
@@ -3315,6 +3833,7 @@ export const translations = {
       '未安装任何 Plugin。\n\n安装一个：\n  /skill plugin install <plugin-name>',
     'skill.plugin.list.installed.found': '已安装的 Plugins ({count})：\n',
     'skill.plugin.list.failed': '列出 Plugins 失败：{error}',
+    'skill.plugin.list.duplicates.warning': '检测到重复的 Plugin 名称（同名 Plugin 来自不同 Marketplace）：',
     'skill.plugin.install.description': '从 Marketplace 安装 Plugin',
     'skill.plugin.install.usage':
       '用法：/skill plugin install <plugin-name> 或 /skill plugin install <plugin-name@marketplace-id>',
@@ -3372,11 +3891,73 @@ export const translations = {
     'skill.label.skills': 'Skills：',
     'skill.label.tools': '工具：',
     'skill.label.name': '名称：',
+    'skill.label.version': '版本：',
     'skill.label.marketplace': 'Marketplace：',
     'skill.label.status': '状态：',
     'skill.label.enabled': '✅ 已启用',
     'skill.label.disabled': '❌ 已禁用',
     'skill.label.parameters': '参数：\n',
+
+    // /goal 命令 + GoalWizard（仅界面文案，提交给模型的 prompt 内容刻意不走 i18n）
+    'goalCommand.description': '启动目标驱动模式（自动开启 YOLO + 设置持续工作时间下限）',
+    'goalCommand.config_not_ready': '配置尚未就绪，请等待 CLI 加载完成后重试。',
+    'goalCommand.new.description': '打开目标驱动模式向导，启动一个新的 goal 任务',
+    'goalCommand.clear.description': '主动结束当前 /goal 契约（解除最低工时与不许停纪律）',
+    'goalCommand.clear.not_active': '当前未处于 /goal 模式，无需清理。',
+    'goalCommand.clear.cleared_announce': '🎯 已清理 /goal 契约。最低工时与不许停纪律均已解除；后续压缩不会再重新注入原 goal prompt。',
+    'goalWizard.title': '🎯 目标驱动模式 / Goal-Driven Mode',
+    'goalWizard.intensity.steady': '平稳模式 — 稳健节奏，每完成 1 项调用 local_time 自检',
+    'goalWizard.intensity.standard': '标准模式（推荐）— 主动规划，每 3 项或里程碑自检',
+    'goalWizard.intensity.intense': '高强度模式 — 禁止等待用户、遇阻立即换路线、不停摆',
+    'goalWizard.step.task.title': '任务描述',
+    'goalWizard.step.task.help': '描述要让 AI 自主完成的目标，可多行。每行一条，回车提交一行；空行结束本字段。',
+    'goalWizard.step.forbidden.title': '用户禁止事项',
+    'goalWizard.step.forbidden.help': '列出 AI 不可触碰的红线（可空），多行。每行一条；空行结束。',
+    'goalWizard.step.criteria.title': '达标特征（任务完成的客观判据）',
+    'goalWizard.step.criteria.help': '列出"算作完成"的客观判据（如：通过测试、文件存在、行为正确）。每行一条；空行结束。',
+    'goalWizard.step.hours.title': '最低持续工作时间（小时）',
+    'goalWizard.step.hours.help': '一个正数（小时），AI 必须持续工作的下限（推荐 2，范围 0.5–24）。',
+    'goalWizard.step.intensity.title': '强度档位',
+    'goalWizard.step.intensity.help': '选择 AI 的工作纪律风格。',
+    'goalWizard.step.confirm.title': '确认并启动',
+    'goalWizard.step.confirm.help': '检查下方将要提交给 AI 的 prompt，确认后启动。Enter 启动；Esc 返回上一步。',
+    'goalWizard.empty_input_hint': '（暂无输入，本字段必填）',
+    'goalWizard.optional_input_hint': '（暂无输入，本字段可空，不需要可直接空行结束）',
+    'goalWizard.current_default': '当前默认值：',
+    'goalWizard.hours_display': '{hours} 小时',
+    'goalWizard.hours_placeholder': '留空使用默认 {hours}',
+    'goalWizard.hours_input_actions': 'Enter 确认（留空使用默认值）；Esc 返回上一步',
+    'goalWizard.multiline_input_actions_cancel': 'Enter 提交一行；空行结束本字段；Esc 取消',
+    'goalWizard.multiline_input_actions_goback': 'Enter 提交一行；空行结束本字段；Esc 返回上一步',
+    'goalWizard.error.required_field': '该字段必填，请至少输入一行后再按空行结束。',
+    'goalWizard.error.invalid_hours': '请输入 0.5 到 24 之间的数字。',
+    'goalWizard.confirm.start_goal_mode': '🚀 启动目标驱动模式（自动开启 YOLO 并提交 prompt）',
+    'goalWizard.confirm.back_to_edit': '↩️  返回修改',
+    'goalWizard.confirm.cancel': '✗ 取消',
+    'goalWizard.confirm.yolo_warning': '⚠️ 启动后将自动开启 YOLO 模式（无需逐次确认工具调用）。',
+    'goalWizard.confirm.summary_title': '── 你填写的内容 ──',
+    'goalWizard.confirm.summary.task': '任务描述：',
+    'goalWizard.confirm.summary.forbidden': '用户禁止事项：',
+    'goalWizard.confirm.summary.criteria': '达标特征：',
+    'goalWizard.confirm.summary.hours': '持续工作下限（小时）：',
+    'goalWizard.confirm.summary.intensity': '强度档位：',
+    'goalWizard.confirm.summary.none': '（无）',
+    'goalWizard.cancelled': 'ℹ️ 目标驱动模式已取消。',
+    'goalWizard.yolo_auto_enabled':
+      '🚀 已自动开启 YOLO 模式（目标驱动模式要求所有工具调用免确认）。\n   退出后可用 /yolo 再次切换。',
+    'goalWizard.yolo_enable_failed':
+      '⚠️ 自动开启 YOLO 失败：{error}。请手动 /yolo 后再试。',
+    'goalWizard.launched_announce':
+      '🎯 目标驱动模式启动\n   持续下限：{hours} 小时\n   档位：{intensity}\n   AI 将先调用 local_time 记录起始时间，然后规划清单并自主推进。',
+    'goalWizard.submit_not_ready':
+      '❌ 目标模式启动失败：submitQuery 未就绪（超时 1s）。请再次执行 /goal。',
+
+    // 记忆刷新（补齐之前 i18n 迁移漏掉的几条）
+    'memory.refreshing': '正在刷新分层记忆（DEEPV.md 或其它上下文文件）...',
+    'memory.refresh_success_loaded': '记忆刷新成功。从 {count} 个文件中加载了 {characters} 个字符。',
+    'memory.refresh_success_no_content': '记忆刷新成功。未找到记忆内容。',
+    'memory.files_list': '\n记忆文件：\n{files}',
+    'memory.refresh_error': '刷新记忆出错：{errorMessage}',
   },
 };
 
@@ -3444,17 +4025,17 @@ export function getLocalizedToolName(toolName: string): string {
 
   // Map common tool names to translation keys
   const toolKeyMap: Record<string, keyof typeof translations.en> = {
-    Edit: 'tool.edit',
-    ReadFile: 'tool.readfile',
-    WriteFile: 'tool.writefile',
-    SearchText: 'tool.searchtext',
-    TodoWrite: 'tool.todowrite',
-    TodoRead: 'tool.todoread',
-    FindFiles: 'tool.findfiles',
-    ReadFolder: 'tool.readfolder',
-    ReadManyFiles: 'tool.readmanyfiles',
-    Shell: 'tool.shell',
-    WebFetch: 'tool.webfetch',
+    'Edit': 'tool.edit',
+    'ReadFile': 'tool.readfile',
+    'WriteFile': 'tool.writefile',
+    'SearchText': 'tool.searchtext',
+    'TodoWrite': 'tool.todowrite',
+    'TodoRead': 'tool.todoread',
+    'FindFiles': 'tool.findfiles',
+    'ReadFolder': 'tool.readfolder',
+    'ReadManyFiles': 'tool.readmanyfiles',
+    'Bash': 'tool.shell',
+    'WebFetch': 'tool.webfetch',
     'Web Search': 'tool.websearch',
     'Save Memory': 'tool.savememory',
     Task: 'tool.task',

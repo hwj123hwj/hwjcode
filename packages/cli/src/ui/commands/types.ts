@@ -47,6 +47,9 @@ export interface CommandContext {
     git: GitService | undefined;
     logger: Logger;
   };
+  // Runtime mode flags
+  /** 🆕 Indicates whether the command is running in non-interactive mode (e.g., stream-json output) */
+  isNonInteractive?: boolean;
   // UI state and history management
   ui: {
     /** Adds a new item to the history display. */
@@ -119,18 +122,7 @@ export interface MessageActionReturn {
  */
 export interface OpenDialogActionReturn {
   type: 'dialog';
-  dialog:
-    | 'help'
-    | 'auth'
-    | 'login'
-    | 'theme'
-    | 'editor'
-    | 'privacy'
-    | 'model'
-    | 'customModelWizard'
-    | 'settings-menu'
-    | 'init-choice'
-    | 'plugin-install';
+  dialog: 'help' | 'auth' | 'login' | 'theme' | 'editor' | 'privacy' | 'model' | 'customModelWizard' | 'settings-menu' | 'init-choice' | 'plugin-install' | 'debate-wizard' | 'debate-resume' | 'goal-wizard' | 'workflow-panel';
   metadata?: Record<string, unknown>;
 }
 

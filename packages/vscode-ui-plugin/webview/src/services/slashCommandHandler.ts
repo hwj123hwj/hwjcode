@@ -122,8 +122,20 @@ export class SlashCommandHandler {
 
   /**
    * 执行自定义命令
+   *
+   * 返回值约定（与 backend slash_command_result payload 对齐）：
+   *   - prompt    : 同步模式 —— 返回处理后的 prompt，调用方将其作为 user message 发送给 AI
+   *   - sideEffect: 副作用模式 —— 此时 prompt 不应被发送，调用方需根据 sideEffect 触发本地动作
+   *                'compress' = 调用 triggerBuiltinCompress() 让 backend 真正执行 tryCompressChat
+   *   - info     : 提示文案，用于在系统通知区显示（命令成功 / 跳过 / 警告等）
    */
-  async executeCommand(commandName: string, args: string): Promise<{ success: boolean; prompt?: string; error?: string }> {
+  async executeCommand(commandName: string, args: string): Promise<{
+    success: boolean;
+    prompt?: string;
+    sideEffect?: 'compress';
+    info?: string;
+    error?: string;
+  }> {
     return new Promise((resolve) => {
       if (!window.vscode) {
         resolve({ success: false, error: 'VSCode API not available' });
@@ -150,6 +162,43 @@ export class SlashCommandHandler {
         window.removeEventListener('message', messageListener);
         resolve({ success: false, error: 'Command execution timeout' });
       }, 10000);
+    });
+  }
+
+  /**
+   * 触发内置 /compress 副作用：让 backend 调用 GeminiClient.tryCompressChat。
+   * 与 executeCommand 不同，这条路径**不期待**返回 prompt，仅期待返回执行结果。
+   *
+   * 该方法专门给 /compress 这类「不发 AI、走 backend 副作用」的内置命令使用。
+   */
+  async triggerBuiltinCompress(): Promise<{ success: boolean; info?: string; error?: string }> {
+    return new Promise((resolve) => {
+      if (!window.vscode) {
+        resolve({ success: false, error: 'VSCode API not available' });
+        return;
+      }
+
+      const messageListener = (event: MessageEvent) => {
+        const message = event.data;
+        // backend 用同一类型的 slash_command_result 反馈结果（success/info/error）
+        if (message.type === 'slash_command_result') {
+          window.removeEventListener('message', messageListener);
+          resolve(message.payload);
+        }
+      };
+
+      window.addEventListener('message', messageListener);
+
+      window.vscode.postMessage({
+        type: 'builtin_compress',
+        payload: {},
+      });
+
+      // 压缩可能耗时较长（最多 ~60s）；超时给到 90s 留余量
+      setTimeout(() => {
+        window.removeEventListener('message', messageListener);
+        resolve({ success: false, error: 'Compression timeout (90s)' });
+      }, 90 * 1000);
     });
   }
 

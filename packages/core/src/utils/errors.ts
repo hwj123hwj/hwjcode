@@ -65,3 +65,23 @@ function parseResponseData(error: GaxiosError): ResponseData {
   }
   return error.response?.data as ResponseData;
 }
+
+/**
+ * 🆕 检查 401 错误响应体是否来自我们的服务端
+ * 特征为具有特定的 JSON 结构和 errorCode: "AUTHENTICATION_FAILED"
+ */
+export function isOurAuthError(errorText: string | undefined | null): boolean {
+  if (!errorText) {
+    return false;
+  }
+  try {
+    const errorObj = JSON.parse(errorText);
+    return (
+      errorObj &&
+      errorObj.error === 'Unauthorized' &&
+      errorObj.errorCode === 'AUTHENTICATION_FAILED'
+    );
+  } catch (e) {
+    return false;
+  }
+}

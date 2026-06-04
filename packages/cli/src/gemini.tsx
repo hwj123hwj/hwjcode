@@ -150,7 +150,7 @@ async function relaunchWithAdditionalArgs(additionalArgs: string[]) {
   await new Promise((resolve) => child.on('close', resolve));
   process.exit(0);
 }
-import { runAcpPeer } from './acp/acpPeer.js';
+import { runAcpClient } from './acp/acpStdioTransport.js';
 import { cleanupOldClipboardImages } from './ui/utils/clipboardUtils.js';
 import { exportSessionToMarkdown } from './utils/sessionExport.js';
 
@@ -191,8 +191,12 @@ async function askUserForAutoUpdate(): Promise<boolean> {
   });
 }
 
-// 询问用户是否进行可选更新
-async function askUserForUpdate(): Promise<boolean> {
+// 询问用户是否进行可选更新。assumeYes=true 时直接返回 true（-uy 场景）。
+async function askUserForUpdate(assumeYes: boolean = false): Promise<boolean> {
+  if (assumeYes) {
+    console.log(`\n${t('update.prompt.now')}y (auto-confirmed via -y)`);
+    return true;
+  }
   return new Promise((resolve) => {
     const rl = createConfirmationReadlineInterface({
       input: process.stdin,
@@ -290,19 +294,6 @@ export async function main() {
   loadEnvironment();
   logTiming('loadEnvironment()');
 
-  // Initialize Skills system context (async, non-blocking)
-  // This loads Skills metadata for AI context injection
-  try {
-    const { initializeSkillsContext } = await import('deepv-code-core');
-    logTiming('import initializeSkillsContext');
-    await initializeSkillsContext();
-    logTiming('initializeSkillsContext()');
-  } catch (error) {
-    logTiming('initializeSkillsContext() (failed)');
-    // Skills system is optional, silently continue if not available
-    // console.warn('[Skills] Initialization failed:', error);
-  }
-
   // 初始化 TerminalSizeManager 以集中管理 resize 事件
   // 这样可以避免 MaxListenersExceededWarning，并提升性能
   // 注意：terminalSizeManager 是单例，此调用确保其在应用启动时初始化
@@ -324,6 +315,20 @@ export async function main() {
   }
 
   const workspaceRoot = process.cwd();
+
+  // Initialize Skills system context AFTER workdir is set
+  // This ensures Skills metadata is loaded from the correct project directory
+  try {
+    const { initializeSkillsContext } = await import('deepv-code-core');
+    logTiming('import initializeSkillsContext');
+    // 传入 workspaceRoot 确保使用正确的项目根目录
+    await initializeSkillsContext(workspaceRoot);
+    logTiming('initializeSkillsContext()');
+  } catch (error) {
+    logTiming('initializeSkillsContext() (failed)');
+    // Skills system is optional, silently continue if not available
+    // console.warn('[Skills] Initialization failed:', error);
+  }
   const settings = loadSettings(workspaceRoot);
   logTiming('loadSettings()');
 
@@ -344,6 +349,61 @@ export async function main() {
 
   // Enable silent mode early for -p flag to suppress startup logs
 
+  // Handle --login <api-key> flag: non-interactive login for Bots
+  if (argv.login) {
+    const apiKey = argv.login.trim();
+    const serverUrl = process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai';
+    console.log('Logging in with API Key...');
+    try {
+      const response = await fetch(`${serverUrl}/auth/jwt/apikey-login`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'DeepCode-CLI/1.0.0'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Login failed (HTTP ${response.status}): ${errorText}`);
+        process.exit(1);
+      }
+
+      const data = await response.json() as any;
+      if (!data.success || !data.accessToken) {
+        console.error(`Login failed: ${data.message || data.error || 'Unknown error'}`);
+        process.exit(1);
+      }
+
+      const { ProxyAuthManager } = await import('deepv-code-core');
+      const proxyAuthManager = ProxyAuthManager.getInstance();
+
+      proxyAuthManager.setJwtTokenData({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresIn: data.expiresIn || 900
+      });
+
+      if (data.user) {
+        proxyAuthManager.setUserInfo({
+          openId: data.user.openId || data.user.userId,
+          userId: data.user.userId,
+          name: data.user.name,
+          enName: data.user.name,
+          email: data.user.email,
+          avatar: data.user.avatar
+        });
+        console.log(`Login successful: ${data.user.name || data.user.email || data.user.openId}`);
+      } else {
+        console.log('Login successful.');
+      }
+      process.exit(0);
+    } catch (error) {
+      console.error(`Login error: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  }
 
   // Handle --update flag
   if (argv.update) {
@@ -400,8 +460,10 @@ export async function main() {
       console.log(message);
       console.log('='.repeat(60));
 
-      // 询问用户是否更新
-      const shouldUpdate = await askUserForUpdate();
+      // 询问用户是否更新。-u 上下文下的 -y / --yolo 视为"默认确认升级"
+      // （交互 REPL 里 -y 的 yolo 语义在这条单次升级分支里用不上，
+      //  挪用为 update 的 assume-yes 最符合用户对 `-uy` 的直觉）。
+      const shouldUpdate = await askUserForUpdate(!!argv.yolo);
       if (shouldUpdate) {
         const success = await executeUpdateCommand(updateCommand);
         if (success) {
@@ -775,7 +837,7 @@ export async function main() {
   // OAuth pre-authentication removed - only Cheeth OA supported
 
   if (config.getExperimentalAcp()) {
-    return runAcpPeer(config, settings);
+    return runAcpClient(config, settings, argv);
   }
 
   let input = config.getQuestion();
@@ -811,7 +873,7 @@ export async function main() {
 
   // If --output-format stream-json is specified, it's explicitly non-interactive mode
   // This is a clear user intent to use programmatic output format
-  const isExplicitNonInteractiveMode = argv.outputFormat === 'stream-json';
+  const isExplicitNonInteractiveMode = argv.outputFormat === 'stream-json' || argv.outputFormat === 'json';
 
   const shouldBeInteractive =
     !!argv.promptInteractive ||
@@ -898,9 +960,9 @@ export async function main() {
   if (!input) {
     if (argv.outputFormat && argv.outputFormat !== 'default') {
       console.error('Error: No prompt provided. When using --output-format, you must provide a prompt via:');
-      console.error('  1. Positional argument: dvcode "your prompt" --output-format stream-json');
-      console.error('  2. -p flag: dvcode -p "your prompt" --output-format stream-json');
-      console.error('  3. stdin: echo "your prompt" | dvcode --output-format stream-json');
+      console.error('  1. Positional argument: dvcode "your prompt" --output-format json');
+      console.error('  2. -p flag: dvcode -p "your prompt" --output-format json');
+      console.error('  3. stdin: echo "your prompt" | dvcode --output-format json');
     } else {
       console.error('No input provided via stdin.');
     }
@@ -925,7 +987,7 @@ export async function main() {
     argv,
   );
 
-  await runNonInteractive(nonInteractiveConfig, input, prompt_id, argv.outputFormat);
+  await runNonInteractive(nonInteractiveConfig, input, prompt_id, argv.outputFormat, settings);
 
   // 在非交互模式结束后，运行所有cleanup函数（包括空会话清理）
   await runExitCleanup();
@@ -1071,13 +1133,19 @@ async function loadNonInteractiveConfig(
 ) {
   let finalConfig = config;
   if (config.getApprovalMode() !== ApprovalMode.YOLO) {
-    // Everything is not allowed, ensure that only read-only tools are configured.
+    // Non-YOLO non-interactive mode: exclude write tools that require user confirmation.
+    // Use --yolo flag to enable all tools (dangerous commands are still blocked).
     const existingExcludeTools = settings.merged.excludeTools || [];
     const interactiveTools = [
       ShellTool.Name,
       EditTool.Name,
       WriteFileTool.Name,
     ];
+
+    console.error(
+      `[Non-interactive mode] Write tools disabled: ${interactiveTools.join(', ')}. ` +
+      `Use --yolo to enable all tools.`,
+    );
 
     const newExcludeTools = [
       ...new Set([...existingExcludeTools, ...interactiveTools]),

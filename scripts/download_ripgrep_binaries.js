@@ -31,21 +31,36 @@ const BASE_URL = 'https://github.com/microsoft/ripgrep-prebuilt/releases/downloa
 
 async function downloadFile(url, filePath) {
   return new Promise((resolve, reject) => {
-    const request = https.get(url, (response) => {
+    const parsedUrl = new URL(url);
+    const options = {
+      headers: {
+        'User-Agent': 'DeepVCode-CI-Client',
+      }
+    };
+
+    // Retrieve GitHub Token from environment variables
+    const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
+
+    // Only attach Authorization header to GitHub domain names (do not leak to AWS S3 on 302 redirects)
+    if (token && (parsedUrl.hostname === 'github.com' || parsedUrl.hostname === 'api.github.com')) {
+      options.headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const request = https.get(url, options, (response) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
         // Handle redirect
         return downloadFile(response.headers.location, filePath).then(resolve).catch(reject);
       }
-      
+
       if (response.statusCode !== 200) {
         reject(new Error(`Failed to download ${url}: ${response.statusCode} ${response.statusMessage}`));
         return;
       }
 
       const fileStream = createWriteStream(filePath);
-      
+
       response.pipe(fileStream);
-      
+
       fileStream.on('finish', () => {
         fileStream.close();
         // Make binary executable on Unix-like systems
@@ -58,10 +73,10 @@ async function downloadFile(url, filePath) {
         }
         resolve();
       });
-      
+
       fileStream.on('error', reject);
     });
-    
+
     request.on('error', reject);
     request.setTimeout(30000, () => {
       request.destroy();
@@ -85,7 +100,7 @@ function getBinaryPath(target, tempDir) {
 async function extractBinary(archivePath, target, outputPath) {
   const { execSync } = await import('child_process');
   const tempDir = path.join(path.dirname(archivePath), 'temp_' + target.replace(/[^\w]/g, '_'));
-  
+
   try {
     if (!existsSync(tempDir)) {
       mkdirSync(tempDir, { recursive: true });
@@ -117,7 +132,7 @@ async function extractBinary(archivePath, target, outputPath) {
 
     const binaryPath = path.join(tempDir, binaryFile);
     fs.copyFileSync(binaryPath, outputPath);
-    
+
     // Make executable on Unix-like systems
     if (!target.includes('windows')) {
       fs.chmodSync(outputPath, 0o755);
@@ -137,20 +152,20 @@ async function extractBinary(archivePath, target, outputPath) {
 
 async function downloadRipgrepBinaries(outputDir) {
   console.log('🚀 Downloading ripgrep binaries for all platforms...');
-  
+
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
   }
 
   const downloadPromises = Object.entries(platforms).map(async ([platformKey, { target, binary }]) => {
-    const version = target.includes('arm-unknown-linux') || target.includes('powerpc64le') ? 
+    const version = target.includes('arm-unknown-linux') || target.includes('powerpc64le') ?
                    MULTI_ARCH_LINUX_VERSION : VERSION;
-    
+
     const url = getDownloadUrl(target, version);
     const archiveExt = target.includes('windows') ? '.zip' : '.tar.gz';
     const archivePath = path.join(outputDir, `ripgrep-${version}-${target}${archiveExt}`);
     const binaryPath = path.join(outputDir, `${platformKey}-${binary}`);
-    
+
     // Skip if binary already exists
     if (existsSync(binaryPath)) {
       console.log(`⏭️  Skipping ${platformKey} (already exists)`);

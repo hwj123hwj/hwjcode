@@ -21,6 +21,7 @@ import { SystemNotificationMessage } from './SystemNotificationMessage';
 import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { messageContentToString } from '../utils/messageContentUtils';
 import { linkifyTextNode } from '../utils/filePathLinkifier';
+import { rehabGluedSingleLineFences } from '../utils/markdownPreprocess';
 import './ToolCalls.css';
 import './MessageMarkdown.css';
 import './ChatInterface.css'; // 🎯 导入确认对话框样式
@@ -192,13 +193,20 @@ const MermaidBlock = React.memo(MermaidBlockInner,
 );
 
 // 代码块组件（提取为独立组件以正确管理状态）
-const CodeBlock: React.FC<any> = ({ node, children, t, isStreaming = false, completedMermaidCodes = new Set() as Set<string>, ...props }) => {
+const CodeBlock: React.FC<any> = ({ node, children, t, isStreaming, ...props }) => {
   const [isCopied, setIsCopied] = React.useState(false);
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
-  // 提取代码内容用于复制
+  // Locate the inner <code> element produced by react-markdown for fenced code blocks.
+  // Note: react-markdown v9 + custom `components.code` causes the child's `type` to be a
+  // function (the custom component) rather than the string 'code'. The reliable signal is
+  // that the child carries a `language-…` className. We accept either: (a) the legacy
+  // string-typed <code> element, or (b) any element whose className contains a language tag.
   const codeElement = React.Children.toArray(children).find(
-    (child: any) => child?.type === 'code'
+    (child: any) =>
+      child?.type === 'code' ||
+      (typeof child?.props?.className === 'string' &&
+        /\blanguage-/.test(child.props.className)),
   ) as any;
 
   // 深度递归提取所有文本内容的函数
@@ -227,13 +235,26 @@ const CodeBlock: React.FC<any> = ({ node, children, t, isStreaming = false, comp
     codeString = extractTextFromNode(node);
   }
 
-  // 从多个来源尝试获取 className
-  const className = codeElement?.props?.className
-    || node?.children?.[0]?.properties?.className?.join?.(' ')
-    || node?.properties?.className?.join?.(' ')
-    || '';
-  const match = /language-(\w+)/.exec(className);
-  const language = match ? match[1] : 'text';
+  const className = codeElement?.props?.className || '';
+  // Match language identifiers including chars common to language names (c++, c#, obj-c, f#, .net…).
+  // Fall back to empty string (not 'text') so the header label can be conditionally hidden.
+  const match = /language-([\w+#.-]+)/.exec(className);
+  const language = match ? match[1] : '';
+
+  // Defensive: if the rendered code body is empty, do not render the wrapper at all.
+  // This avoids the "TEXT-headed empty block" artifact that appears mid-stream when
+  // react-markdown emits a partial fence (no body / no closing fence yet) or when the
+  // LLM literally outputs an empty fenced block.
+  // Distinguish two empty-body cases:
+  //   1. Streaming or no language hint → hide entirely (likely transient artifact).
+  //   2. Non-streaming with explicit language → render a minimal placeholder so the
+  //      user still sees that an (intentionally) empty block was produced.
+  if (!codeString.trim()) {
+    if (isStreaming || !language) {
+      return null;
+    }
+    return <pre className="code-block code-block-empty" {...props} />;
+  }
 
   // mermaid 图表单独渲染，从 node AST 取原始文本避免 rehype 转义
   if (language === 'mermaid') {
@@ -811,7 +832,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
               }
 
               // 🎯 手动解析 <think> 标签，避免 ReactMarkdown 渲染器嵌套错误
-              const rawContent = messageContentToString(message.content);
+              // Apply defensive preprocessing first: rehab single-line glued fences
+              // (real-world LLM outputs like ```bashopen ios/foo``` that CommonMark
+              // would otherwise treat as inline code).
+              const rawContent = rehabGluedSingleLineFences(
+                messageContentToString(message.content),
+              );
               const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
               const renderParts: { type: 'text' | 'think'; content: string }[] = [];
               let lastIndex = 0;
@@ -851,7 +877,79 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
               const hasNormalResponse = renderParts.some((p, i) => p.type === 'text' && p.content.trim().length > 0 && i > 0);
               const shouldAutoCollapse = hasNormalResponse || (!message.isStreaming && message.type === 'assistant');
 
-              const isStreaming = message.isStreaming;
+              const markdownComponents = {
+                // 代码块美化 - 使用独立的 CodeBlock 组件
+                pre: (props: any) => (
+                  <CodeBlock {...props} t={t} isStreaming={message.isStreaming} />
+                ),
+
+                // 行内代码 - 添加文件路径和方法名链接支持
+                code({node, className, children, ...props}: any) {
+                  // 如果有 className，说明是代码块中的 code，直接渲染
+                  if (className) {
+                    return <code className={className} {...props}>{children}</code>;
+                  }
+                  // 否则是行内代码，支持文件路径点击
+                  return (
+                    <code className="inline-code" {...props}>
+                      {linkifyTextNode(children)}
+                    </code>
+                  );
+                },
+
+                // 标题美化 - 添加文件路径和方法名链接支持
+                h1: ({children}: any) => <h1 className="markdown-h1">{linkifyTextNode(children)}</h1>,
+                h2: ({children}: any) => <h2 className="markdown-h2">{linkifyTextNode(children)}</h2>,
+                h3: ({children}: any) => <h3 className="markdown-h3">{linkifyTextNode(children)}</h3>,
+
+                // 段落美化 - 添加文件路径和方法名链接支持
+                p: ({children}: any) => <p className="markdown-p">{linkifyTextNode(children)}</p>,
+
+                // 文本样式美化
+                strong: ({children}: any) => <strong className="markdown-strong">{linkifyTextNode(children)}</strong>,
+                em: ({children}: any) => <em className="markdown-em">{linkifyTextNode(children)}</em>,
+
+                // 列表美化 - 添加文件路径和方法名链接支持
+                ul: ({children}: any) => <ul className="markdown-ul">{children}</ul>,
+                ol: ({children}: any) => <ol className="markdown-ol">{children}</ol>,
+                li: ({children, ...props}: any) => {
+                  const checked = props.checked;
+                  // 处理任务列表
+                  if (typeof checked === 'boolean') {
+                    return (
+                      <li className="markdown-task-list-item">
+                        <input type="checkbox" checked={checked} disabled readOnly />
+                        <span>{linkifyTextNode(children)}</span>
+                      </li>
+                    );
+                  }
+                  return <li className="markdown-li">{linkifyTextNode(children)}</li>;
+                },
+
+                // 引用块美化
+                blockquote: ({children}: any) => (
+                  <blockquote className="markdown-blockquote">
+                    {children}
+                  </blockquote>
+                ),
+
+                // 链接美化
+                a: ({href, children}: any) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="markdown-link">
+                    {children}
+                  </a>
+                ),
+
+                // 表格美化
+                table: ({children}: any) => (
+                  <div className="markdown-table-container">
+                    <table className="markdown-table">{children}</table>
+                  </div>
+                ),
+                tr: ({children}: any) => <tr className="markdown-tr">{children}</tr>,
+                th: ({children}: any) => <th className="markdown-th">{linkifyTextNode(children)}</th>,
+                td: ({children}: any) => <td className="markdown-td">{linkifyTextNode(children)}</td>,
+              };
 
               return (
                 <>

@@ -2,7 +2,7 @@
   "name": "deepv-code-vscode-ui-plugin",
   "displayName": "DeepV Code for VSCode",
   "description": "AI-powered programming assistant with visual interface for VS Code",
-  "version": "1.0.271",
+  "version": "1.0.319",
   "publisher": "DeepX",
   "icon": "assets/icon.png",
   "repository": {
@@ -88,6 +88,12 @@
         "icon": "$(book)"
       },
       {
+        "command": "deepv.openGoalWizard",
+        "title": "Goal-Driven Mode",
+        "category": "DeepV Code",
+        "icon": "$(target)"
+      },
+      {
         "command": "deepv.revertToPrevious",
         "title": "Revert to Previous Version",
         "category": "DeepV Code",
@@ -169,6 +175,9 @@
         {
           "command": "deepv.generateTests",
           "when": "editorHasSelection"
+        },
+        {
+          "command": "deepv.openGoalWizard"
         }
       ]
     },
@@ -228,6 +237,13 @@
           "default": true,
           "description": "Enable healthy use reminders",
           "markdownDescription": "Enable or disable healthy use reminders between 22:00 and 06:00."
+        },
+        "deepv.userRules": {
+          "type": "string",
+          "default": "",
+          "description": "Custom user rules that apply to every conversation",
+          "markdownDescription": "Define custom rules that will be applied to every AI conversation. These rules help personalize AI responses according to your preferences.\n\nExample:\n```\nReply in Chinese\nUse English for code comments\nPrefer TypeScript over JavaScript\n```",
+          "editPresentation": "multilineText"
         }
       }
     }

@@ -42,7 +42,7 @@ export class BinaryManager {
   static findOnPath(command: string): string | null {
     const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
     const result = spawnSync(cmd, [command], {
-      shell: true,
+      shell: false,
       encoding: 'utf8',
       windowsHide: true,
     });
@@ -135,12 +135,21 @@ export class BinaryManager {
       }
 
       await new Promise<void>((resolve, reject) => {
-        const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-        const child = spawn(npm, ['install', ...packages, '--no-save'], {
-          cwd: destDir,
-          shell: true,
-          stdio: 'inherit'
-        });
+        // On Windows, we need to spawn npm via cmd.exe since npm.cmd is a batch file
+        // Node 24+ no longer allows spawn() to directly execute .cmd files with shell: false
+        const isWindows = process.platform === 'win32';
+        const npmArgs = ['install', ...packages, '--no-save'];
+        const child = isWindows
+          ? spawn('cmd.exe', ['/c', 'npm', ...npmArgs], {
+              cwd: destDir,
+              shell: false,
+              stdio: 'inherit'
+            })
+          : spawn('npm', npmArgs, {
+              cwd: destDir,
+              shell: false,
+              stdio: 'inherit'
+            });
         child.on('close', (code) => {
           if (code === 0) resolve();
           else reject(new Error(`npm install failed with code ${code}`));
@@ -259,9 +268,15 @@ export class BinaryManager {
 
       console.log(`[LSP] Downloading ${repo} from GitHub ${owner}/${repo}...`);
 
+      const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
+      const headers: Record<string, string> = { 'User-Agent': 'DeepV-Code-Agent' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const apiUri = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
       const res = await request(apiUri, {
-        headers: { 'User-Agent': 'DeepV-Code-Agent' }
+        headers
       });
       const release = (await res.body.json()) as any;
 

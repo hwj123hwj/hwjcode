@@ -74,6 +74,8 @@ interface MultiSessionMessageFromExtension {
        'rules_list_response' |
        'rules_save_response' |
        'rules_delete_response' |
+       // 🎯 目标驱动模式向导
+       'open_goal_wizard' |
        // 🎯 文本优化命令（/refine）
        'refine_result' |
        'refine_error' |
@@ -91,7 +93,14 @@ interface MultiSessionMessageFromExtension {
        // 🆕 流中断恢复倒计时
        'stream_recovery_start' |
        'stream_recovery_countdown' |
-       'stream_recovery_end';
+       'stream_recovery_end' |
+       // 🔐 认证过期通知
+       'auth_expired' |
+       // 🟢 自定义模型管理响应
+       'custom_models_response' |
+       'custom_models_changed' |
+       'fetch_easy_router_models_response' |
+       'fetch_easy_claw_metadata_response';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -131,6 +140,7 @@ export interface MultiSessionMessageToExtension {
        // 🎯 登录相关消息类型
        'login_check_status' |
        'login_start' |
+       'logout' |
        // 🎯 项目设置相关
        'project_settings_update' |
        'project_settings_request' |
@@ -155,7 +165,13 @@ export interface MultiSessionMessageToExtension {
        'background_task_request' |
        'background_task_move_to_background' |
        // 🎯 注入系统消息到 AI 历史（不显示在 UI）
-       'inject_system_message';
+       'inject_system_message' |
+       // 🟢 自定义模型管理请求
+       'list_custom_models' |
+       'add_custom_models' |
+       'delete_custom_model' |
+       'fetch_easy_router_models' |
+       'fetch_easy_claw_metadata';
   payload: Record<string, unknown> & {
     sessionId?: string; // 大部分消息都包含sessionId
   };
@@ -277,7 +293,7 @@ export class MultiSessionMessageService {
     }
 
     // 🎯 这些消息必须立即发送，不受ready状态限制
-    const immediateMessages = ['ready', 'login_check_status', 'login_start'];
+    const immediateMessages = ['ready', 'login_check_status', 'login_start', 'logout'];
 
     if (!this.isReady && !immediateMessages.includes(message.type)) {
       console.log('Queueing message (not ready):', message.type);
@@ -432,16 +448,26 @@ export class MultiSessionMessageService {
 
   /**
    * 发送聊天消息
+   *
+   * @param goalContext 可选 — /goal 模式启动元数据。仅由 GoalWizardDialog
+   *   提交路径传入；extension 侧在 onChatMessage 收到后会先 setGoalContext
+   *   再处理消息内容。详见 types/messages.ts 的 ChatMessage.goalContext 注释。
    */
-  sendChatMessage(sessionId: string, content: MessageContent, msgId: string) {
+  sendChatMessage(
+    sessionId: string,
+    content: MessageContent,
+    msgId: string,
+    goalContext?: { startedAt: number; hours: number; task: string },
+  ) {
     this.sendMessage({
       type: 'chat_message',
       payload: {
         sessionId,
         id: msgId,
         content,
-        timestamp: Date.now()
-      }
+        timestamp: Date.now(),
+        ...(goalContext ? { goalContext } : {}),
+      },
     });
   }
 
@@ -510,8 +536,26 @@ export class MultiSessionMessageService {
 
   /**
    * 发送工具确认响应
+   *
+   * @param sessionId
+   * @param toolId
+   * @param confirmed 用户是否允许
+   * @param userInput 旧版的 edit 模式行内改写内容（可选）
+   * @param outcome 'proceed_once' | 'proceed_always' | 'proceed_always_project' | 'cancel' 等
+   * @param extra 🎯 AskUserQuestion 专用字段（answers / annotations / feedback）
    */
-  sendToolConfirmationResponse(sessionId: string, toolId: string, confirmed: boolean, userInput?: string, outcome?: string) {
+  sendToolConfirmationResponse(
+    sessionId: string,
+    toolId: string,
+    confirmed: boolean,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ) {
     this.sendMessage({
       type: 'tool_confirmation_response',
       payload: {
@@ -519,7 +563,10 @@ export class MultiSessionMessageService {
         toolId,
         confirmed,
         userInput,
-        outcome
+        outcome,
+        ...(extra?.answers && { answers: extra.answers }),
+        ...(extra?.annotations && { annotations: extra.annotations }),
+        ...(extra?.feedback && { feedback: extra.feedback }),
       }
     });
   }
@@ -577,7 +624,7 @@ export class MultiSessionMessageService {
   /**
    * 🎯 发送项目设置更新
    */
-  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string }) {
+  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any }) {
     this.sendMessage({
       type: 'project_settings_update',
       payload: settings
@@ -610,160 +657,160 @@ export class MultiSessionMessageService {
    * 🎯 监听历史列表分页响应
    */
   onSessionHistoryResponse(handler: (data: { sessions: SessionInfo[]; total: number; hasMore: boolean; offset: number }) => void) {
-    this.addMessageHandler('session_history_response', handler);
+    return this.addMessageHandler('session_history_response', handler);
   }
 
   /**
    * 监听Session创建
    */
   onSessionCreated(handler: (data: { session: SessionInfo }) => void) {
-    this.addMessageHandler('session_created', handler);
+    return this.addMessageHandler('session_created', handler);
   }
 
   /**
    * 监听Session更新
    */
   onSessionUpdated(handler: (data: { sessionId: string; session: SessionInfo }) => void) {
-    this.addMessageHandler('session_updated', handler);
+    return this.addMessageHandler('session_updated', handler);
   }
 
   /**
    * 监听Session删除
    */
   onSessionDeleted(handler: (data: { sessionId: string }) => void) {
-    this.addMessageHandler('session_deleted', handler);
+    return this.addMessageHandler('session_deleted', handler);
   }
 
   /**
    * 监听Session切换
    */
   onSessionSwitched(handler: (data: { sessionId: string; session: SessionInfo }) => void) {
-    this.addMessageHandler('session_switched', handler);
+    return this.addMessageHandler('session_switched', handler);
   }
 
   /**
    * 监听Session导出完成
    */
   onSessionExportComplete(handler: (data: { filePath: string; sessionCount: number }) => void) {
-    this.addMessageHandler('session_export_complete', handler);
+    return this.addMessageHandler('session_export_complete', handler);
   }
 
   /**
    * 监听Session导入完成
    */
   onSessionImportComplete(handler: (data: { importedSessions: SessionInfo[] }) => void) {
-    this.addMessageHandler('session_import_complete', handler);
+    return this.addMessageHandler('session_import_complete', handler);
   }
 
   /**
    * 监听UI历史恢复消息
    */
   onRestoreUIHistory(handler: (data: { sessionId: string; messages: ChatMessage[]; rollbackableMessageIds: string[] }) => void) {
-    this.addMessageHandler('restore_ui_history', handler);
+    return this.addMessageHandler('restore_ui_history', handler);
   }
 
   /**
    * 🎯 监听可回滚消息ID列表更新
    */
   onUpdateRollbackableIds(handler: (data: { sessionId: string; rollbackableMessageIds: string[] }) => void) {
-    this.addMessageHandler('update_rollbackable_ids', handler);
+    return this.addMessageHandler('update_rollbackable_ids', handler);
   }
 
   /**
    * 🎯 监听后端请求UI历史记录的消息
    */
   onRequestUIHistory(handler: (data: { sessionId: string }) => void) {
-    this.addMessageHandler('request_ui_history', handler);
+    return this.addMessageHandler('request_ui_history', handler);
   }
 
   // 原有的消息监听器（现在包含sessionId）
   onToolExecutionResult(handler: (data: { sessionId: string; requestId: string; result: any }) => void) {
-    this.addMessageHandler('tool_execution_result', handler);
+    return this.addMessageHandler('tool_execution_result', handler);
   }
 
   onToolExecutionError(handler: (data: { sessionId: string; requestId: string; error: string }) => void) {
-    this.addMessageHandler('tool_execution_error', handler);
+    return this.addMessageHandler('tool_execution_error', handler);
   }
 
   onToolCallsUpdate(handler: (data: { sessionId: string; toolCalls: any[]; associatedMessageId?: string }) => void) {
-    this.addMessageHandler('tool_calls_update', handler);
+    return this.addMessageHandler('tool_calls_update', handler);
   }
 
   onToolConfirmationRequest(handler: (data: { sessionId: string; toolCall: any }) => void) {
-    this.addMessageHandler('tool_confirmation_request', handler);
+    return this.addMessageHandler('tool_confirmation_request', handler);
   }
 
   onChatResponse(handler: (data: { sessionId: string; response: any }) => void) {
-    this.addMessageHandler('chat_response', handler);
+    return this.addMessageHandler('chat_response', handler);
   }
 
   onChatError(handler: (data: { sessionId: string; error: string }) => void) {
-    this.addMessageHandler('chat_error', handler);
+    return this.addMessageHandler('chat_error', handler);
   }
 
   /**
    * 监听流式聊天开始事件
    */
   onChatStart(handler: (data: { sessionId: string; messageId: string }) => void) {
-    this.addMessageHandler('chat_start', handler);
+    return this.addMessageHandler('chat_start', handler);
   }
 
   /**
    * 监听流式聊天内容块事件
    */
   onChatChunk(handler: (data: { sessionId: string; content: string; messageId: string; isComplete?: boolean }) => void) {
-    this.addMessageHandler('chat_chunk', handler);
+    return this.addMessageHandler('chat_chunk', handler);
   }
 
   /**
    * 监听流式聊天完成事件
    */
   onChatComplete(handler: (data: { sessionId: string; messageId: string; tokenUsage?: any }) => void) {
-    this.addMessageHandler('chat_complete', handler);
+    return this.addMessageHandler('chat_complete', handler);
   }
 
   /**
    * 🎯 监听AI思考过程事件
    */
   onChatReasoning(handler: (data: { sessionId: string; content: string; messageId: string }) => void) {
-    this.addMessageHandler('chat_reasoning', handler);
+    return this.addMessageHandler('chat_reasoning', handler);
   }
 
   onContextUpdate(handler: (data: { sessionId?: string; context: any }) => void) {
-    this.addMessageHandler('context_update', handler);
+    return this.addMessageHandler('context_update', handler);
   }
 
   onQuickAction(handler: (data: { sessionId?: string; action: any }) => void) {
-    this.addMessageHandler('quick_action', handler);
+    return this.addMessageHandler('quick_action', handler);
   }
 
   onToolResultsContinuation(handler: (data: { sessionId: string; response: any }) => void) {
-    this.addMessageHandler('tool_results_continuation', handler);
+    return this.addMessageHandler('tool_results_continuation', handler);
   }
 
   onToolMessage(handler: (data: { sessionId: string; toolId: string; content: string; toolMessageType: 'status' | 'output'; [key: string]: any }) => void) {
-    this.addMessageHandler('tool_message', handler);
+    return this.addMessageHandler('tool_message', handler);
   }
 
   /**
    * 🎯 监听流程状态更新
    */
   onFlowStateUpdate(handler: (data: { sessionId: string; isProcessing: boolean; currentProcessingMessageId?: string; canAbort: boolean }) => void) {
-    this.addMessageHandler('flow_state_update', handler);
+    return this.addMessageHandler('flow_state_update', handler);
   }
 
   /**
    * 🎯 监听流程中断
    */
   onFlowAborted(handler: (data: { sessionId: string }) => void) {
-    this.addMessageHandler('flow_aborted', handler);
+    return this.addMessageHandler('flow_aborted', handler);
   }
 
   /**
    * 🎯 监听记忆文件路径更新
    */
   onMemoryFilesUpdate(handler: (data: { filePaths: string[]; fileCount: number }) => void) {
-    this.addMessageHandler('memory_files_update', handler);
+    return this.addMessageHandler('memory_files_update', handler);
   }
 
   // =============================================================================
@@ -818,42 +865,66 @@ export class MultiSessionMessageService {
    * 监听登录状态响应
    */
   onLoginStatusResponse(callback: (data: { isLoggedIn: boolean; error?: string }) => void) {
-    this.addMessageHandler('login_status_response', callback);
+    return this.addMessageHandler('login_status_response', callback);
   }
 
   /**
    * 监听登录结果
    */
   onLoginResponse(callback: (data: { success: boolean; error?: string }) => void) {
-    this.addMessageHandler('login_response', callback);
+    return this.addMessageHandler('login_response', callback);
+  }
+
+  /**
+   * 发送登出请求
+   */
+  logout(): void {
+    this.sendMessage({
+      type: 'logout',
+      payload: {}
+    });
+  }
+
+  /**
+   * 监听登出结果
+   */
+  onLogoutResponse(callback: (data: { success: boolean; error?: string }) => void) {
+    return this.addMessageHandler('logout_response', callback);
+  }
+
+  /**
+   * 🔐 监听认证过期通知（服务端返回 HTTP 401 时触发）
+   */
+  onAuthExpired(callback: (data: { reason: string }) => void) {
+    return this.addMessageHandler('auth_expired', callback);
   }
 
   /**
    * 🎯 监听项目设置响应
    */
   onProjectSettingsResponse(callback: (data: { yoloMode: boolean }) => void) {
-    this.addMessageHandler('project_settings_response', callback);
+    return this.addMessageHandler('project_settings_response', callback);
   }
 
   /**
    * 🎯 监听服务初始化状态
    */
   onServiceInitializationStatus(callback: (data: { status: string; message: string; timestamp: number }) => void) {
-    this.addMessageHandler('service_initialization_status', callback);
+    return this.addMessageHandler('service_initialization_status', callback);
   }
 
   /**
    * 🎯 监听消息预填充（用于右键菜单快捷操作 - 自动发送）
    */
   onPrefillMessage(callback: (data: { message: string }) => void) {
-    this.addMessageHandler('prefill_message', callback);
+    return this.addMessageHandler('prefill_message', callback);
   }
 
   /**
    * 🎯 监听插入代码到输入框（只插入，不自动发送）
    */
   onInsertCodeToInput(callback: (data: { fileName: string; filePath: string; code: string; startLine?: number; endLine?: number }) => void) {
-    this.addMessageHandler('insert_code_to_input', callback);
+    return this.addMessageHandler('insert_code_to_input', callback);
   }
 
   /**
@@ -877,13 +948,20 @@ export class MultiSessionMessageService {
     startLine?: number;
     endLine?: number;
   }) => void) {
-    this.addMessageHandler('clipboard_cache_response', callback);
+    return this.addMessageHandler('clipboard_cache_response', callback);
   }
   /**
    * 🎯 监听打开规则管理对话框
    */
   onOpenRulesManagement(callback: () => void) {
-    this.addMessageHandler('open_rules_management', callback);
+    return this.addMessageHandler('open_rules_management', callback);
+  }
+
+  /**
+   * 🎯 监听打开目标驱动模式向导
+   */
+  onOpenGoalWizard(callback: () => void) {
+    return this.addMessageHandler('open_goal_wizard', callback);
   }
 
   /**
@@ -1029,11 +1107,49 @@ export class MultiSessionMessageService {
   }
 
   // =============================================================================
+  // 🎯 用户规则相关
+  // =============================================================================
+
+  /**
+   * 📝 获取用户规则
+   */
+  getUserRules(): void {
+    this.sendMessage({
+      type: 'get_user_rules' as any,
+      payload: {}
+    });
+  }
+
+  /**
+   * 📝 保存用户规则
+   */
+  saveUserRules(rules: string): void {
+    this.sendMessage({
+      type: 'save_user_rules' as any,
+      payload: { rules }
+    });
+  }
+
+  /**
+   * 📝 监听用户规则响应
+   */
+  onUserRulesResponse(callback: (data: { rules: string }) => void): () => void {
+    return this.addMessageHandler('user_rules_response', callback);
+  }
+
+  /**
+   * 📝 监听用户规则保存结果
+   */
+  onUserRulesSaved(callback: (data: { success: boolean; error?: string }) => void): () => void {
+    return this.addMessageHandler('user_rules_saved', callback);
+  }
+
+  // =============================================================================
   // 🎯 NanoBanana 图像生成
   // =============================================================================
 
   /**
-   * 🎯 发送NanoBanana图片上传请求
+   * 🎯 发送NanoBanana图片上传请求（单张）
    */
   sendNanoBananaUpload(data: { filename: string; contentType: string; fileData: string }) {
     this.sendMessage({
@@ -1043,16 +1159,50 @@ export class MultiSessionMessageService {
   }
 
   /**
-   * 🎯 监听NanoBanana上传响应
+   * 🎯 发送NanoBanana批量图片上传请求（多张）
    */
-  onNanoBananaUploadResponse(callback: (data: { success: boolean; publicUrl?: string; error?: string }) => void) {
-    this.addMessageHandler('nanobanana_upload_response', callback);
+  sendNanoBananaBatchUpload(data: { files: Array<{ filename: string; contentType: string; fileData: string }> }) {
+    this.sendMessage({
+      type: 'nanobanana_batch_upload' as any,
+      payload: data
+    });
   }
 
   /**
-   * 🎯 发送NanoBanana生成请求
+   * 🎯 监听NanoBanana上传响应（单张）
+   * @returns 取消订阅的函数
    */
-  sendNanoBananaGenerate(data: { prompt: string; aspectRatio: string; imageSize: string; referenceImageUrl?: string }) {
+  onNanoBananaUploadResponse(callback: (data: { success: boolean; publicUrl?: string; error?: string }) => void) {
+    return this.addMessageHandler('nanobanana_upload_response', callback);
+  }
+
+  /**
+   * 🎯 监听NanoBanana批量上传响应（多张）
+   * @returns 取消订阅的函数
+   */
+  onNanoBananaBatchUploadResponse(callback: (data: { success: boolean; publicUrls?: string[]; error?: string }) => void) {
+    return this.addMessageHandler('nanobanana_batch_upload_response', callback);
+  }
+
+  /**
+   * 🎯 发送NanoBanana生成请求（支持多轮会话 + 多图参考）
+   */
+  sendNanoBananaGenerate(data: {
+    prompt: string;
+    aspectRatio: string;
+    imageSize: string;
+    referenceImageUrl?: string;
+    referenceImageUrls?: string[];
+    // 多轮会话上下文
+    conversationContext?: {
+      previousGeneratedImageUrl: string;
+      history: Array<{
+        role: 'user' | 'assistant';
+        prompt?: string;
+        imageUrl?: string;
+      }>;
+    };
+  }) {
     this.sendMessage({
       type: 'nanobanana_generate' as any,
       payload: data
@@ -1061,9 +1211,10 @@ export class MultiSessionMessageService {
 
   /**
    * 🎯 监听NanoBanana生成响应
+   * @returns 取消订阅的函数
    */
   onNanoBananaGenerateResponse(callback: (data: { success: boolean; taskId?: string; estimatedTime?: number; error?: string }) => void) {
-    this.addMessageHandler('nanobanana_generate_response', callback);
+    return this.addMessageHandler('nanobanana_generate_response', callback);
   }
 
   /**
@@ -1078,6 +1229,7 @@ export class MultiSessionMessageService {
 
   /**
    * 🎯 监听NanoBanana状态更新
+   * @returns 取消订阅的函数
    */
   onNanoBananaStatusUpdate(callback: (data: {
     taskId: string;
@@ -1088,7 +1240,7 @@ export class MultiSessionMessageService {
     errorMessage?: string;
     creditsDeducted?: number;
   }) => void) {
-    this.addMessageHandler('nanobanana_status_update', callback);
+    return this.addMessageHandler('nanobanana_status_update', callback);
   }
 
   // =============================================================================
@@ -1109,7 +1261,7 @@ export class MultiSessionMessageService {
    * 🎯 监听PPT生成响应
    */
   onPPTGenerateResponse(callback: (data: { success: boolean; taskId?: string; editUrl?: string; error?: string }) => void) {
-    this.addMessageHandler('ppt_generate_response', callback);
+    return this.addMessageHandler('ppt_generate_response', callback);
   }
 
   /**
@@ -1126,7 +1278,7 @@ export class MultiSessionMessageService {
    * 🎯 监听PPT大纲AI优化响应
    */
   onPPTOptimizeOutlineResponse(callback: (data: { success: boolean; optimizedOutline?: string; error?: string }) => void) {
-    this.addMessageHandler('ppt_optimize_outline_response', callback);
+    return this.addMessageHandler('ppt_optimize_outline_response', callback);
   }
 
   /**

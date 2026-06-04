@@ -50,8 +50,7 @@ export const useSlashCommandProcessor = (
   addItem: UseHistoryManagerReturn['addItem'],
   clearItems: UseHistoryManagerReturn['clearItems'],
   loadHistory: UseHistoryManagerReturn['loadHistory'],
-  history: HistoryItem[],
-  refreshStatic: () => void,
+  refreshStatic: (clearScrollback?: boolean) => void,
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
   onDebugMessage: (message: string) => void,
   openThemeDialog: () => void,
@@ -75,6 +74,10 @@ export const useSlashCommandProcessor = (
     lineCount: number;
   }) => void, // 🆕 接收 openInitChoiceDialog
   openPluginInstallDialog?: () => void, // 🆕 接收 openPluginInstallDialog
+  openDebateWizard?: () => void, // 🎭 接收 openDebateWizard
+  resumeDebate?: () => void, // 🎭 接收 resumeDebate (由 /debate continue 触发)
+  openGoalWizard?: () => void, // 🎯 接收 openGoalWizard (由 /goal 触发)
+  openWorkflowPanel?: () => void, // ⚡ 接收 openWorkflowPanel (由 /workflow 触发)
 ) => {
   const session = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
@@ -172,8 +175,7 @@ export const useSlashCommandProcessor = (
         addItem,
         clear: () => {
           clearItems();
-          console.clear();
-          refreshStatic();
+          refreshStatic(true);
         },
         loadHistory,
         setDebugMessage: onDebugMessage,
@@ -456,6 +458,30 @@ export const useSlashCommandProcessor = (
                       setShowHelp(false);
                       if (openPluginInstallDialog) {
                         openPluginInstallDialog();
+                      }
+                      return { type: 'handled' };
+                    case 'debate-wizard':
+                      setShowHelp(false);
+                      if (openDebateWizard) {
+                        openDebateWizard();
+                      }
+                      return { type: 'handled' };
+                    case 'debate-resume':
+                      setShowHelp(false);
+                      if (resumeDebate) {
+                        resumeDebate();
+                      }
+                      return { type: 'handled' };
+                    case 'goal-wizard':
+                      setShowHelp(false);
+                      if (openGoalWizard) {
+                        openGoalWizard();
+                      }
+                      return { type: 'handled' };
+                    case 'workflow-panel':
+                      setShowHelp(false);
+                      if (openWorkflowPanel) {
+                        openWorkflowPanel();
                       }
                       return { type: 'handled' };
                     default: {

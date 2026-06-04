@@ -31,7 +31,17 @@ import { SlashCommandService } from './services/slashCommandService';
 import { TerminalOutputService } from './services/terminalOutputService';
 import { McpEnabledStateService } from './services/mcpEnabledStateService';
 import { AIService } from './services/aiService';
-import { getAllMCPServerToolCounts, getAllMCPServerToolNames, MCPServerStatus } from 'deepv-code-core';
+import { CustomModelsStorageService } from './services/customModelsStorageService';
+import {
+  getAllMCPServerToolCounts,
+  getAllMCPServerToolNames,
+  MCPServerStatus,
+  isOurAuthError,
+  EASY_ROUTER_BASE_URL,
+  EASY_CLAW_METADATA_URL,
+  filterEasyRouterModels,
+  indexEasyClawMetadata,
+} from 'deepv-code-core';
 import { SessionType, SessionStatus } from './constants/sessionConstants';
 import { SessionInfo } from './types/sessionTypes';
 
@@ -386,6 +396,27 @@ export async function deactivate(): Promise<void> {
   }
 }
 
+// 🔐 辅助函数：检测 HTTP 401 响应并触发自动登出
+// 当服务端返回 401 时，说明用户登录已过期，需要立即通知 webview 切换到登录页
+async function handleHttpAuthError(response: Response): Promise<boolean> {
+  if (response.status === 401) {
+    try {
+      const clonedResponse = response.clone();
+      const text = await clonedResponse.text();
+      if (isOurAuthError(text)) {
+        logger.warn('🔐 HTTP 401 detected with AUTHENTICATION_FAILED, triggering auth expired notification');
+        await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
+        return true;
+      } else {
+        logger.warn('🔐 HTTP 401 detected but it is not from our auth service, ignoring login expiration flow');
+      }
+    } catch (err) {
+      logger.debug('Failed to parse 401 response body for auth check', err instanceof Error ? err : undefined);
+    }
+  }
+  return false;
+}
+
 function setupServiceCommunication() {
 
   // 🎯 监听customProxyServerUrl设置变化
@@ -441,6 +472,56 @@ function setupBasicMessageHandlers() {
 
       // 🎯 使用延迟初始化的AIService，只在真正需要AI功能时才初始化
       const aiService = await sessionManager.getInitializedAIService(message.sessionId);
+
+      // 🎯 /goal 模式启动检测
+      //
+      // 当 GoalWizardDialog 提交时，webview 会在 chat_message 上附带
+      // goalContext 元数据。在把消息送给 AI 之前，先把 goal context 写到
+      // GeminiClient 的内存里（和 CLI 端 useGoalWizard 同等效果）。
+      //
+      // 这一步是 VSCode 端 /goal 模式抗压缩续命的关键：core 的
+      // tryCompressChat 在每次自动/手动压缩后会检查 activeGoalContext，
+      // 若非空则把原始 prompt + T0 + 立即行动指令重新注入历史，防止
+      // summarizer 把契约（最低工时、no-stop 纪律、安全栏等）压没了。
+      //
+      // 时序保证：postMessage 是 FIFO，goalContext 与 prompt 在同一条
+      // chat_message 里到达，setGoalContext 在 processChatMessage 之前
+      // 同步完成 —— 不存在压缩先于注册触发的可能。
+      if (message.goalContext) {
+        try {
+          const geminiClient = aiService.getGeminiClient();
+          if (geminiClient) {
+            // originalPrompt 直接从 message.content 第一条 text part 提取，
+            // 避免 webview 重复传 prompt 字段造成不一致风险。goal 启动消息
+            // 在 GoalWizardDialog.handleStart 里只 push 了一条 text part。
+            const textPart = message.content?.find(
+              (p): p is { type: 'text'; value: string } => p?.type === 'text',
+            );
+            const originalPrompt = textPart?.value ?? '';
+            if (originalPrompt) {
+              geminiClient.setGoalContext({
+                originalPrompt,
+                startedAt: message.goalContext.startedAt,
+                hours: message.goalContext.hours,
+                task: message.goalContext.task,
+              });
+              logger.info(
+                `[Goal] Activated goal context for session ${message.sessionId}: T0=${new Date(message.goalContext.startedAt).toISOString()}, hours=${message.goalContext.hours}`,
+              );
+            } else {
+              logger.warn('[Goal] goalContext present but no text part found in content; skipping setGoalContext');
+            }
+          } else {
+            logger.warn('[Goal] goalContext present but GeminiClient not yet available; goal-mode compression resilience disabled for this session');
+          }
+        } catch (err) {
+          // 不阻断 goal 启动 —— 注册失败只是失去压缩续命能力，
+          // 单次任务依然能跑。与 CLI 端 useGoalWizard 的容错策略一致。
+          logger.warn(
+            `[Goal] Failed to register goal context: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       // 获取当前上下文
       const currentContext = contextService.getCurrentContext();
@@ -713,7 +794,19 @@ function setupBasicMessageHandlers() {
       }
 
       if (data.confirmed) {
-        await aiService.approveToolCall(data.toolId, data.userInput);
+        // 🎯 AskUserQuestion: 如果带 answers/annotations/feedback 结构化字段，透传过去
+        const extra = ((): { answers?: any; annotations?: any; feedback?: string } | undefined => {
+          const d = data as any;
+          if (d.answers || d.annotations || d.feedback) {
+            return {
+              answers: d.answers,
+              annotations: d.annotations,
+              feedback: d.feedback,
+            };
+          }
+          return undefined;
+        })();
+        await aiService.approveToolCall(data.toolId, data.userInput, (data as any).outcome, extra);
       } else {
         await aiService.rejectToolCall(data.toolId, 'User rejected tool execution');
       }
@@ -916,6 +1009,10 @@ function setupBasicMessageHandlers() {
 
           // 更新YOLO设置
           settings.yolo = data.yoloMode;
+          // 🆕 更新 thinking 设置
+          if (data.thinkingConfig !== undefined) {
+            settings.thinking = data.thinkingConfig;
+          }
           logger.debug(`[YOLO] Updated settings to: ${JSON.stringify(settings)}`);
 
           // 写入文件
@@ -942,6 +1039,11 @@ function setupBasicMessageHandlers() {
       // 🎯 然后同步YOLO模式设置到Core配置
       await sessionManager.setProjectYoloMode(data.yoloMode);
 
+      // 🆕 同步 thinking 配置到所有活跃 session 内存中
+      if (data.thinkingConfig !== undefined) {
+        await sessionManager.setProjectThinkingConfig(data.thinkingConfig);
+      }
+
       // 🎯 更新默认模型配置
       if (data.preferredModel) {
         const config = vscode.workspace.getConfiguration('deepv');
@@ -966,8 +1068,9 @@ function setupBasicMessageHandlers() {
     try {
       logger.info('[YOLO] Received project settings request');
 
-      // 获取 YOLO 模式
+      // 获取 YOLO 模式和 thinking 配置
       let yoloMode = false;
+      let thinkingConfig: any = undefined;
 
       // 🎯 优先从项目配置文件读取，确保准确性
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -979,6 +1082,10 @@ function setupBasicMessageHandlers() {
             if (settings.yolo !== undefined) {
               yoloMode = !!settings.yolo;
               logger.info(`[YOLO] ✅ Loaded from project config: ${yoloMode}`);
+            }
+            if (settings.thinking !== undefined) {
+              thinkingConfig = settings.thinking;
+              logger.info(`[Thinking] ✅ Loaded from project config: ${JSON.stringify(thinkingConfig)}`);
             }
           } catch (e) {
             logger.warn('[YOLO] Failed to parse project settings');
@@ -1005,7 +1112,7 @@ function setupBasicMessageHandlers() {
       const preferredModel = config.get<string>('preferredModel', 'auto');
       const healthyUse = config.get<boolean>('healthyUse', true);
 
-      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse });
+      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse, thinkingConfig });
       logger.info(`[YOLO] ✅ Response sent: YOLO=${yoloMode}, Model=${preferredModel}, HealthyUse=${healthyUse}`);
     } catch (error) {
       logger.error('[YOLO] Failed to get project settings', error instanceof Error ? error : undefined);
@@ -1653,6 +1760,7 @@ function setupBasicMessageHandlers() {
       } as any);
 
       if (!response.ok) {
+        if (await handleHttpAuthError(response)) return;
         throw new Error(`Failed to fetch user stats: ${response.status} ${response.statusText}`);
       }
 
@@ -1982,8 +2090,20 @@ function setupLoginHandlers() {
       if (loginResult.success) {
         logger.info('Login completed successfully');
 
-        // 登录成功后，重新初始化所有session的AI服务
-        await sessionManager.reinitializeAllSessions();
+        // 登录成功后，判断是否需要重新初始化
+        if (sessionManager.getIsInitialized()) {
+          // 正常登录（非退出后重登），重新初始化现有session的AI服务
+          await sessionManager.reinitializeAllSessions();
+        } else {
+          // 退出后重登，sessionManager已被dispose，需要完全重新初始化
+          logger.info('SessionManager was disposed, re-initializing...');
+          await sessionManager.initialize();
+
+          // 重新初始化后，发送session列表给前端
+          const sessions = sessionManager.getAllSessionsInfo();
+          const currentSessionId = sessionManager.getCurrentSession()?.info.id || null;
+          await communicationService.sendSessionListUpdate(sessions, currentSessionId);
+        }
       } else {
         logger.error(`Login failed: ${loginResult.error}`);
       }
@@ -1993,6 +2113,36 @@ function setupLoginHandlers() {
       await communicationService.sendGenericMessage('login_response', {
         success: false,
         error: error instanceof Error ? error.message : 'Login process failed'
+      });
+    }
+  });
+
+  // 🎯 处理登出请求
+  communicationService.addMessageHandler('logout', async () => {
+    try {
+      logger.info('Received logout request');
+
+      const { LoginService } = await import('./services/loginService');
+      const loginService = LoginService.getInstance(logger, extensionContext.extensionPath);
+
+      // 执行登出 - 清除 jwt-token.json 和 user-info.json
+      await loginService.logout();
+
+      // 销毁所有 session 的 AI 服务（不删除磁盘历史）
+      await sessionManager.dispose();
+
+      // 发送登出结果
+      await communicationService.sendGenericMessage('logout_response', {
+        success: true
+      });
+
+      logger.info('Logout completed successfully, sessions disposed');
+
+    } catch (error) {
+      logger.error('Failed to logout', error instanceof Error ? error : undefined);
+      await communicationService.sendGenericMessage('logout_response', {
+        success: false,
+        error: error instanceof Error ? error.message : 'Logout failed'
       });
     }
   });
@@ -2108,6 +2258,48 @@ function setupLoginHandlers() {
     }
   });
 
+  // 📝 处理获取用户规则请求
+  communicationService.addMessageHandler('get_user_rules', async () => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      const userRules = config.get<string>('userRules', '');
+      logger.info('📝 Getting user rules', { length: userRules.length });
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: userRules }
+      });
+    } catch (error) {
+      logger.error('Failed to get user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_response',
+        payload: { rules: '' }
+      });
+    }
+  });
+
+  // 📝 处理保存用户规则请求
+  communicationService.addMessageHandler('save_user_rules', async (payload: { rules: string }) => {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      await config.update('userRules', payload.rules, vscode.ConfigurationTarget.Global);
+      logger.info('📝 User rules saved successfully', { length: payload.rules.length });
+
+      // 更新 sessionManager 中的 userRules
+      sessionManager.setUserRules(payload.rules);
+
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: true }
+      });
+    } catch (error) {
+      logger.error('Failed to save user rules', error instanceof Error ? error : undefined);
+      await communicationService.sendMessage({
+        type: 'user_rules_saved',
+        payload: { success: false, error: error instanceof Error ? error.message : String(error) }
+      });
+    }
+  });
+
   // 🎯 处理获取可用模型列表请求
   communicationService.onGetAvailableModels(async (payload) => {
     try {
@@ -2131,6 +2323,13 @@ function setupLoginHandlers() {
 
     } catch (error) {
       logger.error('Failed to get available models', error instanceof Error ? error : undefined);
+
+      // 🔐 检测认证过期错误
+      const errMsg = error instanceof Error ? error.message : '';
+      if (errMsg.includes('Authentication required') || errMsg.includes('401')) {
+        await communicationService.sendAuthExpired('Server returned HTTP 401 - login session expired');
+      }
+
       await communicationService.sendModelResponse(payload.requestId, {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -2269,6 +2468,10 @@ function setupLoginHandlers() {
         await sessionManager.updateSessionModelConfig(payload.sessionId, {
           modelName: payload.modelName
         });
+
+        // 🎯 通知前端模型切换完成（前端不做乐观更新，等此事件后才更新 selectedModelId）
+        // 这样保证：UI 显示 = modelConfig = runtime 三者一致
+        await communicationService.sendModelSwitchComplete(payload.sessionId, payload.modelName);
       }
 
       await communicationService.sendModelResponse(payload.requestId, {
@@ -2367,6 +2570,206 @@ function setupLoginHandlers() {
       await communicationService.sendModelResponse(payload.requestId, {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // ===========================================================================
+  // 🟢 自定义模型管理 IPC（与 CLI 共享 ~/.deepv/custom-models.json）
+  //
+  // 设计要点：
+  // - storage 是单例，与 CLI 一致用 displayName 作为 identity；任何 add 都触发
+  //   广播，让所有打开的 webview ModelSelector 立即看到最新列表。
+  // - 任何 add/delete 之后都对所有 active session 调 setCustomModels(),
+  //   达到 CLI 的 hot-reload 效果（不需要重开会话）。
+  // - EasyRouter / EasyClaw 的 fetch 走扩展宿主，避免 webview CSP 问题，
+  //   且 API key 仅在 IPC 层短暂出现。
+  // ===========================================================================
+
+  /**
+   * 把最新的 custom models 同步到所有 active AIService 的 Config，
+   * 等价于 CLI useCustomModelWizard 的 config.setCustomModels(updatedModels)。
+   * 失败一个 session 不影响其它 session。
+   */
+  const hotReloadCustomModelsToAllSessions = async (models: import('deepv-code-core').CustomModelConfig[]) => {
+    try {
+      const allSessionInfos = sessionManager.getAllSessionsInfo();
+      for (const sess of allSessionInfos) {
+        try {
+          const aiService = sessionManager.getAIService(sess.id);
+          // 仅对已初始化的 session 同步——未初始化的 session 在
+          // initialize() 时会从 storage 读到最新值。
+          const cfg = aiService?.getConfig?.();
+          if (cfg && typeof (cfg as any).setCustomModels === 'function') {
+            (cfg as any).setCustomModels(models);
+            logger.debug(`[CustomModels] hot-reloaded ${models.length} model(s) into session ${sess.id}`);
+          }
+        } catch (sessErr) {
+          logger.warn(
+            `[CustomModels] hot-reload skipped for session ${sess.id}`,
+            sessErr instanceof Error ? sessErr : undefined,
+          );
+        }
+      }
+    } catch (e) {
+      logger.warn('[CustomModels] hot-reload pass failed', e instanceof Error ? e : undefined);
+    }
+  };
+
+  // List
+  communicationService.onListCustomModels(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const models = storage.loadCustomModels();
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: true,
+        models,
+      });
+    } catch (error) {
+      logger.error('[CustomModels] list failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Add (single or batch)
+  communicationService.onAddCustomModels(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const merged = storage.addOrUpdateMany(payload.models);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: true,
+        models: merged,
+      });
+      // 广播 + 热加载（顺序无所谓，二者互不依赖）
+      await communicationService.sendCustomModelsChanged(merged);
+      await hotReloadCustomModelsToAllSessions(merged);
+    } catch (error) {
+      logger.error('[CustomModels] add failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Delete
+  communicationService.onDeleteCustomModel(async (payload) => {
+    try {
+      const storage = CustomModelsStorageService.getInstance(logger);
+      const removed = storage.deleteCustomModel(payload.modelId);
+      const merged = storage.loadCustomModels();
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: removed,
+        models: merged,
+        ...(removed ? {} : { error: `Model not found: ${payload.modelId}` }),
+      });
+      if (removed) {
+        await communicationService.sendCustomModelsChanged(merged);
+        await hotReloadCustomModelsToAllSessions(merged);
+      }
+    } catch (error) {
+      logger.error('[CustomModels] delete failed', error instanceof Error ? error : undefined);
+      await communicationService.sendCustomModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // EasyRouter /v1/models — done in extension host (CSP-friendly, key never leaves IPC).
+  communicationService.onFetchEasyRouterModels(async (payload) => {
+    const apiKey = (payload.apiKey || '').trim();
+    if (!apiKey) {
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: false,
+        error: 'API key is required',
+      });
+      return;
+    }
+    try {
+      const url = `${EASY_ROUTER_BASE_URL.replace(/\/+$/, '')}/models`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      let resp: Response;
+      try {
+        resp = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!resp.ok) {
+        const txt = await resp.text().catch(() => resp.statusText);
+        await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+          success: false,
+          status: resp.status,
+          error: `EasyRouter HTTP ${resp.status}: ${txt.slice(0, 200)}`,
+        });
+        return;
+      }
+      const json = (await resp.json()) as { data?: any[] };
+      const list = Array.isArray(json?.data) ? filterEasyRouterModels(json.data) : [];
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: true,
+        models: list,
+      });
+    } catch (error) {
+      logger.warn(
+        '[CustomModels] EasyRouter fetch failed',
+        error instanceof Error ? error : undefined,
+      );
+      await communicationService.sendFetchEasyRouterModelsResponse(payload.requestId, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // EasyClaw public model metadata — best-effort; failures return empty entries.
+  communicationService.onFetchEasyClawMetadata(async (payload) => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      let resp: Response;
+      try {
+        resp = await fetch(EASY_CLAW_METADATA_URL, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!resp.ok) {
+        await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+          success: true, // soft success
+          entries: [],
+        });
+        return;
+      }
+      const json = (await resp.json()) as { data?: any[] };
+      const map = Array.isArray(json?.data) ? indexEasyClawMetadata(json.data) : new Map();
+      const entries = Array.from(map.entries()) as Array<[string, any]>;
+      await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+        success: true,
+        entries,
+      });
+    } catch (error) {
+      logger.warn(
+        '[CustomModels] EasyClaw metadata fetch failed (best-effort, returning empty)',
+        error instanceof Error ? error : undefined,
+      );
+      await communicationService.sendFetchEasyClawMetadataResponse(payload.requestId, {
+        success: true,
+        entries: [],
       });
     }
   });
@@ -2555,7 +2958,94 @@ function setupSlashCommandHandlers() {
         return;
       }
 
-      // 处理命令的 prompt
+      // ─────────────────────────────────────────────────────────────
+      // 内置 side-effect 命令分发：不返回 prompt，而是执行后端动作
+      // ─────────────────────────────────────────────────────────────
+      if (command.execution === 'side_effect') {
+        if (command.sideEffect === 'compress') {
+          // /compress：让 webview 走副作用分支自己驱动压缩，与 CLI compressCommand
+          // 行为对齐（CLI 内部也是直接调 geminiClient.tryCompressChat）。
+          // 这里只把"我是 compress 副作用"反馈回去；真正调用 tryCompressChat 的
+          // 路径已经存在于 MultiSessionApp 里（compression_confirmation 流），
+          // webview 收到后转发一条 builtin_compress 消息回 backend 实际执行。
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: {
+              success: true,
+              sideEffect: 'compress',
+              info: 'Compressing conversation history…',
+            },
+          });
+          return;
+        }
+        // 未来扩展其它 side-effect 类型时在此追加分支
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: `Unsupported side effect: ${command.sideEffect}` },
+        });
+        return;
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // /init 内置命令的特殊预处理：在 workspace 创建空 DEEPV.md，再走 prompt 分支
+      // ─────────────────────────────────────────────────────────────
+      if (command.kind === 'built-in' && command.name === 'init') {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: { success: false, error: '/init requires an open workspace folder.' },
+          });
+          return;
+        }
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+        const deepvMdPath = path.join(workspaceRoot, 'DEEPV.md');
+        try {
+          let info: string | undefined;
+          if (fs.existsSync(deepvMdPath)) {
+            const stats = fs.statSync(deepvMdPath);
+            if (stats.size === 0) {
+              // 空文件：当不存在处理（与 CLI initCommand 行为对齐）
+              info = `Empty DEEPV.md detected at ${deepvMdPath}, regenerating…`;
+            } else {
+              // 非空文件：MVP 阶段保守拒绝执行，避免覆盖用户内容。
+              // CLI 端在这里会弹 init-choice 对话框；webview 端先走拒绝路径，
+              // 后续如有用户呼声再补对话框。
+              const sizeKB = Math.round(stats.size / 1024 * 100) / 100;
+              communicationService.sendMessage({
+                type: 'slash_command_result',
+                payload: {
+                  success: false,
+                  error: `DEEPV.md already exists (${sizeKB}KB). Delete or rename it first if you want to regenerate via /init.`,
+                },
+              });
+              return;
+            }
+          } else {
+            // 不存在：创建空文件
+            fs.writeFileSync(deepvMdPath, '', 'utf8');
+            info = `Created empty DEEPV.md at ${deepvMdPath}`;
+          }
+          const processedPrompt = slashCommandService.processCommandPrompt(command, args);
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: { success: true, prompt: processedPrompt, info },
+          });
+          return;
+        } catch (initErr) {
+          logger.error('Failed to prepare DEEPV.md for /init', initErr instanceof Error ? initErr : undefined);
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: {
+              success: false,
+              error: `Failed to prepare DEEPV.md: ${initErr instanceof Error ? initErr.message : String(initErr)}`,
+            },
+          });
+          return;
+        }
+      }
+
+      // 默认 prompt 模式（TOML 命令 / 其它 built-in prompt 命令）
       const processedPrompt = slashCommandService.processCommandPrompt(command, args);
 
       communicationService.sendMessage({
@@ -2567,6 +3057,114 @@ function setupSlashCommandHandlers() {
       communicationService.sendMessage({
         type: 'slash_command_result',
         payload: { success: false, error: error instanceof Error ? error.message : 'Command execution failed' },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 内置 /compress 的实际执行入口：webview 收到 sideEffect:'compress' 后
+  // 会回发一条 builtin_compress 消息触发这里。我们直接调用 core 的
+  // tryCompressChat（与 CLI compressCommand 完全一致），并把结果
+  // 通过现有 system-notification / chat_compressed 通道反馈给 webview。
+  // ─────────────────────────────────────────────────────────────────
+  communicationService.addMessageHandler('builtin_compress', async () => {
+    // 本次压缩对应的 session（用于 webview 把状态消息归位到正确的会话）。
+    const compressSessionId = sessionManager.getCurrentSession()?.info.id || null;
+    // 给本次压缩分配一个稳定 statusId，让 webview 能把 start → done/error 的
+    // 多条 compress_status 更新到同一条 in-chat 通知上（而不是不断追加新条目）。
+    const statusId = `compress-${Date.now()}`;
+
+    try {
+      // 当前会话的 AIService —— 与 setupChatHandlers 内 send_message 的
+      // 取法（getCurrentInitializedAIService）保持一致。
+      const aiService = await sessionManager.getCurrentInitializedAIService();
+      const geminiClient = aiService?.getGeminiClient?.();
+      if (!geminiClient) {
+        logger.warn('[/compress] geminiClient not initialized');
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'AI client not ready. Please wait for initialization.' },
+        });
+        return;
+      }
+
+      if (geminiClient.isCompressionInProgress?.()) {
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'Compression already in progress, please wait.' },
+        });
+        return;
+      }
+
+      // ── 阶段 1：start ──────────────────────────────────────────────
+      // 立即把"正在压缩"状态推给 webview，让它在对话流里插入一条持久的
+      // in-chat 通知 + 底部进度条，用户不再面对一片空白干等。
+      communicationService.sendMessage({
+        type: 'compress_status',
+        payload: { phase: 'start', statusId, sessionId: compressSessionId },
+      });
+
+      logger.info('[/compress] Manual compression triggered via slash command');
+      const promptId = `slash-compress-${Date.now()}`;
+      const result = await geminiClient.tryCompressChat(promptId, new AbortController().signal, true);
+
+      if (result) {
+        const before = (result as any).originalTokenCount;
+        const after = (result as any).newTokenCount;
+        logger.info(`[/compress] Compressed ${before} → ${after} tokens`);
+        const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : String(n));
+
+        // ── 阶段 2：done ─────────────────────────────────────────────
+        // 把压缩结果（前后 token 数）回写到同一条 in-chat 通知上。
+        communicationService.sendMessage({
+          type: 'compress_status',
+          payload: {
+            phase: 'done',
+            statusId,
+            sessionId: compressSessionId,
+            originalTokenCount: before,
+            newTokenCount: after,
+          },
+        });
+
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: {
+            success: true,
+            info: `Compressed ${fmt(before)} → ${fmt(after)} tokens`,
+          },
+        });
+      } else {
+        logger.warn('[/compress] tryCompressChat returned falsy result');
+        // ── 阶段 2'：skipped ─────────────────────────────────────────
+        // 历史本来就不大、无需压缩：也要给一个明确的结束态，避免进度条悬挂。
+        communicationService.sendMessage({
+          type: 'compress_status',
+          payload: { phase: 'skipped', statusId, sessionId: compressSessionId },
+        });
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'Compression returned no result. The history may already be small enough.' },
+        });
+      }
+    } catch (error) {
+      logger.error('[/compress] Compression failed', error instanceof Error ? error : undefined);
+      // ── 阶段 2''：error ───────────────────────────────────────────
+      communicationService.sendMessage({
+        type: 'compress_status',
+        payload: {
+          phase: 'error',
+          statusId,
+          sessionId: compressSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      communicationService.sendMessage({
+        type: 'slash_command_result',
+        payload: {
+          success: false,
+          error: `Compression failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
       });
     }
   });
@@ -3070,25 +3668,85 @@ function setupMultiSessionHandlers() {
     }
   });
 
-  // 🎯 处理NanoBanana生成请求
+  // 🎯 处理NanoBanana批量图片上传请求
+  communicationService.onNanoBananaBatchUpload(async (payload) => {
+    try {
+      logger.info('Received nanobanana_batch_upload request', { fileCount: payload.files.length });
+
+      const { ImageGeneratorAdapter } = await import('deepv-code-core');
+      const imageGenerator = ImageGeneratorAdapter.getInstance();
+
+      // 1. 批量获取上传 URL
+      const uploadResult = await imageGenerator.getUploadUrls(
+        payload.files.map(f => ({ filename: f.filename, content_type: f.contentType }))
+      );
+
+      // 2. 并行上传所有图片到 GCS
+      await Promise.all(
+        uploadResult.files.map((urlInfo, idx) => {
+          const base64Data = payload.files[idx].fileData.split(',')[1];
+          const fileBuffer = Buffer.from(base64Data, 'base64');
+          return imageGenerator.uploadImage(urlInfo.upload_url, fileBuffer, payload.files[idx].contentType);
+        })
+      );
+
+      const publicUrls = uploadResult.files.map(f => f.public_url);
+
+      await communicationService.sendNanoBananaBatchUploadResponse({
+        success: true,
+        publicUrls
+      });
+
+      logger.info('NanoBanana batch upload completed', { count: publicUrls.length });
+    } catch (error) {
+      logger.error('Failed to batch upload NanoBanana images', error instanceof Error ? error : undefined);
+      await communicationService.sendNanoBananaBatchUploadResponse({
+        success: false,
+        error: error instanceof Error ? error.message : 'Batch upload failed'
+      });
+    }
+  });
+
+  // 🎯 处理NanoBanana生成请求（支持多轮会话 + 多图参考）
   communicationService.onNanoBananaGenerate(async (payload) => {
     try {
+      // 🆕 判断是否为多轮会话
+      const hasConversationContext = payload.conversationContext && payload.conversationContext.previousGeneratedImageUrl;
+
       logger.info('Received nanobanana_generate request', {
         prompt: payload.prompt.substring(0, 50) + '...',
         aspectRatio: payload.aspectRatio,
-        imageSize: payload.imageSize
+        imageSize: payload.imageSize,
+        hasReferenceImage: !!payload.referenceImageUrl,
+        hasReferenceImages: !!payload.referenceImageUrls?.length,
+        hasConversationContext: !!hasConversationContext,
+        historyLength: payload.conversationContext?.history?.length || 0
       });
 
       // 🎯 获取ImageGeneratorAdapter实例
       const { ImageGeneratorAdapter } = await import('deepv-code-core');
       const imageGenerator = ImageGeneratorAdapter.getInstance();
 
+      // 确定参考图片 URL
+      // 优先级：1. 多轮会话中的上一轮生成图片 2. 用户手动上传的参考图
+      let referenceImageUrl = payload.referenceImageUrl;
+      if (hasConversationContext) {
+        referenceImageUrl = payload.conversationContext!.previousGeneratedImageUrl;
+        logger.info('Using previous generated image as reference for multi-turn conversation', {
+          previousImageUrl: referenceImageUrl?.substring(0, 100) + '...'
+        });
+      }
+
+      // 多图参考 URL（来自批量上传或多选）
+      const referenceImageUrls = payload.referenceImageUrls;
+
       // 提交生成任务
       const task = await imageGenerator.submitImageGenerationTask(
         payload.prompt,
         payload.aspectRatio,
-        payload.referenceImageUrl,
-        payload.imageSize
+        referenceImageUrl,
+        payload.imageSize,
+        referenceImageUrls
       );
 
       // 发送成功响应
@@ -3242,6 +3900,7 @@ function setupMultiSessionHandlers() {
       });
 
       if (!outlineResponse.ok) {
+        if (await handleHttpAuthError(outlineResponse)) return;
         const errorText = await outlineResponse.text();
         throw new Error(`Outline submission failed: ${outlineResponse.status} - ${errorText}`);
       }
@@ -3263,6 +3922,7 @@ function setupMultiSessionHandlers() {
       });
 
       if (!generateResponse.ok) {
+        if (await handleHttpAuthError(generateResponse)) return;
         const errorText = await generateResponse.text();
         throw new Error(`Generation start failed: ${generateResponse.status} - ${errorText}`);
       }
@@ -3290,6 +3950,8 @@ function setupMultiSessionHandlers() {
             const redirectPath = encodeURIComponent(`/ppt/edit/${taskId}`);
             editUrl = `${PPT_WEB_URL}/token-login?code=${tempCodeResult.code}&redirect=${redirectPath}`;
           }
+        } else {
+          await handleHttpAuthError(tempCodeResponse);
         }
       } catch (tempCodeError) {
         logger.warn('Failed to get temp code for PPT edit URL', tempCodeError instanceof Error ? tempCodeError : undefined);
@@ -3371,6 +4033,7 @@ ${payload.outline}
       });
 
       if (!response.ok) {
+        if (await handleHttpAuthError(response)) return;
         const errorText = await response.text();
         throw new Error(`AI optimization failed: ${response.status} - ${errorText}`);
       }
@@ -3856,6 +4519,25 @@ function registerCommands(context: vscode.ExtensionContext) {
       } catch (error) {
         logger.error('Failed to open rules management', error instanceof Error ? error : undefined);
         vscode.window.showErrorMessage('Failed to open Rules Management');
+      }
+    }),
+
+    // 🎯 打开目标驱动模式向导（/goal 等价命令）
+    vscode.commands.registerCommand('deepv.openGoalWizard', async () => {
+      logger.info('deepv.openGoalWizard command executed');
+      try {
+        // 先聚焦侧边栏（确保 webview 已经打开）
+        await vscode.commands.executeCommand('deepv.aiAssistant.focus');
+        // 等 webview ready，最多 3s
+        await communicationService.waitForReady(3000);
+        // 通知 webview 打开 GoalWizardDialog
+        await communicationService.sendMessage({
+          type: 'open_goal_wizard',
+          payload: {}
+        });
+      } catch (error) {
+        logger.error('Failed to open goal wizard', error instanceof Error ? error : undefined);
+        vscode.window.showErrorMessage('Failed to open Goal-Driven Mode');
       }
     }),
 

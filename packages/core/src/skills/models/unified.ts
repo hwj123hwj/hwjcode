@@ -44,8 +44,9 @@ export enum ComponentLoadLevel {
  */
 export interface ComponentLocation {
   type: 'file' | 'directory' | 'remote' | 'memory';
-  path: string;              // Absolute path on disk
+  path: string;              // Absolute path on disk (component path)
   relativePath?: string;     // Path relative to plugin root
+  rootPath?: string;         // Plugin root directory (for ${CLAUDE_PLUGIN_ROOT})
   url?: string;              // Remote URL if applicable
 }
 

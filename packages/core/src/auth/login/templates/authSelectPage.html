@@ -521,10 +521,8 @@
 
     <!-- 登录按钮容器 -->
     <div id="auth-buttons-container" class="auth-buttons-container hidden">
-      <button id="feishu-btn" class="auth-button feishu-btn hidden" onclick="startFeishuAuth()">
-      <img class="icon" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_c768e6a4/feishu.ico" alt="Feishu" />
-      <span data-i18n="auth.feishu.button">Feishu Login</span>
-    </button>
+      <!-- 飞书登录按钮区域（动态生成，支持多租户） -->
+      <div id="feishu-buttons-container"></div>
 
     <button class="auth-button deepvlab-btn" onclick="startDeepvlabAuth()">
       <img class="icon" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_52ad718e/deepv.ico" alt="DeepV" />
@@ -825,14 +823,9 @@
             // DeepVlab登录始终可用（没有hidden类，会自动显示）
             console.log('✅ DeepVlab登录始终可用');
 
-            // 根据权限显示飞书登录按钮
+            // 根据权限显示飞书登录按钮（动态获取租户列表）
             if (data.feishuLoginAllowed) {
-              console.log('✅ 飞书登录已允许，显示飞书登录按钮');
-              const feishuBtn = document.getElementById('feishu-btn');
-              if (feishuBtn) {
-                feishuBtn.classList.remove('hidden');
-                console.log('✅ 飞书登录按钮已显示');
-              }
+              loadFeishuTenants();
             } else {
               console.log('🚫 飞书登录被禁用，保持飞书按钮隐藏');
             }
@@ -888,15 +881,47 @@
       }
     }
 
-    function startFeishuAuth() {
-      console.log('启动飞书认证...');
-      // 这里会调用飞书认证逻辑
-      fetch('/start-feishu-auth', { method: 'POST' })
+    function loadFeishuTenants() {
+      fetch('/api/backend/feishu-tenants')
+        .then(function(resp) { return resp.json(); })
+        .then(function(tenants) {
+          renderFeishuButtons(tenants);
+        })
+        .catch(function() {
+          console.log('⚠️ 无法获取租户列表，显示默认飞书按钮');
+          renderFeishuButtons([{ appId: '', label: t('auth.feishu.button'), tenantKey: 'main' }]);
+        });
+    }
+
+    function renderFeishuButtons(tenants) {
+      var container = document.getElementById('feishu-buttons-container');
+      if (!container) return;
+      container.innerHTML = '';
+      if (!tenants || tenants.length === 0) {
+        tenants = [{ appId: '', label: t('auth.feishu.button'), tenantKey: 'main' }];
+      }
+      tenants.forEach(function(tenant) {
+        var btn = document.createElement('button');
+        btn.className = 'auth-button feishu-btn';
+        btn.innerHTML = '<img class="icon" src="https://res.ainirobot.com/orics/down/v2_k005_20250904_c768e6a4/feishu.ico" alt="Feishu" />' +
+          '<span>' + (tenant.label || t('auth.feishu.button')) + '</span>';
+        btn.onclick = function() { startFeishuAuth(tenant.appId); };
+        container.appendChild(btn);
+      });
+      console.log('✅ 飞书登录按钮已生成，共 ' + tenants.length + ' 个租户');
+    }
+
+    function startFeishuAuth(appId) {
+      console.log('启动飞书认证...', appId ? 'appId=' + appId : '默认');
+      var body = appId ? JSON.stringify({ appId: appId }) : '{}';
+      fetch('/start-feishu-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body
+      })
         .then(response => response.json())
         .then(data => {
           if (data.authUrl) {
-            // 修复方案：直接替换当前页面到认证URL，避免产生额外的空白页面
-            // 这样认证完成后只需要关闭一个页面，不会留下空白的中间页
             window.location.replace(data.authUrl);
           }
         })

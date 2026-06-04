@@ -55,6 +55,13 @@ export class SessionManager extends EventEmitter {
   private currentSessionId: string | null = null;
   private isInitialized = false;
 
+  /**
+   * 🎯 获取初始化状态（用于判断退出后重登是否需要完全重新初始化）
+   */
+  getIsInitialized(): boolean {
+    return this.isInitialized;
+  }
+
   // 🎯 Session 顺序管理（用于拖拽排序）
   private sessionsOrder: string[] = [];
 
@@ -63,6 +70,9 @@ export class SessionManager extends EventEmitter {
   private userMemoryFileCount: number = 0;
   private userMemoryFilePaths: string[] = [];
   private memoryInitialized = false;
+
+  // 🎯 用户规则缓存
+  private userRulesContent: string = '';
 
   // 🎯 等待UI历史记录的Promise映射
   private readonly pendingHistoryRequests: Map<string, {
@@ -137,6 +147,9 @@ export class SessionManager extends EventEmitter {
       this.initializeUserMemory().catch(error => {
         this.logger.error('❌ Failed to initialize user memory in background', error instanceof Error ? error : undefined);
       });
+
+      // 🎯 初始化用户规则
+      this.initializeUserRules();
 
       // 🎯 加载持久化的会话数据
       try {
@@ -229,6 +242,85 @@ export class SessionManager extends EventEmitter {
       this.userMemoryFileCount = 0;
       this.userMemoryFilePaths = [];
       this.memoryInitialized = true;
+    }
+  }
+
+  /**
+   * 🎯 初始化用户规则
+   * 从 VSCode 设置中读取用户规则
+   */
+  private initializeUserRules(): void {
+    try {
+      const config = vscode.workspace.getConfiguration('deepv');
+      this.userRulesContent = config.get<string>('userRules', '');
+      if (this.userRulesContent) {
+        this.logger.info(`✅ User rules loaded: ${this.userRulesContent.length} characters`);
+      } else {
+        this.logger.debug('ℹ️ No user rules configured');
+      }
+    } catch (error) {
+      this.logger.warn('⚠️ Failed to load user rules', error instanceof Error ? error : undefined);
+      this.userRulesContent = '';
+    }
+  }
+
+  /**
+   * 🎯 设置用户规则
+   * 当用户在设置面板中修改规则时调用
+   */
+  public setUserRules(rules: string): void {
+    this.userRulesContent = rules;
+    this.logger.info(`📝 User rules updated: ${rules.length} characters`);
+
+    // 更新所有活跃 AI 服务的 system prompt
+    for (const [sessionId, aiService] of this.aiServices) {
+      const session = this.sessions.get(sessionId);
+      if (session && session.info.status !== SessionStatus.CLOSED) {
+        this.updateAIServiceSystemPrompt(sessionId, aiService).catch(error => {
+          this.logger.warn(`Failed to update system prompt for session ${sessionId}`, error instanceof Error ? error : undefined);
+        });
+      }
+    }
+  }
+
+  /**
+   * 🎯 获取用户规则
+   */
+  public getUserRules(): string {
+    return this.userRulesContent;
+  }
+
+  /**
+   * 🎯 更新单个 AI 服务的 system prompt（包含 userRules）
+   */
+  private async updateAIServiceSystemPrompt(sessionId: string, aiService: AIService): Promise<void> {
+    try {
+      const config = aiService.getConfig();
+      if (config) {
+        // 设置用户规则到 config
+        config.setUserRules(this.userRulesContent);
+
+        // 刷新 system prompt
+        const geminiClient = await config.getGeminiClient();
+        if (geminiClient) {
+          const chat = geminiClient.getChat();
+          if (chat) {
+            const { getCoreSystemPrompt } = await import('deepv-code-core');
+            const updatedSystemPrompt = getCoreSystemPrompt(
+              this.userMemoryContent,
+              true, // isVSCode
+              this.userRulesContent, // userRules
+              config.getAgentStyle?.() || 'default',
+              undefined, // modelId
+              config.getPreferredLanguage?.()
+            );
+            chat.setSystemInstruction(updatedSystemPrompt);
+            this.logger.debug(`Updated system prompt for session ${sessionId} with user rules`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to update system prompt for session ${sessionId}`, error instanceof Error ? error : undefined);
     }
   }
 
@@ -410,6 +502,36 @@ export class SessionManager extends EventEmitter {
     } catch (error) {
       this.logger.error('[YOLO] Failed to set project YOLO mode', error instanceof Error ? error : undefined);
       throw error;
+    }
+  }
+
+  /**
+   * 🎯 设置项目级别的 thinking 配置并同步到所有session
+   */
+  async setProjectThinkingConfig(thinking: any): Promise<void> {
+    try {
+      this.logger.info(`[Thinking] Syncing thinking config to sessions: ${JSON.stringify(thinking)}`);
+
+      const sessionIds = Array.from(this.aiServices.keys());
+      if (sessionIds.length === 0) {
+        return;
+      }
+
+      for (const sessionId of sessionIds) {
+        try {
+          const aiService = this.aiServices.get(sessionId);
+          if (aiService) {
+            const config = aiService.getConfig();
+            if (config) {
+              config.setThinkingConfig(thinking);
+            }
+          }
+        } catch (error) {
+          this.logger.error(`[Thinking] Failed to set thinking config for session ${sessionId}`, error instanceof Error ? error : undefined);
+        }
+      }
+    } catch (error) {
+      this.logger.error('[Thinking] Failed to sync thinking config', error instanceof Error ? error : undefined);
     }
   }
 
@@ -910,6 +1032,17 @@ export class SessionManager extends EventEmitter {
     try {
       this.validateSessionExists(sessionId);
 
+      // 🔒 防御：拒绝空 / 非字符串的 modelName 覆盖（避免 SSoT 被脏数据污染）
+      if (
+        modelConfig.modelName !== undefined &&
+        (typeof modelConfig.modelName !== 'string' || modelConfig.modelName.trim() === '')
+      ) {
+        this.logger.warn(
+          `⚠️ Rejected invalid modelName update for session ${sessionId}: ${JSON.stringify(modelConfig.modelName)}`
+        );
+        return;
+      }
+
       const sessionState = this.sessions.get(sessionId)!;
       sessionState.modelConfig = { ...sessionState.modelConfig, ...modelConfig };
       sessionState.info.lastActivity = Date.now();
@@ -1208,8 +1341,35 @@ export class SessionManager extends EventEmitter {
       throw new Error(`AIService not found for session: ${sessionId}`);
     }
 
-    // 如果已经初始化，直接返回
+    // 如果已经初始化，校准运行时模型与 session.modelConfig（用户最后一次成功的选择），再返回
     if (aiService.isServiceInitialized) {
+      const sessionState = this.sessions.get(sessionId);
+      const desiredModel = sessionState?.modelConfig?.modelName;
+      const config = aiService.getConfig();
+      const currentRuntimeModel = config?.getModel();
+
+      // 仅在 desired 是具体模型（非 auto）、且发生漂移时执行校准
+      if (
+        desiredModel &&
+        desiredModel !== 'auto' &&
+        currentRuntimeModel &&
+        desiredModel !== currentRuntimeModel
+      ) {
+        const geminiClient = config?.getGeminiClient();
+        if (geminiClient) {
+          this.logger.warn(
+            `🔧 Model drift detected for session ${sessionId}: runtime=${currentRuntimeModel}, desired=${desiredModel}. Reconciling via switchModel...`
+          );
+          const result = await geminiClient.switchModel(desiredModel, new AbortController().signal);
+          if (!result.success) {
+            // 校准失败：保留 modelConfig 不变（用户意图），抛出让本次操作失败、提示用户重试
+            const errMsg = `Failed to switch to model ${desiredModel}: ${result.error || 'unknown error'}`;
+            this.logger.error(`❌ Model reconcile failed for session ${sessionId}: ${errMsg}`);
+            throw new Error(errMsg);
+          }
+          this.logger.info(`✅ Model reconciled for session ${sessionId}: now using ${desiredModel}`);
+        }
+      }
       return aiService;
     }
 
@@ -1224,7 +1384,8 @@ export class SessionManager extends EventEmitter {
       await aiService.initialize(workspaceRoot, {
         userMemory: this.userMemoryContent,
         geminiMdFileCount: this.userMemoryFileCount,
-        sessionModel: sessionModel
+        sessionModel: sessionModel,
+        userRules: this.userRulesContent
       });
 
       // 🎯 恢复 AI 客户端历史记录（针对恢复的 session）
@@ -1270,7 +1431,8 @@ export class SessionManager extends EventEmitter {
       await aiService.initialize(workspaceRoot, {
         userMemory: this.userMemoryContent,
         geminiMdFileCount: this.userMemoryFileCount,
-        sessionModel: sessionModel
+        sessionModel: sessionModel,
+        userRules: this.userRulesContent
       });
 
       return aiService;

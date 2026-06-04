@@ -68,6 +68,23 @@ export interface ChatMessage {
   isProcessingTools?: boolean;       // 🎯 是否正在处理工具调用
   toolsCompleted?: boolean;          // 🎯 所有工具调用是否完成
 
+  /**
+   * 🎯 /goal 模式启动元数据（仅由 GoalWizardDialog 提交路径设置）。
+   *
+   * 该字段通过 chat_message 协议透传到 extension 端，extension 在
+   * onChatMessage 入口看到该字段时会先在 GeminiClient 上调用
+   * setGoalContext({...})——保证后续自动/手动压缩能触发原始 goal prompt
+   * 重新注入。
+   *
+   * 与 packages/vscode-ui-plugin/src/types/messages.ts 中的同名字段保持
+   * 完全一致；任何修改两端都要同步。详见 src 侧字段注释。
+   */
+  goalContext?: {
+    startedAt: number;
+    hours: number;
+    task: string;
+  };
+
   // 🎯 工具输出消息专用字段
   toolName?: string;           // 工具名称
   toolId?: string;             // 工具ID
@@ -82,6 +99,11 @@ export interface ChatMessage {
   notificationReason?: string;
   notificationAction?: string;
   severity?: 'info' | 'warning' | 'error';
+  // 🎯 通知是否处于"进行中"状态（如 /compress 压缩中显示 spinner，完成后清除）
+  notificationInProgress?: boolean;
+  // 🎯 关联后端某次异步操作的稳定 id（如 compress_status.statusId），
+  // 让 start → done/error 的多条状态更新落到同一条 in-chat 通知上。
+  statusId?: string;
 
   // 🎯 Token使用情况
   tokenUsage?: {
@@ -160,16 +182,30 @@ export enum ToolCallStatus {
   BackgroundRunning = 'background_running'  // 🎯 后台运行中
 }
 
+// 🎯 AskUserQuestion 相关类型（镜像 core 的定义）
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface AskUserQuestion {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
 // 🎯 工具调用确认详情
 export interface ToolCallConfirmationDetails {
-  message: string;
-  requiresConfirmation: boolean;
+  message?: string;
+  requiresConfirmation?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
   affectedFiles?: string[];
   estimatedTime?: string;
   reversible?: boolean;
   // 🎯 确认类型（来自 core ToolCallConfirmationDetails）
-  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete';
+  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete' | 'question';
   title?: string;
   // 🎯 Edit 类型确认的完整字段（来自 core ToolEditConfirmationDetails）
   fileDiff?: string;
@@ -184,6 +220,9 @@ export interface ToolCallConfirmationDetails {
   // 🎯 Exec 类型确认的字段（来自 core ToolExecuteConfirmationDetails）
   command?: string;
   rootCommand?: string;
+  // 🎯 Question 类型（AskUserQuestion）
+  questions?: AskUserQuestion[];
+  metadata?: { source?: string };
 }
 
 /**
@@ -284,6 +323,7 @@ export interface MessageToExtension {
   'execute_slash_command' |      // 🎯 新增：执行 slash 命令（如 /refine）
   'get_slash_commands' |         // 🎯 新增：获取自定义斜杠命令列表
   'execute_custom_slash_command' | // 🎯 新增：执行自定义斜杠命令
+  'builtin_compress' |              // 🎯 新增：触发内置 /compress 副作用
   'open_file' |                  // 🎯 新增：打开文件并跳转到指定行/方法
   'goto_symbol' |                // 🎯 新增：跳转到符号（方法名）
   'goto_line' |                  // 🎯 新增：跳转到当前文件的指定行

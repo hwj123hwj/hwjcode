@@ -19,6 +19,7 @@ import {
   HookEventName,
   HookDefinition,
   CustomModelConfig,
+  ThinkingConfig,
 } from 'deepv-code-core';
 import stripJsonComments from 'strip-json-comments';
 import { DefaultLight } from '../ui/themes/default-light.js';
@@ -137,6 +138,9 @@ export interface Settings {
   // Custom model settings
   customModels?: CustomModelConfig[];
 
+  // 标准的思考配置
+  thinking?: ThinkingConfig;
+
   // Add other settings here.
   ideMode?: boolean;
   memoryDiscoveryMaxDirs?: number;
@@ -159,8 +163,8 @@ export interface Settings {
   // 语言偏好设置
   preferredLanguage?: string;
 
-  // Slash command aliases
-  commandAliases?: Record<string, string>;
+  // 项目级记忆加载模式: 'all' = DEEPV.md + AGENTS.md, 'deepv-only' = 仅 DEEPV.md, 'none' = 不加载
+  projectMemoryMode?: 'all' | 'deepv-only' | 'none';
 }
 
 export interface SettingsError {

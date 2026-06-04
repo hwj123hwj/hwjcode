@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ApprovalMode } from './config.js';
 import { HookEventName, HookDefinition } from '../hooks/types.js';
+import type { ThinkingConfig } from '../types/customModel.js';
 
 /**
  * Agent 风格类型
@@ -31,6 +32,11 @@ export interface ProjectSettings {
   autoTrimTrailingSpaces?: boolean;  // 自动删除行末空格（适用于C++、Python等源代码）
   hooks?: { [K in HookEventName]?: HookDefinition[] };  // Hook配置
   agentStyle?: AgentStyle;  // Agent 风格：default（Claude）或 codex
+  thinking?: ThinkingConfig;  // 思考模式开关与强度（用于 /thinking 命令的会话级覆盖）
+  feishu?: {
+    recommend?: boolean;      // 是否仅申请推荐级（免审）权限
+    excludeScopes?: string[]; // 需要显式排除的敏感权限列表（例如 ["im:message.send_as_user"]）
+  };
 }
 
 
@@ -95,6 +101,11 @@ export class ProjectSettingsManager {
         autoTrimTrailingSpaces: typeof parsed.autoTrimTrailingSpaces === 'boolean' ? parsed.autoTrimTrailingSpaces : undefined,
         hooks: parsed.hooks ? JSON.parse(JSON.stringify(parsed.hooks)) : undefined,
         agentStyle: validAgentStyles.includes(parsed.agentStyle as any) ? parsed.agentStyle : undefined,
+        thinking: this.validateThinkingConfig(parsed.thinking),
+        feishu: parsed.feishu ? {
+          recommend: typeof parsed.feishu.recommend === 'boolean' ? parsed.feishu.recommend : undefined,
+          excludeScopes: Array.isArray(parsed.feishu.excludeScopes) ? parsed.feishu.excludeScopes.filter((s) => typeof s === 'string') : undefined,
+        } : undefined,
       };
 
       return this.settings;
@@ -198,5 +209,49 @@ export class ProjectSettingsManager {
       agentStyle: style,
     };
     this.save(newSettings);
+  }
+
+  /**
+   * 获取当前思考配置（如未设置则返回 undefined）
+   */
+  getThinkingConfig(): ThinkingConfig | undefined {
+    return this.settings.thinking;
+  }
+
+  /**
+   * 设置思考配置并持久化
+   */
+  setThinkingConfig(config: ThinkingConfig | undefined): void {
+    const newSettings: ProjectSettings = {
+      ...this.settings,
+      thinking: config,
+    };
+    this.save(newSettings);
+  }
+
+  /**
+   * 校验从 settings.json 读取的 thinking 字段，过滤非法值
+   */
+  private validateThinkingConfig(input: unknown): ThinkingConfig | undefined {
+    if (!input || typeof input !== 'object') return undefined;
+    const obj = input as Record<string, unknown>;
+    const validModes = new Set(['on', 'off', 'auto']);
+    const validEfforts = new Set(['low', 'medium', 'high', 'max', 'xhigh', 'auto']);
+
+    const mode = typeof obj.mode === 'string' && validModes.has(obj.mode)
+      ? (obj.mode as ThinkingConfig['mode'])
+      : 'auto';
+    const effort = typeof obj.effort === 'string' && validEfforts.has(obj.effort)
+      ? (obj.effort as ThinkingConfig['effort'])
+      : undefined;
+    const budgetTokens = typeof obj.budgetTokens === 'number' && obj.budgetTokens > 0
+      ? obj.budgetTokens
+      : undefined;
+
+    return {
+      mode,
+      ...(effort ? { effort } : {}),
+      ...(budgetTokens !== undefined ? { budgetTokens } : {}),
+    };
   }
 }

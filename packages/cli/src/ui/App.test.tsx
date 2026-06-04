@@ -159,6 +159,7 @@ vi.mock('deepv-code-core', async (importOriginal) => {
         getCloudModelInfo: vi.fn(() => undefined),
         getCloudModels: vi.fn(() => []),
         getAgentStyle: vi.fn(() => 'default'),
+        getThinkingConfig: vi.fn(() => ({ mode: 'auto', effort: 'auto' })),
         getGeminiMdFilePaths: vi.fn(() => []),
         getHealthyUseEnabled: vi.fn(() => opts.healthyUse ?? false),
         getIdeClient: vi.fn(() => undefined),
@@ -732,8 +733,11 @@ describe('App UI', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 0));
 
+      // 业务：submitQuery(promptText, silent ? { silent: true } : undefined)
+      // 默认非 silent 路径，第 2 个参数为 undefined。这里精确匹配两个实参。
       expect(mockSubmitQuery).toHaveBeenCalledWith(
         'hello from prompt-interactive',
+        undefined,
       );
     });
   });

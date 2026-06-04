@@ -60,12 +60,13 @@ export interface CliArgs {
   telemetry: boolean | undefined;
   checkpointing: boolean | undefined;
   telemetryTarget: string | undefined;
-  outputFormat: 'stream-json' | 'default' | undefined;
+  outputFormat: 'stream-json' | 'json' | 'default' | undefined;
   _: string[]; // positional arguments
   telemetryOtlpEndpoint: string | undefined;
   telemetryLogPrompts: boolean | undefined;
   telemetryOutfile: string | undefined;
   allowedMcpServerNames: string[] | undefined;
+  acp: boolean | undefined;
   experimentalAcp: boolean | undefined;
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
@@ -80,6 +81,7 @@ export interface CliArgs {
   cloudServer: string | undefined;
   testAudio: boolean | undefined;
   workdir: string | undefined;
+  login: string | undefined;
 }
 
 export async function parseArguments(extensions: Extension[] = []): Promise<CliArgs> {
@@ -187,9 +189,14 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       description: 'Enables checkpointing of file edits',
       default: false,
     })
-    .option('experimental-acp', {
+    .option('acp', {
       type: 'boolean',
       description: 'Starts the agent in ACP mode',
+    })
+    .option('experimental-acp', {
+      type: 'boolean',
+      description:
+        'Starts the agent in ACP mode (deprecated, use --acp instead)',
     })
     .option('allowed-mcp-server-names', {
       type: 'array',
@@ -220,7 +227,8 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('update', {
       alias: 'u',
       type: 'boolean',
-      description: 'Force check for updates and prompt to install if available',
+      description:
+        'Force check for updates and prompt to install if available. Combine with -y (`-uy`) to auto-confirm optional updates without the y/N prompt.',
       default: false,
     })
     .option('continue', {
@@ -243,6 +251,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       description: 'Export a specific session history to a Markdown file and exit',
     })
     .option('cloud-mode', {
+      alias: ['remote', 'cloud'],
       type: 'boolean',
       description: 'Connect to cloud server for remote access',
       default: false,
@@ -261,10 +270,14 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       type: 'string',
       description: 'Specify the working directory (supports both Windows and Unix paths)',
     })
+    .option('login', {
+      type: 'string',
+      description: 'Non-interactive login using an API Key (e.g. dvcode --login sk_live_xxx). Exchanges the key for a JWT and exits.',
+    })
     .option('output-format', {
       type: 'string',
-      choices: ['stream-json', 'default'],
-      description: 'Output format for non-interactive mode (stream-json for streaming line-delimited JSON)',
+      choices: ['stream-json', 'json', 'default'],
+      description: 'Output format for non-interactive mode (stream-json for streaming JSONL, json for single JSON result, default for plain text)',
       default: 'default',
     })
     .command(extensionsCommand)
@@ -297,7 +310,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
   const parsedArgs = yargsInstance.argv as any;
 
   // Type-safe conversion for outputFormat
-  if (parsedArgs.outputFormat && !['stream-json', 'default'].includes(parsedArgs.outputFormat)) {
+  if (parsedArgs.outputFormat && !['stream-json', 'json', 'default'].includes(parsedArgs.outputFormat)) {
     parsedArgs.outputFormat = 'default';
   }
 
@@ -344,6 +357,45 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
   return parsedArgs as CliArgs;
 }
 
+/**
+ * Filter memory loading results based on projectMemoryMode setting.
+ * - 'all' (default): keep both DEEPV.md and AGENTS.md
+ * - 'deepv-only': keep only DEEPV.md (filter out AGENTS.md)
+ * - 'none': return empty results
+ */
+export function filterMemoryByMode(
+  result: { memoryContent: string; fileCount: number; filePaths: string[] },
+  mode: Settings['projectMemoryMode'],
+): { memoryContent: string; fileCount: number; filePaths: string[] } {
+  if (mode === 'none') {
+    return { memoryContent: '', fileCount: 0, filePaths: [] };
+  }
+
+  if (mode === 'deepv-only') {
+    const filteredPaths = result.filePaths.filter((fp) => {
+      const filename = fp.split(/[\\/]/).pop() || '';
+      return !filename.toUpperCase().startsWith('AGENTS');
+    });
+    if (filteredPaths.length === result.filePaths.length) {
+      return result; // No AGENTS.md files found, return as-is
+    }
+    // Re-filter memory content by removing AGENTS.md blocks
+    const filteredContent = result.memoryContent
+      .split('\n\n')
+      .filter((block) => !block.includes('AGENTS.md ---'))
+      .join('\n\n')
+      .trim();
+    return {
+      memoryContent: filteredContent,
+      fileCount: filteredPaths.length,
+      filePaths: filteredPaths,
+    };
+  }
+
+  // 'all' or undefined (default) — no filtering
+  return result;
+}
+
 // This function is now a thin wrapper around the server's implementation.
 // It's kept in the CLI for now as App.tsx directly calls it for memory refresh.
 // TODO: Consider if App.tsx should get memory via a server call or if Config should refresh itself.
@@ -363,7 +415,7 @@ export async function loadHierarchicalGeminiMemory(
 
   // Directly call the server function.
   // The server function will use its own homedir() for the global path.
-  return loadServerHierarchicalMemory(
+  const result = await loadServerHierarchicalMemory(
     currentWorkingDirectory,
     debugMode,
     fileService,
@@ -371,6 +423,9 @@ export async function loadHierarchicalGeminiMemory(
     fileFilteringOptions,
     settings.memoryDiscoveryMaxDirs,
   );
+
+  // Apply projectMemoryMode filtering
+  return filterMemoryByMode(result, settings.projectMemoryMode);
 }
 
 export async function loadCliConfig(
@@ -530,7 +585,17 @@ export async function loadCliConfig(
     userMemory: memoryContent,
     memoryTokenCount, // 新增
     geminiMdFileCount: fileCount,
-    approvalMode: argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT,
+    // ACP mode is agent-to-agent: there is no human to answer interactive
+    // permission prompts in the calling process. We default to YOLO so
+    // non-dangerous tools (edits, writes, MCP, generic shell) execute
+    // without prompting. Genuinely dangerous operations (destructive shell
+    // commands, `delete_file`, `ask_user_question`) still generate a
+    // confirmation that the ACP runtime forwards to the caller agent via
+    // `requestPermission`.
+    approvalMode:
+      argv.yolo || argv.acp || argv.experimentalAcp
+        ? ApprovalMode.YOLO
+        : ApprovalMode.DEFAULT,
     showMemoryUsage:
       argv.showMemoryUsage ||
       argv.show_memory_usage ||
@@ -572,7 +637,7 @@ export async function loadCliConfig(
     model: argv.model! || settings.preferredModel,
     extensionContextFilePaths,
     maxSessionTurns: settings.maxSessionTurns ?? -1,
-    experimentalAcp: argv.experimentalAcp || false,
+    experimentalAcp: argv.acp || argv.experimentalAcp || false,
     listExtensions: argv.listExtensions || false,
     listSessions: argv.listSessions || false,
     extensions: allExtensions,

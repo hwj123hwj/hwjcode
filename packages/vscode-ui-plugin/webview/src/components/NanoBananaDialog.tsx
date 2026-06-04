@@ -1,13 +1,13 @@
 /**
- * NanoBanana Image Generation Dialog
- * 图像生成对话框 - 独立的生图界面，不占用聊天对话session历史
+ * NanoBanana Image Generation Dialog - Multi-turn Conversation Mode
+ * 图像生成对话框 - 支持多轮会话的生图界面
  *
  * @license Apache-2.0
  * Copyright 2025 DeepV Code
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Upload, ExternalLink, Image as ImageIcon, Sparkles, RefreshCw } from 'lucide-react';
+import { X, Upload, ExternalLink, Image as ImageIcon, Sparkles, RefreshCw, MessageCircle, User, Ratio, Maximize2 } from 'lucide-react';
 
 // 图片生成动画图标 - 彩色风车/花朵
 const GeneratingImageIcon: React.FC<{ size?: number }> = ({ size = 120 }) => (
@@ -81,16 +81,44 @@ const IMAGE_SIZES = [
 // 🎯 生成状态
 type GenerationStatus = 'idle' | 'uploading' | 'generating' | 'polling' | 'completed' | 'error';
 
-interface GenerationTask {
-  taskId: string;
-  status: GenerationStatus;
+// 🎯 单张参考图信息
+interface ReferenceImage {
+  url: string | null;       // 原始 URL（上传后获得），传递给后端
+  preview: string;           // base64/dataURL 预览图，用于 UI 显示
+  source: 'generated' | 'uploaded';
+}
+
+// 🎯 单条对话消息
+interface NanoBananaMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  timestamp: number;
+  // 用户消息
+  prompt?: string;
+  uploadedImageUrls?: string[];  // 用户上传/选择的参考图预览（可多张）
+  // AI响应
+  generatedImageUrls?: string[];  // base64 for display
+  originalImageUrls?: string[];   // original URLs for browser
+  creditsDeducted?: number;
+  errorMessage?: string;
+  // 生成参数
+  aspectRatio?: string;
+  imageSize?: string;
+  referenceImageUrls?: string[];  // 生成时实际传给后端的参考图 URL 列表
+}
+
+const MAX_REFERENCE_IMAGES = 5;
+
+// 🎯 对话状态
+interface ConversationState {
+  messages: NanoBananaMessage[];
+  currentStatus: GenerationStatus;
+  currentTaskId: string | null;
+  // 多张参考图
+  currentReferences: ReferenceImage[];
   progress: number;
   estimatedTime: number;
   elapsedTime: number;
-  resultUrls: string[];       // base64 data URLs for display in webview
-  originalUrls: string[];     // original URLs for opening in browser
-  errorMessage?: string;
-  creditsDeducted?: number;
 }
 
 interface NanoBananaDialogProps {
@@ -104,22 +132,32 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
 }) => {
   const { t } = useTranslation();
 
-  // 表单状态
+  // 对话状态
+  const [conversation, setConversation] = useState<ConversationState>({
+    messages: [],
+    currentStatus: 'idle',
+    currentTaskId: null,
+    currentReferences: [],
+    progress: 0,
+    estimatedTime: 60,
+    elapsedTime: 0,
+  });
+
+  // 输入状态
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('auto');
   const [imageSize, setImageSize] = useState('1K');
-  const [referenceImage, setReferenceImage] = useState<File | null>(null);
-  const [referencePreview, setReferencePreview] = useState<string | null>(null);
 
-  // 生成任务状态
-  const [task, setTask] = useState<GenerationTask | null>(null);
+  // 待上传的参考图文件列表（仅用于上传流程）
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
 
   // 图片加载失败跟踪
-  const [failedImageIndices, setFailedImageIndices] = useState<Set<number>>(new Set());
+  const [failedImageIndices, setFailedImageIndices] = useState<Set<string>>(new Set());
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const conversationEndRef = useRef<HTMLDivElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
@@ -136,6 +174,13 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
     }
   }, []);
 
+  // 🎯 滚动到对话底部
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  }, []);
+
   // 🎯 组件卸载时清理
   useEffect(() => {
     return () => {
@@ -143,7 +188,7 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
     };
   }, [clearAllIntervals]);
 
-  // 🎯 监听状态更新 - 使用 useEffect 确保只注册一次
+  // 🎯 监听状态更新
   useEffect(() => {
     const messageService = getGlobalMessageService();
 
@@ -156,7 +201,6 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
       errorMessage?: string;
       creditsDeducted?: number;
     }) => {
-      // 只处理当前任务的更新
       if (!currentTaskIdRef.current || data.taskId !== currentTaskIdRef.current) {
         return;
       }
@@ -166,106 +210,141 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
       if (data.status === 'completed' && data.resultUrls) {
         clearAllIntervals();
         currentTaskIdRef.current = null;
-        setTask(prev => prev ? {
-          ...prev,
-          status: 'completed',
-          progress: 100,
-          resultUrls: data.resultUrls || [],
-          originalUrls: data.originalUrls || data.resultUrls || [],
+
+        // 添加 AI 响应消息
+        const assistantMessage: NanoBananaMessage = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          timestamp: Date.now(),
+          generatedImageUrls: data.resultUrls,
+          originalImageUrls: data.originalUrls || data.resultUrls,
           creditsDeducted: data.creditsDeducted,
-        } : null);
+        };
+
+        setConversation(prev => {
+          // 生成完成后，自动将第一张结果图设为当前参考图
+          const newReferences: ReferenceImage[] = [];
+          if (data.resultUrls?.[0]) {
+            newReferences.push({
+              url: data.originalUrls?.[0] || data.resultUrls[0],
+              preview: data.resultUrls[0],
+              source: 'generated',
+            });
+          }
+          return {
+            ...prev,
+            messages: [...prev.messages, assistantMessage],
+            currentStatus: 'idle',
+            currentTaskId: null,
+            currentReferences: newReferences,
+            progress: 100,
+          };
+        });
+        // 清除待上传文件
+        setPendingUploadFiles([]);
+
+        scrollToBottom();
       } else if (data.status === 'failed') {
         clearAllIntervals();
         currentTaskIdRef.current = null;
-        setTask(prev => prev ? {
-          ...prev,
-          status: 'error',
+
+        // 添加错误消息
+        const errorMessage: NanoBananaMessage = {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          timestamp: Date.now(),
           errorMessage: data.errorMessage || 'Generation failed',
-        } : null);
-      } else {
-        // pending/processing 状态下，不更新进度
-        // 进度由本地的 countdownInterval 基于时间计算，避免 API 返回的固定值覆盖
+        };
+
+        setConversation(prev => ({
+          ...prev,
+          messages: [...prev.messages, errorMessage],
+          currentStatus: 'error',
+          currentTaskId: null,
+        }));
+
+        scrollToBottom();
       }
     };
 
-    messageService.onNanoBananaStatusUpdate(handleStatusUpdate);
-
-    // 注意：messageService 的监听器没有返回取消函数，所以这里不需要清理
-  }, [clearAllIntervals]);
+    const unsubscribe = messageService.onNanoBananaStatusUpdate(handleStatusUpdate);
+    return () => unsubscribe();
+  }, [clearAllIntervals, scrollToBottom]);
 
   // 处理ESC键关闭
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && task?.status !== 'generating' && task?.status !== 'polling') {
+      if (e.key === 'Escape' && conversation.currentStatus === 'idle') {
         onClose();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, task?.status]);
+  }, [isOpen, onClose, conversation.currentStatus]);
 
   // 自动聚焦输入框
   useEffect(() => {
-    if (isOpen && textareaRef.current && !task) {
+    if (isOpen && textareaRef.current) {
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
-  }, [isOpen, task]);
+  }, [isOpen]);
 
-  // 🎯 处理图片文件（上传或粘贴共用逻辑）
-  const processImageFile = useCallback((file: File) => {
-    // 验证文件类型
+  // 🎯 处理图片文件（用户上传新参考图）
+  const processImageFile = useCallback((file: File): boolean => {
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
     if (!validTypes.includes(file.type)) {
-      setTask({
-        taskId: '',
-        status: 'error',
-        progress: 0,
-        estimatedTime: 0,
-        elapsedTime: 0,
-        resultUrls: [],
-        originalUrls: [],
-        errorMessage: t('nanoBanana.error.invalidImageType', {}, 'Invalid image type. Please use JPG, PNG, WebP, GIF, or BMP.'),
-      });
       return false;
     }
 
-    // 验证文件大小 (最大10MB)
     if (file.size > 10 * 1024 * 1024) {
-      setTask({
-        taskId: '',
-        status: 'error',
-        progress: 0,
-        estimatedTime: 0,
-        elapsedTime: 0,
-        resultUrls: [],
-        originalUrls: [],
-        errorMessage: t('nanoBanana.error.imageTooLarge', {}, 'Image too large. Maximum size is 10MB.'),
-      });
       return false;
     }
 
-    setReferenceImage(file);
+    // 检查总参考图数量
+    setConversation(prev => {
+      if (prev.currentReferences.length >= MAX_REFERENCE_IMAGES) {
+        return prev;
+      }
+      // 立即显示预览
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const preview = event.target?.result as string;
+        setConversation(p => ({
+          ...p,
+          currentReferences: [...p.currentReferences, {
+            url: null,
+            preview,
+            source: 'uploaded',
+          }],
+        }));
+      };
+      reader.readAsDataURL(file);
+      return prev;
+    });
 
-    // 创建预览
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setReferencePreview(event.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    // 添加到待上传文件列表
+    setPendingUploadFiles(prev => {
+      if (prev.length + conversation.currentReferences.length >= MAX_REFERENCE_IMAGES) {
+        return prev;
+      }
+      return [...prev, file];
+    });
     return true;
-  }, [t]);
+  }, [conversation.currentReferences.length]);
 
-  // 处理参考图片上传
+  // 处理参考图片上传（支持多选）
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processImageFile(file);
+    const files = e.target.files;
+    if (!files) return;
+    for (let i = 0; i < files.length; i++) {
+      processImageFile(files[i]);
+    }
   }, [processImageFile]);
 
-  // 🎯 处理粘贴图片
+  // 🎯 处理粘贴图片（任何轮次都支持）
   const handlePaste = useCallback((e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -285,144 +364,246 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
 
   // 🎯 注册粘贴事件监听
   useEffect(() => {
-    if (!isOpen || task) return;
+    if (!isOpen || conversation.currentStatus !== 'idle') return;
 
     const handler = (e: Event) => handlePaste(e as ClipboardEvent);
     document.addEventListener('paste', handler);
     return () => document.removeEventListener('paste', handler);
-  }, [isOpen, task, handlePaste]);
+  }, [isOpen, conversation.currentStatus, handlePaste]);
 
-  // 清除参考图片
-  const clearReferenceImage = useCallback(() => {
-    setReferenceImage(null);
-    setReferencePreview(null);
+  // 🎯 清除所有参考图
+  const clearAllReferences = useCallback(() => {
+    setPendingUploadFiles([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+    setConversation(prev => ({
+      ...prev,
+      currentReferences: [],
+    }));
   }, []);
 
-  // 开始图像生成
-  const handleGenerate = useCallback(async () => {
-    if (!prompt.trim()) {
-      setTask({
-        taskId: '',
-        status: 'error',
-        progress: 0,
-        estimatedTime: 0,
-        elapsedTime: 0,
-        resultUrls: [],
-        originalUrls: [],
-        errorMessage: t('nanoBanana.error.emptyPrompt', {}, 'Please enter a prompt to generate an image.'),
-      });
-      return;
-    }
+  // 🎯 清除指定索引的参考图
+  const removeReference = useCallback((index: number) => {
+    setConversation(prev => ({
+      ...prev,
+      currentReferences: prev.currentReferences.filter((_, i) => i !== index),
+    }));
+    // 同步清理待上传文件列表中对应的 uploaded 项
+    setPendingUploadFiles(prev => {
+      // 需要找到对应的 pending file 索引
+      // uploaded 类型的 reference 与 pendingUploadFiles 对应
+      let uploadedIdx = 0;
+      const refs = conversation.currentReferences;
+      for (let i = 0; i < index; i++) {
+        if (refs[i]?.source === 'uploaded' && refs[i]?.url === null) {
+          uploadedIdx++;
+        }
+      }
+      if (refs[index]?.source === 'uploaded' && refs[index]?.url === null) {
+        return prev.filter((_, i) => i !== uploadedIdx);
+      }
+      return prev;
+    });
+  }, [conversation.currentReferences]);
 
-    // 清理之前的定时器
+  // 🎯 开始图像生成
+  const handleGenerate = useCallback(async () => {
+    if (!prompt.trim()) return;
+
+    const isGenerating = conversation.currentStatus !== 'idle' && conversation.currentStatus !== 'error';
+    if (isGenerating) return;
+
     clearAllIntervals();
 
-    // 重置状态
-    setTask({
-      taskId: '',
-      status: referenceImage ? 'uploading' : 'generating',
+    // 记录当前使用的参考图预览（供对话历史显示）
+    const referencePreviews = conversation.currentReferences.map(r => r.preview);
+
+    // 添加用户消息到对话历史
+    const userMessage: NanoBananaMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      timestamp: Date.now(),
+      prompt: prompt.trim(),
+      aspectRatio,
+      imageSize,
+      uploadedImageUrls: referencePreviews.length > 0 ? referencePreviews : undefined,
+    };
+
+    setConversation(prev => ({
+      ...prev,
+      messages: [...prev.messages, userMessage],
+      currentStatus: pendingUploadFiles.length > 0 ? 'uploading' : 'generating',
       progress: 0,
       estimatedTime: 60,
       elapsedTime: 0,
-      resultUrls: [],
-      originalUrls: [],
-    });
+    }));
+
+    scrollToBottom();
 
     try {
       const messageService = getGlobalMessageService();
 
-      // 如果有参考图片，先上传
-      let referenceImageUrl: string | undefined;
-      if (referenceImage) {
-        // 读取文件为base64
-        const reader = new FileReader();
-        const fileData = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(referenceImage);
-        });
+      // 收集所有参考图的最终 URL
+      const finalReferenceUrls: string[] = [];
 
-        // 发送上传请求到extension
-        messageService.sendNanoBananaUpload({
-          filename: referenceImage.name,
-          contentType: referenceImage.type,
-          fileData: fileData,
-        });
-
-        // 等待上传完成响应
-        referenceImageUrl = await new Promise<string>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Upload timeout')), 30000);
-
-          const handleUploadResponse = (data: { success: boolean; publicUrl?: string; error?: string }) => {
-            clearTimeout(timeout);
-            if (data.success && data.publicUrl) {
-              resolve(data.publicUrl);
-            } else {
-              reject(new Error(data.error || 'Upload failed'));
-            }
-          };
-
-          messageService.onNanoBananaUploadResponse(handleUploadResponse);
-        });
+      // 已有 URL 的参考图（来自上一轮生成或之前已上传）
+      for (const ref of conversation.currentReferences) {
+        if (ref.url) {
+          finalReferenceUrls.push(ref.url);
+        }
       }
 
-      // 更新状态为生成中
-      setTask(prev => prev ? { ...prev, status: 'generating' } : null);
+      // 如果有待上传的文件，先上传
+      if (pendingUploadFiles.length > 0) {
+        if (pendingUploadFiles.length === 1) {
+          // 单文件：用原有单文件上传接口
+          const file = pendingUploadFiles[0];
+          const reader = new FileReader();
+          const fileData = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
 
-      // 发送生成请求
-      messageService.sendNanoBananaGenerate({
+          messageService.sendNanoBananaUpload({
+            filename: file.name,
+            contentType: file.type,
+            fileData: fileData,
+          });
+
+          const uploadedUrl = await new Promise<string>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Upload timeout')), 30000);
+            const unsubUpload = messageService.onNanoBananaUploadResponse((data) => {
+              clearTimeout(timeout);
+              unsubUpload();
+              if (data.success && data.publicUrl) {
+                resolve(data.publicUrl);
+              } else {
+                reject(new Error(data.error || 'Upload failed'));
+              }
+            });
+          });
+
+          finalReferenceUrls.push(uploadedUrl);
+        } else {
+          // 多文件：用批量上传接口
+          const filesData = await Promise.all(
+            pendingUploadFiles.map(file => {
+              return new Promise<{ filename: string; contentType: string; fileData: string }>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({
+                  filename: file.name,
+                  contentType: file.type,
+                  fileData: reader.result as string,
+                });
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+            })
+          );
+
+          messageService.sendNanoBananaBatchUpload({ files: filesData });
+
+          const uploadedUrls = await new Promise<string[]>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Batch upload timeout')), 60000);
+            const unsubBatch = messageService.onNanoBananaBatchUploadResponse((data) => {
+              clearTimeout(timeout);
+              unsubBatch();
+              if (data.success && data.publicUrls) {
+                resolve(data.publicUrls);
+              } else {
+                reject(new Error(data.error || 'Batch upload failed'));
+              }
+            });
+          });
+
+          finalReferenceUrls.push(...uploadedUrls);
+        }
+
+        setPendingUploadFiles([]);
+      }
+
+      setConversation(prev => ({ ...prev, currentStatus: 'generating' }));
+
+      // 构建请求参数
+      const generateRequest: any = {
         prompt: prompt.trim(),
         aspectRatio,
         imageSize,
-        referenceImageUrl,
-      });
+      };
+
+      // 传递参考图 URL
+      if (finalReferenceUrls.length === 1) {
+        // 单图：保持向后兼容，用 referenceImageUrl
+        generateRequest.referenceImageUrl = finalReferenceUrls[0];
+      } else if (finalReferenceUrls.length > 1) {
+        // 多图：用 referenceImageUrls 数组
+        generateRequest.referenceImageUrls = finalReferenceUrls;
+      }
+
+      // 多轮会话上下文
+      if (finalReferenceUrls.length > 0 && conversation.messages.length > 0) {
+        generateRequest.conversationContext = {
+          previousGeneratedImageUrl: finalReferenceUrls[0],
+          history: conversation.messages.map(m => ({
+            role: m.role,
+            prompt: m.prompt,
+            imageUrl: m.role === 'assistant' ? m.originalImageUrls?.[0] : undefined,
+          })),
+        };
+      }
+
+      // 将实际使用的参考图 URL 回写到 user 消息中
+      if (finalReferenceUrls.length > 0) {
+        setConversation(prev => {
+          const msgs = [...prev.messages];
+          const lastUserIdx = msgs.length - 1;
+          if (msgs[lastUserIdx] && msgs[lastUserIdx].role === 'user') {
+            msgs[lastUserIdx] = { ...msgs[lastUserIdx], referenceImageUrls: finalReferenceUrls };
+          }
+          return { ...prev, messages: msgs };
+        });
+      }
+
+      // 发送生成请求
+      messageService.sendNanoBananaGenerate(generateRequest);
 
       // 等待生成任务创建响应
       const taskResponse = await new Promise<{ taskId: string; estimatedTime: number }>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Generation request timeout')), 30000);
-
-        const handleGenerateResponse = (data: { success: boolean; taskId?: string; estimatedTime?: number; error?: string }) => {
+        const unsubGenerate = messageService.onNanoBananaGenerateResponse((data) => {
           clearTimeout(timeout);
+          unsubGenerate();
           if (data.success && data.taskId) {
             resolve({ taskId: data.taskId, estimatedTime: data.estimatedTime || 60 });
           } else {
             reject(new Error(data.error || 'Failed to start generation'));
           }
-        };
-
-        messageService.onNanoBananaGenerateResponse(handleGenerateResponse);
+        });
       });
 
-      // 保存当前任务ID
       currentTaskIdRef.current = taskResponse.taskId;
 
-      // 更新状态为轮询中
-      setTask(prev => prev ? {
+      setConversation(prev => ({
         ...prev,
-        taskId: taskResponse.taskId,
-        status: 'polling',
+        currentStatus: 'polling',
+        currentTaskId: taskResponse.taskId,
         estimatedTime: taskResponse.estimatedTime,
         elapsedTime: 0,
-      } : null);
+      }));
 
-      // 🎯 开始轮询任务状态
+      // 开始轮询
       pollingIntervalRef.current = setInterval(() => {
         messageService.sendNanoBananaStatus({ taskId: taskResponse.taskId });
       }, 1000);
 
-      // 🎯 开始倒计时/计时器
+      // 开始倒计时
       countdownIntervalRef.current = setInterval(() => {
-        setTask(prev => {
-          if (!prev || prev.status !== 'polling') return prev;
+        setConversation(prev => {
+          if (prev.currentStatus !== 'polling') return prev;
           const newElapsed = prev.elapsedTime + 1;
-          // 如果超过预估时间，动态增加预估时间
-          const newEstimated = newElapsed >= prev.estimatedTime
-            ? prev.estimatedTime + 10
-            : prev.estimatedTime;
-          // 基于时间计算进度百分比（最大99%，完成时由状态更新设为100%）
+          const newEstimated = newElapsed >= prev.estimatedTime ? prev.estimatedTime + 10 : prev.estimatedTime;
           const newProgress = Math.min(99, Math.round((newElapsed / newEstimated) * 100));
           return {
             ...prev,
@@ -436,33 +617,28 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
     } catch (error) {
       clearAllIntervals();
       currentTaskIdRef.current = null;
-      setTask({
-        taskId: '',
-        status: 'error',
-        progress: 0,
-        estimatedTime: 0,
-        elapsedTime: 0,
-        resultUrls: [],
-        originalUrls: [],
+
+      const errorMessage: NanoBananaMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        timestamp: Date.now(),
         errorMessage: error instanceof Error ? error.message : 'Unknown error occurred',
-      });
+      };
+
+      setConversation(prev => ({
+        ...prev,
+        messages: [...prev.messages, errorMessage],
+        currentStatus: 'error',
+        currentTaskId: null,
+      }));
+
+      scrollToBottom();
     }
-  }, [prompt, aspectRatio, imageSize, referenceImage, t, clearAllIntervals]);
+  }, [prompt, aspectRatio, imageSize, pendingUploadFiles, conversation, clearAllIntervals, scrollToBottom]);
 
-  // 打开生成的图片
-  // 处理图片加载失败
-  const handleImageLoadError = useCallback((index: number) => {
-    setFailedImageIndices(prev => {
-      const newSet = new Set(prev);
-      newSet.add(index);
-      return newSet;
-    });
-  }, []);
-
+  // 打开图片
   const openImage = useCallback((url: string) => {
-    // 如果是data URL，需要特殊处理
     if (url.startsWith('data:')) {
-      // 在新窗口打开data URL
       const newWindow = window.open();
       if (newWindow) {
         newWindow.document.write(`<img src="${url}" style="max-width:100%;height:auto;" />`);
@@ -473,23 +649,198 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
     }
   }, []);
 
-  // 新建生成
-  const handleNewGeneration = useCallback(() => {
+  // 🎯 新对话
+  const handleNewConversation = useCallback(() => {
     clearAllIntervals();
     currentTaskIdRef.current = null;
-    setTask(null);
+    setConversation({
+      messages: [],
+      currentStatus: 'idle',
+      currentTaskId: null,
+      currentReferences: [],
+      progress: 0,
+      estimatedTime: 60,
+      elapsedTime: 0,
+    });
+    setPrompt('');
+    setPendingUploadFiles([]);
     setFailedImageIndices(new Set());
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     setTimeout(() => textareaRef.current?.focus(), 100);
   }, [clearAllIntervals]);
 
+  // 🎯 再次生成：用生成当前图片时的原始参考图和提示词重新生成
+  const handleRegenerate = useCallback(async (messageIndex: number) => {
+    const isGeneratingNow = conversation.currentStatus !== 'idle' && conversation.currentStatus !== 'error';
+    if (isGeneratingNow) return;
+
+    // 找到对应的 user 消息（assistant 消息的前一条）
+    const userMsg = conversation.messages.slice(0, messageIndex).reverse().find(m => m.role === 'user');
+    if (!userMsg || !userMsg.prompt) return;
+
+    clearAllIntervals();
+
+    // 用原始参数重新添加 user 消息
+    const userMessage: NanoBananaMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      timestamp: Date.now(),
+      prompt: userMsg.prompt,
+      aspectRatio: userMsg.aspectRatio || 'auto',
+      imageSize: userMsg.imageSize || '1K',
+      uploadedImageUrls: userMsg.uploadedImageUrls || undefined,
+    };
+
+    setConversation(prev => ({
+      ...prev,
+      messages: [...prev.messages, userMessage],
+      currentStatus: 'generating',
+      progress: 0,
+      estimatedTime: 60,
+      elapsedTime: 0,
+    }));
+
+    scrollToBottom();
+
+    try {
+      const messageService = getGlobalMessageService();
+
+      // 构建请求参数 - 使用原始 prompt 和参数
+      const generateRequest: any = {
+        prompt: userMsg.prompt,
+        aspectRatio: userMsg.aspectRatio || 'auto',
+        imageSize: userMsg.imageSize || '1K',
+      };
+
+      // 使用 user 消息中记录的实际参考图 URL
+      const refUrls = userMsg.referenceImageUrls;
+      if (refUrls && refUrls.length === 1) {
+        generateRequest.referenceImageUrl = refUrls[0];
+      } else if (refUrls && refUrls.length > 1) {
+        generateRequest.referenceImageUrls = refUrls;
+      }
+
+      // 将参考图 URL 回写到新 user 消息中
+      if (refUrls && refUrls.length > 0) {
+        setConversation(prev => {
+          const msgs = [...prev.messages];
+          const lastIdx = msgs.length - 1;
+          if (msgs[lastIdx]?.role === 'user') {
+            msgs[lastIdx] = { ...msgs[lastIdx], referenceImageUrls: refUrls };
+          }
+          return { ...prev, messages: msgs };
+        });
+      }
+
+      // 发送生成请求
+      messageService.sendNanoBananaGenerate(generateRequest);
+
+      // 等待生成任务创建响应
+      const taskResponse = await new Promise<{ taskId: string; estimatedTime: number }>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Generation request timeout')), 30000);
+        const unsubRegenerate = messageService.onNanoBananaGenerateResponse((data) => {
+          clearTimeout(timeout);
+          unsubRegenerate();
+          if (data.success && data.taskId) {
+            resolve({ taskId: data.taskId, estimatedTime: data.estimatedTime || 60 });
+          } else {
+            reject(new Error(data.error || 'Failed to start generation'));
+          }
+        });
+      });
+
+      currentTaskIdRef.current = taskResponse.taskId;
+
+      setConversation(prev => ({
+        ...prev,
+        currentStatus: 'polling',
+        currentTaskId: taskResponse.taskId,
+        estimatedTime: taskResponse.estimatedTime,
+        elapsedTime: 0,
+      }));
+
+      pollingIntervalRef.current = setInterval(() => {
+        messageService.sendNanoBananaStatus({ taskId: taskResponse.taskId });
+      }, 1000);
+
+      countdownIntervalRef.current = setInterval(() => {
+        setConversation(prev => {
+          if (prev.currentStatus !== 'polling') return prev;
+          const newElapsed = prev.elapsedTime + 1;
+          const newEstimated = newElapsed >= prev.estimatedTime ? prev.estimatedTime + 10 : prev.estimatedTime;
+          const newProgress = Math.min(99, Math.round((newElapsed / newEstimated) * 100));
+          return {
+            ...prev,
+            elapsedTime: newElapsed,
+            estimatedTime: newEstimated,
+            progress: newProgress,
+          };
+        });
+      }, 1000);
+
+      scrollToBottom();
+
+    } catch (error: any) {
+      console.error('[NanoBanana] Regenerate error:', error);
+      clearAllIntervals();
+      currentTaskIdRef.current = null;
+
+      const errorMessage: NanoBananaMessage = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        timestamp: Date.now(),
+        errorMessage: error.message || 'Regeneration failed',
+      };
+
+      setConversation(prev => ({
+        ...prev,
+        messages: [...prev.messages, errorMessage],
+        currentStatus: 'error',
+      }));
+
+      scrollToBottom();
+    }
+  }, [conversation, clearAllIntervals, scrollToBottom]);
+
+  // 🎯 选择图片作为参考（点击历史图片的"选为参考"按钮，添加到参考图列表）
+  const handleSelectAsReference = useCallback((originalUrl: string, previewUrl: string) => {
+    setConversation(prev => {
+      if (prev.currentReferences.length >= MAX_REFERENCE_IMAGES) {
+        return prev;
+      }
+      return {
+        ...prev,
+        currentReferences: [...prev.currentReferences, {
+          url: originalUrl,
+          preview: previewUrl,
+          source: 'generated',
+        }],
+      };
+    });
+  }, []);
+
+  // 处理图片加载失败
+  const handleImageLoadError = useCallback((imageId: string) => {
+    setFailedImageIndices(prev => {
+      const newSet = new Set(prev);
+      newSet.add(imageId);
+      return newSet;
+    });
+  }, []);
+
+  // 格式化时间
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   if (!isOpen) return null;
 
-  const isGenerating = task?.status === 'uploading' || task?.status === 'generating' || task?.status === 'polling';
-  const showResults = task?.status === 'completed' && task.resultUrls.length > 0;
-  const showError = task?.status === 'error';
-
-  // 计算剩余时间
-  const remainingTime = task ? Math.max(0, task.estimatedTime - task.elapsedTime) : 0;
+  const isGenerating = conversation.currentStatus !== 'idle' && conversation.currentStatus !== 'error';
+  const isFirstRound = conversation.messages.length === 0;
+  const remainingTime = Math.max(0, conversation.estimatedTime - conversation.elapsedTime);
 
   return (
     <div className="nanobanana-dialog__backdrop" onClick={isGenerating ? undefined : onClose}>
@@ -510,284 +861,358 @@ export const NanoBananaDialog: React.FC<NanoBananaDialogProps> = ({
           </button>
         </header>
 
-        {/* Body */}
+        {/* Body - 对话历史 */}
         <div className="nanobanana-dialog__body">
-          {/* 生成结果展示 */}
-          {showResults && (
-            <div className="nanobanana-dialog__results">
-              <div className="nanobanana-dialog__results-header">
-                <Sparkles size={16} />
-                <span>{t('nanoBanana.generationComplete', {}, 'Generation Complete!')}</span>
-                {task?.creditsDeducted && (
-                  <span className="nanobanana-dialog__credits">
-                    -{task.creditsDeducted} {t('nanoBanana.credits', {}, 'credits')}
-                  </span>
-                )}
+          {/* 空状态 */}
+          {conversation.messages.length === 0 && !isGenerating && (
+            <div className="nanobanana-dialog__empty-state">
+              <div className="nanobanana-dialog__empty-icon">
+                <NanoBananaIcon size={48} />
               </div>
-              <div className="nanobanana-dialog__images">
-                {task?.resultUrls.map((url, index) => {
-                  // 使用原始URL打开浏览器，使用resultUrl（base64）显示预览
-                  const originalUrl = task.originalUrls?.[index] || url;
-                  const hasFailed = failedImageIndices.has(index);
+              <div className="nanobanana-dialog__empty-text">
+                {t('nanoBanana.promptPlaceholder', {}, 'Describe the image you want to generate...')}
+              </div>
+              <div className="nanobanana-dialog__empty-hint">
+                {t('nanoBanana.pasteHint', {}, 'You can also paste an image with Ctrl+V')}
+              </div>
+            </div>
+          )}
 
-                  return (
-                    <div key={index} className="nanobanana-dialog__image-wrapper">
-                      {hasFailed ? (
-                        <div className="nanobanana-dialog__image-failed">
-                          <div className="nanobanana-dialog__image-failed-content">
-                            <p className="nanobanana-dialog__image-failed-text">
-                              {t('nanoBanana.imageTooLarge', {}, 'Image is large, please click to view')}
-                            </p>
+          {/* 对话历史 */}
+          <div className="nanobanana-dialog__conversation">
+            {conversation.messages.map((message, messageIndex) => (
+              <div
+                key={message.id}
+                className={`nanobanana-dialog__message nanobanana-dialog__message--${message.role}${message.errorMessage ? ' nanobanana-dialog__message--error' : ''}`}
+              >
+                {/* 消息头部 */}
+                <div className={`nanobanana-dialog__message-header nanobanana-dialog__message-header--${message.role}`}>
+                  <span className="nanobanana-dialog__message-icon">
+                    {message.role === 'user' ? <User size={14} /> : <NanoBananaIcon size={14} />}
+                  </span>
+                  <span>
+                    {message.role === 'user'
+                      ? t('nanoBanana.you', {}, 'You')
+                      : t('nanoBanana.assistant', {}, 'NanoBanana')}
+                  </span>
+                  <span className="nanobanana-dialog__message-time">
+                    {formatTime(message.timestamp)}
+                  </span>
+                </div>
+
+                {/* 用户消息内容 */}
+                {message.role === 'user' && (
+                  <>
+                    <div className="nanobanana-dialog__message-content">
+                      {message.prompt}
+                    </div>
+                    <div className="nanobanana-dialog__message-params">
+                      <span className="nanobanana-dialog__message-param">
+                        <Ratio size={12} /> {message.aspectRatio}
+                      </span>
+                      <span className="nanobanana-dialog__message-param">
+                        <Maximize2 size={12} /> {message.imageSize}
+                      </span>
+                    </div>
+                    {message.uploadedImageUrls && message.uploadedImageUrls.length > 0 && (
+                      <div className="nanobanana-dialog__user-references">
+                        {message.uploadedImageUrls.map((imgUrl, idx) => (
+                          <div key={idx} className="nanobanana-dialog__user-reference">
+                            <img
+                              src={imgUrl}
+                              alt={`Reference ${idx + 1}`}
+                              className="nanobanana-dialog__user-reference-thumb"
+                            />
                             <button
-                              className="nanobanana-dialog__image-failed-link"
-                              onClick={() => openImage(originalUrl)}
+                              className="nanobanana-dialog__user-reference-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectAsReference(imgUrl, imgUrl);
+                              }}
+                              disabled={isGenerating}
                             >
-                              {t('nanoBanana.clickToView', {}, 'Click to View')}
+                              {t('nanoBanana.selectAsReference', {}, 'Use as reference')}
                             </button>
                           </div>
-                        </div>
-                      ) : (
-                        <>
-                          <img
-                            src={url}
-                            alt={`Generated ${index + 1}`}
-                            className="nanobanana-dialog__result-image"
-                            onClick={() => openImage(originalUrl)}
-                            onError={() => handleImageLoadError(index)}
-                          />
-                          <button
-                            className="nanobanana-dialog__open-btn"
-                            onClick={() => openImage(originalUrl)}
-                            title={t('nanoBanana.openInBrowser', {}, 'Open in browser')}
-                          >
-                            <ExternalLink size={14} />
-                          </button>
-                        </>
-                      )}
+                        ))}
+                        <span className="nanobanana-dialog__user-reference-text">
+                          {t('nanoBanana.referenceImage', {}, 'Reference Image')} ({message.uploadedImageUrls.length})
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* AI 响应 - 生成的图片 */}
+                {message.role === 'assistant' && message.generatedImageUrls && (
+                  <>
+                    <div className="nanobanana-dialog__message-images">
+                      {message.generatedImageUrls.map((url, index) => {
+                        const imageId = `${message.id}-${index}`;
+                        const originalUrl = message.originalImageUrls?.[index] || url;
+                        const hasFailed = failedImageIndices.has(imageId);
+
+                        return (
+                          <div key={imageId} className="nanobanana-dialog__message-image-container">
+                            <div className="nanobanana-dialog__message-image-wrapper">
+                              {hasFailed ? (
+                                <div className="nanobanana-dialog__image-failed" onClick={() => openImage(originalUrl)}>
+                                  <div className="nanobanana-dialog__image-failed-content">
+                                    <p className="nanobanana-dialog__image-failed-text">
+                                      {t('nanoBanana.imageTooLarge', {}, 'Image is large, please click to view')}
+                                    </p>
+                                    <button className="nanobanana-dialog__image-failed-link">
+                                      {t('nanoBanana.clickToView', {}, 'Click to View')}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <img
+                                  src={url}
+                                  alt={`Generated ${index + 1}`}
+                                  className="nanobanana-dialog__message-image"
+                                  onClick={() => openImage(originalUrl)}
+                                  onError={() => handleImageLoadError(imageId)}
+                                />
+                              )}
+                            </div>
+                            <div className="nanobanana-dialog__image-actions">
+                              <button
+                                className="nanobanana-dialog__select-reference-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSelectAsReference(originalUrl, url);
+                                }}
+                                disabled={isGenerating}
+                              >
+                                {t('nanoBanana.selectAsReference', {}, 'Use as reference')}
+                              </button>
+                              <button
+                                className="nanobanana-dialog__regenerate-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRegenerate(messageIndex);
+                                }}
+                                disabled={isGenerating}
+                              >
+                                {t('nanoBanana.regenerate', {}, 'Regenerate')}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-              <p className="nanobanana-dialog__results-hint">
-                {t('nanoBanana.resultsHint', {}, 'Not satisfied? Generate another. Like it? Save it soon - we don\'t store images permanently.')}
-              </p>
-              <button
-                className="nanobanana-dialog__new-btn"
-                onClick={handleNewGeneration}
-              >
-                <RefreshCw size={14} />
-                {t('nanoBanana.generateAnother', {}, 'Generate Another')}
-              </button>
-            </div>
-          )}
+                    {message.creditsDeducted && (
+                      <div className="nanobanana-dialog__message-credits">
+                        <Sparkles size={14} />
+                        <span>-{message.creditsDeducted} {t('nanoBanana.credits', {}, 'credits')}</span>
+                      </div>
+                    )}
+                  </>
+                )}
 
-          {/* 错误展示 */}
-          {showError && (
-            <div className="nanobanana-dialog__error">
-              <span className="nanobanana-dialog__error-icon">❌</span>
-              <span className="nanobanana-dialog__error-text">{task?.errorMessage}</span>
-              <button
-                className="nanobanana-dialog__retry-btn"
-                onClick={handleNewGeneration}
-              >
-                {t('nanoBanana.tryAgain', {}, 'Try Again')}
-              </button>
-            </div>
-          )}
-
-          {/* 生成中状态 */}
-          {isGenerating && (() => {
-            const progress = task?.progress || 0;
-            // 计算滤镜效果：马赛克(0-16%) -> 模糊(16-50%) -> 清晰(50-100%)
-            let filterStyle: string;
-            let opacity: number;
-
-            if (progress <= 16) {
-              // 阶段1: 像素化马赛克效果 (使用SVG filter)
-              // 像素大小从 12px 渐变到 4px
-              const pixelSize = Math.max(4, 12 - (progress / 16) * 8);
-              filterStyle = `url(#pixelate-${Math.round(pixelSize)})`;
-              opacity = 0.7 + (progress / 16) * 0.1;
-            } else if (progress <= 50) {
-              // 阶段2: 高斯模糊逐渐减少
-              // blur从 8px 渐变到 2px
-              const blurAmount = 8 - ((progress - 16) / 34) * 6;
-              filterStyle = `blur(${blurAmount}px)`;
-              opacity = 0.8 + ((progress - 16) / 34) * 0.1;
-            } else {
-              // 阶段3: 清晰化 + 轻微发光
-              // blur从 2px 渐变到 0px
-              const blurAmount = Math.max(0, 2 - ((progress - 50) / 50) * 2);
-              const glowIntensity = ((progress - 50) / 50) * 8;
-              filterStyle = blurAmount > 0
-                ? `blur(${blurAmount}px) drop-shadow(0 0 ${glowIntensity}px rgba(255, 184, 3, 0.6))`
-                : `drop-shadow(0 0 ${glowIntensity}px rgba(255, 184, 3, 0.6))`;
-              opacity = 0.9 + ((progress - 50) / 50) * 0.1;
-            }
-
-            return (
-              <div className="nanobanana-dialog__generating">
-                {/* SVG 像素化滤镜定义 */}
-                <svg width="0" height="0" style={{ position: 'absolute' }}>
-                  <defs>
-                    {[12, 11, 10, 9, 8, 7, 6, 5, 4].map(size => (
-                      <filter key={size} id={`pixelate-${size}`} x="0" y="0" width="100%" height="100%">
-                        <feFlood x="4" y="4" height="1" width="1" />
-                        <feComposite width={size} height={size} />
-                        <feTile result="a" />
-                        <feComposite in="SourceGraphic" in2="a" operator="in" />
-                        <feMorphology operator="dilate" radius={size / 2} />
-                      </filter>
-                    ))}
-                  </defs>
-                </svg>
-
-                {/* 图片生成动画：马赛克 -> 模糊 -> 清晰 */}
-                <div
-                  className="nanobanana-dialog__progressive-reveal"
-                  style={{
-                    filter: filterStyle,
-                    opacity: opacity,
-                    transition: 'filter 0.3s ease-out, opacity 0.3s ease-out',
-                  }}
-                >
-                  <GeneratingImageIcon size={120} />
-                </div>
-                <div className="nanobanana-dialog__generating-text">
-                  {task?.status === 'uploading' && t('nanoBanana.uploading', {}, 'Uploading reference image...')}
-                  {task?.status === 'generating' && t('nanoBanana.generating', {}, 'Starting image generation...')}
-                  {task?.status === 'polling' && t('nanoBanana.waitingForResult', {}, 'Generating your image...')}
-                </div>
-                <div className="nanobanana-dialog__progress">
-                  <div
-                    className="nanobanana-dialog__progress-bar"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <div className="nanobanana-dialog__progress-text">
-                  {progress}% - {task?.elapsedTime || 0}s / ~{remainingTime}s {t('nanoBanana.remaining', {}, 'remaining')}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 输入表单 */}
-          {!isGenerating && !showResults && !showError && (
-            <>
-              {/* Prompt输入 */}
-              <div className="nanobanana-dialog__field">
-                <label className="nanobanana-dialog__label">
-                  {t('nanoBanana.prompt', {}, 'Prompt')}
-                </label>
-                <textarea
-                  ref={textareaRef}
-                  className="nanobanana-dialog__textarea"
-                  placeholder={t('nanoBanana.promptPlaceholder', {}, 'Describe the image you want to generate...')}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  rows={4}
-                />
-              </div>
-
-              {/* 参数选择区 */}
-              <div className="nanobanana-dialog__params">
-                {/* 宽高比 */}
-                <div className="nanobanana-dialog__param">
-                  <label className="nanobanana-dialog__label">
-                    {t('nanoBanana.aspectRatio', {}, 'Aspect Ratio')}
-                  </label>
-                  <select
-                    className="nanobanana-dialog__select"
-                    value={aspectRatio}
-                    onChange={(e) => setAspectRatio(e.target.value)}
-                  >
-                    {ASPECT_RATIOS.map((ratio) => (
-                      <option key={ratio.value} value={ratio.value}>
-                        {ratio.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 图片尺寸 */}
-                <div className="nanobanana-dialog__param">
-                  <label className="nanobanana-dialog__label">
-                    {t('nanoBanana.imageSize', {}, 'Size')}
-                  </label>
-                  <select
-                    className="nanobanana-dialog__select"
-                    value={imageSize}
-                    onChange={(e) => setImageSize(e.target.value)}
-                  >
-                    {IMAGE_SIZES.map((size) => (
-                      <option key={size.value} value={size.value}>
-                        {size.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* 参考图片上传 */}
-              <div className="nanobanana-dialog__field">
-                <label className="nanobanana-dialog__label">
-                  {t('nanoBanana.referenceImage', {}, 'Reference Image (Optional)')}
-                  <span className="nanobanana-dialog__label-hint">
-                    {t('nanoBanana.pasteHint', {}, 'You can also paste an image with Ctrl+V')}
-                  </span>
-                </label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/bmp"
-                  onChange={handleImageUpload}
-                  style={{ display: 'none' }}
-                />
-
-                {referencePreview ? (
-                  <div className="nanobanana-dialog__reference-preview">
-                    <img src={referencePreview} alt="Reference" />
-                    <button
-                      className="nanobanana-dialog__remove-reference"
-                      onClick={clearReferenceImage}
-                      title={t('nanoBanana.removeReference', {}, 'Remove reference image')}
-                    >
-                      <X size={14} />
-                    </button>
+                {/* AI 响应 - 错误 */}
+                {message.role === 'assistant' && message.errorMessage && (
+                  <div className="nanobanana-dialog__message-error">
+                    <X size={14} />
+                    <span>{message.errorMessage}</span>
                   </div>
-                ) : (
-                  <button
-                    className="nanobanana-dialog__upload-btn"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload size={16} />
-                    <span>{t('nanoBanana.uploadImage', {}, 'Upload Image')}</span>
-                  </button>
                 )}
               </div>
-            </>
-          )}
+            ))}
+
+            {/* 生成中状态 */}
+            {isGenerating && (
+              <div className="nanobanana-dialog__message nanobanana-dialog__message--assistant nanobanana-dialog__message--generating">
+                <div className="nanobanana-dialog__message-header nanobanana-dialog__message-header--assistant">
+                  <span className="nanobanana-dialog__message-icon"><NanoBananaIcon size={14} /></span>
+                  <span>{t('nanoBanana.assistant', {}, 'NanoBanana')}</span>
+                </div>
+                <div className="nanobanana-dialog__message-generating-content">
+                  <div className="nanobanana-dialog__progressive-reveal" style={{
+                    filter: conversation.progress <= 50
+                      ? `blur(${Math.max(0, 8 - (conversation.progress / 50) * 8)}px)`
+                      : 'none',
+                    opacity: 0.7 + (conversation.progress / 100) * 0.3,
+                    transition: 'filter 0.3s ease-out, opacity 0.3s ease-out',
+                  }}>
+                    <GeneratingImageIcon size={80} />
+                  </div>
+                  <div className="nanobanana-dialog__generating-text">
+                    {conversation.currentStatus === 'uploading' && t('nanoBanana.uploading', {}, 'Uploading reference image...')}
+                    {conversation.currentStatus === 'generating' && t('nanoBanana.generating', {}, 'Starting image generation...')}
+                    {conversation.currentStatus === 'polling' && t('nanoBanana.waitingForResult', {}, 'Generating your image...')}
+                  </div>
+                  <div className="nanobanana-dialog__message-progress">
+                    <div
+                      className="nanobanana-dialog__message-progress-bar"
+                      style={{ width: `${conversation.progress}%` }}
+                    />
+                  </div>
+                  <div className="nanobanana-dialog__message-progress-text">
+                    {conversation.progress}% - {conversation.elapsedTime}s / ~{remainingTime}s {t('nanoBanana.remaining', {}, 'remaining')}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={conversationEndRef} />
+          </div>
         </div>
 
-        {/* Footer */}
-        {!isGenerating && !showResults && !showError && (
-          <footer className="nanobanana-dialog__footer">
+        {/* Footer - 输入区域 */}
+        <div className="nanobanana-dialog__input-area">
+          {/* 参考图列表（所有轮次通用） */}
+          {conversation.currentReferences.length > 0 && (
+            <div className="nanobanana-dialog__reference-row">
+              {conversation.currentReferences.map((ref, idx) => (
+                <div key={idx} className="nanobanana-dialog__message-reference nanobanana-dialog__message-reference--with-remove">
+                  <img src={ref.preview} alt={`Reference ${idx + 1}`} />
+                  <span>
+                    {ref.source === 'uploaded'
+                      ? t('nanoBanana.referenceImage', {}, 'Reference Image')
+                      : t('nanoBanana.basedOnPrevious', {}, 'Based on previous image')}
+                  </span>
+                  <button
+                    className="nanobanana-dialog__reference-remove-corner"
+                    onClick={() => removeReference(idx)}
+                    disabled={isGenerating}
+                    title={t('nanoBanana.removeReference', {}, 'Remove reference image')}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              {/* 添加更多参考图按钮（未满 5 张时显示） */}
+              {conversation.currentReferences.length < MAX_REFERENCE_IMAGES && (
+                <button
+                  className="nanobanana-dialog__upload-new-reference"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isGenerating}
+                  title={t('nanoBanana.uploadNewReference', {}, 'Upload new reference image')}
+                >
+                  <Upload size={14} />
+                  <span>+</span>
+                </button>
+              )}
+              {/* 全部清除按钮 */}
+              {conversation.currentReferences.length > 1 && (
+                <button
+                  className="nanobanana-dialog__upload-new-reference"
+                  onClick={clearAllReferences}
+                  disabled={isGenerating}
+                  title={t('nanoBanana.clearAllReferences', {}, 'Clear all reference images')}
+                >
+                  <X size={14} />
+                  <span>{t('nanoBanana.clearAll', {}, 'Clear All')}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 参数选择 */}
+          <div className="nanobanana-dialog__input-params">
+            <div className="nanobanana-dialog__input-param">
+              <span className="nanobanana-dialog__input-param-label">{t('nanoBanana.aspectRatio', {}, 'Aspect Ratio')}</span>
+              <select
+                className="nanobanana-dialog__input-param-select"
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+                disabled={isGenerating}
+              >
+                {ASPECT_RATIOS.map((ratio) => (
+                  <option key={ratio.value} value={ratio.value}>
+                    {ratio.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="nanobanana-dialog__input-param">
+              <span className="nanobanana-dialog__input-param-label">{t('nanoBanana.imageSize', {}, 'Size')}</span>
+              <select
+                className="nanobanana-dialog__input-param-select"
+                value={imageSize}
+                onChange={(e) => setImageSize(e.target.value)}
+                disabled={isGenerating}
+              >
+                {IMAGE_SIZES.map((size) => (
+                  <option key={size.value} value={size.value}>
+                    {size.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 隐藏的文件上传 input（始终存在，支持多选） */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif,image/bmp"
+              multiple
+              onChange={handleImageUpload}
+              style={{ display: 'none' }}
+            />
+
+            {/* 上传按钮（无参考图时显示） */}
+            {conversation.currentReferences.length === 0 && (
+              <button
+                className="nanobanana-dialog__new-conversation-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isGenerating}
+                title={t('nanoBanana.uploadImage', {}, 'Upload Image')}
+              >
+                <Upload size={14} />
+                <span>{t('nanoBanana.referenceImage', {}, 'Reference')}</span>
+              </button>
+            )}
+          </div>
+
+          {/* 输入框 */}
+          <textarea
+            ref={textareaRef}
+            className="nanobanana-dialog__input-textarea"
+            placeholder={
+              isFirstRound
+                ? t('nanoBanana.promptPlaceholder', {}, 'Describe the image you want to generate...')
+                : t('nanoBanana.promptPlaceholderContinue', {}, 'Continue refining based on the previous image...')
+            }
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleGenerate();
+              }
+            }}
+            disabled={isGenerating}
+          />
+
+          {/* 按钮组 */}
+          <div className="nanobanana-dialog__input-actions">
+            {!isFirstRound && (
+              <button
+                className="nanobanana-dialog__new-conversation-btn"
+                onClick={handleNewConversation}
+                disabled={isGenerating}
+              >
+                <RefreshCw size={14} />
+                <span>{t('nanoBanana.newConversation', {}, 'New Chat')}</span>
+              </button>
+            )}
             <button
-              className="nanobanana-dialog__cancel-btn"
-              onClick={onClose}
-            >
-              {t('common.cancel', {}, 'Cancel')}
-            </button>
-            <button
-              className="nanobanana-dialog__generate-btn"
+              className="nanobanana-dialog__continue-btn"
               onClick={handleGenerate}
-              disabled={!prompt.trim()}
+              disabled={!prompt.trim() || isGenerating}
             >
               <ImageIcon size={14} />
-              {t('nanoBanana.generate', {}, 'Generate Image')}
+              <span>
+                {isFirstRound
+                  ? t('nanoBanana.generate', {}, 'Generate Image')
+                  : t('nanoBanana.continueGenerate', {}, 'Continue')}
+              </span>
             </button>
-          </footer>
-        )}
+          </div>
+        </div>
       </div>
     </div>
   );

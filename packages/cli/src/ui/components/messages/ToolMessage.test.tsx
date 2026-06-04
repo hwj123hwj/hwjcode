@@ -187,4 +187,157 @@ describe('<ToolMessage />', () => {
     // We can at least ensure it doesn't have the high emphasis indicator.
     expect(sanitizeOutput(lowEmphasisFrame())).not.toContain('←');
   });
+
+  describe('completed read/search result collapsing', () => {
+    it('shows compact line count for a completed read_file', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          description="src/app.ts"
+          resultDisplay={"line 1\nline 2\nline 3"}
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      expect(output).toContain('ReadFile');
+      expect(output).toContain('src/app.ts');
+      expect(output).toContain('(3 lines read)');
+    });
+
+    it('shows compact line count for a completed read_file when format is (42 lines)', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          description="src/app.ts"
+          resultDisplay="(42 lines)"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      expect(output).toContain('ReadFile');
+      expect(output).toContain('src/app.ts');
+      expect(output).toContain('(42 lines read)');
+    });
+
+    it('shows compact line count for a completed read_file when format is read lines: 1-100', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          description="src/app.ts"
+          resultDisplay="read lines: 1-100"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      expect(output).toContain('ReadFile');
+      expect(output).toContain('src/app.ts');
+      expect(output).toContain('(100 lines read)');
+    });
+
+    it('shows compact match count for a completed search_file_content', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="search_file_content"
+          name="SearchText"
+          description="pattern"
+          resultDisplay="Found 12 matches"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      expect(output).toContain('SearchText');
+      expect(output).toContain('(12 matches found)');
+    });
+
+    it('shows compact file count for a completed read_many_files', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_many_files"
+          name="ReadManyFiles"
+          description="patterns"
+          resultDisplay="Successfully read and concatenated content from **5 file(s)** (12KB total)."
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      expect(output).toContain('ReadManyFiles');
+      expect(output).toContain('(5 files read)');
+    });
+
+    it('hides the result body for a completed read_file (one-line summary)', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          description="src/app.ts"
+          resultDisplay="(42 lines)"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      const output = sanitizeOutput(lastFrame());
+      // Title stays visible...
+      expect(output).toContain('ReadFile');
+      expect(output).toContain('src/app.ts');
+      // ...but the result body is collapsed away.
+      expect(output).not.toContain('(42 lines)');
+      expect(output).not.toContain('└ (42 lines)');
+    });
+
+    it('still shows the body while a read_file is executing', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          resultDisplay="partial body"
+          status={ToolCallStatus.Executing}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('partial body');
+    });
+
+    it('keeps the error message visible for a failed read_file', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="read_file"
+          name="ReadFile"
+          resultDisplay="File not found."
+          status={ToolCallStatus.Error}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('File not found.');
+    });
+
+    it('does not collapse a non-read tool result', () => {
+      const { lastFrame } = renderWithContext(
+        <ToolMessage
+          {...baseProps}
+          toolId="run_shell_command"
+          name="Shell"
+          resultDisplay="build output here"
+          status={ToolCallStatus.Success}
+        />,
+        StreamingState.Idle,
+      );
+      expect(sanitizeOutput(lastFrame())).toContain('build output here');
+    });
+  });
 });

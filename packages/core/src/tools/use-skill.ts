@@ -128,22 +128,6 @@ Important:
     }
 
     try {
-      // Check if we're in VSCode extension environment (extensionPath is set globally)
-      const extensionPath = (globalThis as any).__extensionPath;
-      if (extensionPath) {
-        // VSCode extension environment - skills are not available in bundled extension
-        // The skill system is only available in CLI mode
-        return {
-          llmContent: `❌ Skill system is not available in VSCode extension mode.
-
-The skill system requires the CLI environment to function.
-Skills are designed for the DeepV Code CLI, not the VSCode extension.
-
-To use skills, please run DeepV Code from the command line.`,
-          returnDisplay: 'Skill system not available in VSCode extension',
-        };
-      }
-
       // Initialize Skills system - directly using imported modules
       const settings = new SettingsManager();
       await settings.initialize();

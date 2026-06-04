@@ -574,6 +574,14 @@ export class ToolRegistry {
   }
 
   /**
+   * Unregisters a tool by name.
+   * Returns true if the tool was found and removed, false otherwise.
+   */
+  unregisterTool(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  /**
    * Get the definition of a specific tool.
    * Supports tool aliases for backward compatibility and model training variations.
    * For example, 'bash' is aliased to 'run_shell_command'.

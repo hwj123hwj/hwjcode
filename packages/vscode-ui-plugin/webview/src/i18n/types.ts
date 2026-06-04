@@ -357,6 +357,14 @@ export interface Translations {
     cancel: string;
     confirmAndSwitch: string;
     inProgress: string;
+    manualTitle: string;
+    manualInProgress: string;
+    manualInProgressDesc: string;
+    manualDone: string;
+    manualDoneDesc: string;
+    manualSkipped: string;
+    manualSkippedDesc: string;
+    manualFailed: string;
   };
 
   reasoning: {
@@ -371,6 +379,7 @@ export interface Translations {
     buttonTooltip: string;
     prompt: string;
     promptPlaceholder: string;
+    promptPlaceholderContinue: string;
     aspectRatio: string;
     imageSize: string;
     referenceImage: string;
@@ -378,19 +387,30 @@ export interface Translations {
     uploadImage: string;
     removeReference: string;
     generate: string;
+    continueGenerate: string;
     generateAnother: string;
+    newConversation: string;
     uploading: string;
     generating: string;
     waitingForResult: string;
     estimatedTime: string;
     generationComplete: string;
     resultsHint: string;
+    continueHint: string;
     credits: string;
     openInBrowser: string;
     tryAgain: string;
     remaining: string;
     imageTooLarge: string;
     clickToView: string;
+    // 多轮会话相关
+    you: string;
+    assistant: string;
+    basedOnPrevious: string;
+    selectAsReference: string;
+    regenerate: string;
+    conversationHistory: string;
+    uploadNewReference: string;
     error: {
       emptyPrompt: string;
       invalidImageType: string;
@@ -529,6 +549,7 @@ export interface Translations {
       mcp: string;
       memory: string;
       more: string;
+      account: string;
     };
     general: {
       yoloLabel: string;
@@ -547,10 +568,37 @@ export interface Translations {
       refresh: string;
       refreshing: string;
     };
+    userRules: {
+      title: string;
+      description: string;
+      placeholder: string;
+      saved: string;
+      saving: string;
+      saveFailed: string;
+      save: string;
+      noChanges: string;
+      limitExceeded: string;
+      lineCount: string;
+      byteCount: string;
+      lineLimitExceeded: string;
+      byteLimitExceeded: string;
+    };
     more: {
       title: string;
       description: string;
       open: string;
+    };
+    account: {
+      title: string;
+      notLoggedIn: string;
+      name: string;
+      email: string;
+      userId: string;
+      logoutButton: string;
+      logoutConfirm: string;
+      loggingOut: string;
+      logoutSuccess: string;
+      logoutFailed: string;
     };
   };
 
@@ -622,6 +670,74 @@ export interface Translations {
   streamRecovery: {
     jitter: string;
     resuming: string;
+  };
+
+  goalWizard: {
+    buttonTooltip: string;
+    title: string;
+    closeTooltip: string;
+    stepLabel: string;
+    step: {
+      task: string;
+      forbidden: string;
+      criteria: string;
+      hours: string;
+      intensity: string;
+      confirm: string;
+    };
+    field: {
+      taskLabel: string;
+      taskHint: string;
+      taskPlaceholder: string;
+      forbiddenLabel: string;
+      forbiddenHint: string;
+      forbiddenPlaceholder: string;
+      criteriaLabel: string;
+      criteriaHint: string;
+      criteriaPlaceholder: string;
+      hoursLabel: string;
+      hoursHint: string;
+      intensityLabel: string;
+      intensityHint: string;
+      confirmLabel: string;
+      confirmHint: string;
+    };
+    intensity: {
+      steadyTitle: string;
+      steadyDesc: string;
+      standardTitle: string;
+      standardDesc: string;
+      intenseTitle: string;
+      intenseDesc: string;
+    };
+    confirm: {
+      yoloKeep: string;
+      yoloEnable: string;
+      summary: {
+        task: string;
+        forbidden: string;
+        criteria: string;
+        hours: string;
+        intensity: string;
+        none: string;
+        empty: string;
+      };
+    };
+    error: {
+      taskRequired: string;
+      criteriaRequired: string;
+      hoursInvalid: string;
+    };
+    button: {
+      cancel: string;
+      back: string;
+      next: string;
+      starting: string;
+      start: string;
+    };
+    units: {
+      hours: string;
+    };
   };
 }
 

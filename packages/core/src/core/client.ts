@@ -10,7 +10,6 @@ import {
   PartListUnion,
   Content,
   Tool,
-  GenerateContentResponse,
 } from '@google/genai';
 import { getFolderStructure } from '../utils/getFolderStructure.js';
 import { detectTerminalEnvironment, formatTerminalInfo } from '../utils/terminalDetection.js';
@@ -25,7 +24,7 @@ import { Config } from '../config/config.js';
 import { UserTierId } from '../code_assist/types.js';
 import { AgentContext } from '../telemetry/types.js';
 import { getCoreSystemPrompt, CustomModelInfo } from './prompts.js';
-import { isCustomModel } from '../types/customModel.js';
+import { isCustomModel, generateCustomModelId } from '../types/customModel.js';
 import { SceneType, SceneManager } from './sceneManager.js';
 import { checkNextSpeaker } from '../utils/nextSpeakerChecker.js';
 import { reportError } from '../utils/errorReporting.js';
@@ -41,14 +40,21 @@ import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
 import { LoopDetectionService } from '../services/loopDetectionService.js';
 import { CompressionService } from '../services/compressionService.js';
+import { MicroCompactService } from '../services/microCompactService.js';
+import { PostCompactRestorationService } from '../services/postCompactRestorationService.js';
 import { ideContext } from '../ide/ideContext.js';
 import { logFlashDecidedToContinue } from '../telemetry/loggers.js';
 import { FlashDecidedToContinueEvent, LoopType } from '../telemetry/types.js';
 import { logger } from '../utils/enhancedLogger.js';
+import {
+  buildGoalContinuationMessage,
+  type GoalContext,
+} from '../utils/goalContinuationPrompt.js';
+import { GoalAchievedTool } from '../tools/goal-achieved.js';
 
 import { DeepVServerAdapter } from './DeepVServerAdapter.js';
 
-function isThinkingSupported(model: string) {
+function isThinkingSupported(_model: string) {
   // ✅ 服务端内部决定模型 - 客户端总是尝试启用thinking
   // 如果服务端选择的模型不支持，会被忽略，不会出错
   return true; // 让服务端处理thinking支持判断
@@ -74,6 +80,8 @@ export class GeminiClient {
 
   private readonly loopDetector: LoopDetectionService;
   private readonly compressionService: CompressionService;
+  private readonly microCompactService: MicroCompactService;
+  private readonly postCompactRestoration: PostCompactRestorationService;
   private lastPromptId?: string;
   private isCompressing: boolean = false; // 压缩互斥锁，防止重入
 
@@ -82,6 +90,18 @@ export class GeminiClient {
   private compressionThreshold: number = 0.8; // 动态压缩阈值
   private readonly emergencyStopThreshold: number = 0.9; // 🚨 紧急制动阈值：90%
   private needsCompression: boolean = false; // 是否需要在下次对话前压缩
+
+  /**
+   * /goal 模式上下文，仅在内存中保留。
+   *
+   * 设置时机：useGoalWizard 在 submitQuery 之前调用 setGoalContext。
+   * 用途：自动压缩 (tryCompressChat) 完成后，如果该字段非空，
+   *       会把原始 goal prompt + T0 时间锚 + 行动指令重新注入历史，
+   *       防止 summarizer 把契约（最低工时、no-stop 纪律、安全栏等）压没了。
+   * 清除时机：用户再次执行 /goal（被新 goal 覆盖）；进程退出（自动）。
+   * 不清除的情况：/clear（仅清屏不清上下文）；普通会话切换。
+   */
+  private activeGoalContext: GoalContext | null = null;
 
   constructor(private config: Config) {
     if (config.getProxy()) {
@@ -96,6 +116,19 @@ export class GeminiClient {
       compressionTokenThreshold: this.compressionThreshold,
       compressionPreserveThreshold: 0.3,
       skipEnvironmentMessages: 2, // 跳过环境信息和确认消息
+    });
+
+    this.microCompactService = new MicroCompactService({
+      idleThresholdMinutes: 60,
+      keepRecentToolResults: 5,
+      tokenUsageThreshold: 0.7,
+      enabled: true,
+    });
+
+    this.postCompactRestoration = new PostCompactRestorationService({
+      maxFilesToRestore: 5,
+      maxCharsPerFile: 5000,
+      totalCharBudget: 50000,
     });
 
     // 初始化智能压缩阈值（使用与CompressionService相同的逻辑）
@@ -161,6 +194,62 @@ export class GeminiClient {
     return this.config;
   }
 
+  // ───────────────── Goal 模式上下文管理 ─────────────────
+  // 仅供 /goal 启动钩子（packages/cli useGoalWizard）调用。
+  // 这些方法不会触发任何对话或副作用——只是更新内存里的标志位。
+
+  /**
+   * 启动 /goal 模式时调用。会覆盖任何已存在的 goal context（即"再开一次 /goal
+   * 自动结束上一个"），符合用户预期的清除时机。
+   */
+  setGoalContext(ctx: GoalContext): void {
+    this.activeGoalContext = ctx;
+    logger.info(
+      `[GeminiClient] Goal context activated. T0=${new Date(ctx.startedAt).toISOString()}, hours=${ctx.hours}, taskLen=${ctx.task.length}`,
+    );
+
+    // 🎯 动态注册 goal_achieved 工具（仅在 goal 模式激活时存在，保障 AI 无法在普通模式下滥用）
+    this.config.getToolRegistry().then((toolRegistry) => {
+      toolRegistry.registerTool(new GoalAchievedTool(this.config));
+      this.setTools().catch((err) => {
+        logger.error('[GeminiClient] Failed to reload tools after registering goal_achieved:', err);
+      });
+    }).catch((err) => {
+      logger.error('[GeminiClient] Failed to get tool registry for goal_achieved:', err);
+    });
+  }
+
+  /**
+   * 显式清除 goal context。当前没有 UI 入口直接调用，但保留供
+   * 未来 `/goal cancel` 之类的命令、以及测试使用。
+   */
+  clearGoalContext(): void {
+    if (this.activeGoalContext) {
+      logger.info('[GeminiClient] Goal context cleared.');
+    }
+    this.activeGoalContext = null;
+
+    // 🎯 动态注销 goal_achieved 工具
+    this.config.getToolRegistry().then((toolRegistry) => {
+      const removed = toolRegistry.unregisterTool(GoalAchievedTool.Name);
+      if (removed) {
+        this.setTools().catch((err) => {
+          logger.error('[GeminiClient] Failed to reload tools after unregistering goal_achieved:', err);
+        });
+      }
+    }).catch((err) => {
+      logger.error('[GeminiClient] Failed to get tool registry to unregister goal_achieved:', err);
+    });
+  }
+
+  /**
+   * 当前是否有活跃的 goal context。返回拷贝引用而非克隆——调用方
+   * 不应该修改该对象。
+   */
+  getGoalContext(): GoalContext | null {
+    return this.activeGoalContext;
+  }
+
   /**
    * 获取自定义模型信息（用于系统提示注入）
    * 如果当前模型是自定义模型，返回其详细信息；否则返回 undefined
@@ -193,15 +282,78 @@ export class GeminiClient {
     if (!customConfig) {
       return modelName;
     }
-    const providerName = customConfig.provider === 'openai' ? 'OpenAI' : 'Anthropic';
+    const providerNameMap: Record<string, string> = { 'openai': 'OpenAI', 'openai-responses': 'OpenAI Responses', 'anthropic': 'Anthropic' };
+    const providerName = providerNameMap[customConfig.provider] || customConfig.provider;
     return `${customConfig.modelId} (via ${customConfig.baseUrl}, ${providerName}-compatible)`;
+  }
+
+  /**
+   * 解析「大历史压缩升级」时应使用的目标模型 ID。
+   *
+   * 触发场景：sessionTokenCount > ~900K（接近 Flash 1M 上限），需要把压缩
+   * 任务交给一个能吞下 1M+ 输入的模型，否则压缩请求自身就会被上游拒。
+   *
+   * 决策分两条路：
+   *   1) DeepV 云端协议用户（非自定义模型）→ 'x-ai/grok-4.1-fast'。
+   *      DeepVServer 内部能解析这个 ID 并路由到云端 grok 实例。
+   *   2) 自定义模型直连用户（isCustomModel === true）→ 在他们配置的
+   *      customModels 列表里寻找一个 1M+ 上下文模型。优先级：
+   *        a. modelId 含 "grok"（grok-4 / grok-4-fast 等）
+   *        b. modelId 含 "gemini" + ("pro" | "flash")（任何 gemini 1M+ 变种）
+   *      找不到合适候选时，**保留** SceneManager 给出的默认值
+   *      'gemini-2.5-flash' —— 让下游 createTemporaryChat 的
+   *      isUsingCustomModel 分支再做一次 fallback（自定义 gemini-flash → 主模型）。
+   *      关键：绝不能直接吐 'x-ai/grok-4.1-fast'，因为 DeepVServer 解析不到
+   *      自定义模型用户的私有 baseUrl/apiKey，必然 401/404 静默失败。
+   *
+   * @param defaultCompressionModel SceneManager 给出的默认压缩模型 ID
+   * @returns 应该传给 compressionService 的最终模型 ID
+   */
+  private resolveLargeContextCompressionModel(defaultCompressionModel: string | undefined): string {
+    const fallback = defaultCompressionModel ?? 'gemini-2.5-flash';
+    const currentModel = this.config.getModel();
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+
+    if (!isUsingCustomModel) {
+      // 云端协议用户：维持原行为，让 DeepVServer 路由到云端 grok。
+      return 'x-ai/grok-4.1-fast';
+    }
+
+    // 自定义模型用户：在他们的 customModels 里搜寻 1M+ 上下文候选。
+    const customModels = this.config.getCustomModels() || [];
+    const enabled = customModels.filter(m => m.enabled !== false);
+
+    // 优先 1：grok 系（4 / 4.1-fast 等都是 1M+ 上下文）
+    const grokCandidate = enabled.find(m => {
+      const id = (m.modelId || '').toLowerCase();
+      const display = (m.displayName || '').toLowerCase();
+      return id.includes('grok') || display.includes('grok');
+    });
+    if (grokCandidate) {
+      return generateCustomModelId(grokCandidate);
+    }
+
+    // 优先 2：gemini pro/flash（gemini 系列默认就是 1M 输入上下文）
+    const geminiCandidate = enabled.find(m => {
+      const id = (m.modelId || '').toLowerCase();
+      const display = (m.displayName || '').toLowerCase();
+      const hay = `${id} ${display}`;
+      return hay.includes('gemini') && (hay.includes('pro') || hay.includes('flash'));
+    });
+    if (geminiCandidate) {
+      return generateCustomModelId(geminiCandidate);
+    }
+
+    // 找不到合适候选 → 保留默认值，由 createTemporaryChat 的兜底逻辑处理。
+    // 注意：这里 *不能* 直接返回云端 grok ID，否则自定义模型用户会 401/404。
+    return fallback;
   }
 
   /**
    * 获取通用内容生成器
    * DeepVServerAdapter 支持所有模型：Claude模型进行参数转换，Gemini模型直接转发
    */
-  private async getContentGeneratorForModel(model: string): Promise<ContentGenerator> {
+  private async getContentGeneratorForModel(_model: string): Promise<ContentGenerator> {
     // 创建通用适配器，支持Claude和Gemini模型
     const { hasAvailableProxyServer, getActiveProxyServerUrl } = await import('../config/proxyConfig.js');
 
@@ -231,10 +383,40 @@ export class GeminiClient {
     scene: SceneType,
     model?: string,
     agentContext: AgentContext = { type: 'sub', agentId: SceneManager.getSceneDisplayName(scene) },
-    options?: { disableSystemPrompt?: boolean }
+    options?: { disableSystemPrompt?: boolean; emptySystemPrompt?: boolean }
   ): Promise<GeminiChat> {
     const sceneModel = SceneManager.getModelForScene(scene);
-    const modelToUse = model || sceneModel || this.config.getModel();
+    let modelToUse = model || sceneModel || this.config.getModel();
+
+    const currentModel = this.config.getModel();
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+
+    if (isUsingCustomModel) {
+      const isSystemScene = [
+        SceneType.COMPRESSION,
+        SceneType.CONTENT_SUMMARY,
+        SceneType.EDIT_CORRECTION,
+        SceneType.JSON_GENERATION
+      ].includes(scene);
+
+      if (isSystemScene || model === 'gemini-2.5-flash' || model === 'gemini-2.5-flash-lite') {
+        const customModels = this.config.getCustomModels() || [];
+        const geminiFlashModel = customModels.find(m => {
+          if (m.enabled === false) return false;
+          const modelIdLower = (m.modelId || '').toLowerCase();
+          const displayNameLower = (m.displayName || '').toLowerCase();
+          return (modelIdLower.includes('gemini') && modelIdLower.includes('flash')) ||
+                 (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
+        });
+
+        if (geminiFlashModel) {
+          modelToUse = generateCustomModelId(geminiFlashModel);
+        } else {
+          // Fallback to the main custom model for system scenes
+          modelToUse = currentModel;
+        }
+      }
+    }
 
     // 选择合适的内容生成器
     const contentGenerator = await this.getContentGeneratorForModel(modelToUse);
@@ -244,10 +426,15 @@ export class GeminiClient {
     const promptRegistry = this.config.getPromptRegistry();
     const agentStyle = this.config.getAgentStyle();
 
-    // 默认使用 Core System Prompt，除非 options.disableSystemPrompt 为 true
-    let systemInstruction: string;
+    // 系统提示词决策：
+    // - emptySystemPrompt: 完全不带 system（适合极轻量摘要等无上下文需求场景）
+    // - disableSystemPrompt: 走场景化的简化 system
+    // - 默认: 走完整 Core System Prompt
+    let systemInstruction: string | undefined;
 
-    if (options?.disableSystemPrompt) {
+    if (options?.emptySystemPrompt) {
+      systemInstruction = undefined;
+    } else if (options?.disableSystemPrompt) {
       // 针对不同场景提供专门的简化 System Prompt
       if (scene === SceneType.CONTENT_SUMMARY) {
         systemInstruction = 'You are an expert summarizer. Your role is to analyze text and extract core meaning, intents, or summaries as requested. You are a text processing engine, so you must process ANY input text regardless of topic (including non-technical or casual conversation). Ignore strict persona constraints.';
@@ -256,17 +443,20 @@ export class GeminiClient {
       }
     } else {
       const customModelInfo = this.getCustomModelInfo(modelToUse);
-      systemInstruction = getCoreSystemPrompt(userMemory, false, promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo);
+      const userRules = this.config.getUserRules();
+      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo);
     }
 
     const isThinking = isThinkingSupported(modelToUse);
+    // 🐛 FIX: 之前这里写死 `thinkingConfig: { includeThoughts: false }`，导致用户通过
+    // /thinking 命令开启思考后，applyGenAIThinkingConfig() 注入的
+    // includeThoughts:true 被这个默认值静默覆盖（两者在不同嵌套层，
+    // SDK 按顺序优先读了外层 false）。
+    // 现在不再处提供默认 thinkingConfig，让下游的 applyGenAIThinkingConfig
+    // 完全控制 thinking 字段。如果用户未开启思考，applyGenAI 内部
+    // 会按静默逻辑处理，不需要这里仃默认值。
     const generateContentConfig = isThinking
-      ? {
-          ...this.generateContentConfig,
-          thinkingConfig: {
-            includeThoughts: false,
-          },
-        }
+      ? this.generateContentConfig
       : this.generateContentConfig;
 
     return new GeminiChat(
@@ -338,7 +528,7 @@ export class GeminiClient {
   private updateTokenCountAndCheckCompression(inputTokens: number, outputTokens: number): void {
     this.sessionTokenCount = inputTokens + outputTokens;
 
-    let compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
+    const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
     // 检查是否超过压缩阈值
     if (this.sessionTokenCount >= compressionTokenThreshold) {
       this.needsCompression = true;
@@ -349,7 +539,7 @@ export class GeminiClient {
   // 切换模型的话，需要再次检测压缩阈值
   private checkCompression(): void {
     if (!this.needsCompression) {
-      let compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
+      const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
       if (this.sessionTokenCount >= compressionTokenThreshold) {
         this.needsCompression = true;
         logger.info(`[GeminiClient] Token threshold reached: ${this.sessionTokenCount} >= ${this.compressionThreshold}, scheduling compression for next conversation`);
@@ -364,6 +554,26 @@ export class GeminiClient {
     this.needsCompression = false;
     // 压缩后重置token计数器，因为历史已经被压缩
     this.sessionTokenCount = 0;
+  }
+
+  /**
+   * 兜底瘦身：在全量 LLM 自动压缩失败后调用。
+   * 强制执行一次 MicroCompact，将旧的可压缩工具输出替换为占位符，为对话争取继续运行的空间。
+   *
+   * @returns MicroCompact 执行结果（是否应用、清除条数）
+   */
+  private runMicroCompactFallback(): { applied: boolean; clearedCount: number } {
+    try {
+      const curHistory = this.getChat().getHistory(true);
+      const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
+      if (mcResult.applied) {
+        this.getChat().setHistory(curHistory);
+      }
+      return { applied: mcResult.applied, clearedCount: mcResult.clearedCount };
+    } catch (err) {
+      console.warn(`[runMicroCompactFallback] MicroCompact fallback threw: ${err instanceof Error ? err.message : String(err)}`);
+      return { applied: false, clearedCount: 0 };
+    }
   }
 
   /**
@@ -391,12 +601,27 @@ export class GeminiClient {
     return this.chat !== undefined && this.contentGenerator !== undefined;
   }
 
+  /**
+   * 追踪文件读取事件（供工具层调用）
+   * 用于压缩后自动恢复最近读取的文件上下文
+   */
+  trackFileRead(filePath: string): void {
+    this.postCompactRestoration.trackFileRead(filePath);
+  }
+
   getHistory(): Content[] {
     return this.getChat().getHistory();
   }
 
   setHistory(history: Content[]) {
-    this.getChat().setHistory(history);
+    // 🛡️ /session select / IDE companion 等路径会直接通过此入口注入历史，
+    //    在历史本身已经损坏的情况下（中断、截断、压缩失误），下一次 sendMessage
+    //    无论走 Gemini 原生还是 CustomModel 直连，都会因为孤立的 functionResponse 报 400。
+    //    所以这里统一用 GeminiChat.sanitizeRequestContents 在写入前做一次卫士级清洗。
+    const sanitized = Array.isArray(history)
+      ? GeminiChat.sanitizeRequestContents(history)
+      : history;
+    this.getChat().setHistory(sanitized);
   }
 
   async setTools(): Promise<void> {
@@ -413,7 +638,8 @@ export class GeminiClient {
     const agentStyle = this.config.getAgentStyle();
     const currentModel = this.config.getModel();
     const customModelInfo = this.getCustomModelInfo(currentModel);
-    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
+    const userRules = this.config.getUserRules();
+    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
 
     if (this.chat) {
       this.chat.setSystemInstruction(updatedSystemPrompt);
@@ -423,6 +649,23 @@ export class GeminiClient {
   async resetChat(): Promise<void> {
     this.resetCompressionFlag();
     this.chat = await this.startChat();
+  }
+
+  /**
+   * Replace the active {@link GeminiChat} with one hydrated from persisted
+   * history. Used by the ACP `loadSession` flow and by session-resume
+   * commands. The provided `history` is passed to {@link startChat} as
+   * `extraHistory`, which means the initial environment/system context is
+   * still prepended automatically.
+   */
+  async resumeChat(history: Content[]): Promise<void> {
+    this.resetCompressionFlag();
+    // 🛡️ 与 setHistory 保持一致：通过 fixRequestContents 兜底清洗历史。
+    //    ACP 路径（IDE companion）的会话水化也会走到这里。
+    const sanitized = Array.isArray(history)
+      ? GeminiChat.sanitizeRequestContents(history)
+      : history;
+    this.chat = await this.startChat(sanitized);
   }
 
   private async getEnvironment(): Promise<Part[]> {
@@ -438,7 +681,8 @@ export class GeminiClient {
     let environmentInfo = '';
     try {
       // 使用 setTimeout 让环境检测异步进行，避免阻塞UI
-      const terminalInfo = await new Promise<any>((resolve) => {
+      type TerminalInfo = ReturnType<typeof detectTerminalEnvironment>;
+      const terminalInfo = await new Promise<TerminalInfo>((resolve) => {
         setTimeout(() => {
           try {
             const result = detectTerminalEnvironment();
@@ -570,18 +814,21 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       const agentStyle = this.config.getAgentStyle();
       const currentModel = this.config.getModel();
       const customModelInfo = this.getCustomModelInfo(currentModel);
-      const systemInstruction = getCoreSystemPrompt(userMemory, isVSCode, promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
+      const userRules = this.config.getUserRules();
 
-      const generateContentConfigWithThinking = isThinkingSupported(
+      // 如果有用户规则，优先使用；否则使用 promptRegistry
+      const systemInstruction = getCoreSystemPrompt(
+        userMemory,
+        isVSCode,
+        userRules || promptRegistry,
+        agentStyle,
         currentModel,
-      )
-        ? {
-            ...this.generateContentConfig,
-            thinkingConfig: {
-              includeThoughts: false,
-            },
-          }
-        : this.generateContentConfig;
+        this.config.getPreferredLanguage(),
+        customModelInfo
+      );
+
+      // 🐛 FIX: 同上，不再在这里写死 includeThoughts:false 覆盖下游。
+      const generateContentConfigWithThinking = this.generateContentConfig;
       return new GeminiChat(
         this.config,
         this.getContentGenerator(),
@@ -627,7 +874,7 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
               message: `Agent execution blocked by BeforeAgent hook`
             }
           }
-        } as any;
+        };
         return new Turn(this.getChat(), prompt_id, this.config.getModel(), this.config);
       }
     } catch (hookError) {
@@ -669,14 +916,72 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     this.checkCompression();
     // 基于响应的智能压缩：检查是否需要在本次对话前进行压缩
     // 只有当 needsCompression 标记为 true 时才尝试压缩，否则不触发压缩流程和 PreCompress 钩子
+    //
+    // 设计原则：自动压缩与手动 /compress 走完全相同的路径——
+    //   - 不检查熔断器（force=true 直接尝试）
+    //   - 使用普通 AbortController().signal，不设独立超时
+    //   - 失败就直接 yield 失败事件，不再做 MicroCompact 兜底
+    // 仅保留 yield ChatCompressed 事件（流式协议必需，UI 借此显示压缩气泡）
     if (this.needsCompression) {
       console.log('[sendMessageStream] Token threshold exceeded, performing compression before new conversation');
-      const compressed = await this.tryCompressChat(prompt_id, signal, true); // 强制压缩
+
+      let compressed: ChatCompressionInfo | null = null;
+      let compressionError: string | undefined;
+      try {
+        compressed = await this.tryCompressChat(prompt_id, new AbortController().signal, true);
+      } catch (err) {
+        compressionError = err instanceof Error ? err.message : String(err);
+        console.warn(`[sendMessageStream] Auto-compress threw: ${compressionError}`);
+      }
+
       if (compressed) {
-        yield { type: GeminiEventType.ChatCompressed, value: compressed };
+        yield {
+          type: GeminiEventType.ChatCompressed,
+          value: { success: true, info: compressed },
+        };
         this.resetCompressionFlag(); // 压缩完成后重置标记
       } else {
-        console.warn('[sendMessageStream] Failed to perform scheduled compression');
+        // 全量 LLM 压缩失败：尝试 MicroCompact 兜底瘦身。
+        // 兜底成功（清除了若干旧工具输出）→ yield 成功事件（degraded=true），继续对话。
+        // 兜底也失败（没东西可清）→ yield 失败事件，return 避免让未瘦身的 history 去撞 API。
+        console.warn('[sendMessageStream] Full compression failed, attempting MicroCompact fallback');
+        const fallback = this.runMicroCompactFallback();
+        if (fallback.applied) {
+          console.log(`[sendMessageStream] MicroCompact fallback succeeded: cleared ${fallback.clearedCount} old tool results`);
+          yield {
+            type: GeminiEventType.ChatCompressed,
+            value: {
+              success: true,
+              degraded: true,
+              clearedCount: fallback.clearedCount,
+              reason: compressionError ?? 'compression_returned_null',
+            },
+          };
+          this.resetCompressionFlag(); // 降级成功后也重置标记，让对话继续
+        } else {
+          yield {
+            type: GeminiEventType.ChatCompressed,
+            value: {
+              success: false,
+              reason: compressionError ?? 'compression_returned_null',
+            },
+          };
+          // 注意：不清除 needsCompression 标记。下次用户发消息时会再试一次。
+          return new Turn(this.getChat(), prompt_id, this.config.getModel());
+        }
+      }
+    }
+
+    // 微压缩：在发送消息前执行轻量级清理
+    // 触发条件：1) 空闲超时（缓存冷了省钱）2) token用量接近全量压缩阈值（缓冲层）
+    const currentTokenLimit = tokenLimit(this.config.getModel(), this.config);
+    const tokenUsageRatio = currentTokenLimit > 0 ? this.sessionTokenCount / currentTokenLimit : 0;
+    if (this.microCompactService.shouldMicroCompact(tokenUsageRatio)) {
+      const curHistory = this.getChat().getHistory(true);
+      const mcResult = this.microCompactService.microCompactMessages(curHistory, 2);
+      if (mcResult.applied) {
+        this.getChat().setHistory(curHistory);
+        logger.info(`[sendMessageStream] MicroCompact applied: cleared ${mcResult.clearedCount} old tool results`);
       }
     }
 
@@ -737,13 +1042,21 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
     }
 
     const resultStream = turn.run(request, signal);
+    let lastFinishReason: string | undefined;
     for await (const event of resultStream) {
       if (this.loopDetector.addAndCheck(event)) {
         const loopType = this.loopDetector.getDetectedLoopType();
+        logger.info(`[STOP-DEBUG] sendMessageStream: LOOP DETECTED, type=${loopType}, turn will be stopped`);
         yield { type: GeminiEventType.LoopDetected, value: loopType ? loopType.toString() : undefined };
         // Add feedback to chat history so AI understands why it was stopped
         this.addLoopDetectionFeedbackToHistory(loopType);
         return turn;
+      }
+
+      // 记录 Finished 事件的 finishReason
+      if (event.type === GeminiEventType.Finished) {
+        lastFinishReason = event.value;
+        logger.info(`[STOP-DEBUG] sendMessageStream: received Finished event, finishReason=${lastFinishReason}, errorDetails=${event.errorDetails || 'none'}`);
       }
 
       // 处理TokenUsage事件，累积token计数并判断是否需要下次压缩
@@ -754,31 +1067,49 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           tokenInfo.outputTokens
         );
 
+        // 更新微压缩的时间戳（收到响应=助手刚活动过）
+        this.microCompactService.updateLastAssistantMessageTime();
+
         // 继续传递事件给上层处理
         yield event;
       } else {
         yield event;
       }
     }
+
+    // 🔍 STOP-DEBUG: 记录 turn 结束后的决策信息
+    const pendingToolCallCount = turn.pendingToolCalls.length;
+    const signalAborted = signal?.aborted;
+    logger.info(`[STOP-DEBUG] sendMessageStream: turn stream ended. pendingToolCalls=${pendingToolCallCount}, signal.aborted=${signalAborted}, lastFinishReason=${lastFinishReason}, boundedTurns=${boundedTurns}, model=${this.config.getModel()}, initialModel=${initialModel}`);
+
+    if (pendingToolCallCount > 0) {
+      logger.info(`[STOP-DEBUG] sendMessageStream: has ${pendingToolCallCount} pending tool calls, will be scheduled by CLI layer. Tools: [${turn.pendingToolCalls.map(tc => tc.name).join(', ')}]`);
+    }
+
     if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
       // Check if model was switched during the call (likely due to quota error)
       const currentModel = this.config.getModel();
       if (currentModel !== initialModel) {
         // Model was switched (likely due to quota error fallback)
         // Don't continue with recursive call to prevent unwanted Flash execution
+        logger.info(`[STOP-DEBUG] sendMessageStream: MODEL SWITCHED during call (${initialModel} → ${currentModel}), stopping recursion`);
         return turn;
       }
 
+      logger.info(`[STOP-DEBUG] sendMessageStream: no pending tool calls, checking nextSpeaker...`);
       const nextSpeakerCheck = await checkNextSpeaker(
         this.getChat(),
         this,
         signal,
       );
+      logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker result=${JSON.stringify(nextSpeakerCheck)}`);
+
       if (nextSpeakerCheck?.next_speaker === 'model') {
         logFlashDecidedToContinue(
           this.config,
           new FlashDecidedToContinueEvent(prompt_id),
         );
+        logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker=model, sending "Please continue." (remaining turns=${boundedTurns - 1})`);
         const nextRequest = [{ text: 'Please continue.' }];
         // This recursive call's events will be yielded out, and the final
         // turn object will be from the recursive call.
@@ -789,7 +1120,11 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
           boundedTurns - 1,
           initialModel,
         );
+      } else {
+        logger.info(`[STOP-DEBUG] sendMessageStream: nextSpeaker is NOT model, ENDING conversation turn. nextSpeaker=${nextSpeakerCheck?.next_speaker || 'null/undefined'}`);
       }
+    } else if (signal?.aborted) {
+      logger.info(`[STOP-DEBUG] sendMessageStream: signal was aborted, skipping nextSpeaker check`);
     }
 
     // 🪝 触发 AfterAgent 钩子 - 在每个 turn 完成后执行（按照原版逻辑）
@@ -844,11 +1179,21 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
 
       // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
-      // upgrade to x-ai/grok-4.1-fast to ensure compression succeeds.
+      // upgrade the compression model so a 1M+ history can still fit.
       // Using 900,000 as a safe threshold to allow buffer for output and overhead.
+      //
+      // ⚠️ 必须分两条路：
+      //   1) DeepV 云端协议用户 → 'x-ai/grok-4.1-fast'（云端可解析）
+      //   2) 自定义模型直连用户 → 在他们配置的 customModels 里找 1M+ 上下文模型
+      //      ('grok-4' / 'gemini-...-pro' / 'gemini-...-flash' 等)。如果找不到，
+      //      就保留 SceneManager 默认值 'gemini-2.5-flash' —— 让下游
+      //      createTemporaryChat 的 isUsingCustomModel 分支再兜底替换为
+      //      用户自定义的 gemini-flash（仍然是直连他们自己的 endpoint）。
+      //   把云端模型 ID 直接塞给自定义模型用户，DeepVServer 解析不到他们的
+      //   私有 baseUrl/apiKey，必然 401/404，导致压缩静默失败。
       if (this.sessionTokenCount > 900000) {
-        console.log(`[tryCompressChat] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to x-ai/grok-4.1-fast.`);
-        compressionModel = 'x-ai/grok-4.1-fast';
+        compressionModel = this.resolveLargeContextCompressionModel(compressionModel);
+        console.log(`[tryCompressChat] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to ${compressionModel}.`);
       }
 
       const historyModel = this.config.getModel(); // history实际使用的模型，用于测算长度
@@ -876,6 +1221,96 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       if (compressionResult.newHistory) {
         this.getChat().setHistory(compressionResult.newHistory);
         console.log('[tryCompressChat] Compression applied successfully');
+
+        // 压缩后状态恢复：附加最近读取的文件内容
+        try {
+          const restorationContent = await this.postCompactRestoration.generateRestorationContent();
+          if (restorationContent) {
+            const currentHistory = this.getChat().getHistory(true);
+
+            // 确保追加 restoration 消息前角色交替正确
+            const lastMsg = currentHistory[currentHistory.length - 1];
+            if (lastMsg && lastMsg.role === MESSAGE_ROLES.USER) {
+              // 末尾已是 user，先补一条 model 占位以避免连续 user
+              currentHistory.push({
+                role: MESSAGE_ROLES.MODEL,
+                parts: [{ text: 'Understood.' }],
+              });
+            }
+
+            currentHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: restorationContent }],
+            });
+            currentHistory.push({
+              role: MESSAGE_ROLES.MODEL,
+              parts: [{ text: 'I have reviewed the restored file context and am ready to continue. I will use read_file to verify current file state before attempting any edits, since files may have changed during compression.' }],
+            });
+            this.getChat().setHistory(currentHistory);
+            console.log(`[tryCompressChat] Post-compact restoration: attached ${this.postCompactRestoration.getRecentlyReadFiles().length} recently-read files`);
+          }
+        } catch (restorationError) {
+          console.warn(`[tryCompressChat] Post-compact restoration failed (non-fatal): ${restorationError}`);
+        }
+
+        // 🎯 /goal 模式上下文恢复
+        // 如果当前会话处于 /goal 模式，将原始 goal prompt + T0 时间锚 + 立即行动指令
+        // 重新注入历史，让 model 重新看到完整契约。详见 goalContinuationPrompt.ts。
+        //
+        // 设计要点：
+        //   - 这条 user 消息**有意成为最后一条 user 消息**——它本身就是给 model 的
+        //     "继续干活"指令；model 接下来的回复就会是它对该指令的响应。
+        //   - 因此这里只追加 user 消息，不附带 model ack。
+        //   - 它会自动通过下面"确保不以 model 结尾"块的检查（最后一条已经是 user）。
+        //   - 每次压缩都重新注入完整原 prompt：保证经过多次压缩后契约依然完整。
+        if (this.activeGoalContext) {
+          try {
+            const currentHistory = this.getChat().getHistory(true);
+            const lastMsg = currentHistory[currentHistory.length - 1];
+
+            // 角色交替守卫：如果上一条已经是 user，先补一条 model 占位。
+            // 通常 postCompactRestoration 追加的末尾是 model(ack)，所以一般不会触发。
+            if (lastMsg && lastMsg.role === MESSAGE_ROLES.USER) {
+              currentHistory.push({
+                role: MESSAGE_ROLES.MODEL,
+                parts: [{ text: 'Understood.' }],
+              });
+            }
+
+            currentHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: buildGoalContinuationMessage(this.activeGoalContext) }],
+            });
+            this.getChat().setHistory(currentHistory);
+            console.log(
+              `[tryCompressChat] Goal continuation injected. T0=${new Date(this.activeGoalContext.startedAt).toISOString()}, elapsedMin=${Math.floor((Date.now() - this.activeGoalContext.startedAt) / 60000)}`,
+            );
+          } catch (goalRestoreError) {
+            console.warn(`[tryCompressChat] Goal continuation injection failed (non-fatal): ${goalRestoreError}`);
+          }
+        }
+
+        // 🔧 安全保障：确保压缩后 history 不以 model 结尾
+        // AWS Bedrock Claude 等模型不支持 assistant prefill，要求对话以 user 结尾。
+        // postCompactRestoration 追加的最后一条消息是 model(ack)，如果此后没有新 user 消息，
+        // sendMessageStream 在工具调用循环中发送 functionResponse 时，如果该 functionResponse
+        // 对应的 functionCall 已被压缩掉，fixRequestContents 会将其作为孤立响应移除，
+        // 导致 contents 末尾变成 model → API 报 400。
+        {
+          const finalHistory = this.getChat().getHistory(true);
+          const lastMsg = finalHistory[finalHistory.length - 1];
+          if (lastMsg && lastMsg.role === MESSAGE_ROLES.MODEL) {
+            finalHistory.push({
+              role: MESSAGE_ROLES.USER,
+              parts: [{ text: '[Conversation continues]' }],
+            });
+            this.getChat().setHistory(finalHistory);
+            console.log('[tryCompressChat] Appended user placeholder to ensure history does not end with model message');
+          }
+        }
+
+        // 重置微压缩状态（压缩后等于"新对话"开始）
+        this.microCompactService.reset();
       }
 
       return compressionResult.compressionInfo || null;
@@ -920,13 +1355,13 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       const curatedHistory = this.getChat().getHistory(true);
       let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
 
-      // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
-      // upgrade to x-ai/grok-4.1-fast to ensure compression succeeds.
-      // Using 900,000 as a safe threshold to allow buffer for output and overhead.
-      // We use sessionTokenCount as a proxy, or we could recount if needed.
+      // 🚀 Dynamic Model Upgrade: 与 tryCompressChat 路径保持一致 —— 自定义
+      //   模型用户不能被强行改写为云端 'x-ai/grok-4.1-fast'，否则 DeepVServer
+      //   解析不到他们的私有 baseUrl / apiKey，压缩 100% 失败。
+      //   resolveLargeContextCompressionModel 会按"是否自定义模型"分两条路决策。
       if (this.sessionTokenCount > 900000) {
-        console.log(`[switchModel] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to x-ai/grok-4.1-fast.`);
-        compressionModel = 'x-ai/grok-4.1-fast';
+        compressionModel = this.resolveLargeContextCompressionModel(compressionModel);
+        console.log(`[switchModel] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to ${compressionModel}.`);
       }
 
       // 尝试压缩以适应新模型

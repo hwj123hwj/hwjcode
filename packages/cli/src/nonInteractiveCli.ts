@@ -41,7 +41,11 @@ import {
   outputFunctionCallFixed,
   outputError,
   outputResult,
+  outputFinalJson,
+  MessageBuffer,
 } from './utils/streamJsonOutput.js';
+import { handleNonInteractiveSlashCommand } from './nonInteractiveSlashCommandHandler.js';
+import { LoadedSettings } from './config/settings.js';
 
 function getResponseText(response: GenerateContentResponse): string | null {
   if (response.candidates && response.candidates.length > 0) {
@@ -101,7 +105,8 @@ export async function runNonInteractive(
   config: Config,
   input: string,
   prompt_id: string,
-  outputFormat: 'stream-json' | 'default' = 'default',
+  outputFormat: 'stream-json' | 'json' | 'default' = 'default',
+  settings?: LoadedSettings,
 ): Promise<void> {
   await config.initialize();
 
@@ -122,18 +127,186 @@ export async function runNonInteractive(
 
   const chat = await geminiClient.getChat();
   const abortController = new AbortController();
-  let currentMessages: Content[] = [{ role: MESSAGE_ROLES.USER, parts: [{ text: input }] }];
+
+  // 🆕 处理斜杠命令预处理
+  let processedInput = input;
+  let initialFunctionCall: { name: string; args: Record<string, unknown> } | null = null;
+
+  if (settings) {
+    const slashCommandResult = await handleNonInteractiveSlashCommand(input, config, settings);
+
+    if (slashCommandResult.type === 'tool_call') {
+      // 斜杠命令转换为工具调用
+      initialFunctionCall = {
+        name: slashCommandResult.toolName,
+        args: slashCommandResult.toolArgs,
+      };
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+      }
+    } else if (slashCommandResult.type === 'submit_prompt') {
+      // 斜杠命令转换为新的prompt
+      processedInput = slashCommandResult.content;
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+        // Note: Converted prompt will be sent as the actual user message
+      }
+    } else if (slashCommandResult.type === 'complete') {
+      // 🆕 命令已完成，直接输出结果并退出
+      if (outputFormat === 'stream-json') {
+        outputMessage('user', input);
+        outputMessage('assistant', slashCommandResult.message);
+        outputResult(slashCommandResult.success ? 'success' : 'error', {
+          total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: 0,
+        });
+      } else if (outputFormat === 'json') {
+        outputFinalJson({
+          model: config.getModel(),
+          content: slashCommandResult.message,
+          status: slashCommandResult.success ? 'success' : 'error',
+        });
+      } else {
+        console.log(slashCommandResult.message);
+      }
+      process.exit(slashCommandResult.success ? 0 : 1);
+    } else if (slashCommandResult.type === 'unsupported') {
+      // 不支持的斜杠命令
+      if (outputFormat === 'stream-json') {
+        outputError(slashCommandResult.reason);
+        outputResult('error');
+      } else if (outputFormat === 'json') {
+        outputFinalJson({
+          model: config.getModel(),
+          content: '',
+          status: 'error',
+          error: slashCommandResult.reason,
+        });
+      } else {
+        console.error(`Error: ${slashCommandResult.reason}`);
+      }
+      process.exit(1);
+    }
+    // type === 'not_slash_command' 时，继续正常处理
+  }
+
+  let currentMessages: Content[] = [{ role: MESSAGE_ROLES.USER, parts: [{ text: processedInput }] }];
   let turnCount = 0;
   const modelName = config.getModel();
   const modelCapabilities = getModelCapabilities(modelName);
 
+  // Buffer for coalescing assistant message deltas in stream-json mode
+  const messageBuffer = outputFormat === 'stream-json' ? new MessageBuffer() : null;
+
+  // Accumulate full response text for json mode (single final JSON output)
+  const isJsonMode = outputFormat === 'json';
+  let jsonAccumulatedText = '';
+
   // Output init event if in stream-json mode
   if (outputFormat === 'stream-json') {
     outputInit(config.getSessionId(), modelName);
-    outputMessage('user', input);
+    if (!initialFunctionCall) {
+      outputMessage('user', processedInput);
+    }
   }
 
   try {
+    // 🆕 如果有初始工具调用（来自斜杠命令），直接执行工具，跳过第一轮LLM调用
+    if (initialFunctionCall) {
+      const callId = `${initialFunctionCall.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const requestInfo: ToolCallRequestInfo = {
+        callId,
+        name: initialFunctionCall.name,
+        args: initialFunctionCall.args,
+        isClientInitiated: true, // 标记为客户端发起
+        prompt_id,
+      };
+
+      if (outputFormat === 'stream-json') {
+        outputToolUse(initialFunctionCall.name, callId, initialFunctionCall.args);
+      }
+
+      try {
+        const toolResponse = await executeToolCall(
+          config,
+          requestInfo,
+          toolRegistry,
+          abortController.signal,
+        );
+
+        if (toolResponse.error) {
+          const resultDisplay = toolResponse.resultDisplay
+            ? typeof toolResponse.resultDisplay === 'string'
+              ? toolResponse.resultDisplay
+              : JSON.stringify(toolResponse.resultDisplay)
+            : toolResponse.error.message;
+
+          if (outputFormat === 'stream-json') {
+            outputToolResult(callId, 'error', resultDisplay);
+            outputError(resultDisplay);
+            outputResult('error');
+          } else if (isJsonMode) {
+            outputFinalJson({
+              model: modelName,
+              content: '',
+              status: 'error',
+              error: resultDisplay,
+            });
+          } else {
+            console.error(`Error executing tool ${initialFunctionCall.name}: ${resultDisplay}`);
+          }
+          process.exit(1);
+        }
+
+        // 工具执行成功，输出结果
+        if (toolResponse.resultDisplay) {
+          const resultText = typeof toolResponse.resultDisplay === 'string'
+            ? toolResponse.resultDisplay
+            : JSON.stringify(toolResponse.resultDisplay);
+
+          if (outputFormat === 'stream-json') {
+            outputToolResult(callId, 'success', resultText);
+            outputResult('success', {
+              total_tokens: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              duration_ms: 0,
+            });
+          } else if (isJsonMode) {
+            outputFinalJson({
+              model: modelName,
+              content: resultText,
+              status: 'success',
+            });
+          } else {
+            console.log(resultText);
+          }
+        }
+
+        // 斜杠命令工具调用完成，直接返回
+        return;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (outputFormat === 'stream-json') {
+          outputToolResult(callId, 'error', errorMsg);
+          outputError(errorMsg);
+          outputResult('error');
+        } else if (isJsonMode) {
+          outputFinalJson({
+            model: modelName,
+            content: '',
+            status: 'error',
+            error: errorMsg,
+          });
+        } else {
+          console.error(`Exception executing tool ${initialFunctionCall.name}:`, error);
+        }
+        process.exit(1);
+      }
+    }
+
     while (true) {
       turnCount++;
       if (
@@ -176,8 +349,10 @@ export async function runNonInteractive(
 
         const textPart = getResponseText(resp);
         if (textPart) {
-          if (outputFormat === 'stream-json') {
-            outputMessage('assistant', textPart, true); // delta=true for streaming
+          if (messageBuffer) {
+            messageBuffer.append(textPart);
+          } else if (isJsonMode) {
+            jsonAccumulatedText += textPart;
           } else {
             process.stdout.write(textPart);
           }
@@ -186,6 +361,9 @@ export async function runNonInteractive(
           functionCalls.push(...resp.functionCalls);
         }
       }
+
+      // Flush buffered text before processing tool calls or finishing the turn
+      messageBuffer?.flush();
 
       // Check for streaming completeness issues in small models
       if (modelCapabilities.proneToIncompleteStream && functionCalls.length > 0) {
@@ -217,6 +395,13 @@ export async function runNonInteractive(
             if (stillInvalid && !modelCapabilities.enableMalformedRetry) {
               if (outputFormat === 'stream-json') {
                 outputError('Function calls remain invalid after fixing. Aborting.');
+              } else if (isJsonMode) {
+                outputFinalJson({
+                  model: modelName,
+                  content: jsonAccumulatedText,
+                  status: 'error',
+                  error: 'Function calls remain invalid after fixing. Aborting.',
+                });
               } else {
                 console.error('\n❌ Function calls remain invalid after fixing. Aborting.');
               }
@@ -360,9 +545,6 @@ export async function runNonInteractive(
 
         currentMessages = [{ role: MESSAGE_ROLES.USER, parts: toolResponseParts }];
       } else {
-        if (outputFormat !== 'stream-json') {
-          process.stdout.write('\n'); // Ensure a final newline
-        }
         if (outputFormat === 'stream-json') {
           outputResult('success', {
             total_tokens: 0, // TODO: track token usage
@@ -370,11 +552,22 @@ export async function runNonInteractive(
             output_tokens: 0,
             duration_ms: 0,
           });
+        } else if (isJsonMode) {
+          outputFinalJson({
+            model: modelName,
+            content: jsonAccumulatedText,
+            status: 'success',
+          });
+        } else {
+          process.stdout.write('\n'); // Ensure a final newline
         }
         return;
       }
     }
   } catch (error) {
+    // Flush any remaining buffered text before reporting the error
+    messageBuffer?.flush();
+
     const errorMsg = parseAndFormatApiError(
       error,
       config.getContentGeneratorConfig()?.authType,
@@ -382,6 +575,13 @@ export async function runNonInteractive(
     if (outputFormat === 'stream-json') {
       outputError(errorMsg);
       outputResult('error');
+    } else if (isJsonMode) {
+      outputFinalJson({
+        model: modelName,
+        content: jsonAccumulatedText,
+        status: 'error',
+        error: errorMsg,
+      });
     } else {
       console.error(errorMsg);
     }

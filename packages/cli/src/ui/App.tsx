@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Box,
   DOMElement,
@@ -16,13 +16,8 @@ import {
   useInput,
   type Key as InkKeyType,
 } from 'ink';
-import {
-  StreamingState,
-  type HistoryItem,
-  MessageType,
-  ToolCallStatus,
-  type IndividualToolCallDisplay,
-} from './types.js';
+import { StreamingState, type HistoryItem, MessageType, ToolCallStatus, type IndividualToolCallDisplay } from './types.js';
+import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
 import { useAnimatedTitleIcon } from './hooks/useAnimatedTitleIcon.js';
@@ -33,6 +28,8 @@ import { TaskCompletionSummary } from './components/TaskCompletionSummary.js';
 import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
+import { useDebateWizard } from './hooks/useDebateWizard.js';
+import { useGoalWizard } from './hooks/useGoalWizard.js';
 import { useAuthCommand } from './hooks/useAuthCommand.js';
 import { useLoginCommand } from './hooks/useLoginCommand.js';
 import { useEditorSettings } from './hooks/useEditorSettings.js';
@@ -41,6 +38,7 @@ import { useSettingsMenu } from './hooks/useSettingsMenu.js';
 import { usePluginInstallCommand } from './hooks/usePluginInstallCommand.js';
 import { useSlashCommandProcessor } from './hooks/slashCommandProcessor.js';
 import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
+import { useGoalActive } from './hooks/useGoalActive.js';
 import { useConsoleMessages } from './hooks/useConsoleMessages.js';
 import {
   useBackgroundTaskNotifications,
@@ -52,6 +50,9 @@ import { Header } from './components/Header.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { LoadingIndicator } from './components/LoadingIndicator.js';
 import { AutoAcceptIndicator } from './components/AutoAcceptIndicator.js';
+import { GoalActiveIndicator } from './components/GoalActiveIndicator.js';
+import { WorkflowActiveIndicator } from './components/WorkflowActiveIndicator.js';
+import { WorkflowPanel } from './components/WorkflowPanel.js';
 import { ShellModeIndicator } from './components/ShellModeIndicator.js';
 import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
@@ -62,6 +63,12 @@ import { ThemeDialog } from './components/ThemeDialog.js';
 import { ModelDialog } from './components/ModelDialog.js';
 import { PluginInstallDialog } from './components/PluginInstallDialog.js';
 import { CustomModelWizard } from './components/CustomModelWizard.js';
+import { DebateWizard } from './components/DebateWizard.js';
+import { GoalWizard } from './components/GoalWizard.js';
+import { DebateIndicator } from './components/DebateIndicator.js';
+import { TodoPanel } from './components/TodoPanel.js';
+import { useTodos } from './hooks/useTodos.js';
+import { endDebate } from './utils/debateState.js';
 import { AuthDialog } from './components/AuthDialog.js';
 import { LoginDialog } from './components/LoginDialog.js';
 import { AuthInProgress } from './components/AuthInProgress.js';
@@ -78,16 +85,8 @@ import { Tips } from './components/Tips.js';
 import { ConsolePatcher } from './utils/ConsolePatcher.js';
 import { registerCleanup } from '../utils/cleanup.js';
 import { DetailedMessagesDisplay } from './components/DetailedMessagesDisplay.js';
-import {
-  TokenUsageDisplay,
-  type TokenUsageInfo,
-} from './components/TokenUsageDisplay.js';
-import {
-  tokenUsageEventManager,
-  IDEConnectionStatus,
-  type BackgroundTask,
-  getBackgroundTaskManager,
-} from 'deepv-code-core';
+import { TokenUsageDisplay, type TokenUsageInfo } from './components/TokenUsageDisplay.js';
+import { tokenUsageEventManager, IDEConnectionStatus, type BackgroundTask, getBackgroundTaskManager, todoStore } from 'deepv-code-core';
 import { HistoryItemDisplay } from './components/HistoryItemDisplay.js';
 import { ImagePollingSpinner } from './components/ImagePollingSpinner.js';
 import { StreamRecoverySpinner } from './components/StreamRecoverySpinner.js';
@@ -102,6 +101,7 @@ import { ContextSummaryDisplay } from './components/ContextSummaryDisplay.js';
 import { IDEContextDetailDisplay } from './components/IDEContextDetailDisplay.js';
 import { ReasoningDisplay } from './components/ReasoningDisplay.js';
 import { HealthyUseReminder } from './components/HealthyUseReminder.js';
+import { FeishuStatusDashboard, type FeishuProjectRoute, type FeishuMessageLogEntry } from './components/FeishuStatusDashboard.js';
 import { useHistoryCleanup } from './hooks/useHistoryCleanup.js';
 import { HistoryCleanupDialog } from './components/HistoryCleanupDialog.js';
 import { useHistory } from './hooks/useHistoryManager.js';
@@ -214,7 +214,20 @@ const detectIDEAEnvironment = (): boolean => {
 };
 
 /**
- * Cross-platform clear screen function that properly clears scroll buffer on Windows
+ * Cross-platform visible-screen clear for automatic UI redraws.
+ *
+ * This deliberately does not clear terminal scrollback. Automatic redraws can be
+ * triggered by terminal resize/layout changes, and clearing scrollback there can
+ * make the terminal viewport appear to jump back to the top while the user is
+ * typing or pasting.
+ */
+const clearVisibleScreen = (stdout: NodeJS.WriteStream) => {
+  stdout.write(ansiEscapes.clearScreen);
+  stdout.write(ansiEscapes.cursorTo(0, 0));
+};
+
+/**
+ * Cross-platform explicit clear screen function that also clears scrollback.
  * 特别优化了IDEA环境下的兼容性
  */
 const clearScreenWithScrollBuffer = (stdout: NodeJS.WriteStream) => {
@@ -222,14 +235,12 @@ const clearScreenWithScrollBuffer = (stdout: NodeJS.WriteStream) => {
 
   if (isIDEAEnv) {
     // IDEA环境特殊处理：使用更温和的清屏方式，避免光标位置错乱
-    stdout.write(ansiEscapes.clearScreen); // 只清屏，不重置
-    stdout.write(ansiEscapes.cursorTo(0, 0)); // 移动光标到顶部
+    clearVisibleScreen(stdout);
     // 不使用滚动缓冲区清理，避免IDEA终端的兼容性问题
   } else if (process.platform === 'win32') {
     // On Windows, use full reset to properly clear screen and scroll buffer
     stdout.write('\x1Bc'); // Full reset
-    stdout.write(ansiEscapes.clearScreen);
-    stdout.write(ansiEscapes.cursorTo(0, 0));
+    clearVisibleScreen(stdout);
   } else {
     // On Unix-like systems, clear screen + scroll buffer + move cursor to top
     stdout.write('\x1B[2J\x1B[3J\x1B[H');
@@ -344,6 +355,107 @@ const App = ({
   const [feishuServerPort, setFeishuServerPort] = useState<number | undefined>(
     undefined,
   );
+
+  // 飞书消息处理状态
+  const [isFeishuProcessing, setIsFeishuProcessing] = useState(false);
+  const [isFeishuBotRunning, setIsFeishuBotRunning] = useState(false);
+
+  // 飞书仪表板状态
+  const [feishuRoutes, setFeishuRoutes] = useState<Record<string, FeishuProjectRoute>>({});
+  // 「当前正在干活（Agent 仍在处理）」的群集合，可同时多个。
+  const [feishuActiveGroupChatIds, setFeishuActiveGroupChatIds] = useState<Set<string>>(new Set());
+  const [feishuGroupLogs, setFeishuGroupLogs] = useState<Record<string, FeishuMessageLogEntry[]>>({});
+  const [feishuBotName, setFeishuBotName] = useState<string>('');
+  const [feishuPlatform, setFeishuPlatform] = useState<string>('feishu');
+  const [feishuChatNames, setFeishuChatNames] = useState<Record<string, string>>({});
+
+  // 监听飞书消息处理与Bot运行状态事件
+  useEffect(() => {
+    const handleFeishuProcessingStart = () => {
+      setIsFeishuProcessing(true);
+    };
+
+    const handleFeishuProcessingEnd = () => {
+      setIsFeishuProcessing(false);
+    };
+
+    const handleFeishuBotStarted = (payload?: { botName?: string; platform?: string }) => {
+      setIsFeishuBotRunning(true);
+      if (payload?.botName !== undefined) {
+        setFeishuBotName(payload.botName);
+      }
+      if (payload?.platform !== undefined) {
+        setFeishuPlatform(payload.platform);
+      }
+    };
+
+    const handleFeishuBotStopped = () => {
+      setIsFeishuBotRunning(false);
+    };
+
+    // 仪表板事件：群处理开始 —— 加入「正在干活」集合（可同时多个群）
+    const handleFeishuGroupProcessingStart = (chatId: string) => {
+      setFeishuActiveGroupChatIds(prev => {
+        if (prev.has(chatId)) return prev;
+        const next = new Set(prev);
+        next.add(chatId);
+        return next;
+      });
+    };
+
+    // 仪表板事件：群处理结束 —— 从「正在干活」集合移除
+    const handleFeishuGroupProcessingEnd = (chatId: string) => {
+      setFeishuActiveGroupChatIds(prev => {
+        if (!prev.has(chatId)) return prev;
+        const next = new Set(prev);
+        next.delete(chatId);
+        return next;
+      });
+    };
+
+    // 仪表板事件：消息日志
+    const handleFeishuMessageLog = (chatId: string, text: string, direction: 'in' | 'out' | 'tool', timestamp: number) => {
+      setFeishuGroupLogs(prev => {
+        const existing = prev[chatId] ?? [];
+        const entry: FeishuMessageLogEntry = { chatId, text, direction, timestamp };
+        // 最多保留 50 条日志
+        const updated = [...existing, entry].slice(-50);
+        return { ...prev, [chatId]: updated };
+      });
+    };
+
+    // 仪表板事件：路由更新
+    const handleFeishuProjectRoutesUpdated = (routes: Record<string, FeishuProjectRoute>) => {
+      setFeishuRoutes(routes);
+    };
+
+    // 仪表板事件：群名解析完成（chatId → 群名）。合并进已有映射，避免覆盖。
+    const handleFeishuChatNamesResolved = (chatNames: Record<string, string>) => {
+      setFeishuChatNames(prev => ({ ...prev, ...chatNames }));
+    };
+
+    appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+    appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+    appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+    appEvents.on(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+    appEvents.on(AppEvent.FeishuGroupProcessingStart, handleFeishuGroupProcessingStart);
+    appEvents.on(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
+    appEvents.on(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
+    appEvents.on(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
+    appEvents.on(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+
+    return () => {
+      appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
+      appEvents.off(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
+      appEvents.off(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
+      appEvents.off(AppEvent.FeishuBotStopped, handleFeishuBotStopped);
+      appEvents.off(AppEvent.FeishuGroupProcessingStart, handleFeishuGroupProcessingStart);
+      appEvents.off(AppEvent.FeishuGroupProcessingEnd, handleFeishuGroupProcessingEnd);
+      appEvents.off(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
+      appEvents.off(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
+      appEvents.off(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+    };
+  }, []);
 
   // 监听飞书服务器事件
   useEffect(() => {
@@ -489,10 +601,14 @@ const App = ({
   // 🎯 小窗口优化 - 根据窗口大小调整渲染策略
   const smallWindowConfig = useSmallWindowOptimization();
 
-  const refreshStatic = useCallback(() => {
+  const refreshStatic = useCallback((clearScrollback = false) => {
     // 🎯 小窗口优化 - 在极小窗口下减少清屏操作
     if (smallWindowConfig.sizeLevel !== 'tiny') {
-      clearScreenWithScrollBuffer(stdout);
+      if (clearScrollback) {
+        clearScreenWithScrollBuffer(stdout);
+      } else {
+        clearVisibleScreen(stdout);
+      }
     }
     setStaticKey((prev) => prev + 1);
   }, [setStaticKey, stdout, smallWindowConfig.sizeLevel]);
@@ -883,6 +999,115 @@ const App = ({
     handleWizardCancel,
   } = useCustomModelWizard(settings, addItem, config);
 
+  // 🎭 辩论向导。useDebateWizard 在 wizard 完成时需要 submitQuery 提交开场白，
+  // 但 submitQuery 是 useGeminiStream 返回的、定义在下面。用 ref 中转解决前后依赖。
+  // 同时共享一个 AbortController ref 给 useGeminiStream 和 useDebateWizard，
+  // 让首启 switchModel 和自动推进的 switchModel 用同一个可中止句柄。
+  type DebateSubmitQuery = (
+    query: PartListUnion,
+    options?: { isContinuation?: boolean; silent?: boolean },
+  ) => void;
+  const submitQueryForDebateRef = useRef<DebateSubmitQuery | null>(null);
+  const debateAdvanceAbortRef = useRef<AbortController | null>(null);
+  const {
+    isDebateWizardOpen,
+    debateWizardModels,
+    debateWizardPresets,
+    debatePreferredLanguage,
+    openDebateWizard,
+    handleDebateWizardComplete,
+    handleDebateWizardCancel,
+    handleDebateLanguageSelected,
+    handleResumeDebate,
+  } = useDebateWizard({
+    settings,
+    config,
+    addItem,
+    submitQuery: (q, o) => {
+      const impl = submitQueryForDebateRef.current;
+      if (impl) {
+        impl(q, o);
+        return;
+      }
+      // submitQuery 尚未挂上。实践中这种 race 窗口非常窄（只发生在首次
+      // App mount 后立即打开 wizard 并 confirm）。轮询重试最多 ~1s，
+      // 超时后补一条 ERROR 提示，避免静默丢消息。
+      const deadline = Date.now() + 1000;
+      const tick = () => {
+        const impl2 = submitQueryForDebateRef.current;
+        if (impl2) {
+          impl2(q, o);
+          return;
+        }
+        if (Date.now() > deadline) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: '❌ 辩论启动失败：submitQuery 未就绪（超时 1s）。请再次执行 /debate。',
+            },
+            Date.now(),
+          );
+          endDebate();
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      setTimeout(tick, 50);
+    },
+    advanceAbortRef: debateAdvanceAbortRef,
+  });
+
+  // 🎯 目标驱动模式向导。和 debate 一样，submitQuery 在下面才被定义，
+  // 走同一个 ref 中转。
+  const submitQueryForGoalRef = useRef<DebateSubmitQuery | null>(null);
+
+  // ⚡ Workflow panel state
+  const [isWorkflowPanelOpen, setIsWorkflowPanelOpen] = useState(false);
+  const openWorkflowPanel = useCallback(() => setIsWorkflowPanelOpen(true), []);
+  const closeWorkflowPanel = useCallback(() => {
+    setIsWorkflowPanelOpen(false);
+    // Force a static refresh so buffered history items appear immediately after closing
+    refreshStatic();
+  }, [refreshStatic]);
+
+  const {
+    isGoalWizardOpen,
+    openGoalWizard,
+    handleGoalWizardComplete,
+    handleGoalWizardCancel,
+  } = useGoalWizard({
+    config,
+    addItem,
+    submitQuery: (q, o) => {
+      const impl = submitQueryForGoalRef.current;
+      if (impl) {
+        impl(q, o);
+        return;
+      }
+      // submitQuery 尚未挂上：与 debate 同样的 race window，轮询重试 1s。
+      const deadline = Date.now() + 1000;
+      const tick = () => {
+        const impl2 = submitQueryForGoalRef.current;
+        if (impl2) {
+          impl2(q, o);
+          return;
+        }
+        if (Date.now() > deadline) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: t('goalWizard.submit_not_ready'),
+            },
+            Date.now(),
+          );
+          return;
+        }
+        setTimeout(tick, 50);
+      };
+      setTimeout(tick, 50);
+    },
+  });
+
   const {
     isSettingsMenuDialogOpen,
     openSettingsMenuDialog,
@@ -1017,7 +1242,7 @@ const App = ({
     addItem(
       {
         type: MessageType.INFO,
-        text: 'Refreshing hierarchical memory (DEEPV.md or other context files)...',
+        text: t('memory.refreshing'),
       },
       Date.now(),
     );
@@ -1036,9 +1261,8 @@ const App = ({
       config.setGeminiMdFileCount(fileCount);
       setGeminiMdFileCount(fileCount);
 
-      let successMessage = `Memory refreshed successfully. ${memoryContent.length > 0 ? `Loaded ${memoryContent.length} characters from ${fileCount} file(s).` : 'No memory content found.'}`;
-      if (fileCount > 0 && filePaths.length > 0) {
-        successMessage += `\nMemory files:\n${filePaths.map((f) => `  - ${f}`).join('\n')}`;
+      let successMessage = memoryContent.length > 0 ? tp('memory.refresh_success_loaded', { characters: memoryContent.length, count: fileCount }) : t('memory.refresh_success_no_content');      if (fileCount > 0 && filePaths.length > 0) {
+        successMessage += tp('memory.files_list', { files: filePaths.map(f => `  - ${f}`).join('\n') });
       }
 
       addItem(
@@ -1061,7 +1285,7 @@ const App = ({
       addItem(
         {
           type: MessageType.ERROR,
-          text: `Error refreshing memory: ${errorMessage}`,
+          text: tp('memory.refresh_error', { errorMessage }),
         },
         Date.now(),
       );
@@ -1185,12 +1409,43 @@ const App = ({
   const isInitialMount = useRef(true);
   const completionSummaryCounterRef = useRef(0);
 
-  const widthFraction = 0.9;
-  const inputWidth = Math.max(
-    20,
-    Math.floor(terminalWidth * widthFraction) - 3,
-  );
-  const suggestionsWidth = Math.max(60, Math.floor(terminalWidth * 0.8));
+  // 智能主区域和输入框宽度计算：
+  // 为了让输入框、边线和历史消息在宽终端下能够绝对顶头、完美撑满屏幕：
+  // - 宽终端（≥ 80）：
+  //   主区域直接占满全宽并仅在左右预留各 1 字符的边距（即 terminalWidth - 2）。
+  //   输入框内容分配至最宽限度：terminalWidth - 4（扣除 2 字符 Box Padding 和 2 字符前缀符号）。
+  //   这样在 InputPrompt 中，`inputWidth + 2` 的边线字符长度恰好为 `terminalWidth - 2`。
+  //   加上 1 字符左 Padding 和 1 字符右 Padding，边线和内容将完美顶格在 column 1 和 column terminalWidth - 1 上，
+  //   与右上角的 "YOLO mode" 提示符在视觉上达到完美的顶头对齐！
+  // - 窄终端（< 80）：使用 95% 比例。
+  const mainAreaWidth = useMemo(() => {
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 2
+        : Math.floor(terminalWidth * 0.95)
+    );
+  }, [terminalWidth]);
+
+  const inputWidth = useMemo(() => {
+    return Math.max(
+      20,
+      terminalWidth >= 80
+        ? terminalWidth - 4
+        : mainAreaWidth - 3
+    );
+  }, [terminalWidth, mainAreaWidth]);
+
+  const inputViewportHeight = useMemo(() => {
+    return Math.max(
+      1,
+      Math.min(15, Math.floor(inputWidth / 10)),
+    );
+  }, [inputWidth]);
+
+  const suggestionsWidth = useMemo(() => {
+    return Math.max(60, Math.floor(mainAreaWidth * 0.9));
+  }, [mainAreaWidth]);
 
   // Utility callbacks
   const isValidPath = useCallback((filePath: string): boolean => {
@@ -1262,6 +1517,10 @@ const App = ({
     openSettingsMenuDialog, // 🆕 传递 openSettingsMenuDialog
     openInitChoiceDialog, // 🆕 传递 openInitChoiceDialog
     openPluginInstallDialog, // 🆕 传递 openPluginInstallDialog
+    openDebateWizard, // 🎭 传递 openDebateWizard
+    handleResumeDebate, // 🎭 传递 /debate continue 的恢复 handler
+    openGoalWizard, // 🎯 传递 openGoalWizard
+    openWorkflowPanel, // ⚡ 传递 openWorkflowPanel
   );
 
   const {
@@ -1292,13 +1551,32 @@ const App = ({
     setEstimatedInputTokens, // 传递预估token设置函数
     settings, // 传递设置对象以支持异步模型配置更新
     customProxyUrl,
+    debateAdvanceAbortRef, // 🎭 共享的辩论推进 AbortController ref
   );
+
+  // 🎭 把真正的 submitQuery 绑到 ref 上，让 useDebateWizard 能在开始辩论时用它
+  // 发开场白（提交给首个模型）。effect 每次 submitQuery 引用变化时更新。
+  useEffect(() => {
+    submitQueryForDebateRef.current = submitQuery;
+    submitQueryForGoalRef.current = submitQuery;
+  }, [submitQuery]);
+
+  // 当进入响应状态（工作中时），重置 token 使用状态，避免在刚开始时显示旧的数据
+  useEffect(() => {
+    if (streamingState === StreamingState.Responding) {
+      setLastTokenUsage(null);
+    }
+  }, [streamingState]);
 
   // 🎯 动画标题图标 - AI繁忙时循环显示 ✱ ✻ ✳️，空闲时显示 🚀
   const currentTitleIcon = useAnimatedTitleIcon(streamingState);
   useEffect(() => {
-    updateWindowTitleIcon(currentTitleIcon);
-  }, [currentTitleIcon]);
+    if (!isFeishuBotRunning) {
+      updateWindowTitleIcon(currentTitleIcon);
+    } else {
+      process.stdout.write(`\x1b]2;Feishu Gateway Mode |  DeepV Code\x07`);
+    }
+  }, [currentTitleIcon, isFeishuBotRunning]);
 
   // 🎯 监听后台任务完成事件
   useBackgroundTaskNotifications({
@@ -1491,19 +1769,20 @@ const App = ({
   }, [streamingState, pendingBackgroundNotifications, config, submitQuery]);
 
   const sendPromptImmediately = useCallback(
-    (promptText: string, pauseQueueUntilResponse = false) => {
+    (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
       if (logoShows) {
         clearScreenWithScrollBuffer(stdout);
         setLogoShows(false);
       }
       setCumulativeCredits(0);
+      setLastTokenUsage(null);
 
       // 如果需要暂停队列直到响应开始
       if (pauseQueueUntilResponse) {
         setQueuePaused(true);
       }
 
-      submitQuery(promptText);
+      submitQuery(promptText, silent ? { silent: true } : undefined);
     },
     [logoShows, stdout, submitQuery],
   );
@@ -1551,7 +1830,7 @@ const App = ({
   );
 
   const handlePromptOrQueue = useCallback(
-    (promptText: string, pauseQueueUntilResponse = false) => {
+    (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
       const sanitizedPrompt = promptText.trim();
       if (!sanitizedPrompt) {
         return;
@@ -1563,7 +1842,7 @@ const App = ({
         return;
       }
 
-      sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse);
+      sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
     },
     [
       addItem,
@@ -1617,6 +1896,8 @@ const App = ({
     async (submittedValue: string) => {
       const trimmedValue = submittedValue.trim();
       if (trimmedValue.length > 0) {
+        // 更新最后用户交互时间（goal 看门狗用）
+        lastUserInteractionRef.current = Date.now();
         // Clear screen once when user first submits message after logo is shown
         if (logoShows) {
           clearScreenWithScrollBuffer(stdout);
@@ -1664,23 +1945,23 @@ const App = ({
                 return;
               }
 
-              if (slashCommandResult.type === 'handled') {
-                // Slash命令已处理，不需要继续
-                return;
-              } else if (slashCommandResult.type === 'submit_prompt') {
-                // Slash命令返回需要提交的内容
-                handlePromptOrQueue(slashCommandResult.content);
-                return;
-              } else if (slashCommandResult.type === 'schedule_tool') {
-                // Slash命令要求执行工具，这里可以扩展处理
-                return;
-              } else if (slashCommandResult.type === 'select_session') {
-                // 开启 Session 选择对话框
-                setSessionSelectData(slashCommandResult.sessions);
-                return;
-              } else if (slashCommandResult.type === 'refine_result') {
-                // 润色结果，显示确认界面
-                console.log('[App] 收到 refine_result，设置 refineResult 状态');
+            if (slashCommandResult.type === 'handled') {
+              // Slash命令已处理，不需要继续
+              return;
+            } else if (slashCommandResult.type === 'submit_prompt') {
+              // Slash命令返回需要提交的内容
+              handlePromptOrQueue(slashCommandResult.content, false, slashCommandResult.silent);
+              return;
+            } else if (slashCommandResult.type === 'schedule_tool') {
+              // Slash命令要求执行工具，这里可以扩展处理
+              return;
+            } else if (slashCommandResult.type === 'select_session') {
+              // 开启 Session 选择对话框
+              setSessionSelectData(slashCommandResult.sessions);
+              return;
+            } else if (slashCommandResult.type === 'refine_result') {
+              // 润色结果，显示确认界面
+              console.log('[App] 收到 refine_result，设置 refineResult 状态');
 
                 // 计算截断阈值
                 const maxRowsSent = getDefaultMaxRows('sent', terminalHeight);
@@ -1736,7 +2017,7 @@ const App = ({
 
   const buffer = useTextBuffer({
     initialText: '',
-    viewport: { height: 50, width: inputWidth }, // Increased from 10 to 50 to support large pastes
+    viewport: { height: inputViewportHeight, width: inputWidth },
     stdin,
     setRawMode,
     isValidPath,
@@ -1786,6 +2067,10 @@ const App = ({
     estimatedInputTokens: loadingEstimatedTokens,
   } = useLoadingIndicator(streamingState, estimatedInputTokens);
 
+  // 🎯 当前待办列表（响应式）：用于在输入框上方原地渲染固定的任务面板，
+  //    避免 todo_write 每次更新都在滚动区重复出现一整块列表。
+  const todos = useTodos();
+
   // When transitioning from Responding to Idle, capture the elapsed time for printing
   const lastElapsedTimeBeforeIdleRef = useRef<number>(0);
   useEffect(() => {
@@ -1793,6 +2078,82 @@ const App = ({
       lastElapsedTimeBeforeIdleRef.current = elapsedTime;
     }
   }, [elapsedTime, streamingState]);
+
+  // 🎯 /goal 模式心跳：每秒探测 GeminiClient.activeGoalContext，让底部状态栏
+  // 在 goal 启动 / clear 后 1s 内切换显示。详见 useGoalActive 注释。
+  const isGoalActive = useGoalActive(config);
+
+  // workflow 工具执行期间显示状态栏指示器
+  // 扫描 pendingHistoryItems（实时工具状态）中是否有 workflow 工具正在执行
+  const isWorkflowActive = useMemo(() => {
+    const isWorkflowRunning = (tools: IndividualToolCallDisplay[]): boolean =>
+      tools.some(t =>
+        (t.toolId === 'workflow') &&
+        (t.status === ToolCallStatus.Executing || t.status === ToolCallStatus.SubAgentRunning),
+      );
+    return pendingHistoryItems.some(item =>
+      item.type === 'tool_group' && isWorkflowRunning(item.tools),
+    );
+  }, [pendingHistoryItems]);
+
+  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
+
+  // ──── Goal 模式 Idle 看门狗 ────
+  // 问题：某些 AI 模型在 /goal 模式下会"发呆"——既不继续工作，也不调用
+  // goal_achieved。表现为 streamingState=Idle 但 goal 契约未释放。
+  // 解决：跟踪上次用户交互时间；如果 goal active + idle + 60s 无交互，
+  // 自动 silent-submit 一条提示消息让 AI 继续。
+  const GOAL_IDLE_TIMEOUT_MS = 60_000;
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const goalIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 追踪用户交互：任何提交输入、slash命令等都会更新此时间戳
+  // 我们在 handleFinalSubmit 中手动更新，避免闭包依赖问题
+
+  useEffect(() => {
+    // 卫语句：只有在 goal 活跃、当前空闲、且非退出状态时，才需要开启看门狗
+    const isWatchdogNeeded = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+    if (!isWatchdogNeeded) {
+      return;
+    }
+
+    const elapsed = Date.now() - lastUserInteractionRef.current;
+    const remainingTime = Math.max(0, GOAL_IDLE_TIMEOUT_MS - elapsed);
+
+    goalIdleTimerRef.current = setTimeout(() => {
+      goalIdleTimerRef.current = null;
+
+      // 触发时二次确认条件仍然满足
+      const isStillEligible = isGoalActive && streamingState === StreamingState.Idle && !getIsQuitting();
+      if (!isStillEligible) {
+        return;
+      }
+
+      // 发送前更新时间戳，避免消息发出后立即又触发（防抖）
+      lastUserInteractionRef.current = Date.now();
+
+      const goalContinuePrompt =
+        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
+        '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
+        '请立即执行以下检查：\n' +
+        '1. 调用 local_time 确认当前时间和你的工作时长\n' +
+        '2. 对照目标契约检查完成情况——哪些达标、哪些还差\n' +
+        '3. 如果全部达标 → 调用 goal_achieved 声明完成\n' +
+        '4. 如果未达标 → 继续执行剩余工作（调用工具、写代码、运行测试等）\n\n' +
+        '目标契约仍在生效中，请继续工作。';
+
+      submitQuery(goalContinuePrompt, { silent: true });
+    }, remainingTime);
+
+    return () => {
+      if (goalIdleTimerRef.current) {
+        clearTimeout(goalIdleTimerRef.current);
+        goalIdleTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGoalActive, streamingState, getIsQuitting]);
 
   const { shouldShowSummary, completionElapsedTime } = useTaskCompletionSummary(
     streamingState,
@@ -1805,8 +2166,6 @@ const App = ({
       completionSummaryCounterRef.current += 1;
     }
   }, [shouldShowSummary]);
-
-  const showAutoAcceptIndicator = useAutoAcceptIndicator({ config });
 
   const handleExit = useCallback(
     (
@@ -1854,6 +2213,12 @@ const App = ({
     //     meta: key.meta
     //   });
     // }
+
+    // ⚡ Workflow 面板按键拦截（Esc 只关闭面板，不触发 abort）
+    if (isWorkflowPanelOpen && key.escape) {
+      closeWorkflowPanel();
+      return;
+    }
 
     // 🎯 后台任务面板按键处理（最高优先级）
     if (showBackgroundTaskPanel) {
@@ -2132,14 +2497,14 @@ const App = ({
     fetchUserMessages();
   }, [history, logger]);
 
-  const shouldRenderInputPrompt = !refineResult && !initError;
+  const shouldRenderInputPrompt = !refineResult && !initError && !isFeishuProcessing;
 
   const handleClearScreen = useCallback(() => {
     clearItems();
     clearConsoleMessagesState();
-    clearScreenWithScrollBuffer(stdout);
-    refreshStatic();
-  }, [clearItems, clearConsoleMessagesState, stdout, refreshStatic]);
+    todoStore.clear(); // 同步清空固定任务面板
+    refreshStatic(true);
+  }, [clearItems, clearConsoleMessagesState, refreshStatic]);
 
   const mainControlsRef = useRef<DOMElement>(null);
   const pendingHistoryItemRef = useRef<DOMElement>(null);
@@ -2179,8 +2544,7 @@ const App = ({
     [terminalHeight, footerHeight],
   );
 
-  // Linus fix: 移动变量定义到useMemo之前，避免使用未定义变量的错误
-  const mainAreaWidth = Math.floor(terminalWidth * 0.9);
+  // mainAreaWidth 已在组件顶层定义为基于终端宽度的智能响应式 useMemo，此处无需重复定义。
 
   // 🔧 优化：根据终端大小智能调整最大高度
   // - 小窗口（≤30 行）：使用 60% 可用高度，避免撑破布局
@@ -2446,7 +2810,7 @@ const App = ({
 
   return (
     <StreamingContext.Provider value={streamingState}>
-      <Box flexDirection="column" width="90%" ref={rootUiRef}>
+      <Box flexDirection="column" width="100%" ref={rootUiRef}>
         {/* Move UpdateNotification outside Static so it can re-render when updateMessage changes */}
         {updateMessage ? <UpdateNotification message={updateMessage} /> : null}
 
@@ -2456,7 +2820,7 @@ const App = ({
          * ensure that it's statically rendered.
          *
          * Background on the Static Item: Anything in the Static component is written a single time
-         * to the console. Think of it like doing a console.log and then never using ANSI codes to
+         * to the console. Think of it like doing a logger.debug and then never using ANSI codes to
          * clear that content ever again. Effectively it has a moving frame that every time new static
          * content is set it'll flush content to the terminal and move the area which it's "clearing"
          * down a notch. Without Static the area which gets erased and redrawn continuously grows.
@@ -2466,7 +2830,9 @@ const App = ({
         </Static>
         <OverflowProvider>
           <Box ref={pendingHistoryItemRef} flexDirection="column">
-            {pendingHistoryItems.map((item, i) => (
+            {/* Suppress intermediate tool output while WorkflowPanel is open to prevent flicker.
+                Items are buffered in pendingHistoryItems and will appear in history when the panel closes. */}
+            {!isWorkflowPanelOpen && pendingHistoryItems.map((item, i) => (
               <HistoryItemDisplay
                 key={i}
                 availableTerminalHeight={availableTerminalHeight}
@@ -2479,14 +2845,22 @@ const App = ({
                 isFocused={!isEditorDialogOpen}
               />
             ))}
+            {isWorkflowPanelOpen && pendingHistoryItems.length > 0 && (
+              <Box paddingX={1}>
+                <Text dimColor>{pendingHistoryItems.length} update{pendingHistoryItems.length !== 1 ? 's' : ''} pending (will show when panel closes)</Text>
+              </Box>
+            )}
             <ShowMoreLines />
           </Box>
         </OverflowProvider>
 
         {showHelp ? <Help commands={slashCommands} /> : null}
 
-        {/* 🆕 显示思考过程框（在pending内容后，一旦开始内容就隐藏） */}
-        {reasoning && !hasContentStarted ? (
+        {/* 显示思考过程框：reasoning 存在就显示。
+            正文开始 / 流式结束 / 用户取消 / 新一轮提问 时由
+            useGeminiStream 立即置 null 隐藏。 */}
+
+        {reasoning ? (
           <ReasoningDisplay
             reasoning={reasoning}
             terminalHeight={terminalHeight}
@@ -2554,6 +2928,33 @@ const App = ({
               <CustomModelWizard
                 onComplete={handleWizardComplete}
                 onCancel={handleWizardCancel}
+              />
+            </Box>
+          ) : isDebateWizardOpen ? (
+            <Box flexDirection="column">
+              <DebateWizard
+                availableModels={debateWizardModels}
+                presets={debateWizardPresets}
+                preferredLanguage={debatePreferredLanguage}
+                onComplete={handleDebateWizardComplete}
+                onCancel={handleDebateWizardCancel}
+                onLanguageSelected={handleDebateLanguageSelected}
+              />
+            </Box>
+          ) : isGoalWizardOpen ? (
+            <Box flexDirection="column">
+              <GoalWizard
+                onComplete={handleGoalWizardComplete}
+                onCancel={handleGoalWizardCancel}
+              />
+            </Box>
+          ) : isWorkflowPanelOpen ? (
+            <Box flexDirection="column">
+              <WorkflowPanel
+                isVisible={isWorkflowPanelOpen}
+                onClose={closeWorkflowPanel}
+                terminalWidth={mainAreaWidth}
+                terminalHeight={terminalHeight}
               />
             </Box>
           ) : isPluginInstallDialogOpen ? (
@@ -2657,6 +3058,7 @@ const App = ({
                 onOpenTheme={openThemeDialog}
                 onOpenEditor={openEditorDialog}
                 onOpenModel={openModelDialog}
+                onReloadMemory={performMemoryRefresh}
               />
             </Box>
           ) : sessionSelectData ? (
@@ -2719,15 +3121,33 @@ const App = ({
                     : currentLoadingPhrase
                 }
                 elapsedTime={elapsedTime}
+                lastTokenUsage={lastTokenUsage}
               />
 
-              <Box
-                marginTop={1}
-                marginBottom={1}
-                display="flex"
-                justifyContent="space-between"
-                width="100%"
-              >
+
+
+              {/* 飞书 Bot 运行中 → 显示状态仪表板 */}
+              {isFeishuBotRunning ? (
+                <FeishuStatusDashboard
+                  routes={feishuRoutes}
+                  activeGroupChatIds={feishuActiveGroupChatIds}
+                  groupLogs={feishuGroupLogs}
+                  botName={feishuBotName}
+                  platform={feishuPlatform}
+                  isConnected={true}
+                  terminalWidth={terminalWidth}
+                  chatNames={feishuChatNames}
+                />
+              ) : (
+                <React.Fragment>
+                  {/* 正常模式下的内容区域 */}
+                  <Box
+                    marginTop={1}
+                    marginBottom={1}
+                    display="flex"
+                    justifyContent="space-between"
+                    width="100%"
+                  >
                 <Box>
                   {process.env.GEMINI_SYSTEM_MD ? (
                     <Text color={Colors.AccentRed}>|⌐■_■| </Text>
@@ -2753,14 +3173,23 @@ const App = ({
                 </Box>
                 <Box>
                   {planModeActive ? <PlanModeIndicator /> : null}
-                  {showAutoAcceptIndicator !== ApprovalMode.DEFAULT &&
-                  !shellModeActive &&
-                  !helpModeActive &&
-                  !planModeActive ? (
-                    <AutoAcceptIndicator
-                      approvalMode={showAutoAcceptIndicator}
-                    />
+                  {/* 🎯 状态栏优先级：plan > goal > YOLO/AUTO_EDIT。
+                      goal 模式下强制启用 YOLO，再显示 "YOLO mode (ctrl+y)"
+                      就只是噪音；用 goal 指示器替代它，告诉用户"长时任务在跑、
+                      已运行多久"，更有信息量。/goal clear 后 isGoalActive 变 false，
+                      立即恢复原有 YOLO/AUTO_EDIT 显示。 */}
+                  {!planModeActive && isGoalActive && !shellModeActive && !helpModeActive ? (
+                    <GoalActiveIndicator config={config} />
                   ) : null}
+                  {!planModeActive && !isGoalActive && isWorkflowActive && !shellModeActive && !helpModeActive ? (
+                    <WorkflowActiveIndicator />
+                  ) : null}
+                  {showAutoAcceptIndicator !== ApprovalMode.DEFAULT &&
+                    !shellModeActive && !helpModeActive && !planModeActive && !isGoalActive && !isWorkflowActive ? (
+                      <AutoAcceptIndicator
+                        approvalMode={showAutoAcceptIndicator}
+                      />
+                    ) : null}
                   {shellModeActive ? <ShellModeIndicator /> : null}
                   {helpModeActive ? <HelpModeIndicator /> : null}
                 </Box>
@@ -2769,7 +3198,7 @@ const App = ({
                 <IDEContextDetailDisplay openFiles={openFiles} />
               ) : null}
 
-              {/* 图片生成轮询动画 - 显示在 ContextSummaryDisplay 上方 */}
+              {/* 图片生成轮询动画 */}
               {imagePolling.isVisible ? (
                 <Box marginY={0} marginBottom={1}>
                   <ImagePollingSpinner
@@ -2790,15 +3219,16 @@ const App = ({
                 </Box>
               ) : null}
 
-              {/* Token Usage Display - 显示在输入框上方 */}
-              {lastTokenUsage &&
-              streamingState !== StreamingState.Responding ? (
+              {/* Token Usage Display - 飞书模式下隐藏 */}
+              {lastTokenUsage && streamingState !== StreamingState.Responding ? (
                 <TokenUsageDisplay
                   tokenUsage={lastTokenUsage}
                   inputWidth={inputWidth}
                   cumulativeCredits={cumulativeCredits}
                 />
               ) : null}
+            </React.Fragment>
+          )}
 
               {/* 队列消息显示 - 简洁模式（无Queued标签） */}
               {queuedPrompts.length > 0 && !initError ? (
@@ -2924,6 +3354,15 @@ const App = ({
                 </Box>
               ) : null}
 
+              {/* 📋 固定任务面板：常驻输入框上方，随 todo_write 原地更新，
+                   空列表或全部完成时自动隐藏（见 TodoPanel 内部逻辑）。 */}
+              <TodoPanel todos={todos} isActive={streamingState !== StreamingState.Idle} />
+
+              {/* 🎭 辩论模式指示器：常驻输入框上方，显示当前发言模型+总进度。
+                   相比历史消息里的"已切换到 xxx"提示，这个常驻指示器不会被
+                   React 18 批处理或流式响应覆盖，任何时候都能看清当前状态。 */}
+              <DebateIndicator />
+
               {shouldRenderInputPrompt ? (
                 <InputPrompt
                   buffer={buffer}
@@ -2943,17 +3382,7 @@ const App = ({
                   focus={isFocused}
                   vimHandleInput={vimHandleInput}
                   placeholder={placeholder}
-                  isModalOpen={
-                    isModelDialogOpen ||
-                    isCustomModelWizardOpen ||
-                    isAuthDialogOpen ||
-                    isThemeDialogOpen ||
-                    isEditorDialogOpen ||
-                    isInitChoiceDialogOpen ||
-                    isPluginInstallDialogOpen ||
-                    isToolConfirmationMenuOpen ||
-                    showBackgroundTaskPanel
-                  }
+                  isModalOpen={isModelDialogOpen || isCustomModelWizardOpen || isDebateWizardOpen || isGoalWizardOpen || isWorkflowPanelOpen || isAuthDialogOpen || isThemeDialogOpen || isEditorDialogOpen || isInitChoiceDialogOpen || isPluginInstallDialogOpen || isToolConfirmationMenuOpen || showBackgroundTaskPanel}
                   isExecutingTools={isExecutingTools}
                   isBusy={
                     streamingState !== StreamingState.Idle ||
@@ -2961,6 +3390,14 @@ const App = ({
                   }
                   isInSpecialMode={!!refineResult || queueEditMode}
                 />
+              ) : null}
+
+              {!shouldRenderInputPrompt && isFeishuProcessing ? (
+                <Box borderStyle="round" borderColor={Colors.AccentYellow} paddingX={1} marginBottom={1}>
+                  <Text color={Colors.AccentYellow} bold>
+                    {t('feishu.tui.agent_working')}
+                  </Text>
+                </Box>
               ) : null}
 
               {/* 🎯 后台任务提示 - 显示在输入框下方 */}
@@ -3024,6 +3461,7 @@ const App = ({
             ideConnectionStatus={ideConnectionStatus}
             config={config}
             terminalWidth={terminalWidth}
+            isFeishuProcessing={isFeishuProcessing}
           />
         </Box>
       </Box>

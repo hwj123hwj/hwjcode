@@ -6,23 +6,7 @@
  */
 
 import WebSocket from 'ws';
-import {
-  Config,
-  ToolRegistry,
-  executeToolCall,
-  GeminiClient,
-  ToolCallRequestInfo,
-  SceneType,
-  AuthType,
-  ApprovalMode,
-  GeminiChat,
-  MESSAGE_ROLES,
-  GeminiEventType,
-  ServerGeminiStreamEvent,
-  CoreToolScheduler,
-  ToolCall as EngineToolCall,
-  CompletedToolCall,
-} from 'deepv-code-core';
+import { Config, ToolRegistry, executeToolCall, GeminiClient, ToolCallRequestInfo, SceneType, AuthType, ApprovalMode, GeminiChat, MESSAGE_ROLES, GeminiEventType, ServerGeminiStreamEvent, CoreToolScheduler, ToolCall as EngineToolCall, CompletedToolCall, ToolConfirmationOutcome } from 'deepv-code-core';
 import { EditorType } from 'deepv-code-core';
 import { GenerateContentResponse, FunctionCall, Part } from '@google/genai';
 import { Content } from 'deepv-code-core';
@@ -34,13 +18,8 @@ import {
 } from './remoteProtocol.js';
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { remoteLogger } from './remoteLogger.js';
-import {
-  getMCPDiscoveryState,
-  MCPDiscoveryState,
-  getMCPServerStatus,
-  MCPServerStatus,
-} from 'deepv-code-core';
-import { t, isChineseLocale } from '../ui/utils/i18n.js';
+import { getMCPDiscoveryState, MCPDiscoveryState, getMCPServerStatus, MCPServerStatus } from 'deepv-code-core';
+import { t, tp, isChineseLocale } from '../ui/utils/i18n.js';
 
 /**
  * 格式化时间戳为 yyyy-mm-dd HH:mm:ss 格式
@@ -79,9 +58,23 @@ export class RemoteSession {
   private isProcessingInterrupted: boolean = false;
   private currentAbortController: AbortController | null = null;
 
+  // 🆕 远程确认支持：当危险命令需要用户确认时，暂存确认上下文
+  private pendingConfirmation: {
+    callId: string;
+    toolName: string;
+    command: string;
+    scheduler: CoreToolScheduler;
+  } | null = null;
+
   // UI展示记录存储 - 用于断线重连后恢复UI状态
   private uiDisplayRecords: UIDisplayRecord[] = [];
   private currentAIResponse: UIDisplayRecord | null = null; // 当前正在进行的AI响应
+  private lastPromptTokenCount = 0; // 最近一次 API 调用的 prompt token 数
+
+  // 思考流跟踪：每轮对话生成一个 thoughtId，所有 Thought/Reasoning chunk 共享
+  // null 表示当前轮次还没出现过思考事件；一旦发出过 Thought/Reasoning，
+  // 必须在轮次结束（status=idle、错误、中断）前发送一条 isComplete=true 收尾。
+  private currentThoughtId: string | null = null;
 
   constructor(
     private ws: WebSocket,
@@ -266,6 +259,13 @@ export class RemoteSession {
   }
 
   /**
+   * 获取最近一次 API 调用的 prompt token count（用于 context left 计算）
+   */
+  getLastPromptTokenCount(): number {
+    return this.lastPromptTokenCount;
+  }
+
+  /**
    * 处理命令消息
    */
   async handleCommand(message: CommandMessage): Promise<void> {
@@ -275,6 +275,47 @@ export class RemoteSession {
       command,
       messageId: message.id,
     });
+
+    // 🆕 如果当前正在等待用户确认危险命令，拦截输入作为确认回复
+    if (this.pendingConfirmation) {
+      const input = command.trim().toLowerCase();
+      const { callId, command: pendingCmd, scheduler } = this.pendingConfirmation;
+
+      if (['y', 'yes', 'ok', '确认', '是'].includes(input)) {
+        this.pendingConfirmation = null;
+        remoteLogger.info('RemoteSession', `用户确认执行危险命令: ${this.sessionId}`, { callId });
+        this.sendMessage(MessageFactory.createOutput(
+          `✅ 已确认，正在执行: \`${pendingCmd}\`\n`,
+          true, 'stdout'
+        ));
+        await scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.ProceedOnce);
+        return;
+      }
+
+      if (['n', 'no', 'cancel', '取消', '否'].includes(input)) {
+        this.pendingConfirmation = null;
+        remoteLogger.info('RemoteSession', `用户取消危险命令: ${this.sessionId}`, { callId });
+        this.sendMessage(MessageFactory.createOutput(
+          `🛑 已取消该操作。\n`,
+          true, 'stdout'
+        ));
+        await scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.Cancel);
+        return;
+      }
+
+      // 用户输入了无关内容，再次提醒
+      this.sendMessage(MessageFactory.createOutput(
+        `⚠️ 请先回复 y(确认) 或 n(取消) 来处理待确认的危险命令：\`${pendingCmd}\`\n`,
+        true, 'stdout'
+      ));
+      return;
+    }
+
+    // 🆕 斜杠命令预处理：在发送给 AI 之前拦截本地可处理的命令
+    if (command.trim().startsWith('/')) {
+      const handled = await this.handleSlashCommand(command.trim());
+      if (handled) return;
+    }
 
     // 如果有正在处理的指令，则等待完成
     if (this.currentProcessingPromise) {
@@ -323,6 +364,114 @@ export class RemoteSession {
       this.currentProcessingPromise = null;
       this.currentAIResponse = null;
       this.currentAbortController = null;
+      // 兜底：command 处理结束时确保任何挂起的思考段被收尾。
+      // 正常路径下 finalizeThought 已在 idle/error 之前调用，这里是防御性的。
+      this.finalizeThought();
+    }
+  }
+
+  /**
+   * 处理斜杠命令（本地拦截，不发给 AI）
+   * 返回 true 表示已处理，false 表示不是已知命令，需继续走 AI 流程
+   */
+  private async handleSlashCommand(input: string): Promise<boolean> {
+    const parts = input.substring(1).trim().split(/\s+/);
+    const cmd = parts[0]?.toLowerCase();
+    const args = parts.slice(1).join(' ').trim();
+
+    switch (cmd) {
+      case 'model':
+        await this.handleModelCommand(args);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * 处理 /model 命令：切换模型或显示当前模型
+   */
+  private async handleModelCommand(modelArg: string): Promise<void> {
+    try {
+      const { getAvailableModels } = await import('../ui/commands/modelCommand.js');
+      const { getModelNameFromDisplayName } = await import('../utils/modelUtils.js');
+
+      if (!modelArg) {
+        // /model 无参数：显示当前模型和可用列表
+        const currentModel = this.config.getModel() || 'auto';
+        const { modelInfos } = await getAvailableModels(undefined, this.config);
+        const modelList = ['auto', ...modelInfos.map(m => m.name)]
+          .map(m => `  ${m === currentModel ? '▶' : ' '} ${m}`)
+          .join('\n');
+
+        this.addUIRecord({ type: 'user_input', content: `/model`, status: 'completed' });
+        this.sendMessage(MessageFactory.createOutput(
+          `Current model: **${currentModel}**\n\nAvailable models:\n${modelList}\n\nUsage: \`/model <name>\` to switch.\n`,
+          true, 'stdout'
+        ));
+        this.sendMessage(MessageFactory.createStatus('idle', ''));
+        return;
+      }
+
+      this.addUIRecord({ type: 'user_input', content: `/model ${modelArg}`, status: 'completed' });
+
+      // 获取可用模型列表
+      const { modelInfos } = await getAvailableModels(undefined, this.config);
+      const availableNames = ['auto', ...modelInfos.map(m => m.name)];
+
+      // displayName → modelName 转换
+      const actualModelName = getModelNameFromDisplayName(modelArg, modelInfos);
+
+      if (!availableNames.includes(actualModelName)) {
+        const list = availableNames.join(', ');
+        this.sendMessage(MessageFactory.createOutput(
+          `❌ Unknown model: \`${modelArg}\`\n\nAvailable: ${list}\n`,
+          true, 'stdout'
+        ));
+        this.sendMessage(MessageFactory.createStatus('idle', ''));
+        return;
+      }
+
+      // 切换模型
+      this.sendMessage(MessageFactory.createOutput(
+        `⏳ Switching to model **${actualModelName}**...\n`,
+        true, 'stdout'
+      ));
+
+      this.config.setModel(actualModelName);
+
+      if (this.geminiClient) {
+        await this.geminiClient.waitForChatInitialized();
+        const switchResult = await this.geminiClient.switchModel(
+          actualModelName,
+          new AbortController().signal
+        );
+
+        if (!switchResult.success) {
+          this.sendMessage(MessageFactory.createOutput(
+            `❌ Failed to switch model: ${switchResult.error || 'Unknown error'}\n`,
+            true, 'stdout'
+          ));
+          this.sendMessage(MessageFactory.createStatus('error', 'Model switch failed'));
+          return;
+        }
+      }
+
+      this.sendMessage(MessageFactory.createOutput(
+        `✅ Model switched to **${actualModelName}**\n`,
+        true, 'stdout'
+      ));
+      this.sendMessage(MessageFactory.createStatus('idle', ''));
+
+      remoteLogger.info('RemoteSession', `模型切换成功: ${this.sessionId}`, { model: actualModelName });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sendMessage(MessageFactory.createOutput(
+        `❌ Model switch error: ${errMsg}\n`,
+        true, 'stdout'
+      ));
+      this.sendMessage(MessageFactory.createStatus('error', 'Model switch failed'));
+      remoteLogger.error('RemoteSession', `模型切换失败: ${this.sessionId}`, error);
     }
   }
 
@@ -331,6 +480,13 @@ export class RemoteSession {
    */
   handleInterrupt(): void {
     remoteLogger.info('RemoteSession', `收到中断信号: ${this.sessionId}`);
+
+    // 🆕 如果有待确认的危险命令，中断时自动取消
+    if (this.pendingConfirmation) {
+      const { callId, scheduler } = this.pendingConfirmation;
+      this.pendingConfirmation = null;
+      scheduler.handleConfirmationResponse(callId, ToolConfirmationOutcome.Cancel).catch(() => {});
+    }
 
     // 设置中断标志 - 这会在适当的检查点生效，确保已开始的工具能够完成
     this.isProcessingInterrupted = true;
@@ -353,6 +509,9 @@ export class RemoteSession {
       content: '指令已中断',
       status: 'completed',
     });
+
+    // 中断前先收尾思考段
+    this.finalizeThought();
 
     // 发送中断状态消息
     this.sendMessage(MessageFactory.createStatus('idle', '✅ 指令已中断'));
@@ -378,6 +537,8 @@ export class RemoteSession {
 
     // 初始化当前AI响应为null，在每轮开始时创建新的响应记录
     this.currentAIResponse = null;
+    // 新一次 processCommand 开始：确保上一轮残留的思考段被收尾
+    this.finalizeThought();
 
     try {
       if (!this.geminiChat || !this.toolRegistry) {
@@ -410,6 +571,9 @@ export class RemoteSession {
 
         // 🔧 修复: 为每轮AI响应创建新的记录，避免多轮响应被合并
         this.currentAIResponse = null;
+        // 每轮（含工具调用回合）开始时收尾上一轮的思考段。
+        // 这样工具→新一轮 reasoning 会获得新的 thoughtId，客户端能正确分段。
+        this.finalizeThought();
 
         // 发送当前轮次的消息给AI（可能是初始用户输入或工具执行结果）
         const responseStreamGenerator = this.geminiClient!.sendMessageStream(
@@ -468,6 +632,8 @@ export class RemoteSession {
 
         // 如果没有工具调用，对话结束
         if (toolCallRequests.length === 0) {
+          // idle 前先收尾思考段，确保客户端结束当前折叠区
+          this.finalizeThought();
           this.sendMessage(MessageFactory.createStatus('idle', '指令执行完成'));
           return;
         }
@@ -567,9 +733,9 @@ export class RemoteSession {
       return;
     }
 
-    remoteLogger.error('RemoteSession', `发送错误消息: ${this.sessionId}`, {
-      error,
-    });
+    remoteLogger.error('RemoteSession', `发送错误消息: ${this.sessionId}`, { error });
+    // 错误前先收尾思考段，避免客户端永远等不到 isComplete
+    this.finalizeThought();
     this.sendMessage(MessageFactory.createError(error));
     // 确保发送idle状态
     this.sendMessage(MessageFactory.createStatus('idle', '操作完成'));
@@ -584,6 +750,11 @@ export class RemoteSession {
     // 清空UI显示记录
     this.uiDisplayRecords = [];
     this.currentAIResponse = null;
+    // 清理思考段，避免下一轮误把它当延续
+    this.finalizeThought();
+
+    // 🆕 清理待确认状态
+    this.pendingConfirmation = null;
 
     // 清理对话历史
     this.geminiClient?.resetChat();
@@ -687,14 +858,61 @@ export class RemoteSession {
 
         break;
 
-      case GeminiEventType.ChatCompressed:
-        // 对话压缩通知
-        remoteLogger.info(
-          'RemoteSession',
-          `对话已自动压缩: ${this.sessionId}`,
-          event.value,
-        );
+      case GeminiEventType.ChatCompressed: {
+        // 对话压缩通知 - 按成功/降级/失败分类处理。
+        // 关键：remoteLogger 只写服务端本地日志文件，不经 WebSocket。
+        // 必须同时 sendMessage 把状态发到远端客户端，否则远程用户会遇到
+        // 和本地 CLI 一样的"无声停止"问题——屏幕上没任何提示，对话已被截停。
+        const payload = event.value;
+        if (payload?.success) {
+          if (payload.degraded) {
+            // 降级：全量压缩失败，但 MicroCompact 兜底清理了若干旧工具输出。
+            // 对话仍可继续，只是上下文更紧。告知用户但不升级为错误。
+            remoteLogger.info(
+              'RemoteSession',
+              `对话已自动压缩(轻量模式): ${this.sessionId}, clearedCount=${payload.clearedCount}, reason=${payload.reason}`,
+              payload,
+            );
+            this.sendMessage(
+              MessageFactory.createOutput(
+                `\n${tp('conversation.compress.degraded', {
+                  clearedCount: payload.clearedCount ?? 0,
+                })}\n`,
+                true,
+                'stdout',
+              ),
+            );
+          } else {
+            // 完整成功：对话无损继续，不需要打扰用户（与本地 CLI 行为一致，
+            // 本地只在 /compress 手动触发时才显式展示成功消息）。
+            remoteLogger.info(
+              'RemoteSession',
+              `对话已自动压缩(完整): ${this.sessionId}`,
+              payload,
+            );
+          }
+        } else {
+          // 失败：core 层已经 return new Turn() 停掉了这一轮对话。
+          // 必须告知远端用户要么手动 /compress 要么 /session new，
+          // 否则用户只看到"AI 没回复"，完全不知道发生了什么。
+          const reason = payload?.reason ?? 'unknown';
+          const isCircuitBreaker = reason.startsWith('circuit_breaker');
+          const failureKey = isCircuitBreaker
+            ? 'conversation.compress.failed.circuit_breaker'
+            : 'conversation.compress.failed.generic';
+          const message = payload
+            ? tp(failureKey, { reason })
+            : t('conversation.compress.failed.unknown');
+
+          remoteLogger.warn(
+            'RemoteSession',
+            `对话自动压缩失败: ${this.sessionId}, reason=${reason}`,
+            payload,
+          );
+          this.sendError(message);
+        }
         break;
+      }
 
       case GeminiEventType.MaxSessionTurns:
         // 达到最大会话轮次
@@ -722,17 +940,33 @@ export class RemoteSession {
               : 'Repetitive loop detected, conversation stopped';
         }
 
-        remoteLogger.warn(
-          'RemoteSession',
-          `检测到对话循环: ${this.sessionId} (type: ${loopType || 'unknown'})`,
-        );
+        remoteLogger.warn('RemoteSession', `检测到对话循环: ${this.sessionId} (type: ${loopType || 'unknown'})`);
+        this.finalizeThought();
         this.sendMessage(MessageFactory.createStatus('idle', loopMessage));
         break;
 
-      case GeminiEventType.Thought:
-        // AI思考过程 - 可以选择是否显示
-
+      case GeminiEventType.Thought: {
+        // Gemini 风格的离散 Thought 事件 (subject + description)
+        // 与本地 useGeminiStream 一致：本机端会在 LoadingIndicator 显示 subject。
+        // 远程端转发为 THOUGHT 消息，便于 Web/飞书展示思考标题与进展。
+        const thoughtId = this.ensureThoughtId();
+        const subject = (event.value as { subject?: string })?.subject ?? '';
+        const description = (event.value as { description?: string })?.description ?? '';
+        this.sendMessage(MessageFactory.createThought(thoughtId, subject, description));
         break;
+      }
+
+      case GeminiEventType.Reasoning: {
+        // OpenAI/Claude/DeepSeek 风格的流式 reasoning chunk
+        // 远程端按 thoughtId 聚合：所有 chunk 累加成完整 reasoning，
+        // 客户端可折叠展示。该轮结束时必须发一条 isComplete=true 收尾。
+        const thoughtId = this.ensureThoughtId();
+        const text = (event.value as { text?: string })?.text ?? '';
+        if (text) {
+          this.sendMessage(MessageFactory.createReasoningChunk(thoughtId, text, false));
+        }
+        break;
+      }
 
       case GeminiEventType.UserCancelled:
         // 用户取消
@@ -757,8 +991,10 @@ export class RemoteSession {
         break;
 
       case GeminiEventType.TokenUsage:
-        // Token使用统计
-
+        // Token使用统计 - 记录最近一次的 prompt token count（用于 context left 计算）
+        if (event.value && typeof event.value === 'object' && 'inputTokens' in event.value) {
+          this.lastPromptTokenCount = (event.value as { inputTokens: number }).inputTokens;
+        }
         break;
 
       default:
@@ -979,14 +1215,44 @@ export class RemoteSession {
         allToolsCompleted = true;
       },
       onToolCallsUpdate: (toolCalls: EngineToolCall[]) => {
-        // 工具状态更新回调
-        // remoteLogger.info('RemoteSession', `工具状态更新: ${this.sessionId}`, {
-        //   toolCount: toolCalls.length,
-        //   statuses: toolCalls.map(tc => {
-        //     const toolName = 'tool' in tc ? tc.tool.name : tc.request.name;
-        //     return `${toolName}:${tc.status}`;
-        //   })
-        // });
+        // 🆕 检测是否有工具进入 awaiting_approval 状态（危险命令确认）
+        const confirmingTool = toolCalls.find(tc => tc.status === 'awaiting_approval');
+        if (confirmingTool && !this.pendingConfirmation) {
+          const confirmingAny = confirmingTool as any;
+          const details = confirmingAny.confirmationDetails;
+          const command = details?.command || confirmingAny.request?.args?.command || String(confirmingAny.request?.args);
+          const warning = details?.warning || '这是一个需要确认的敏感操作。';
+          const toolName = confirmingAny.tool?.displayName || confirmingAny.tool?.name || confirmingAny.request?.name || 'Unknown';
+
+          // 保存确认上下文，等待用户回复
+          this.pendingConfirmation = {
+            callId: confirmingTool.request.callId,
+            toolName,
+            command: typeof command === 'string' ? command : JSON.stringify(command),
+            scheduler: toolScheduler,
+          };
+
+          // 向远程端发送人性化的确认提示文本
+          const promptText = [
+            ``,
+            `⚠️ **安全确认**`,
+            `AI 准备执行以下命令：`,
+            `\`${this.pendingConfirmation.command}\``,
+            ``,
+            `${warning}`,
+            ``,
+            `**请回复 y(确认执行) 或 n(取消)**`,
+            ``,
+          ].join('\n');
+
+          this.sendMessage(MessageFactory.createOutput(promptText, true, 'stdout'));
+          this.sendMessage(MessageFactory.createStatus('idle', '等待用户确认危险命令...'));
+
+          remoteLogger.info('RemoteSession', `发送远程确认请求: ${this.sessionId}`, {
+            callId: confirmingTool.request.callId,
+            command: this.pendingConfirmation.command,
+          });
+        }
       },
       onPreToolExecution: async (toolCallInfo) => {
         // 工具执行前的预处理
@@ -1040,6 +1306,12 @@ export class RemoteSession {
   ): Promise<void> {
     if (!content) return;
 
+    // 内容已经开始，对应的思考段落必须收尾。
+    // 这里保持本地 CLI useGeminiStream 的行为：reasoning 在 content 出现时被清空。
+    this.finalizeThought();
+
+
+
     // 🔧 修复: 为每轮AI响应创建独立的记录，避免多轮响应被合并
     if (!this.currentAIResponse) {
       this.currentAIResponse = this.addUIRecord({
@@ -1067,4 +1339,32 @@ export class RemoteSession {
     // 发送实时响应到前端
     this.sendMessage(MessageFactory.createOutput(content, false, 'stdout'));
   }
+
+  /**
+   * 获取或创建本轮 thoughtId。
+   * 同一个对话轮次内的所有 Thought / Reasoning 事件共享一个 id，
+   * 客户端用它聚合渲染 / 节流刷新。
+   */
+  private ensureThoughtId(): string {
+    if (!this.currentThoughtId) {
+      this.currentThoughtId = `t_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    }
+    return this.currentThoughtId;
+  }
+
+  /**
+   * 收尾当前思考段：发送一条 isComplete=true 的空 chunk，并清空 thoughtId。
+   * 调用时机：内容开始、轮次结束（idle/error/中断）、新轮次开始。
+   * 幂等：未发出过思考事件时无任何动作。
+   */
+  private finalizeThought(): void {
+    if (this.currentThoughtId) {
+      this.sendMessage(
+        MessageFactory.createReasoningChunk(this.currentThoughtId, '', true),
+      );
+      this.currentThoughtId = null;
+    }
+  }
+
+
 }

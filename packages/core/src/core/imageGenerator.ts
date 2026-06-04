@@ -128,6 +128,48 @@ export class ImageGeneratorAdapter {
   }
 
   /**
+   * Get upload URLs for multiple images (batch)
+   */
+  async getUploadUrls(files: Array<{ filename: string; content_type: string }>): Promise<{
+    files: Array<{
+      upload_url: string;
+      public_url: string;
+      storage_path: string;
+      filename: string;
+      expires_in: number;
+      required_headers: Record<string, string>;
+    }>;
+  }> {
+    const endpoint = '/web-api/images/upload-urls';
+    const proxyUrl = `${proxyAuthManager.getProxyServerUrl()}${endpoint}`;
+
+    logger.debug('[ImageGenerator] Getting batch upload URLs', { fileCount: files.length });
+
+    try {
+      const response = await this.fetchWithRetry(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ files }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (response.status === 401) {
+          throw new UnauthorizedError(`Authentication failed: ${errorText}`);
+        }
+        throw new Error(`Failed to get batch upload URLs (${response.status}): ${errorText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      logger.error('[ImageGenerator] Get batch upload URLs error', error);
+      throw error;
+    }
+  }
+
+  /**
    * Upload image to Google Cloud Storage
    */
   async uploadImage(uploadUrl: string, fileBuffer: Buffer | Uint8Array, contentType: string): Promise<void> {
@@ -155,11 +197,11 @@ export class ImageGeneratorAdapter {
   /**
    * Submit an image generation task
    */
-  async submitImageGenerationTask(prompt: string, size: string, fromImgUrl?: string, imageSize?: string): Promise<ImageGenerationTask> {
+  async submitImageGenerationTask(prompt: string, size: string, fromImgUrl?: string, imageSize?: string, imageUrls?: string[]): Promise<ImageGenerationTask> {
     const endpoint = '/web-api/images/generations';
     const proxyUrl = `${proxyAuthManager.getProxyServerUrl()}${endpoint}`;
 
-    logger.debug('[ImageGenerator] Submitting task', { prompt, size, fromImgUrl, imageSize });
+    logger.debug('[ImageGenerator] Submitting task', { prompt, size, fromImgUrl, imageSize, imageUrlsCount: imageUrls?.length });
 
     try {
       const body: any = {
@@ -169,6 +211,10 @@ export class ImageGeneratorAdapter {
 
       if (fromImgUrl) {
         body.from_img_url = fromImgUrl;
+      }
+
+      if (imageUrls && imageUrls.length > 0) {
+        body.image_urls = imageUrls;
       }
 
       if (imageSize) {

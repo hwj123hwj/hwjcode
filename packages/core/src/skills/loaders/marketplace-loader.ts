@@ -18,6 +18,7 @@ import {
 import { IPluginLoader } from './types.js';
 import { SettingsManager, SkillsPaths } from '../settings-manager.js';
 import { PluginStructureAnalyzer, ComponentParser } from '../parsers/index.js';
+import { isDirentDirectoryFollowingSymlinks } from '../utils/fs-helpers.js';
 import { PluginSource } from '../skill-types.js';
 
 /**
@@ -164,11 +165,7 @@ export class MarketplaceLoader implements IPluginLoader {
       }
     } else if (typeof source === 'string') {
       // 2. 字符串类型：相对路径
-      if (source.startsWith('./') || source.startsWith('../')) {
-        pluginDir = path.join(mpPath, source);
-      } else {
-        pluginDir = path.join(mpPath, source);
-      }
+      pluginDir = path.join(mpPath, source);
     } else {
       // 3. 未知类型，回退到插件名
       pluginDir = path.join(mpPath, pluginDef.name);
@@ -251,13 +248,11 @@ export class MarketplaceLoader implements IPluginLoader {
     }
 
     // 3. 自动发现组件
-    // strict 字段语义：
-    //   - undefined (默认): 总是自动发现并合并，确保发现所有组件
-    //   - false: 总是自动发现并合并（显式声明）
-    //   - true: 只使用显式定义的组件，不自动发现
-    const shouldAutoDiscover = pluginDef.strict !== false;
-
-    if (shouldAutoDiscover) {
+    // 始终执行自动发现，确保不遗漏任何组件
+    // 显式定义的组件优先（去重时保留显式定义的版本）
+    // 注：第三方插件的 strict 字段原意是限制 Claude Code 的行为，
+    //     不应阻止我们发现和加载组件
+    {
       // 自动发现标准目录
       // 按照标准目录和常见第三方工具目录进行自动发现
       const discoveryTasks = [
@@ -300,6 +295,9 @@ export class MarketplaceLoader implements IPluginLoader {
     }
 
     // 4. 构建 UnifiedPlugin
+    // 从 installed_plugins.json 读取实际启用状态
+    const pluginEnabled = installedInfo?.enabled ?? true;
+
     return {
       id,
       name: pluginDef.name,
@@ -326,7 +324,7 @@ export class MarketplaceLoader implements IPluginLoader {
         detectedFormat: 'deepv-code'
       },
       installed: true,
-      enabled: true,
+      enabled: pluginEnabled,
       marketplace: {
         id: marketplaceId,
         name: marketplaceId
@@ -338,14 +336,19 @@ export class MarketplaceLoader implements IPluginLoader {
   private async discoverPluginDirs(mpPath: string): Promise<string[]> {
     const dirs: string[] = [];
 
+    // 注意：必须跟随 symlink —— marketplace 根下 plugin 可能是软链接到开发中
+    // 的仓库（monorepo workspace 常见），`Dirent.isDirectory()` 对 symlink 返回
+    // false，所以要显式 follow。
+
     // 1. 检查根目录下的插件 (DeepV Code 风格)
     const rootEntries = await fs.readdir(mpPath, { withFileTypes: true });
     for (const entry of rootEntries) {
-      if (entry.isDirectory() && !entry.name.startsWith('.')) {
-        // 排除 plugins 目录，因为它会被单独处理
-        if (entry.name !== 'plugins') {
-          dirs.push(path.join(mpPath, entry.name));
-        }
+      if (entry.name.startsWith('.')) continue;
+      const isDir = await isDirentDirectoryFollowingSymlinks(entry, mpPath);
+      if (!isDir) continue;
+      // 排除 plugins 目录，因为它会被单独处理
+      if (entry.name !== 'plugins') {
+        dirs.push(path.join(mpPath, entry.name));
       }
     }
 
@@ -354,9 +357,10 @@ export class MarketplaceLoader implements IPluginLoader {
     if (await fs.pathExists(pluginsPath)) {
       const pluginEntries = await fs.readdir(pluginsPath, { withFileTypes: true });
       for (const entry of pluginEntries) {
-        if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          dirs.push(path.join(pluginsPath, entry.name));
-        }
+        if (entry.name.startsWith('.')) continue;
+        const isDir = await isDirentDirectoryFollowingSymlinks(entry, pluginsPath);
+        if (!isDir) continue;
+        dirs.push(path.join(pluginsPath, entry.name));
       }
     }
 

@@ -52,7 +52,14 @@ function getRipgrepPath(): string {
 
 
 /**
- * Find VSCode's built-in ripgrep binary
+ * Find VSCode's built-in ripgrep binary.
+ *
+ * VSCode stores ripgrep in different locations depending on version:
+ * - Old: @vscode/ripgrep → bin/rg.exe
+ * - New (1.99+): @vscode/ripgrep-universal → bin/{platform-arch}/rg.exe
+ *
+ * The appRoot (from vscode.env.appRoot) typically points to
+ * .../resources/app, where node_modules lives.
  */
 function findVSCodeRipgrep(): string {
   const platform = process.platform;
@@ -61,26 +68,40 @@ function findVSCodeRipgrep(): string {
   // Get VSCode app root from environment variable set by extension
   const appRoot = process.env.VSCODE_APP_ROOT;
   if (!appRoot) {
-    throw new Error('VSCODE_APP_ROOT environment variable not set. VSCode extension may not be properly initialized.');
+    logger.warn('[GrepTool] VSCODE_APP_ROOT not set, falling back to bundled ripgrep');
+    return rgPath;
   }
 
   logger.info(`[GrepTool] Using VSCode app root: ${appRoot}`);
 
-  // Common relative paths where VSCode stores ripgrep
-  const commonPaths = [
-    // VSCode standard locations
+  // Platform-arch directory name used by @vscode/ripgrep-universal
+  // Detect process.arch dynamically to support ARM, x64, and other architectures
+  const arch = process.arch; // e.g. 'x64', 'arm64', 'arm'
+  const platformArchDirs: Record<string, Record<string, string>> = {
+    win32: { x64: 'win32-x64', arm64: 'win32-arm64', arm: 'win32-arm' },
+    darwin: { x64: 'darwin-x64', arm64: 'darwin-arm64', arm: 'darwin-arm' },
+    linux: { x64: 'linux-x64', arm64: 'linux-arm64', arm: 'linux-arm' },
+  };
+  const platformArchDir = platformArchDirs[platform]?.[arch] ?? `${platform}-${arch}`;
+
+  // Search paths in priority order
+  const candidatePaths = [
+    // New VSCode (1.99+): @vscode/ripgrep-universal with platform-arch subdirectory
+    path.join(appRoot, 'node_modules', '@vscode', 'ripgrep-universal', 'bin', platformArchDir, binaryName),
+    // Old VSCode: @vscode/ripgrep with flat bin directory
     path.join(appRoot, 'node_modules.asar.unpacked', '@vscode', 'ripgrep', 'bin', binaryName),
     path.join(appRoot, 'node_modules', '@vscode', 'ripgrep', 'bin', binaryName),
   ];
 
-  for (const rgPath of commonPaths) {
-    if (fs.existsSync(rgPath)) {
-      logger.info(`[GrepTool] Found VSCode ripgrep at: ${rgPath}`);
-      return rgPath;
+  for (const rgCandidatePath of candidatePaths) {
+    if (fs.existsSync(rgCandidatePath)) {
+      logger.info(`[GrepTool] Found VSCode ripgrep at: ${rgCandidatePath}`);
+      return rgCandidatePath;
     }
   }
 
-  throw new Error(`Could not find VSCode's built-in ripgrep binary in app root: ${appRoot}`);
+  logger.warn(`[GrepTool] Could not find VSCode ripgrep in app root, falling back to bundled ripgrep`);
+  return rgPath;
 }
 
 
@@ -197,15 +218,23 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
    */
   private resolveAndValidatePath(relativePath?: string): string {
     // Handle both absolute and relative paths correctly
-    const targetPath = relativePath && path.isAbsolute(relativePath)
-      ? relativePath
-      : path.resolve(this.config.getTargetDir(), relativePath || '.');
+    const targetPath = path.normalize(
+      relativePath && path.isAbsolute(relativePath)
+        ? relativePath
+        : path.resolve(this.config.getTargetDir(), relativePath || '.'),
+    );
+    const normalizedRoot = path.normalize(this.config.getTargetDir());
 
     // Security Check: Ensure the resolved path is still within the root directory.
-    if (
-      !targetPath.startsWith(this.config.getTargetDir()) &&
-      targetPath !== this.config.getTargetDir()
-    ) {
+    // Use normalized paths for comparison; on Windows, also compare case-insensitively.
+    const isWithinRoot = targetPath === normalizedRoot ||
+      targetPath.startsWith(normalizedRoot + path.sep) ||
+      (process.platform === 'win32' &&
+        targetPath.toLowerCase() === normalizedRoot.toLowerCase()) ||
+      (process.platform === 'win32' &&
+        targetPath.toLowerCase().startsWith(normalizedRoot.toLowerCase() + path.sep));
+
+    if (!isWithinRoot) {
       throw new Error(
         `Path validation failed: Attempted path "${relativePath || '.'}" resolves outside the allowed root directory "${this.config.getTargetDir()}".`,
       );
@@ -627,33 +656,44 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
     const results: GrepMatch[] = [];
     const lines = output.split('\n').filter(line => line.trim());
 
-    // Determine if this is a single file search
-    const isSearchingFile = searchPath && fs.statSync(searchPath).isFile();
+    // Determine if this is a single file search (cache the stat call once)
+    let isSearchingFile = false;
+    if (searchPath) {
+      try { isSearchingFile = fs.statSync(searchPath).isFile(); } catch { /* ignore */ }
+    }
+
+    // Regex for parsing ripgrep output: filename:line_number:content
+    // Handles Windows drive letters (e.g., D:\path) correctly by matching
+    // a non-empty path followed by :digits:content
+    // Note: multiFileRe uses lazy .+? so it prefers matching the shortest path
+    // before the first :digits: boundary. For Windows drive letter paths like
+    // D:\path\file.ts:42:content, the regex correctly matches the full path
+    // because the :42: portion can only match digits after the colon.
+    const MULTI_FILE_RE = /^(.+?):([0-9]+):(.*)$/;
+    const SINGLE_FILE_RE = /^([0-9]+):(.*)$/;
 
     for (const line of lines) {
-      const firstColonIndex = line.indexOf(':');
-      if (firstColonIndex === -1) continue;
-
       let filePath: string;
       let lineNumberStr: string;
       let content: string;
 
       if (isSearchingFile) {
         // Single file format: line_number:content
-        lineNumberStr = line.substring(0, firstColonIndex);
-        content = line.substring(firstColonIndex + 1);
+        const m = line.match(SINGLE_FILE_RE);
+        if (!m) continue;
+        lineNumberStr = m[1]!;
+        content = m[2]!;
         // Use the relative path of the search target
-        filePath = path.relative(basePath, searchPath);
+        filePath = path.relative(basePath, searchPath!);
       } else {
         // Multi file format: filename:line_number:content
-        const secondColonIndex = line.indexOf(':', firstColonIndex + 1);
-        if (secondColonIndex === -1) {
-          // Malformed line, skip
-          continue;
-        }
-        filePath = line.substring(0, firstColonIndex);
-        lineNumberStr = line.substring(firstColonIndex + 1, secondColonIndex);
-        content = line.substring(secondColonIndex + 1);
+        // The regex handles Windows paths like D:\path\file.ts correctly
+        // because the lazy .+? prefers the shortest path before :digits:
+        const m = line.match(MULTI_FILE_RE);
+        if (!m) continue;
+        filePath = m[1]!;
+        lineNumberStr = m[2]!;
+        content = m[3]!;
       }
 
       const lineNumber = parseInt(lineNumberStr, 10);

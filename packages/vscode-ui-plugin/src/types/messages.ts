@@ -51,6 +51,34 @@ export interface ChatMessage {
   type: 'user' | 'assistant' | 'system';
   // 🎯 新增：工具调用相关
   associatedToolCalls?: ToolCall[];
+  /**
+   * 🎯 /goal 模式启动元数据。
+   *
+   * 当且仅当本条 chat_message 是由 GoalWizardDialog 提交的"goal 启动消息"时
+   * 才会被设置。extension 侧在 onChatMessage 入口看到该字段后，会先在
+   * GeminiClient 上调用 setGoalContext({...})，再走正常的 processChatMessage
+   * 流程——这样"注册 goal context"和"发出原始 goal prompt"在同一个事件内
+   * 原子完成，不存在竞态。
+   *
+   * 价值：core 的 tryCompressChat 在每次自动/手动压缩后会检查
+   * activeGoalContext，若非空则把原 prompt + T0 时间锚 + 立即行动指令重新
+   * 注入历史，防止 summarizer 把 /goal 契约（最低工时、no-stop 纪律、
+   * 安全栏等）压没了导致 agent 在压缩后停摆。
+   *
+   * 字段：
+   *   - startedAt: T0 (Date.now())，由 webview 在 wizard 点击"启动"时捕获。
+   *     extension 不重新生成时间戳——避免 IPC 延迟造成 T0 漂移。
+   *   - hours:    最低连续工时下限。
+   *   - task:     任务摘要，用于日志/未来 UI。
+   *
+   * 注意：originalPrompt 不在这里——它就是 message.content 里的那条 text
+   * part，extension 端从 content 提取即可，避免冗余传递造成的不一致风险。
+   */
+  goalContext?: {
+    startedAt: number;
+    hours: number;
+    task: string;
+  };
 }
 
 export interface ChatResponse {
@@ -72,12 +100,63 @@ export enum ToolCallStatus {
   BackgroundRunning = 'background_running'  // 🎯 后台运行中
 }
 
+// 🎯 AskUserQuestion 相关类型（镜像 core 的定义）
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface AskUserQuestion {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
 // 🎯 工具调用确认详情
+// 注意：本接口包含所有 confirmation 变体的字段合集。`type` 字段区分具体变体。
+// 实际从 core 传过来时，structured clone 会丢弃 onConfirm 函数，其余字段保留。
 export interface ToolCallConfirmationDetails {
-  message: string;
-  requiresConfirmation: boolean;
+  // 原有通用字段
+  message?: string;
+  requiresConfirmation?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
   affectedFiles?: string[];
+
+  // 辨别字段 + 共用元数据
+  type?: 'edit' | 'exec' | 'mcp' | 'info' | 'delete' | 'question';
+  title?: string;
+
+  // edit
+  fileDiff?: string;
+  fileName?: string;
+  originalContent?: string | null;
+  newContent?: string;
+
+  // delete
+  filePath?: string;
+  fileContent?: string;
+  fileSize?: number;
+  reason?: string;
+
+  // exec
+  command?: string;
+  rootCommand?: string;
+  warning?: string;
+
+  // mcp
+  serverName?: string;
+  toolName?: string;
+  toolDisplayName?: string;
+
+  // info
+  prompt?: string;
+  urls?: string[];
+
+  // 🎯 question (AskUserQuestion)
+  questions?: AskUserQuestion[];
+  metadata?: { source?: string };
 }
 
 /**
@@ -206,7 +285,17 @@ export type WebViewToExtensionMessage =
   // 原有消息类型（现在包含sessionId）
   | { type: 'tool_execution_request'; payload: ToolExecutionRequest & { sessionId: string } }
   | { type: 'tool_execution_confirm'; payload: { requestId: string; confirmed: boolean; sessionId?: string } }
-  | { type: 'tool_confirmation_response'; payload: { toolId: string; confirmed: boolean; userInput?: string; sessionId: string } }
+  | { type: 'tool_confirmation_response'; payload: {
+      toolId: string;
+      confirmed: boolean;
+      userInput?: string;
+      sessionId: string;
+      outcome?: string;
+      // 🎯 AskUserQuestion 专用字段 —— 当 tool 是 ask_user_question 时携带
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    } }
   | { type: 'tool_cancel_all'; payload: { sessionId: string } }
   | { type: 'flow_abort'; payload: { sessionId: string } }  // 🎯 新增流程中断消息
   | { type: 'chat_message'; payload: ChatMessage & { sessionId: string } }
@@ -249,7 +338,7 @@ export type WebViewToExtensionMessage =
   // 🎯 Undo 模块
   | { type: 'undo_file_change'; payload: { sessionId: string; fileName: string; filePath?: string; originalContent: string; isNewFile: boolean; isDeletedFile: boolean } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_update'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_update'; payload: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any; healthyUse?: boolean } }
   | { type: 'project_settings_request'; payload: {} }
   // 🎯 Diff编辑器相关
   | { type: 'openDiffInEditor'; payload: { fileDiff: string; fileName: string; originalContent: string; newContent: string; filePath?: string } }
@@ -280,6 +369,9 @@ export type WebViewToExtensionMessage =
   | { type: 'open_extension_marketplace'; payload: { extensionId: string } }
   // 📝 记忆文件相关
   | { type: 'refresh_memory'; payload: {} }
+  // 📝 用户规则相关
+  | { type: 'get_user_rules'; payload: {} }
+  | { type: 'save_user_rules'; payload: { rules: string } }
   // 🎯 版本控制相关
   | { type: 'revert_to_message'; payload: { sessionId: string; messageId: string } }
   | { type: 'version_timeline_request'; payload: { sessionId: string } }
@@ -291,7 +383,20 @@ export type WebViewToExtensionMessage =
   | { type: 'request_user_stats'; payload: {} }
   // 🎯 后台任务管理
   | { type: 'background_task_request'; payload: { action: 'list' | 'kill'; taskId?: string } }
-  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } };
+  | { type: 'background_task_move_to_background'; payload: { sessionId: string; toolCallId: string } }
+  // 🎯 自定义模型管理（与 CLI 端共享 ~/.deepv/custom-models.json）
+  // ----------------------------------------------------------------
+  // EasyRouter / EasyClaw 元数据请求是从 webview 发起的（webview 直接拿到 API key
+  // 并发起 fetch，避免 key 跨进程多跳）。如果 webview 沙箱因 CSP 拒绝外部 fetch,
+  // extension 端也提供同名 IPC 作为后备路径——见 extension.ts 的 onFetchEasyRouter*。
+  | { type: 'list_custom_models'; payload: { requestId: string } }
+  | {
+      type: 'add_custom_models';
+      payload: { requestId: string; models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | { type: 'delete_custom_model'; payload: { requestId: string; modelId: string } }
+  | { type: 'fetch_easy_router_models'; payload: { requestId: string; apiKey: string } }
+  | { type: 'fetch_easy_claw_metadata'; payload: { requestId: string } };
 
 // Message types from Extension to WebView
 export type ExtensionToWebViewMessage =
@@ -348,7 +453,7 @@ export type ExtensionToWebViewMessage =
   // 🎯 文件路径解析结果
   | { type: 'file_paths_resolved'; payload: { resolvedFiles: string[] } }
   // 🎯 项目设置相关
-  | { type: 'project_settings_response'; payload: { yoloMode: boolean } }
+  | { type: 'project_settings_response'; payload: { yoloMode: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any } }
   // 🎯 服务初始化状态
   | { type: 'service_initialization_status'; payload: { status: 'starting' | 'progress' | 'ready' | 'failed'; message: string; timestamp: number } }
   | { type: 'service_initialization_done'; payload: {} }
@@ -359,6 +464,9 @@ export type ExtensionToWebViewMessage =
   | { type: 'lint_suggestions'; payload: { suggestions: any[]; sessionId: string | null; timestamp: number } }
   // 🎯 记忆文件路径信息更新
   | { type: 'memory_files_update'; payload: { filePaths: string[]; fileCount: number } }
+  // 🎯 用户规则响应
+  | { type: 'user_rules_response'; payload: { rules: string } }
+  | { type: 'user_rules_saved'; payload: { success: boolean; error?: string } }
   | { type: 'tool_suggestion'; payload: { sessionId: string; toolName: string; params: any; timestamp: number } }
   // 🎯 模型配置相关
   | { type: 'model_response'; payload: { requestId: string; success: boolean; models?: any[]; currentModel?: string; error?: string } }
@@ -373,10 +481,12 @@ export type ExtensionToWebViewMessage =
   | { type: 'rules_save_response'; payload: { success: boolean; error?: string } }
   | { type: 'rules_delete_response'; payload: { success: boolean; error?: string } }
   | { type: 'open_rules_management'; payload: {} }
-  // 🎯 NanoBanana 图像生成
+  | { type: 'open_goal_wizard'; payload: {} }
+  // 🎯 NanoBanana 图像生成（支持多轮会话 + 多图参考）
   | { type: 'nanobanana_upload_response'; payload: { success: boolean; publicUrl?: string; error?: string } }
+  | { type: 'nanobanana_batch_upload_response'; payload: { success: boolean; publicUrls?: string[]; error?: string } }
   | { type: 'nanobanana_generate_response'; payload: { success: boolean; taskId?: string; estimatedTime?: number; error?: string } }
-  | { type: 'nanobanana_status_update'; payload: { taskId: string; status: 'pending' | 'processing' | 'completed' | 'failed'; progress?: number; resultUrls?: string[]; originalUrls?: string[]; errorMessage?: string; creditsDeducted?: number } }
+  | { type: 'nanobanana_status_update'; payload: NanoBananaStatusUpdatePayload }
   // 🎯 PPT 生成 (无状态轮询，任务提交后直接返回编辑页面URL)
   | { type: 'ppt_generate_response'; payload: { success: boolean; taskId?: string; editUrl?: string; error?: string } }
   // 🎯 PPT 大纲 AI 优化
@@ -390,7 +500,29 @@ export type ExtensionToWebViewMessage =
   | { type: 'stream_recovery_end'; payload: { sessionId: string } }
   // 🎯 自定义斜杠命令相关
   | { type: 'slash_commands_list'; payload: { commands: SlashCommandInfo[] } }
-  | { type: 'slash_command_result'; payload: { success: boolean; prompt?: string; error?: string } }
+  | { type: 'slash_command_result'; payload: {
+      success: boolean;
+      /** Prompt 模式：返回处理后的 prompt 给 webview 转发为 user message */
+      prompt?: string;
+      /** Side-effect 模式：webview 检测到此字段则不发 AI，转发对应消息给 backend 触发动作 */
+      sideEffect?: 'compress';
+      /** 信息提示：用于在 webview 上显示一条系统通知（成功 / 跳过等） */
+      info?: string;
+      error?: string;
+    } }
+  // 🎯 手动 /compress 的状态推送（让 webview 在对话流里展示"正在压缩 / 压缩结果"）
+  | { type: 'compress_status'; payload: {
+      /** start = 开始压缩；done = 完成；skipped = 历史太小无需压缩；error = 失败 */
+      phase: 'start' | 'done' | 'skipped' | 'error';
+      /** 同一次压缩的稳定 id，让 start → done/error 落到同一条 in-chat 通知 */
+      statusId: string;
+      sessionId: string | null;
+      /** done 时携带：压缩前后的 token 数 */
+      originalTokenCount?: number;
+      newTokenCount?: number;
+      /** error 时携带：错误信息 */
+      error?: string;
+    } }
   // 🎯 模型切换压缩确认
   | { type: 'compression_confirmation_request'; payload: { requestId: string; sessionId: string; targetModel: string; currentTokens: number; targetTokenLimit: number; compressionThreshold: number; message: string } }
   // 🎯 Token使用情况更新（压缩后）
@@ -405,7 +537,45 @@ export type ExtensionToWebViewMessage =
   // 🎯 后台任务完成通知（用于触发 AI 继续）
   | { type: 'background_task_completed_notification'; payload: BackgroundTaskCompletedPayload }
   // 🎯 后台任务结果显示（在聊天界面显示任务输出）
-  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload };
+  | { type: 'background_task_result'; payload: BackgroundTaskResultPayload }
+  // 🎯 自定义模型管理响应（与上行 IPC 一一对应）
+  // 所有请求都携带 requestId，webview 用同一 requestId 匹配响应——和 model_response
+  // 的模式一致，避免上下行混合在同一通道时跨请求误投递。
+  | {
+      type: 'custom_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: import('deepv-code-core').CustomModelConfig[];
+        error?: string;
+      };
+    }
+  // 任意 webview 触发自定义模型变更（add/delete）后，extension 主动广播这条
+  // 给所有 webview，让 ModelSelector 不必主动轮询就能拿到最新列表。
+  | {
+      type: 'custom_models_changed';
+      payload: { models: import('deepv-code-core').CustomModelConfig[] };
+    }
+  | {
+      type: 'fetch_easy_router_models_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        models?: Array<{ id: string; owned_by?: string; supported_endpoint_types?: string[] }>;
+        error?: string;
+        status?: number;
+      };
+    }
+  | {
+      type: 'fetch_easy_claw_metadata_response';
+      payload: {
+        requestId: string;
+        success: boolean;
+        // map.entries() 序列化为 [key, value][]，避免 Map 不能跨 IPC clone。
+        entries?: Array<[string, import('deepv-code-core').EasyClawModelMetadata]>;
+        error?: string;
+      };
+    };
 
 /**
  * 🔌 MCP 状态消息负载
@@ -414,6 +584,55 @@ export interface MCPStatusPayload {
   sessionId: string;
   discoveryState: 'not_started' | 'in_progress' | 'completed';
   servers: MCPServerStatusInfo[];
+}
+
+// =============================================================================
+// 🍌 NanoBanana 多轮会话类型定义
+// =============================================================================
+
+/**
+ * NanoBanana 状态更新消息负载
+ */
+export interface NanoBananaStatusUpdatePayload {
+  taskId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress?: number;
+  resultUrls?: string[];
+  originalUrls?: string[];
+  errorMessage?: string;
+  creditsDeducted?: number;
+}
+
+/**
+ * NanoBanana 对话历史条目（传递给后端的上下文）
+ */
+export interface NanoBananaHistoryEntry {
+  role: 'user' | 'assistant';
+  prompt?: string;           // 用户的提示词
+  imageUrl?: string;         // 生成的图片 URL
+}
+
+/**
+ * NanoBanana 多轮会话上下文
+ */
+export interface NanoBananaConversationContext {
+  /** 上一轮生成的图片 URL（作为本轮的参考图） */
+  previousGeneratedImageUrl: string;
+  /** 完整对话历史 */
+  history: NanoBananaHistoryEntry[];
+}
+
+/**
+ * NanoBanana 生成请求（支持多轮会话）
+ */
+export interface NanoBananaGenerateRequest {
+  prompt: string;
+  aspectRatio: string;
+  imageSize: string;
+  /** 用户手动上传的参考图（首轮可用） */
+  referenceImageUrl?: string;
+  /** 多轮会话上下文 */
+  conversationContext?: NanoBananaConversationContext;
 }
 
 /**

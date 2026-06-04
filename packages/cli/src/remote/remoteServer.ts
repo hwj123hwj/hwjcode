@@ -11,6 +11,7 @@ import { createServer, Server } from 'http';
 import * as path from 'path';
 import * as os from 'os';
 import * as net from 'net';
+import * as fs from 'fs/promises';
 
 import { Config, ToolRegistry, executeToolCall } from 'deepv-code-core';
 import { GenerateContentResponse, FunctionCall, Part } from '@google/genai';
@@ -26,6 +27,8 @@ import {
   RequestUIStateMessage,
   AuthSubmitMessage,
   ClearSessionMessage,
+  FeishuImageMessage,
+  GetModelsRequestMessage,
 } from './remoteProtocol.js';
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { t, tp } from '../ui/utils/i18n.js';
@@ -35,6 +38,8 @@ import { ProxyAuthManager } from 'deepv-code-core';
 import { RemoteSession } from './remoteSession.js';
 import { remoteLogger } from './remoteLogger.js';
 import { CloudClient } from './cloudClient.js';
+import { getAvailableModels } from '../ui/commands/modelCommand.js';
+import { detectImageExtension } from '../services/feishu/image-type.js';
 
 /**
  * 从指定端口开始查找可用端口
@@ -69,6 +74,7 @@ interface SessionInfo {
   session: RemoteSession;
   firstUserInput?: string;  // 第一条用户输入
   lastUserInput?: string;   // 最后一条用户输入
+  cloudRouteRef?: { current: Record<string, any> };  // 云端路由引用，供 virtualWs 回包时使用
 }
 
 /**
@@ -285,7 +291,7 @@ export class RemoteServer {
   /**
    * 检查电源管理设置和系统休眠状态
    */
-  private checkPowerManagement(): boolean {
+  private async checkPowerManagement(): Promise<boolean> {
     const platform = process.platform;
 
     console.log('\n' + t('power.management.check.title'));
@@ -356,9 +362,6 @@ export class RemoteServer {
       this.cloudMode = true;
       this.cloudServerUrl = cloudServerUrl;
 
-      // 🆕 设置云模式环境变量，用于禁用SSE流式传输
-      process.env.DEEPV_CLOUD_MODE = 'true';
-
       // 🔧 先清理已存在的CloudClient，避免重复创建
       if (this.cloudClient) {
         console.log(t('cloud.cleanup.existing'));
@@ -367,7 +370,7 @@ export class RemoteServer {
       }
 
       // 检查电源管理设置，确保系统不会休眠导致云端连接中断
-      const powerManagementOk = this.checkPowerManagement();
+      const powerManagementOk = await this.checkPowerManagement();
       if (!powerManagementOk) {
         throw new Error('电源管理设置不当，系统可能会休眠导致云端连接中断');
       }
@@ -416,9 +419,6 @@ export class RemoteServer {
     // 清理云端模式状态
     this.cloudMode = false;
     this.cloudServerUrl = undefined;
-
-    // 🆕 清除云模式环境变量
-    delete process.env.DEEPV_CLOUD_MODE;
 
     // 清理所有sessions
     for (const sessionInfo of this.sessions.values()) {
@@ -522,11 +522,59 @@ export class RemoteServer {
     }
   }
 
+  private async downloadFeishuImageToClipboard(message: FeishuImageMessage): Promise<string> {
+    const clipboardDir = path.resolve(process.cwd(), '.deepvcode', 'clipboard');
+    await fs.mkdir(clipboardDir, { recursive: true });
+
+    const response = await fetch(message.payload.imageUrl);
+    if (!response.ok) {
+      throw new Error(`下载飞书图片失败: ${response.status} ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // 🎯 按真实类型确定扩展名（字节头优先，Content-Type/原文件名兜底），
+    // 避免落盘扩展名与实际格式不符导致下游 media_type 推断错误、触发供应商 400。
+    const ext = detectImageExtension(
+      bytes,
+      response.headers.get('content-type') || message.payload.mimeType,
+    );
+
+    // 取原文件名的基名（去掉原扩展名），无名时回退 feishu-image，再拼上探测出的真实扩展名。
+    const rawBase = (message.payload.fileName || 'feishu-image').replace(
+      /\.[a-zA-Z0-9]+$/,
+      '',
+    );
+    const safeBase = (rawBase || 'feishu-image').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.resolve(clipboardDir, `${safeBase}${ext}`);
+
+    await fs.writeFile(filePath, Buffer.from(arrayBuffer));
+    return filePath;
+  }
+
+  private buildCommandFromFeishuImageMessage(message: FeishuImageMessage, absolutePath: string): string {
+    const text = message.payload.text?.trim();
+    return text ? `${text}\n@${absolutePath}` : `@${absolutePath}`;
+  }
+
   /**
    * 处理来自CloudClient的消息（云端模式专用）
    */
   public async handleCloudMessage(message: any): Promise<void> {
     console.log(tp('cloud.mode.handle.message', { type: message.type }));
+
+    // 构建回包路由信息：透传原始 _cloudRoute，并补充 targetWeb（如有 webId）
+    // 这保证不论消息来自 Web 还是飞书，回包都携带正确的路由信息
+    const incomingRoute = (message as any)._cloudRoute;
+    const incomingWebId = (message as any).webId;
+    const buildReplyRoute = (): Record<string, any> => {
+      const route: Record<string, any> = { ...(incomingRoute || {}) };
+      if (incomingWebId) {
+        route.targetWeb = incomingWebId;
+      }
+      return route;
+    };
 
     try {
       switch (message.type) {
@@ -538,13 +586,20 @@ export class RemoteServer {
           // 从原始消息中提取webId用于路由
           const originWebId = (message as any).webId;
 
+          // 捕获当前消息的路由信息，供 virtualWs 回包时使用
+          // 使用对象引用，以便后续 COMMAND 消息可以更新路由
+          const sessionRouteRef = { current: buildReplyRoute() };
+
           const virtualWs = {
             readyState: 1, // WebSocket.OPEN
             send: (data: string) => {
-              //console.log(`🌐 [VirtualWS] 发送到云端: ${data}`);
-              // 直接发送原始消息，让服务器端处理路由
               if (this.cloudClient) {
-                this.cloudClient.sendToCloud(JSON.parse(data));
+                const parsed = JSON.parse(data);
+                // 自动注入路由信息：让 session 的所有回包都能正确路由
+                if (!parsed._cloudRoute) {
+                  parsed._cloudRoute = { ...sessionRouteRef.current };
+                }
+                this.cloudClient.sendToCloud(parsed);
               }
             },
             close: () => {
@@ -555,6 +610,12 @@ export class RemoteServer {
           // 使用现有的createSession方法
           const sessionId = this.createSession(virtualWs);
           console.log(tp('cloud.mode.session.created', { sessionId }));
+
+          // 将路由引用绑到 SessionInfo 上，以便后续 COMMAND 更新路由
+          {
+            const si = this.sessions.get(sessionId);
+            if (si) si.cloudRouteRef = sessionRouteRef;
+          }
 
           // 重要: 初始化session，确保geminiChat和toolRegistry正确设置
           let initSuccess = false;
@@ -573,9 +634,6 @@ export class RemoteServer {
 
           // 🎯 发送CREATE_SESSION响应给Web端
           if (this.cloudClient) {
-            // 从原始消息中提取webId用于路由
-            const webId = (message as any).webId;
-
             const createSessionResponse = {
               id: `session_${Date.now()}`,
               type: 'create_session_response',
@@ -585,14 +643,11 @@ export class RemoteServer {
                 error: initSuccess ? undefined : 'Session创建或初始化失败'
               },
               timestamp: Date.now(),
-              // 添加路由信息指定目标Web客户端
-              _cloudRoute: {
-                targetWeb: webId
-              }
+              _cloudRoute: buildReplyRoute()
             };
 
             this.cloudClient.sendToCloud(createSessionResponse);
-            console.log(tp('cloud.mode.create.session.response', { webId, status: initSuccess ? 'SUCCESS' : 'FAILED' }));
+            console.log(tp('cloud.mode.create.session.response', { webId: incomingWebId || 'N/A', status: initSuccess ? 'SUCCESS' : 'FAILED' }));
 
             // 触发session列表同步
             // 立即同步新创建的session到云端
@@ -619,6 +674,11 @@ export class RemoteServer {
             break;
           }
 
+          // 更新 session 的路由信息，确保 COMMAND 回包路由到正确的来源
+          if (sessionInfo.cloudRouteRef) {
+            sessionInfo.cloudRouteRef.current = buildReplyRoute();
+          }
+
           console.log(tp('cloud.mode.command.forward', { sessionId: targetSessionId }));
 
           try {
@@ -632,6 +692,144 @@ export class RemoteServer {
             this.cloudClient.triggerSessionSync();
           }
           break;
+
+        case 'FEISHU_IMAGE_MESSAGE':
+        case 'feishu_image_message': {
+          const feishuImageMessage = message as FeishuImageMessage;
+          const targetSessionId = feishuImageMessage.sessionId;
+          if (!targetSessionId) {
+            console.error('飞书图片消息缺少 sessionId');
+            break;
+          }
+
+          const sessionInfo = this.sessions.get(targetSessionId);
+          if (!sessionInfo) {
+            console.error(tp('cloud.mode.session.not.exist', { sessionId: targetSessionId }));
+            break;
+          }
+
+          // 更新路由信息
+          if (sessionInfo.cloudRouteRef) {
+            sessionInfo.cloudRouteRef.current = buildReplyRoute();
+          }
+
+          try {
+            const absolutePath = await this.downloadFeishuImageToClipboard(feishuImageMessage);
+            const command = this.buildCommandFromFeishuImageMessage(feishuImageMessage, absolutePath);
+            await sessionInfo.session.handleCommand(MessageFactory.createCommand(command));
+            console.log(`飞书图片已转为本地命令输入: ${absolutePath}`);
+          } catch (error) {
+            console.error(`处理飞书图片消息失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+
+          if (this.cloudClient) {
+            this.cloudClient.triggerSessionSync();
+          }
+          break;
+        }
+
+        case 'GET_MODELS_REQUEST':
+        case 'get_models_request': {
+          try {
+            const { modelInfos } = await getAvailableModels(undefined, this.config);
+            const currentModel = this.config.getModel();
+
+            const models = modelInfos.map(m => ({
+              id: m.name,
+              name: m.displayName,
+              current: m.name === currentModel
+            }));
+
+            // 如果没有 current (比如 current 是 auto)，手动加一个 auto
+            if (!models.some(m => m.current)) {
+              models.unshift({
+                id: 'auto',
+                name: 'Auto (Recommended)',
+                current: currentModel === 'auto' || !currentModel
+              });
+            } else {
+              // 也要确保 auto 在列表中
+              if (!models.some(m => m.id === 'auto')) {
+                models.unshift({
+                  id: 'auto',
+                  name: 'Auto (Recommended)',
+                  current: currentModel === 'auto'
+                });
+              }
+            }
+
+            const response = MessageFactory.createGetModelsResponse(models);
+            if (this.cloudClient) {
+              (response as any)._cloudRoute = buildReplyRoute();
+              this.cloudClient.sendToCloud(response);
+            }
+          } catch (error) {
+            console.error(`获取模型列表失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          break;
+        }
+
+        case 'GET_STATUS_REQUEST':
+        case 'get_status_request': {
+          try {
+            const { getCliVersion } = await import('../utils/version.js');
+            const { tokenLimit } = await import('deepv-code-core');
+            const version = await getCliVersion();
+            const currentModel = this.config.getModel();
+
+            // 找到与此请求相关的 session（取最近活跃的）
+            let sessionId = (message as any).sessionId || '';
+            let contextTokens = 0;
+
+            if (!sessionId && this.sessions.size > 0) {
+              const sorted = Array.from(this.sessions.entries())
+                .sort(([, a], [, b]) => b.lastActiveAt - a.lastActiveAt);
+              sessionId = sorted[0][0];
+            }
+
+            // 从 session 获取 lastPromptTokenCount
+            if (sessionId) {
+              const sessionInfo = this.sessions.get(sessionId);
+              if (sessionInfo) {
+                contextTokens = sessionInfo.session.getLastPromptTokenCount();
+              }
+            }
+
+            // 获取 context window 上限（复用 tokenLimit 方法，与 Footer 一致）
+            const contextMaxTokens = tokenLimit(currentModel || 'auto', this.config);
+
+            // 获取 git branch
+            let gitBranch = '';
+            try {
+              const { execSync } = await import('child_process');
+              gitBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+                cwd: process.cwd(),
+                encoding: 'utf-8',
+                timeout: 3000,
+              }).trim();
+            } catch {
+              gitBranch = '';
+            }
+
+            const response = MessageFactory.createGetStatusResponse({
+              version,
+              model: currentModel || 'auto',
+              contextTokens,
+              contextMaxTokens,
+              sessionId,
+              workingDir: process.cwd(),
+              gitBranch,
+            });
+
+            if (this.cloudClient) {
+              (response as any)._cloudRoute = buildReplyRoute();
+              this.cloudClient.sendToCloud(response);
+            }
+          } catch (error) {
+            console.error(`获取状态信息失败: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          break;
+        }
 
         case 'REQUEST_UI_STATE':
         case 'request_ui_state':
@@ -655,7 +853,6 @@ export class RemoteServer {
 
           try {
             const uiData = uiSessionInfo.session.getUIDisplayData();
-            const webId = (message as any).webId;
 
             const uiResponse = {
               id: `ui_${Date.now()}`,
@@ -666,16 +863,13 @@ export class RemoteServer {
                 isProcessing: uiData.isProcessing
               },
               timestamp: Date.now(),
-              // 添加路由信息指定目标Web客户端
-              _cloudRoute: {
-                targetWeb: webId
-              }
+              _cloudRoute: buildReplyRoute()
             };
 
             // 发送回云端
             if (this.cloudClient) {
               this.cloudClient.sendToCloud(uiResponse);
-              console.log(tp('cloud.mode.ui.state.sent', { webId }));
+              console.log(tp('cloud.mode.ui.state.sent', { webId: incomingWebId || 'N/A' }));
             }
           } catch (error) {
             console.error(tp('cloud.mode.ui.state.failed', { error: error instanceof Error ? error.message : String(error) }));
@@ -738,7 +932,6 @@ export class RemoteServer {
 
             // 发送清理成功响应
             if (this.cloudClient) {
-              const webId = (message as any).webId;
               const clearResponse = {
                 id: `clear_${Date.now()}`,
                 type: 'clear_session_response',
@@ -747,10 +940,7 @@ export class RemoteServer {
                   sessionId: clearSessionId
                 },
                 timestamp: Date.now(),
-                // 添加路由信息指定目标Web客户端
-                _cloudRoute: {
-                  targetWeb: webId
-                }
+                _cloudRoute: buildReplyRoute()
               };
               this.cloudClient.sendToCloud(clearResponse);
             }
@@ -759,7 +949,6 @@ export class RemoteServer {
 
             // 发送清理失败响应
             if (this.cloudClient) {
-              const webId = (message as any).webId;
               const clearResponse = {
                 id: `clear_${Date.now()}`,
                 type: 'clear_session_response',
@@ -769,10 +958,7 @@ export class RemoteServer {
                   error: error instanceof Error ? error.message : String(error)
                 },
                 timestamp: Date.now(),
-                // 添加路由信息指定目标Web客户端
-                _cloudRoute: {
-                  targetWeb: webId
-                }
+                _cloudRoute: buildReplyRoute()
               };
               this.cloudClient.sendToCloud(clearResponse);
             }

@@ -12,7 +12,7 @@ import {
   type ToolLocation,
 } from './tools.js';
 import { Type } from '@google/genai';
-import { SkillsContextBuilder } from '../skills/skills-context-builder.js';
+import { SkillsCompatAdapter } from '../skills/skills-compat.js';
 import { Config } from '../config/config.js';
 
 interface GetSkillDetailsParams {
@@ -24,7 +24,7 @@ interface GetSkillDetailsParams {
  * GetSkillDetailsTool - Get detailed information about a specific skill
  */
 export class GetSkillDetailsTool extends BaseTool<GetSkillDetailsParams, ToolResult> {
-  private contextBuilder: SkillsContextBuilder;
+  private compatAdapter: SkillsCompatAdapter;
 
   constructor(private readonly config: Config) {
     super(
@@ -46,7 +46,7 @@ export class GetSkillDetailsTool extends BaseTool<GetSkillDetailsParams, ToolRes
       false, // canUpdateOutput
     );
 
-    this.contextBuilder = new SkillsContextBuilder(this.config.getProjectRoot());
+    this.compatAdapter = new SkillsCompatAdapter(this.config.getProjectRoot());
   }
 
   override validateToolParams(params: GetSkillDetailsParams): string | null {
@@ -90,7 +90,7 @@ export class GetSkillDetailsTool extends BaseTool<GetSkillDetailsParams, ToolRes
     }
 
     try {
-      const skill = this.contextBuilder.getSkillDetails(params.skillId);
+      const skill = await this.compatAdapter.getSkillDetails(params.skillId);
 
       if (!skill) {
         return {

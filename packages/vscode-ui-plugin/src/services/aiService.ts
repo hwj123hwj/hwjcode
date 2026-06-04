@@ -51,7 +51,9 @@ import {
   getAllMCPServerToolNames,
   MCPServerStatus,
   MCPDiscoveryState,
-  unloadMcpServer
+  unloadMcpServer,
+  UnauthorizedError,
+  formatHttpErrorFallback
 } from 'deepv-code-core';
 
 import { ContextBuilder } from './contextBuilder';
@@ -137,7 +139,7 @@ export class AIService {
     this.loginService = LoginService.getInstance(logger, extensionPath);
   }
 
-  async initialize(workspaceRoot?: string, memoryOptions?: { userMemory?: string; geminiMdFileCount?: number; sessionModel?: string }) {
+  async initialize(workspaceRoot?: string, memoryOptions?: { userMemory?: string; geminiMdFileCount?: number; sessionModel?: string; userRules?: string }) {
     this.logger.info('Initializing AIService');
 
     try {
@@ -148,6 +150,7 @@ export class AIService {
       // 🎯 使用传入的用户内存内容，如果没有则为空
       const userMemory = memoryOptions?.userMemory || '';
       const geminiMdFileCount = memoryOptions?.geminiMdFileCount || 0;
+      const userRules = memoryOptions?.userRules || '';
 
       if (userMemory.length > 0) {
         this.logger.info(`📝 Using shared user memory: ${Math.round(userMemory.length / 1024)}KB from ${geminiMdFileCount} file(s)`);
@@ -212,6 +215,24 @@ export class AIService {
         this.logger.info(`Using custom proxy server from VSCode extension settings: ${customProxyServerUrl}`);
       }
 
+      // 🟢 从 ~/.deepv/custom-models.json 加载用户配置的自定义模型
+      // 这与 CLI 完全等价；webview 端添加/删除走 IPC 后会调
+      // config.setCustomModels() 做热重载，新会话则在这里读到最新值。
+      let customModels: Array<import('deepv-code-core').CustomModelConfig> | undefined;
+      try {
+        const { CustomModelsStorageService } = await import('./customModelsStorageService.js');
+        customModels = CustomModelsStorageService.getInstance(this.logger).loadCustomModels();
+        if (customModels.length > 0) {
+          this.logger.info(`📦 Loaded ${customModels.length} custom model(s) from ~/.deepv/custom-models.json`);
+        }
+      } catch (cmErr) {
+        this.logger.warn(
+          '⚠️ Failed to load custom models, continuing without them',
+          cmErr instanceof Error ? cmErr : undefined,
+        );
+        customModels = undefined;
+      }
+
       this.config = new Config({
         sessionId: this.sessionId,
         targetDir: targetDir,
@@ -225,15 +246,17 @@ export class AIService {
         usageStatisticsEnabled: false,
         userMemory: userMemory,              // 🎯 传入用户内存内容
         geminiMdFileCount: geminiMdFileCount, // 🎯 传入文件计数
+        userRules: userRules,                // 🎯 传入用户规则
         mcpServers: mcpServers,              // 🎯 传入 MCP 服务器配置
         customProxyServerUrl: customProxyServerUrl, // 🎯 传入自定义代理服务器URL
+        customModels: customModels,          // 🟢 自定义模型 — 与 CLI 共享存储
         fileFiltering: {
           respectGitIgnore: true,
           respectGeminiIgnore: true,
           enableRecursiveFileSearch: true
         },
         telemetry: { enabled: false },
-        vsCodePluginMode: false              // 🎯 禁用VSCode插件模式，启用SubAgent工具
+        vsCodePluginMode: true
       });
 
       await this.config.initialize();
@@ -1494,8 +1517,16 @@ export class AIService {
     } catch (error) {
       this.logger.error('❌ Failed to process edit message', error instanceof Error ? error : undefined);
 
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Edit Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message
+        const errorMessage = `Edit Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     }
@@ -1585,8 +1616,16 @@ export class AIService {
     } catch (error) {
       this.logger.error('❌ Failed to process AI chat', error instanceof Error ? error : undefined);
 
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message，避免错误被原始堆栈淹没
+        const errorMessage = `Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     }
@@ -1624,8 +1663,17 @@ export class AIService {
     } catch (error) {
       this.logger.error('❌ Failed to process streaming response with parts', error instanceof Error ? error : undefined);
 
+      // 🔐 检测认证过期错误，避免作为普通错误展示给用户
+      if (error instanceof UnauthorizedError) {
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       if (this.communicationService && this.sessionId) {
-        const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        // 🆕 兜底显示 HTTP code + message，避免错误被原始堆栈淹没
+        const errorMessage = `Error: ${formatHttpErrorFallback(error) ?? (error instanceof Error ? error.message : String(error))}`;
         await this.communicationService.sendChatError(this.sessionId, errorMessage);
       }
     } finally {
@@ -1703,8 +1751,28 @@ export class AIService {
               throw streamInterruptError;
             }
 
+            // 🔐 检测认证过期错误（HTTP 401），触发自动登出
+            // 🆕 必须同时包含 AUTHENTICATION_FAILED，说明是我们服务端的 401，而不是上游模型的 401
+            const isAuthError =
+              errorMessage.includes('AUTHENTICATION_FAILED') &&
+              (errorMessage.includes('401') ||
+               errorMessage.includes('Unauthorized') ||
+               errorMessage.includes('Authentication required') ||
+               errorMessage.includes('re-authenticate'));
+
+            if (isAuthError && this.communicationService) {
+              this.logger.warn('🔐 Authentication error detected in AI stream, triggering auth expired');
+              await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+              this.isCurrentlyResponding = false;
+              this.setProcessingState(false, null, false);
+              return;
+            }
+
             if (this.communicationService && this.sessionId) {
-              await this.communicationService.sendChatError(this.sessionId, `❌ AI响应时出现错误：${errorMessage}`);
+              // 🆕 使用 core 的 fallback 工具，确保 HTTP code + message 都展示给用户
+              // 而不是直接显示原始堆栈或被吞掉。优先使用 fallback，否则退回原始 message。
+              const fallback = formatHttpErrorFallback(event.value.error) ?? errorMessage;
+              await this.communicationService.sendChatError(this.sessionId, `❌ AI响应时出现错误：${fallback}`);
             }
             return;
 
@@ -1786,12 +1854,25 @@ export class AIService {
         return;
       }
 
+      // 🔐 检测认证过期错误（核心层抛出的 UnauthorizedError）
+      if (streamError instanceof UnauthorizedError) {
+        this.logger.warn('🔐 UnauthorizedError caught in stream processing, triggering auth expired');
+        this.isCurrentlyResponding = false;
+        this.setProcessingState(false, null, false);
+        if (this.communicationService) {
+          await this.communicationService.sendAuthExpired('AI API returned authentication error - login session expired');
+        }
+        return;
+      }
+
       this.logger.error('Error processing stream events', streamError instanceof Error ? streamError : undefined);
       this.isCurrentlyResponding = false;
       this.setProcessingState(false, null, false);
 
       if (this.communicationService && this.sessionId) {
-        await this.communicationService.sendChatError(this.sessionId, `❌ 处理AI流式响应时出错`);
+        // 🆕 把 streamError 的 HTTP code + message 暴露出来，便于排查
+        const detail = formatHttpErrorFallback(streamError) ?? (streamError instanceof Error ? streamError.message : String(streamError));
+        await this.communicationService.sendChatError(this.sessionId, `❌ 处理AI流式响应时出错：${detail}`);
       }
     }
   }
@@ -2140,7 +2221,7 @@ export class AIService {
       'replace': 'Edit',
       'multiedit': 'MultiEdit',
       'delete_file': 'DeleteFile',
-      'run_shell_command': 'Shell',
+      'run_shell_command': 'Bash',
       'search_file_content': 'SearchText',
       'glob': 'FindFiles',
       'list_directory': 'ReadFolder',
@@ -2260,11 +2341,44 @@ export class AIService {
 
   // 🎯 工具确认方法
 
-  async approveToolCall(toolId: string, userInput?: string): Promise<void> {
+  /**
+   * @param toolId
+   * @param userInput  兼容旧路径：edit 工具行内修改后的 newContent
+   * @param outcome    'proceed_once' | 'proceed_always' | 'proceed_always_project' 等
+   * @param extra      🎯 AskUserQuestion 的结构化答案（answers / annotations / feedback）
+   */
+  async approveToolCall(
+    toolId: string,
+    userInput?: string,
+    outcome?: string,
+    extra?: {
+      answers?: Record<string, string>;
+      annotations?: Record<string, { preview?: string; notes?: string }>;
+      feedback?: string;
+    }
+  ): Promise<void> {
     if (!this.coreToolScheduler) throw new Error('Core scheduler not available');
 
-    const coreOutcome: ToolConfirmationOutcome = ToolConfirmationOutcome.ProceedOnce;
-    const confirmationPayload: ToolConfirmationPayload | undefined = userInput ? { newContent: String(userInput) } : undefined;
+    const coreOutcome: ToolConfirmationOutcome =
+      outcome === 'proceed_always' ? ToolConfirmationOutcome.ProceedAlways :
+      outcome === 'proceed_always_tool' ? ToolConfirmationOutcome.ProceedAlwaysTool :
+      outcome === 'proceed_always_server' ? ToolConfirmationOutcome.ProceedAlwaysServer :
+      outcome === 'proceed_always_project' ? ToolConfirmationOutcome.ProceedAlwaysProject :
+      outcome === 'modify_with_editor' ? ToolConfirmationOutcome.ModifyWithEditor :
+      ToolConfirmationOutcome.ProceedOnce;
+
+    // 🎯 构造 payload：优先携带 AskUserQuestion 的结构化答案，
+    // 兜底走旧的 newContent（edit 工具的行内改写路径）。
+    let confirmationPayload: ToolConfirmationPayload | undefined;
+    if (extra?.answers || extra?.annotations || extra?.feedback) {
+      confirmationPayload = {
+        ...(extra.answers && { answers: extra.answers }),
+        ...(extra.annotations && { annotations: extra.annotations }),
+        ...(extra.feedback && { feedback: extra.feedback }),
+      };
+    } else if (userInput) {
+      confirmationPayload = { newContent: String(userInput) };
+    }
 
     this.coreToolScheduler.handleConfirmationResponse(toolId, coreOutcome, confirmationPayload);
   }

@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/** @vitest-environment jsdom */
+
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useHistory } from './useHistoryManager.js';
 import { HistoryItem } from '../types.js';
+import { appEvents, AppEvent } from '../../utils/events.js';
 
 describe('useHistoryManager', () => {
   it('should initialize with an empty history', () => {
@@ -198,5 +201,45 @@ describe('useHistoryManager', () => {
     expect(result.current.history[0].text).toBe('Message 1');
     expect(result.current.history[1].text).toBe('Gemini response');
     expect(result.current.history[2].text).toBe('Message 1');
+  });
+
+  it('should limit history to 100 items when Feishu Bot is started', () => {
+    const { result } = renderHook(() => useHistory());
+
+    // Start Feishu Bot
+    act(() => {
+      appEvents.emit(AppEvent.FeishuBotStarted);
+    });
+
+    const timestamp = Date.now();
+    act(() => {
+      for (let i = 0; i < 120; i++) {
+        result.current.addItem({
+          type: 'info',
+          text: `Message ${i}`,
+        }, timestamp + i);
+      }
+    });
+
+    expect(result.current.history).toHaveLength(100);
+    expect(result.current.history[0].text).toBe('Message 20');
+    expect(result.current.history[99].text).toBe('Message 119');
+
+    // Stop Feishu Bot
+    act(() => {
+      appEvents.emit(AppEvent.FeishuBotStopped);
+    });
+
+    // Add another item
+    act(() => {
+      result.current.addItem({
+        type: 'info',
+        text: 'Message 120',
+      }, timestamp + 120);
+    });
+
+    // Should now be 101 items
+    expect(result.current.history).toHaveLength(101);
+    expect(result.current.history[100].text).toBe('Message 120');
   });
 });

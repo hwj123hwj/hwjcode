@@ -42,8 +42,9 @@ export class ComponentParser {
       if (stat.isFile() && itemPath.endsWith('.md')) {
         const component = await this.markdownParser.parse(itemPath, type, pluginId, marketplaceId);
 
-        // 修正相对路径
+        // 修正相对路径和插件根路径
         component.location.relativePath = path.relative(pluginRoot, itemPath);
+        component.location.rootPath = pluginRoot;
 
         return component;
       }
@@ -59,6 +60,7 @@ export class ComponentParser {
           component.location.type = 'directory';
           component.location.path = itemPath;
           component.location.relativePath = path.relative(pluginRoot, itemPath);
+          component.location.rootPath = pluginRoot;
 
           // 修正名称（如果 SKILL.md 中没有 name，MarkdownParser 会用 SKILL 作为名字，这是不对的）
           if (component.name === 'SKILL') {

@@ -6,7 +6,7 @@
  * Copyright 2025 DeepV Code
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getGlobalMessageService } from '../services/globalMessageService';
 
 // =============================================================================
@@ -23,6 +23,9 @@ interface YoloModeContextType {
   /** 健康使用提醒 */
   healthyUse: boolean;
 
+  /** 思考配置 */
+  thinkingConfig: any;
+
   /** 更新YOLO模式 */
   updateYoloMode: (enabled: boolean) => Promise<void>;
 
@@ -31,6 +34,9 @@ interface YoloModeContextType {
 
   /** 更新健康使用提醒 */
   updateHealthyUse: (enabled: boolean) => Promise<void>;
+
+  /** 更新思考配置 */
+  updateThinkingConfig: (config: any) => Promise<void>;
 
   /** 加载YOLO模式设置 */
   loadYoloMode: () => Promise<void>;
@@ -60,8 +66,12 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
   const [yoloMode, setYoloMode] = useState<boolean>(false);
   const [preferredModel, setPreferredModel] = useState<string>('auto');
   const [healthyUse, setHealthyUse] = useState<boolean>(true);
+  const [thinkingConfig, setThinkingConfig] = useState<any>({ mode: 'auto', effort: 'auto' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 🎯 用于清理监听器的 ref
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // =============================================================================
   // 核心功能实现
@@ -74,8 +84,11 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     console.log('[YOLO] syncFromCore called');
     const messageService = getGlobalMessageService();
     if (messageService) {
+      // 🎯 清理之前的监听器，避免累积
+      unsubscribeRef.current?.();
+
       // 监听响应
-      messageService.onProjectSettingsResponse((data: any) => {
+      unsubscribeRef.current = messageService.onProjectSettingsResponse((data: any) => {
         console.log('[YOLO] Received settings from Core:', data);
         setYoloMode(data.yoloMode);
         if (data.preferredModel) {
@@ -83,6 +96,9 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
         }
         if (data.healthyUse !== undefined) {
           setHealthyUse(data.healthyUse);
+        }
+        if (data.thinkingConfig !== undefined && data.thinkingConfig !== null) {
+          setThinkingConfig(data.thinkingConfig);
         }
       });
 
@@ -92,10 +108,17 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     }
   }, []);
 
+  // 🎯 组件卸载时清理监听器
+  useEffect(() => {
+    return () => {
+      unsubscribeRef.current?.();
+    };
+  }, []);
+
   /**
    * 向VSCode发送设置更新
    */
-  const sendToVSCode = useCallback(async (updates: { yoloMode?: boolean; preferredModel?: string; healthyUse?: boolean }) => {
+  const sendToVSCode = useCallback(async (updates: { yoloMode?: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any }) => {
     try {
       const messageService = getGlobalMessageService();
       if (messageService) {
@@ -103,7 +126,8 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
         const payload = {
           yoloMode: updates.yoloMode !== undefined ? updates.yoloMode : yoloMode,
           preferredModel: updates.preferredModel !== undefined ? updates.preferredModel : preferredModel,
-          healthyUse: updates.healthyUse !== undefined ? updates.healthyUse : healthyUse
+          healthyUse: updates.healthyUse !== undefined ? updates.healthyUse : healthyUse,
+          thinkingConfig: updates.thinkingConfig !== undefined ? updates.thinkingConfig : thinkingConfig
         };
 
         messageService.sendProjectSettingsUpdate(payload);
@@ -113,7 +137,7 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
       console.error('Failed to send settings to VSCode:', error);
       throw new Error('同步设置到VSCode失败');
     }
-  }, [yoloMode, preferredModel, healthyUse]);
+  }, [yoloMode, preferredModel, healthyUse, thinkingConfig]);
 
   /**
    * 加载设置
@@ -181,6 +205,22 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     }
   }, [sendToVSCode]);
 
+  /**
+   * 更新思考配置
+   */
+  const updateThinkingConfig = useCallback(async (config: any) => {
+    setError(null);
+    const oldConfig = thinkingConfig;
+
+    try {
+      setThinkingConfig(config);
+      await sendToVSCode({ thinkingConfig: config });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新思考配置失败');
+      setThinkingConfig(oldConfig);
+    }
+  }, [sendToVSCode, thinkingConfig]);
+
   // =============================================================================
   // 初始化加载
   // =============================================================================
@@ -200,9 +240,11 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     yoloMode,
     preferredModel,
     healthyUse,
+    thinkingConfig,
     updateYoloMode,
     updatePreferredModel,
     updateHealthyUse,
+    updateThinkingConfig,
     loadYoloMode,
     isLoading,
     error

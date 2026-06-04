@@ -43,6 +43,7 @@ import { vimCommand } from '../ui/commands/vimCommand.js';
 import { yoloCommand } from '../ui/commands/yoloCommand.js';
 import { healthyUseCommand } from '../ui/commands/healthyUseCommand.js';
 import { agentStyleCommand } from '../ui/commands/agentStyleCommand.js';
+import { thinkingCommand } from '../ui/commands/thinkingCommand.js';
 import { trimSpacesCommand } from '../ui/commands/trimSpacesCommand.js';
 import { sessionCommand } from '../ui/commands/sessionCommand.js';
 import { mcpCommand } from '../ui/commands/mcpCommand.js';
@@ -56,6 +57,13 @@ import { pluginCommand } from '../ui/commands/pluginCommand.js';
 import { pptCommand } from '../ui/commands/pptCommand.js';
 import { hooksCommand } from '../ui/commands/hooksCommand.js';
 import { issueCommand } from '../ui/commands/issueCommand.js';
+import { newCommand } from '../ui/commands/newCommand.js';
+import { wikiCommand } from '../ui/commands/wikiCommand.js';
+import { debateCommand } from '../ui/commands/debateCommand.js';
+import { goalCommand } from '../ui/commands/goalCommand.js';
+import { feishuCommand } from '../ui/commands/feishuCommand.js';
+import { todoCommand } from '../ui/commands/todoCommand.js';
+import { workflowCommand } from '../ui/commands/workflowCommand.js';
 
 /**
  * Loads the core, hard-coded slash commands that are an integral part
@@ -101,6 +109,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       // privacyCommand, // 已删除
       mcpCommand, // 已删除
       nanoBananaCommand,
+      newCommand, // 隐藏快捷命令：/new 直接创建新会话
       planCommand,
       queueCommand,
       quitCommand,
@@ -118,8 +127,15 @@ export class BuiltinCommandLoader implements ICommandLoader {
       yoloCommand,
       healthyUseCommand,
       agentStyleCommand,
+      thinkingCommand,
       accountCommand,
       pptCommand,
+      wikiCommand,
+      debateCommand,
+      goalCommand,
+      feishuCommand,
+      todoCommand,
+      workflowCommand,
     ];
 
     return allDefinitions.filter((cmd): cmd is SlashCommand => cmd !== null);

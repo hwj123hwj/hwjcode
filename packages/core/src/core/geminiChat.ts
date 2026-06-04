@@ -1,3 +1,4 @@
+import { logger } from '../utils/enhancedLogger.js';
 /**
  * @license
  * Copyright 2025 Google LLC
@@ -37,6 +38,7 @@ import {
   AgentContext,
 } from '../telemetry/types.js';
 import { DEFAULT_GEMINI_FLASH_MODEL, DEFAULT_GEMINI_MODEL } from '../config/models.js';
+import { WorkflowTool } from '../tools/workflow.js';
 import { tokenUsageEventManager } from '../events/tokenUsageEvents.js';
 import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 import { SessionManager } from '../services/sessionManager.js';
@@ -86,6 +88,8 @@ function validateHistory(history: Content[]) {
 
 /**
  * 检查内容是否为 reasoning（思考过程）
+ * reasoning 会保留在 history 中由 DeepV Server 决定如何转发给上游协议
+ * （DeepSeek 思考模式：带 tool_call 时必须回传，不带时服务器会忽略）
  */
 function isReasoningContent(content: Content | undefined): boolean {
   return !!(
@@ -104,7 +108,7 @@ function isReasoningContent(content: Content | undefined): boolean {
  * The model may sometimes generate invalid or empty contents(e.g., due to safety
  * filters or recitation). Extracting valid turns from the history
  * ensures that subsequent requests could be accepted by the model.
- * 同时也会过滤掉 reasoning 内容（模型思考过程）
+ * reasoning 内容保留在 history 中，由 DeepV Server 决定如何转发给上游
  */
 function extractCuratedHistory(comprehensiveHistory: Content[]): Content[] {
   if (comprehensiveHistory === undefined || comprehensiveHistory.length === 0) {
@@ -122,12 +126,11 @@ function extractCuratedHistory(comprehensiveHistory: Content[]): Content[] {
       let isValid = true;
       while (i < length && comprehensiveHistory[i].role === MESSAGE_ROLES.MODEL) {
         const currentContent = comprehensiveHistory[i];
-        // 跳过 reasoning 内容，不加入精选历史
-        if (!isReasoningContent(currentContent)) {
-          modelOutput.push(currentContent);
-          if (isValid && !isValidContent(currentContent)) {
-            isValid = false;
-          }
+        modelOutput.push(currentContent);
+        // reasoning content 在 isValidContent 下应当被视为有效
+        // （它有 parts 且 parts[0] 有 reasoning 字段）
+        if (isValid && !isValidContent(currentContent)) {
+          isValid = false;
         }
         i++;
       }
@@ -304,7 +307,7 @@ export class GeminiChat {
    * const response = await chat.sendMessage({
    *   message: 'Why is the sky blue?'
    * });
-   * console.log(response.text);
+   * logger.debug(response.text);
    * ```
    */
   async sendMessage(
@@ -346,7 +349,7 @@ export class GeminiChat {
         return this.contentGenerator.generateContent({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config },
+          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
         }, scene);
       };
 
@@ -420,6 +423,162 @@ export class GeminiChat {
    * @returns 修正后的请求内容
    */
   private fixRequestContents(requestContents: Content[]): Content[] {
+    return GeminiChat.sanitizeRequestContents(requestContents);
+  }
+
+  /**
+   * 静态版本的请求内容修复器，与实例方法 fixRequestContents 行为完全一致，
+   * 但可被无 GeminiChat 实例的调用方直接复用（如 CustomModelAdapter、setHistory 兜底）。
+   *
+   * 之所以新增 static 入口而不是把 fixRequestContents 直接改成 static：
+   *   - 保持外部所有现有调用点（this.fixRequestContents）零改动
+   *   - 让所有协议路径（Gemini 原生 / DeepVServer / CustomModel）共享同一份实现，避免逻辑漂移
+   *
+   * 函数体保持不变；如需更新清洗规则，只在这里修改即可。
+   */
+  static sanitizeRequestContents(requestContents: Content[]): Content[] {
+    // 🆕 [并行同名工具调用兜底] —— 在任何 dedup 之前给「同名 ≥2 且都无 id」的 fc/fr 配合成 id
+    //
+    // 触发场景（用户实拍 400，状态栏全程 [Gemini] gemini-3.5-flash，没切模型）：
+    //   Gemini 原生上游报：
+    //     "Please ensure that the number of function response parts
+    //      is equal to the number of function call parts of the function call turn."
+    //
+    // 根因：Gemini 协议下 functionCall / functionResponse 的 `id` 字段不强制必填。
+    //   当 Gemini 在一个 turn 里**并行调用 N 次同名工具**（比如同时 read_file
+    //   多个文件、并行 replace 多处），写回的 N 个 fr 全是同 name 无 id。
+    //   而下面去重阶段使用的 key = `id || name:${name}` 会让这 N 个 fr 全部 collide
+    //   到同一个桶，只保留 1 个 → API 收到 N 个 fc 但只有 1 个 fr → 数量不等 → 400。
+    //
+    //   `unmatchedCalls` 那一步用的 isToolMatch 在双方都无 id 时回退到「只看 name」，
+    //   N 个 fc 都"匹配"到唯一 1 个 fr，也不会触发 cancel 补全。
+    //
+    // 修复策略：进入任何 dedup 之前，专门针对「同名 ≥2 个无 id functionCall」这个
+    //   触发条件启动「FIFO id 配对」—— 把同名的 fc / fr 按出现顺序一一配对，
+    //   让每一对共享同一个「权威 id」，从根上消除 fc.id ≠ fr.id 的错位。
+    //
+    // 🐛 二次修复（2026-06-04，用户实拍切到 [Anthropic] claude-opus-4-8 后 400）：
+    //   错误码原文：
+    //     ValidationException: ***.***.content.1: unexpected `tool_use_id`
+    //     found in `tool_result` blocks: read_file-1780549486950-5f6pb6trd.
+    //     Each `tool_result` block must have a corresponding `tool_use` block.
+    //
+    //   病灶定位：`read_file-<ts>-<rand>` 是 coreToolScheduler 给 functionResponse
+    //   强制写入的 callId（见 createFunctionResponsePart：`id: callId`），几乎总是存在；
+    //   而 Gemini 原生 functionCall 通常无 id。旧实现的「合成 id 配对」只做了两件错事：
+    //     1) 给无 id 的 fc 造了 `gem_synth_read_file_N`；
+    //     2) 第 2 遍只回填「无 id」的 fr —— 但 fr 早就带着真实 callId，于是被整段跳过。
+    //   结果 tool_use.id = gem_synth_read_file_1，tool_result.tool_use_id =
+    //   read_file-<ts>-<rand>，两侧永不相等。更糟的是：这反而把下游 isToolMatch 的
+    //   「ID 对齐」逻辑也击穿了（双方都有 id 但不等 → 不再 name 模糊匹配 → 不对齐）。
+    //
+    //   正确做法（本次）：权威 id 取值优先级 = fc 原始 id > fr 原始 id（CLI callId）>
+    //   确定性合成 id。把这个权威 id 同时写回配对的 fc 和 fr，保证严格一致。
+    //
+    // 关键约束（保护现有行为，零回归）：
+    //   - 仅当**同名无 id fc 出现 ≥2 次**才启动 —— 这是 bug 的唯一触发条件。
+    //     单个无 id fc 的场景（Claude 跨模型迁移）继续走原 name 模糊匹配 + ID 对齐路径。
+    //   - 已自洽（fc.id === fr.id）的配对先剔除，绝不被 FIFO 误配。
+    //   - 合成 id 仅在 fc / fr 双方都无 id 时才用，且基于稳定 counter（幂等）。
+    //   - 没匹配上的多余孤立 fr 会自然落入下面"移除孤立 functionResponse"分支。
+    //   - 与 4343cb67 在 AnthropicConverter 内的合成 id 配对独立互不干扰。
+    {
+      // 第 0 步：扫描所有 functionCall，统计每个 name 下「无 id」实例的数量
+      const noIdCallsByName = new Map<string, number>();
+      for (const content of requestContents) {
+        if (content.role !== MESSAGE_ROLES.MODEL || !content.parts) continue;
+        for (const part of content.parts) {
+          const fc = (part as any)?.functionCall;
+          if (!fc || typeof fc !== 'object') continue;
+          if (typeof fc.id === 'string' && fc.id.length > 0) continue;
+          const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+          noIdCallsByName.set(name, (noIdCallsByName.get(name) ?? 0) + 1);
+        }
+      }
+
+      // 仅对「同名 ≥2 个无 id fc」的 name 启动 FIFO 合成 id 配对
+      const namesNeedingSynth = new Set<string>();
+      for (const [name, count] of noIdCallsByName) {
+        if (count >= 2) namesNeedingSynth.add(name);
+      }
+
+      if (namesNeedingSynth.size > 0) {
+        let synthCounter = 0;
+        const hasId = (x: any) => x && typeof x.id === 'string' && x.id.length > 0;
+
+        // 收集目标 name 的 fc / fr（按文档出现顺序），用于 FIFO 配对。
+        const callsByName = new Map<string, any[]>();
+        const respsByName = new Map<string, any[]>();
+        for (const content of requestContents) {
+          if (!content.parts) continue;
+          if (content.role === MESSAGE_ROLES.MODEL) {
+            for (const part of content.parts) {
+              const fc = (part as any)?.functionCall;
+              if (!fc || typeof fc !== 'object') continue;
+              const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+              if (!namesNeedingSynth.has(name)) continue;
+              if (!callsByName.has(name)) callsByName.set(name, []);
+              callsByName.get(name)!.push(fc);
+            }
+          } else if (content.role === MESSAGE_ROLES.USER) {
+            for (const part of content.parts) {
+              const fr = (part as any)?.functionResponse;
+              if (!fr || typeof fr !== 'object') continue;
+              const name = typeof fr.name === 'string' ? fr.name : 'unknown';
+              if (!namesNeedingSynth.has(name)) continue;
+              if (!respsByName.has(name)) respsByName.set(name, []);
+              respsByName.get(name)!.push(fr);
+            }
+          }
+        }
+
+        for (const name of namesNeedingSynth) {
+          const calls = callsByName.get(name) ?? [];
+          const resps = respsByName.get(name) ?? [];
+
+          // 步骤 A：先剔除「fc / fr 已带相同 id」的自洽配对，避免后续 FIFO 误配。
+          const usedResp = new Set<number>();
+          const pendingCalls: any[] = [];
+          for (const fc of calls) {
+            if (hasId(fc)) {
+              const matchIdx = resps.findIndex(
+                (fr, i) => !usedResp.has(i) && hasId(fr) && fr.id === fc.id,
+              );
+              if (matchIdx >= 0) {
+                usedResp.add(matchIdx);
+                continue;
+              }
+            }
+            pendingCalls.push(fc);
+          }
+          const pendingResps = resps.filter((_, i) => !usedResp.has(i));
+
+          // 步骤 B：对剩余的 fc·fr 按 FIFO 一一配对，让每对共享同一个「权威 id」。
+          //
+          // 🔑 权威 id 优先级：fc 原始 id > fr 原始 id（如 CLI 生成的 callId）> 确定性合成 id。
+          //
+          // 这一步是本次修复的核心：旧实现只给无 id 的 fc 造合成 id、却跳过「已带真实 id 的
+          // fr」（functionResponse 的 id 由 coreToolScheduler 用 `${name}-${ts}-${rand}` 强制
+          // 写入，几乎总是存在）。结果 tool_use.id = gem_synth_read_file_1，而
+          // tool_result.tool_use_id = read_file-<ts>-<rand>，两侧永不相等 →
+          //   Anthropic/Bedrock 400: unexpected `tool_use_id` found in `tool_result` blocks.
+          // 现在改为把 fr 上已有的真实 id 回填到无 id 的 fc 上（双方共享同一 id），从根上消除错位。
+          const n = Math.max(pendingCalls.length, pendingResps.length);
+          for (let k = 0; k < n; k++) {
+            const fc = pendingCalls[k];
+            const fr = pendingResps[k];
+            let canonical: string;
+            if (hasId(fc)) canonical = fc.id;
+            else if (hasId(fr)) canonical = fr.id;
+            else if (fc) canonical = `gem_synth_${name}_${++synthCounter}`;
+            else continue; // 多出来的孤立 fr（无对应 fc）：留给下面「移除孤立 functionResponse」处理
+            if (fc) fc.id = canonical;
+            if (fr) fr.id = canonical;
+          }
+        }
+      }
+    }
+
     const fixedContents: Content[] = [];
 
     // 🔍 辅助函数：判断 functionCall 和 functionResponse 是否匹配
@@ -515,7 +674,7 @@ export class GeminiChat {
               const matchingCall = allFunctionCalls.find(fc => isToolMatch(fc.call, resp));
               if (matchingCall) {
                 if (matchingCall.call.id !== resp.id) {
-                  console.log(
+                  logger.debug(
                     `[fixRequestContents] 🔧 ID 对齐：将响应 ${resp.name} 的 ID 从 "${resp.id || 'unnamed'}" ` +
                     `同步为调用方的 ID "${matchingCall.call.id || 'unnamed'}"`
                   );
@@ -562,7 +721,7 @@ export class GeminiChat {
           });
 
           if (orphanedResponses.length > 0) {
-            console.log(
+            logger.debug(
               `[fixRequestContents] 检测到第${i + 1}条消息中有 ${orphanedResponses.length} 个孤立的 function response:`,
               orphanedResponses.map(r => ({
                 name: r.functionResponse!.name,
@@ -608,7 +767,7 @@ export class GeminiChat {
             // 如果 bestResponses 中存储的是真实结果（优先级 100），且不是我们当前看到的这条消息中的
             // 说明真实结果在后续消息中，不需要补全 cancel
             if (best && best.priority === 100 && best.originalIndex > i + 1) {
-              console.log(`[fixRequestContents] ⏭️ 跳过补全 cancel：${functionCall.name} (id: ${functionCall.id || 'unnamed'})，真实结果将在后续消息中到达`);
+              logger.debug(`[fixRequestContents] ⏭️ 跳过补全 cancel：${functionCall.name} (id: ${functionCall.id || 'unnamed'})，真实结果将在后续消息中到达`);
               return false;
             }
             return true;
@@ -633,7 +792,7 @@ export class GeminiChat {
               parts: cancelResponses
             });
 
-            console.log(`[fixRequestContents] 为第${i + 1}条消息补全了 ${callsNeedingCancel.length} 个未匹配的 function call`);
+            logger.debug(`[fixRequestContents] 为第${i + 1}条消息补全了 ${callsNeedingCancel.length} 个未匹配的 function call`);
           }
 
           // 如果下一条消息有混合内容，调整 parts 顺序：function-response 在前，text 在后
@@ -646,7 +805,7 @@ export class GeminiChat {
                 ...next,
                 parts: [...nextFunctionResponses, ...textParts]
               };
-              console.log(`[fixRequestContents] 调整了第${i + 2}条消息的内容顺序，function-response 在前`);
+              logger.debug(`[fixRequestContents] 调整了第${i + 2}条消息的内容顺序，function-response 在前`);
             }
           }
         }
@@ -700,7 +859,51 @@ export class GeminiChat {
       }
     }
 
-    return finalContents;
+    // 🔧 安全保障：确保 contents 不以 model/assistant 结尾
+    // 某些模型（如 AWS Bedrock 上的 Claude）不支持 assistant prefill，
+    // 要求对话必须以 user 消息结尾。如果上面的过滤逻辑移除了末尾的 user 消息
+    // （例如因为孤立的 functionResponse 被全部过滤），末尾会变成 model 消息，
+    // 导致 API 返回 400 错误。
+    if (finalContents.length > 0) {
+      const lastContent = finalContents[finalContents.length - 1];
+      if (lastContent.role === MESSAGE_ROLES.MODEL) {
+        console.warn('[fixRequestContents] ⚠️ Contents ends with model message after cleanup — appending user placeholder to prevent assistant-prefill error');
+        finalContents.push({
+          role: MESSAGE_ROLES.USER,
+          parts: [{ text: '[Conversation continues]' }],
+        });
+      }
+    }
+
+    // 🔧 合并相邻同 role 消息（关键修复：解决"两条相邻 user 消息"导致的上游 400）
+    //
+    // 触发场景：流式响应中断后，客户端的恢复逻辑会注入一条独立的
+    // user("[System] interrupted...continue") 消息，但这一条紧贴在前一条
+    // user(functionResponse) 后面，形成 [user(fr), user(text)] 的相邻 user 序列。
+    //
+    // 当下游 OpenAI 兼容上游（如 deepseek-v4-pro 的 easyrouter）做协议规范化时，
+    // 可能错误地认为后一条 user 把前一条 user 的 tool_result 截断了 —— 触发：
+    //   "Messages with role 'tool' must be a response to a preceding message
+    //    with 'tool_calls'"
+    //
+    // 修复：在请求最终发出前，把所有相邻同 role 消息的 parts 合并到第一条上。
+    // 这对 user(fr) + user(text) 来说意味着把 text 加到 functionResponse 同一条 user 里，
+    // 让上游看到一段完整的 "tool_use → tool_result" 配对，而 text 只是配对里的附加上下文。
+    const mergedContents: Content[] = [];
+    for (const content of finalContents) {
+      const prev = mergedContents[mergedContents.length - 1];
+      if (prev && prev.role === content.role) {
+        prev.parts = [...(prev.parts || []), ...(content.parts || [])];
+      } else {
+        // 浅拷贝：避免直接修改 caller 持有的对象
+        mergedContents.push({
+          ...content,
+          parts: content.parts ? [...content.parts] : undefined,
+        });
+      }
+    }
+
+    return mergedContents;
   }
 
   /**
@@ -721,7 +924,7 @@ export class GeminiChat {
    *   message: 'Why is the sky blue?'
    * });
    * for await (const chunk of response) {
-   *   console.log(chunk.text);
+   *   logger.debug(chunk.text);
    * }
    * ```
    */
@@ -763,7 +966,7 @@ export class GeminiChat {
         return this.contentGenerator.generateContentStream({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config },
+          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
         }, scene);
       };
 
@@ -918,21 +1121,29 @@ export class GeminiChat {
 
     try {
       for await (const chunk of streamResponse) {
-        // 先检查是否是 reasoning 内容，如果是就跳过不加入 chunks
+        // 先检查是否是 reasoning 内容
         const content = chunk.candidates?.[0]?.content;
         const isReasoning = content && this.isReasoningContent(content);
         const isThought = content && this.isThoughtContent(content);
 
-        // 收集所有有效的块，但排除 thought 和 reasoning
-        if ((isValidResponse(chunk) || chunk.usageMetadata) && !isReasoning && !isThought) {
+        // 收集所有有效的块，但排除 thought（thought 仅 UI 显示不入历史）
+        // reasoning 仍然入 chunks 用于 API response 日志记录与 history 保留
+        if ((isValidResponse(chunk) || chunk.usageMetadata) && !isThought) {
           chunks.push(chunk);
         }
 
         // 处理包含内容的有效响应
         if (isValidResponse(chunk)) {
           if (content !== undefined) {
-            // 跳过 thought 和 reasoning 内容，不加入历史记录
-            if (isThought || isReasoning) {
+            // thought 仅 UI 显示，不加入历史记录
+            if (isThought) {
+              yield chunk;
+              continue;
+            }
+            // 🆕 reasoning content 也要进入 outputContent 以保留在 history 中
+            // 由 DeepV Server 在转发到上游时按各家协议（如 DeepSeek）规则自行处理
+            if (isReasoning) {
+              this.appendReasoningToOutput(outputContent, content);
               yield chunk;
               continue;
             }
@@ -991,9 +1202,10 @@ export class GeminiChat {
     modelOutput: Content[],
     automaticFunctionCallingHistory?: Content[],
   ) {
-    // 过滤掉 thought 和 reasoning 内容
+    // 过滤掉 thought 内容（thought 仅 UI 显示）
+    // reasoning 内容保留进入 history，由 DeepV Server 决定如何转发给上游
     const nonThoughtModelOutput = modelOutput.filter(
-      (content) => !this.isThoughtContent(content) && !this.isReasoningContent(content),
+      (content) => !this.isThoughtContent(content),
     );
 
     let outputContents: Content[] = [];
@@ -1030,8 +1242,8 @@ export class GeminiChat {
     // 🔧 Enhanced consolidation logic to merge function calls into single messages
     const consolidatedOutputContents: Content[] = [];
     for (const content of outputContents) {
-      // 跳过 thought 和 reasoning 内容
-      if (this.isThoughtContent(content) || this.isReasoningContent(content)) {
+      // 跳过 thought 内容（reasoning 保留入 history）
+      if (this.isThoughtContent(content)) {
         continue;
       }
       const lastContent =
@@ -1051,7 +1263,7 @@ export class GeminiChat {
       } else if (hasFunctionCalls && lastHasFunctionCalls && lastContent.role === MESSAGE_ROLES.MODEL) {
         // 🚀 KEY FIX: Merge consecutive function calls into the same message
         // This ensures multiple function calls are stored as one model message with multiple parts
-        console.log('[recordHistory] Merging consecutive function calls into single message');
+        logger.debug('[recordHistory] Merging consecutive function calls into single message');
         lastContent.parts?.push(...(content.parts || []));
       } else {
         consolidatedOutputContents.push(content);
@@ -1112,10 +1324,68 @@ export class GeminiChat {
 
   /**
    * 检查内容是否为模型的 reasoning（思考过程）
-   * reasoning 不应该被添加到历史记录中
+   * reasoning 仍会保留在 history 中，由 DeepV Server 决定如何转发给上游
    * 直接调用外部函数
    */
   private isReasoningContent(content: Content | undefined): boolean {
     return isReasoningContent(content);
   }
+
+  /**
+   * 把流式 reasoning chunk 合并到 outputContent 末尾。
+   * 如果末尾已经是 reasoning content，就把文本拼接进去；
+   * 否则作为新的一条 model content 追加。
+   * 这样可以避免几十上百个 reasoning chunk 各自变成一条 history 记录。
+   */
+  private appendReasoningToOutput(
+    outputContent: Content[],
+    chunkContent: Content,
+  ): void {
+    const incomingText = (chunkContent.parts || [])
+      .map((p) => (typeof (p as any).reasoning === 'string' ? (p as any).reasoning : ''))
+      .join('');
+    if (!incomingText) return;
+
+    const last = outputContent[outputContent.length - 1];
+    if (last && this.isReasoningContent(last)) {
+      const firstPart: any = last.parts?.[0];
+      if (firstPart && typeof firstPart.reasoning === 'string') {
+        firstPart.reasoning += incomingText;
+        return;
+      }
+    }
+    outputContent.push({
+      role: MESSAGE_ROLES.MODEL,
+      parts: [{ reasoning: incomingText } as any],
+    });
+  }
+}
+
+/**
+ * Filter tools for a single request based on the current user message.
+ *
+ * WorkflowTool is only exposed when the user's message contains the exact
+ * trigger word "workflow" (case-insensitive). This is a hard, per-request
+ * enforcement layer that complements the prompt-level description constraints.
+ * Historical context (prior workflow invocations) cannot bypass this gate.
+ */
+function filterToolsByMessage(userContent: Content, tools: unknown): unknown {
+  if (!tools || !Array.isArray(tools)) return tools;
+
+  const userText = (userContent.parts ?? [])
+    .filter((p): p is { text: string } => typeof (p as any).text === 'string')
+    .map(p => p.text)
+    .join('');
+
+  const hasWorkflowTrigger = /\bworkflow\b/i.test(userText);
+  if (hasWorkflowTrigger) return tools;
+
+  // Remove WorkflowTool from this request's tool declarations
+  return (tools as Tool[]).map(toolGroup => {
+    if (!toolGroup.functionDeclarations) return toolGroup;
+    const filtered = toolGroup.functionDeclarations.filter(
+      decl => decl.name !== WorkflowTool.Name,
+    );
+    return { ...toolGroup, functionDeclarations: filtered };
+  });
 }

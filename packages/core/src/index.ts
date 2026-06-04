@@ -6,6 +6,10 @@
 
 // Export config
 export * from './config/config.js';
+export * from './config/agent-loop-context.js';
+export * from './policy/policy-engine.js';
+export * from './policy/policy-updater.js';
+export * from './confirmation-bus/message-bus.js';
 export * from './config/projectSettings.js';
 export * from './config/messageRoles.js';
 export * from './config/serverConfig.js';
@@ -24,6 +28,7 @@ export * from './core/prompts.js';
 export * from './core/tokenLimits.js';
 export * from './core/modelConfig.js';
 export * from './core/turn.js';
+export * from './core/invalidStreamError.js';
 export * from './core/geminiRequest.js';
 export * from './core/coreToolScheduler.js';
 export * from './core/nonInteractiveToolExecutor.js';
@@ -36,6 +41,7 @@ export * from './core/mainAgentAdapter.js';
 export * from './core/subAgentAdapter.js';
 export * from './core/sceneManager.js';
 export * from './core/imageGenerator.js';
+export * from './core/workflowRegistry.js';
 
 export * from './code_assist/codeAssist.js';
 // clearCachedCredentialFile removed with OAuth2 - no longer needed for Cheeth OA
@@ -48,6 +54,7 @@ export * from './code_assist/inlineCompletion.js';
 export * from './utils/paths.js';
 export * from './utils/schemaValidator.js';
 export * from './utils/errors.js';
+export * from './utils/httpErrorFallback.js';
 export * from './utils/getFolderStructure.js';
 export * from './utils/memoryDiscovery.js';
 export * from './utils/gitIgnoreParser.js';
@@ -60,6 +67,13 @@ export * from './utils/modelDiagnostics.js';
 export * from './utils/logging.js';
 export * from './utils/pathUtils.js';
 export * from './utils/healthyUseReminderState.js';
+export * from './utils/constants.js';
+export * from './utils/stdio.js';
+export * from './utils/version.js';
+export * from './utils/events.js';
+export * from './utils/sessionUtils.js';
+export * from './utils/sessionSelector.js';
+export * from './utils/goalContinuationPrompt.js';
 
 export * from './utils/enhancedLogger.js';
 
@@ -77,6 +91,7 @@ export { AuthServer } from './auth/login/authServer.js';
 
 // Export services
 export * from './services/fileDiscoveryService.js';
+export * from './services/fileSystemService.js';
 export * from './services/gitService.js';
 export * from './services/sessionManager.js';
 export * from './services/mcpResponseGuard.js';
@@ -110,11 +125,17 @@ export * from './tools/web-fetch.js';
 export * from './tools/memoryTool.js';
 export * from './tools/shell.js';
 export * from './tools/web-search.js';
+export * from './tools/image-reader.js';
+export * from './tools/audio-reader.js';
 export * from './tools/read-many-files.js';
 export * from './tools/read-lints.js';
 export * from './tools/lint-fix.js';
+export * from './tools/ask-user-question.js';
+export * from './tools/local-time.js';
+export * from './tools/goal-achieved.js';
 export * from './tools/mcp-client.js';
 export * from './tools/mcp-tool.js';
+export * from './tools/todo-store.js';
 
 // PPT tools
 export * from './tools/ppt/index.js';
@@ -140,3 +161,6 @@ export * from './utils/browser.js';
 
 // Export skills system (consolidated from cli package)
 export * from './skills/index.js';
+
+// Export ACP-facing command helpers
+export * as AcpCommands from './commands/index.js';

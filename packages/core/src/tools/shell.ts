@@ -34,10 +34,82 @@ import {
   shouldAlwaysConfirmCommand,
 } from '../utils/dangerous-command-detector.js';
 
+/**
+ * 识别是否为长期运行的服务器/服务类命令行
+ * 用于匹配完成后自动压后台，防止前台挂死和超时
+ */
+export function isServerOrPersistentCommand(command: string): boolean {
+  if (!command) return false;
+  const trimmed = command.trim();
+
+  // 1. 前端/Node.js 生态 (npm/yarn/pnpm/bun dev/start/serve/watch/hot 等)
+  const nodePatterns = [
+    /\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:dev|start|serve|watch|hot)\b/i,
+    /\bvite\b/i,
+    /\bnext\s+dev\b/i,
+    /\bnuxt\s+dev\b/i,
+    /\bnodemon\b/i,
+    /\bpm2\s+start\b/i,
+    /\bwebpack\s+(?:serve|dev-server)\b/i,
+    /\bhttp-server\b/i,
+  ];
+
+  // 2. Python Web 框架及服务
+  const pythonPatterns = [
+    /\bpython(?:3)?\s+-m\s+http\.server\b/i,
+    /\b(?:uvicorn|gunicorn|hypercorn|flask|fastapi)\b/i,
+    /\brunserver\b/i, // django manage.py runserver
+    /\bcelery\s+(?:-A\s+\w+\s+)?worker\b/i,
+    /\bjupyter\s+(?:notebook|lab)\b/i,
+  ];
+
+  // 3. Go 热加载
+  const goPatterns = [
+    /\bair\b/i,
+  ];
+
+  // 4. Ruby Web 服务器
+  const rubyPatterns = [
+    /\brails\s+(?:server|s)\b/i,
+    /\bjekyll\s+serve\b/i,
+  ];
+
+  // 5. Java / Spring Boot / JVM 开发服务器
+  const javaPatterns = [
+    /\bspring-boot:run\b/i,
+    /\bbootRun\b/i,
+  ];
+
+  // 6. PHP Web 服务器 (PHP -S 必须大写 S)
+  const phpPatterns = [
+    /\bphp\s+-S\b/,
+    /\bartisan\s+serve\b/i,
+  ];
+
+  // 7. Docker compose (不带 -d 的启动，即前台持续打印日志形式)
+  const dockerPatterns = [
+    /\b(?:docker-compose|docker\s+compose)\s+up\b(?!\s+(?:.*\s+)?-d\b)/i,
+  ];
+
+  const allPatterns = [
+    ...nodePatterns,
+    ...pythonPatterns,
+    ...goPatterns,
+    ...rubyPatterns,
+    ...javaPatterns,
+    ...phpPatterns,
+    ...dockerPatterns,
+  ];
+
+  return allPatterns.some(pattern => pattern.test(trimmed));
+}
+
 export interface ShellToolParams {
   command: string;
   description?: string;
   directory?: string;
+  action?: 'execute' | 'stop_background_task' | 'list_background_tasks';
+  backgroundTaskId?: string;
 }
 
 import { spawn } from 'child_process';
@@ -304,7 +376,7 @@ function sanitizeShellOutput(text: string): string {
 
 
 
-const DEFAULT_SHELL_TIMEOUT_MS = 120000; // 120 seconds default timeout
+const DEFAULT_SHELL_TIMEOUT_MS = 300000; // 300 seconds default timeout (5 minutes)
 
 export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   static Name: string = 'run_shell_command';
@@ -313,7 +385,7 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   constructor(private readonly config: Config) {
     super(
       ShellTool.Name,
-      'Shell',
+      'Bash',
       `This tool executes a given shell command as \`bash -c <command>\`. Command can start background processes using \`&\`. Command is executed as a subprocess that leads its own process group. Command process group can be terminated as \`kill -- -PGID\` or signaled as \`kill -s SIGNAL -- -PGID\`.
 
       The following information is returned:
@@ -326,14 +398,42 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
       Exit Code: Exit code or \`(none)\` if terminated by signal.
       Signal: Signal number or \`(none)\` if no signal was received.
       Background PIDs: List of background processes started or \`(none)\`.
-      Process Group PGID: Process group started or \`(none)\``,
+      Process Group PGID: Process group started or \`(none)\`
+
+# When to use this tool
+
+IMPORTANT: Prefer dedicated tools over this tool when available:
+- Read files: use the read_file tool, NOT cat/head/tail
+- Edit files: use the replace tool, NOT sed/awk
+- Write files: use the write_file tool, NOT echo or cat with heredoc
+- Search files: use the glob tool, NOT find or ls
+- Search content: use the search_file_content tool, NOT grep or rg
+Reserve this tool for system commands and terminal operations that have no dedicated equivalent.
+
+# Multiple commands
+
+- If commands are independent and can run in parallel, make multiple tool calls in a single message.
+- If commands must run sequentially, use \`&&\` to chain them in a single call.
+- Do NOT use newlines to separate commands (newlines are ok inside quoted strings).
+
+# Avoid unnecessary sleep
+
+- Do not sleep between commands that can run immediately.
+- Do not retry failing commands in a sleep loop — diagnose the root cause instead.
+- If you must poll, keep sleep duration short (1-5 seconds).
+
+# Git safety
+
+- Prefer creating a new commit rather than amending an existing one.
+- Before destructive operations (git reset --hard, git push --force, git checkout --), consider whether a safer alternative achieves the same goal.
+- Never skip hooks (--no-verify) or bypass signing unless the user explicitly asks for it.`,
       Icon.Terminal,
       {
         type: Type.OBJECT,
         properties: {
           command: {
             type: Type.STRING,
-            description: 'Exact bash command to execute as `bash -c <command>`',
+            description: 'Exact bash command to execute as `bash -c <command>`. Optional when listing or stopping background tasks.',
           },
           description: {
             type: Type.STRING,
@@ -345,8 +445,17 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
             description:
               '(OPTIONAL) Directory to run the command in, if not the project root directory. Must be relative to the project root directory and must already exist.',
           },
+          action: {
+            type: Type.STRING,
+            enum: ['execute', 'stop_background_task', 'list_background_tasks'],
+            description: 'The action to perform: "execute" (default) to run a command, "stop_background_task" to terminate a background task, or "list_background_tasks" to list all running background tasks.',
+          },
+          backgroundTaskId: {
+            type: Type.STRING,
+            description: 'The ID of the background task to terminate. Required when action is "stop_background_task".',
+          },
         },
-        required: ['command'],
+        required: [],
       },
       false, // output is not markdown
       true, // output can be updated
@@ -368,6 +477,23 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   }
 
   validateToolParams(params: ShellToolParams): string | null {
+    const action = params.action || 'execute';
+
+    if (action === 'list_background_tasks') {
+      return null;
+    }
+
+    if (action === 'stop_background_task') {
+      if (!params.backgroundTaskId) {
+        return 'backgroundTaskId is required when action is stop_background_task';
+      }
+      return null;
+    }
+
+    if (!params.command) {
+      return 'Command is required.';
+    }
+
     const commandCheck = isCommandAllowed(params.command, this.config);
     if (!commandCheck.allowed) {
       if (!commandCheck.reason) {
@@ -409,6 +535,11 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   ): Promise<ToolCallConfirmationDetails | false> {
     if (this.validateToolParams(params)) {
       return false; // skip confirmation, execute call will fail immediately
+    }
+
+    const action = params.action || 'execute';
+    if (action === 'list_background_tasks' || action === 'stop_background_task') {
+      return false; // skip confirmation for listing and stopping tasks
     }
 
     const command = stripShellWrapper(params.command);
@@ -461,7 +592,65 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
     signal: AbortSignal,
     updateOutput?: (output: string) => void,
   ): Promise<ToolResult> {
-    const strippedCommand = stripShellWrapper(params.command);
+    const action = params.action || 'execute';
+
+    if (action === 'list_background_tasks') {
+      const taskManager = getBackgroundTaskManager();
+      const tasks = taskManager.getAllTasks();
+
+      if (tasks.length === 0) {
+        const msg = 'No background tasks found.';
+        return {
+          llmContent: msg,
+          returnDisplay: msg,
+        };
+      }
+
+      let table = 'Currently registered background tasks:\n\n';
+      table += '| Task ID | Status | Command | Directory | PID | Start Time |\n';
+      table += '|---|---|---|---|---|---|\n';
+      for (const t of tasks) {
+        const timeStr = new Date(t.startTime).toLocaleTimeString();
+        table += `| ${t.id} | ${t.status} | \`${t.command}\` | ${t.directory || '(root)'} | ${t.pid || 'N/A'} | ${timeStr} |\n`;
+      }
+
+      return {
+        llmContent: table,
+        returnDisplay: `Listed ${tasks.length} background tasks.`,
+      };
+    }
+
+    if (action === 'stop_background_task') {
+      const taskManager = getBackgroundTaskManager();
+      const taskId = params.backgroundTaskId!;
+      const task = taskManager.getTask(taskId);
+
+      if (!task) {
+        const msg = `Error: Background task with ID "${taskId}" not found.`;
+        return {
+          llmContent: msg,
+          returnDisplay: msg,
+        };
+      }
+
+      if (task.status !== 'running') {
+        const msg = `Background task "${taskId}" is not running (Current status: ${task.status}).`;
+        return {
+          llmContent: msg,
+          returnDisplay: msg,
+        };
+      }
+
+      taskManager.killTask(taskId);
+
+      const msg = `Successfully terminated background task "${taskId}" (Command: \`${task.command}\`).`;
+      return {
+        llmContent: msg,
+        returnDisplay: msg,
+      };
+    }
+
+    const strippedCommand = stripShellWrapper(params.command || '');
 
     // 🚨 保护措施：防止在CLI环境下杀死所有node.exe进程
     // 检测危险的批量结束nodejs进程的命令（仅在非Bun运行时环境下）
@@ -710,9 +899,19 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
         });
 
         // Background mode handler - check periodically
+        let ticks = 0;
         const checkInterval = setInterval(() => {
-          if (backgroundSignal.isBackgroundModeRequested() && !exited) {
-            console.log('[ShellTool] 🔥 Background mode detected! Moving to background...');
+          ticks++;
+          const isPersistent = isServerOrPersistentCommand(strippedCommand);
+          // ⏳ 等待 10 秒（100 个 tick * 100ms），给持久化服务充足的启动时间，以便在发生端口冲突或启动即崩溃（exit 1）时能直接被前台捕获
+          const autoTrigger = isPersistent && (ticks >= 100);
+
+          if ((backgroundSignal.isBackgroundModeRequested() || autoTrigger) && !exited) {
+            console.log(
+              autoTrigger
+                ? '[ShellTool] 🌐 Server command detected! Auto-moving to background...'
+                : '[ShellTool] 🔥 Background mode detected! Moving to background...'
+            );
             backgroundModeTriggered = true;
             clearInterval(checkInterval);
 
@@ -770,9 +969,27 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
 
     // If background mode was triggered, return early with a special message
     if (backgroundModeTriggered) {
+      const isAuto = isServerOrPersistentCommand(strippedCommand);
+      const triggerReason = isAuto
+        ? `automatically identified as a long-running service/server command and moved to the background`
+        : `moved to the background by the user`;
+
       return {
-        llmContent: `[DeepV Code - SYSTEM NOTIFICATION] Command "${params.command}" has been moved to background by user (Task ID: ${backgroundTaskId}). ⚠️ IMPORTANT: DO NOT report this as completed and DO NOT re-execute this command - it is still running. The system will automatically notify you with the results when it finishes.`,
-        returnDisplay: `Running in background...`,
+        llmContent: `[DeepV Code - SYSTEM NOTIFICATION] Command "${params.command}" has been ${triggerReason} (Task ID: ${backgroundTaskId}).
+
+⚠️ IMPORTANT RULES FOR BACKGROUND TASKS:
+1. DO NOT report this task as completed.
+2. DO NOT re-execute this command - it is still running actively in the background.
+3. The system will automatically notify you with the results (on stdout/stderr) if the task finishes.
+4. You can continue to perform other tasks (such as writing tests, making edits, or requesting web searches) in subsequent turns while this server runs!
+
+🔧 HOW TO MANAGE THIS BACKGROUND TASK:
+- If you want to stop/terminate this background service, invoke the run_shell_command tool with:
+  * action: "stop_background_task"
+  * backgroundTaskId: "${backgroundTaskId}"
+- If you want to see the status of all running background tasks, invoke the run_shell_command tool with:
+  * action: "list_background_tasks"`,
+        returnDisplay: isAuto ? `Auto-started in background... (Task ID: ${backgroundTaskId})` : `Running in background... (Task ID: ${backgroundTaskId})`,
         isBackgroundTask: true,
         backgroundTaskId,
       };

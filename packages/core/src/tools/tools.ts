@@ -288,7 +288,7 @@ export interface McpThinkingDisplay {
   thoughtHistoryLength?: number;
 }
 
-export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay;
+export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay | GoalAchievedDisplay;
 
 // Export tool output message utilities
 export {
@@ -335,6 +335,28 @@ export interface TodoDisplay {
     status: 'pending' | 'in_progress' | 'completed';
     priority: 'high' | 'medium' | 'low';
   }>;
+}
+
+/**
+ * Structured UI display for `goal_achieved` tool results.
+ *
+ * Why this is a structured shape (not a plain string):
+ *   The default tool-result row is a single dim line — fine for routine
+ *   things like "ReadFolder Listed 3 items" but bad for a "I just declared
+ *   the long-running /goal task complete and here are my reasons"
+ *   announcement, which the user actually wants to *read*. Both UIs
+ *   (CLI Ink + VSCode webview React) special-case this `type` discriminator
+ *   to render a bordered card with the reason laid out as a multi-line
+ *   block, mirroring the same pattern used by TodoDisplay / SubAgentDisplay.
+ *
+ * Fields:
+ *   - reason: the raw text the model wrote into the tool's `reason` param.
+ *     Renderers should preserve whitespace/newlines so the model's
+ *     paragraph structure (e.g. "criterion 1: …\ncriterion 2: …") survives.
+ */
+export interface GoalAchievedDisplay {
+  type: 'goal_achieved_display';
+  reason: string;
 }
 
 export interface SubAgentDisplay {
@@ -390,7 +412,35 @@ export interface ToolEditConfirmationDetails {
 export interface ToolConfirmationPayload {
   // used to override `modifiedProposedContent` for modifiable tools in the
   // inline modify flow
-  newContent: string;
+  newContent?: string;
+
+  // ========== AskUserQuestion payload fields ==========
+  /**
+   * Answers collected from the AskUserQuestion dialog.
+   * Keyed by `question.question` text, values are the selected option label(s)
+   * (comma-joined for multi-select). For free-text "Other" answers, the value
+   * is the raw user input.
+   */
+  answers?: Record<string, string>;
+
+  /**
+   * Optional per-question annotations: user notes or captured preview content.
+   * Keyed by question text. Surfaced to the LLM in the tool_result.
+   */
+  annotations?: Record<
+    string,
+    {
+      preview?: string;
+      notes?: string;
+    }
+  >;
+
+  /**
+   * Feedback text when the user chooses "Chat about this" or
+   * "Skip interview and plan immediately" — forwarded back to the LLM
+   * via the tool_result content.
+   */
+  feedback?: string;
 }
 
 export interface ToolExecuteConfirmationDetails {
@@ -431,12 +481,84 @@ export interface ToolDeleteConfirmationDetails {
   reason?: string;
 }
 
+/**
+ * Option for a single AskUserQuestion question.
+ */
+export interface AskUserQuestionOption {
+  /** Display text for this option (concise, 1-5 words). Used as the answer key in the LLM-facing result. */
+  label: string;
+  /** Explanation of what this option means or implies. */
+  description: string;
+  /** Optional preview content (markdown or html) rendered side-by-side. Single-select only. */
+  preview?: string;
+}
+
+/**
+ * A single question inside an AskUserQuestion call.
+ */
+export interface AskUserQuestion {
+  /** The complete question to ask the user. */
+  question: string;
+  /** Short chip label (≤12 chars) displayed in the question navigation bar. */
+  header: string;
+  /** 2-4 mutually exclusive options (unless multiSelect). An "Other" option is auto-appended by the UI. */
+  options: AskUserQuestionOption[];
+  /** Whether the user can pick multiple options. Defaults to false. */
+  multiSelect?: boolean;
+}
+
+/**
+ * Confirmation details for the AskUserQuestion tool.
+ * Rendered by a dedicated permission dialog (AskUserQuestionMessage)
+ * that reuses the standard awaiting_approval pause/resume pipeline.
+ */
+export interface ToolQuestionConfirmationDetails {
+  type: 'question';
+  title: string;
+  /** 1-4 questions to ask in this call. */
+  questions: AskUserQuestion[];
+  /** Optional metadata for tracking/analytics (not shown to user). */
+  metadata?: {
+    source?: string;
+  };
+  onConfirm: (
+    outcome: ToolConfirmationOutcome,
+    payload?: ToolConfirmationPayload,
+  ) => Promise<void>;
+}
+
+/**
+ * A single phase/step in a workflow, shown in the pre-run confirmation dialog.
+ */
+export interface WorkflowPhase {
+  /** Short label for this phase, e.g. "运行测试" */
+  name: string;
+  /** One-line description of what this phase does */
+  description: string;
+  /** Up to 3 sample agent prompts (truncated) to show the user */
+  agentPreviews?: string[];
+}
+
+export interface ToolWorkflowConfirmationDetails {
+  type: 'workflow';
+  title: string;
+  /** Short description of the overall workflow goal */
+  description: string;
+  /** Ordered list of high-level phases inferred from the script */
+  phases: WorkflowPhase[];
+  /** The raw orchestration script, shown when user picks "View script" */
+  rawScript: string;
+  onConfirm: (outcome: ToolConfirmationOutcome) => Promise<void>;
+}
+
 export type ToolCallConfirmationDetails =
   | ToolEditConfirmationDetails
   | ToolExecuteConfirmationDetails
   | ToolMcpConfirmationDetails
   | ToolInfoConfirmationDetails
-  | ToolDeleteConfirmationDetails;
+  | ToolDeleteConfirmationDetails
+  | ToolQuestionConfirmationDetails
+  | ToolWorkflowConfirmationDetails;
 
 export enum ToolConfirmationOutcome {
   ProceedOnce = 'proceed_once',
@@ -445,6 +567,8 @@ export enum ToolConfirmationOutcome {
   ProceedAlwaysTool = 'proceed_always_tool',
   ProceedAlwaysProject = 'proceed_always_project', // 本项目始终允许
   ModifyWithEditor = 'modify_with_editor',
+  /** Special outcome: user wants to inspect the workflow script before running */
+  InspectScript = 'inspect_script',
   Cancel = 'cancel',
 }
 
@@ -507,6 +631,7 @@ export enum Icon {
   Trash = 'trash',           // 🗑️ 用于DeleteFile
   List = 'list',             // 📜 用于ListSkills
   Info = 'info',             // ℹ️ 用于GetSkillDetails
+  Question = 'question',     // ❓ 用于AskUserQuestion
 }
 
 export interface ToolLocation {
@@ -515,3 +640,41 @@ export interface ToolLocation {
   // Which line (if known)
   line?: number;
 }
+
+/**
+ * Semantic category of a tool. Used by clients (including ACP editors) to
+ * decide how to render tool calls and to infer safety properties.
+ *
+ * This is independent of {@link Icon}: `Kind` describes *what* a tool does,
+ * while `Icon` describes *how* it is visually represented.
+ */
+export enum Kind {
+  Read = 'read',
+  Edit = 'edit',
+  Delete = 'delete',
+  Move = 'move',
+  Search = 'search',
+  Execute = 'execute',
+  Think = 'think',
+  Agent = 'agent',
+  Fetch = 'fetch',
+  Communicate = 'communicate',
+  Plan = 'plan',
+  SwitchMode = 'switch_mode',
+  Other = 'other',
+}
+
+/** Tool kinds that perform side-effecting operations. */
+export const MUTATOR_KINDS: readonly Kind[] = [
+  Kind.Edit,
+  Kind.Delete,
+  Kind.Move,
+  Kind.Execute,
+] as const;
+
+/** Tool kinds that are read-only and safe to run in parallel. */
+export const READ_ONLY_KINDS: readonly Kind[] = [
+  Kind.Read,
+  Kind.Search,
+  Kind.Fetch,
+] as const;

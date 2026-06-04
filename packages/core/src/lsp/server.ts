@@ -8,9 +8,63 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import { LSPServer } from './types.js';
 import { BinaryManager } from './binaryManager.js';
+
+/**
+ * Spawn a command with Node 24+ Windows .cmd compatibility.
+ *
+ * On Windows, Node 24 no longer allows spawn() to directly execute .cmd/.bat files
+ * when shell: false (EINVAL error). This helper:
+ * 1. Detects .cmd files on Windows
+ * 2. Parses the .cmd to find the underlying .js entry point
+ * 3. Spawns node.exe directly with the .js file
+ *
+ * This avoids both the EINVAL error and the shell: true deprecation warning.
+ */
+function spawnCommand(bin: string, args: string[], options: { cwd: string }): ChildProcess {
+  const isWindows = process.platform === 'win32';
+  const isCmdFile = isWindows && bin.toLowerCase().endsWith('.cmd');
+
+  // Common spawn options for LSP servers - require stdio pipes for JSON-RPC communication
+  const spawnOptions = {
+    cwd: options.cwd,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'] as ('pipe' | 'inherit' | 'ignore')[],
+  };
+
+  if (isCmdFile && fs.existsSync(bin)) {
+    // Parse .cmd file to find the JS entry point
+    // npm .cmd files have a pattern like: "%_prog%" "%dp0%\..\package\file.js" %*
+    const content = fs.readFileSync(bin, 'utf8');
+
+    // Look for pattern: "%dp0%\...<path>.js" or ".mjs"
+    // Example: "%dp0%\..\pyright\langserver.index.js"
+    const jsMatch = content.match(/%dp0%([^"]*\.m?js)/i);
+    if (jsMatch) {
+      const binDir = path.dirname(bin);
+      // The matched path starts with backslash (e.g., "\..\pyright\file.js")
+      // Convert to relative path by prepending "."
+      let jsRelPath = jsMatch[1].replace(/\\/g, path.sep);
+      if (jsRelPath.startsWith(path.sep)) {
+        jsRelPath = '.' + jsRelPath;
+      }
+      const jsPath = path.resolve(binDir, jsRelPath);
+
+      if (fs.existsSync(jsPath)) {
+        // Spawn node directly with the JS file
+        return spawn(process.execPath, [jsPath, ...args], spawnOptions);
+      }
+    }
+
+    // Fallback: try running via cmd.exe /c
+    return spawn('cmd.exe', ['/c', bin, ...args], spawnOptions);
+  }
+
+  // Non-Windows or non-.cmd: spawn directly
+  return spawn(bin, args, spawnOptions);
+}
 
 /**
  * 智能根目录探测：向上递归寻找特征文件
@@ -62,7 +116,7 @@ export const TypeScriptLSP = (projectRoot: string): LSPServer.Info => ({
     }
 
     return {
-      process: spawn(bin, args, { cwd: root, shell: true })
+      process: spawnCommand(bin, args, { cwd: root })
     };
   }
 });
@@ -71,13 +125,17 @@ export const Pyright = (projectRoot: string): LSPServer.Info => ({
   id: 'pyright',
   displayName: 'Python Language Server',
   extensions: ['.py'],
-  root: NearestRoot(['pyproject.toml', 'setup.py', 'requirements.txt', '.git'], projectRoot),
+  // 🎯 优化: Pyright 根目录探测策略
+  // 1. 首先查找 Python 项目标志 (pyproject.toml, setup.py, requirements.txt)
+  // 2. 如果找不到，查找 package.json (monorepo 中的子包) 而不是 .git (整个项目根)
+  // 这样在 monorepo 环境下，Pyright 会在子包目录启动，而不是整个项目根
+  root: NearestRoot(['pyproject.toml', 'setup.py', 'requirements.txt', 'package.json'], projectRoot),
   async spawn(root: string) {
     const bin = await BinaryManager.ensureBinary('pyright',
       await BinaryManager.npmInstaller(['pyright'], 'pyright-langserver')
     );
     return {
-      process: spawn(bin, ['--stdio'], { cwd: root, shell: true })
+      process: spawnCommand(bin, ['--stdio'], { cwd: root })
     };
   }
 });
@@ -215,7 +273,7 @@ export const WebLSP = (projectRoot: string): LSPServer.Info => ({
       await BinaryManager.npmInstaller(['vscode-langservers-extracted'], 'vscode-html-language-server')
     );
     return {
-      process: spawn(bin, ['--stdio'], { cwd: root, shell: true })
+      process: spawnCommand(bin, ['--stdio'], { cwd: root })
     };
   }
 });
@@ -230,7 +288,7 @@ export const SqlLSP = (projectRoot: string): LSPServer.Info => ({
       await BinaryManager.npmInstaller(['sql-language-server'], 'sql-language-server')
     );
     return {
-      process: spawn(bin, ['up', '--method', 'stdio'], { cwd: root, shell: true })
+      process: spawnCommand(bin, ['up', '--method', 'stdio'], { cwd: root })
     };
   }
 });
@@ -245,7 +303,7 @@ export const DockerLSP = (projectRoot: string): LSPServer.Info => ({
       await BinaryManager.npmInstaller(['dockerfile-language-server-nodejs'], 'docker-langserver')
     );
     return {
-      process: spawn(bin, ['--stdio'], { cwd: root, shell: true })
+      process: spawnCommand(bin, ['--stdio'], { cwd: root })
     };
   }
 });
@@ -260,7 +318,7 @@ export const YamlLSP = (projectRoot: string): LSPServer.Info => ({
       await BinaryManager.npmInstaller(['yaml-language-server'], 'yaml-language-server')
     );
     return {
-      process: spawn(bin, ['--stdio'], { cwd: root, shell: true })
+      process: spawnCommand(bin, ['--stdio'], { cwd: root })
     };
   }
 });
