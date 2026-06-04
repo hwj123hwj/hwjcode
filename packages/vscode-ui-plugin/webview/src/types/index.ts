@@ -99,6 +99,11 @@ export interface ChatMessage {
   notificationReason?: string;
   notificationAction?: string;
   severity?: 'info' | 'warning' | 'error';
+  // 🎯 通知是否处于"进行中"状态（如 /compress 压缩中显示 spinner，完成后清除）
+  notificationInProgress?: boolean;
+  // 🎯 关联后端某次异步操作的稳定 id（如 compress_status.statusId），
+  // 让 start → done/error 的多条状态更新落到同一条 in-chat 通知上。
+  statusId?: string;
 
   // 🎯 Token使用情况
   tokenUsage?: {

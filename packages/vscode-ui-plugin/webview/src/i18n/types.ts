@@ -357,6 +357,14 @@ export interface Translations {
     cancel: string;
     confirmAndSwitch: string;
     inProgress: string;
+    manualTitle: string;
+    manualInProgress: string;
+    manualInProgressDesc: string;
+    manualDone: string;
+    manualDoneDesc: string;
+    manualSkipped: string;
+    manualSkippedDesc: string;
+    manualFailed: string;
   };
 
   reasoning: {
