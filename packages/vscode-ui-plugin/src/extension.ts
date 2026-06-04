@@ -2958,7 +2958,94 @@ function setupSlashCommandHandlers() {
         return;
       }
 
-      // 处理命令的 prompt
+      // ─────────────────────────────────────────────────────────────
+      // 内置 side-effect 命令分发：不返回 prompt，而是执行后端动作
+      // ─────────────────────────────────────────────────────────────
+      if (command.execution === 'side_effect') {
+        if (command.sideEffect === 'compress') {
+          // /compress：让 webview 走副作用分支自己驱动压缩，与 CLI compressCommand
+          // 行为对齐（CLI 内部也是直接调 geminiClient.tryCompressChat）。
+          // 这里只把"我是 compress 副作用"反馈回去；真正调用 tryCompressChat 的
+          // 路径已经存在于 MultiSessionApp 里（compression_confirmation 流），
+          // webview 收到后转发一条 builtin_compress 消息回 backend 实际执行。
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: {
+              success: true,
+              sideEffect: 'compress',
+              info: 'Compressing conversation history…',
+            },
+          });
+          return;
+        }
+        // 未来扩展其它 side-effect 类型时在此追加分支
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: `Unsupported side effect: ${command.sideEffect}` },
+        });
+        return;
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // /init 内置命令的特殊预处理：在 workspace 创建空 DEEPV.md，再走 prompt 分支
+      // ─────────────────────────────────────────────────────────────
+      if (command.kind === 'built-in' && command.name === 'init') {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: { success: false, error: '/init requires an open workspace folder.' },
+          });
+          return;
+        }
+        const workspaceRoot = workspaceFolders[0].uri.fsPath;
+        const deepvMdPath = path.join(workspaceRoot, 'DEEPV.md');
+        try {
+          let info: string | undefined;
+          if (fs.existsSync(deepvMdPath)) {
+            const stats = fs.statSync(deepvMdPath);
+            if (stats.size === 0) {
+              // 空文件：当不存在处理（与 CLI initCommand 行为对齐）
+              info = `Empty DEEPV.md detected at ${deepvMdPath}, regenerating…`;
+            } else {
+              // 非空文件：MVP 阶段保守拒绝执行，避免覆盖用户内容。
+              // CLI 端在这里会弹 init-choice 对话框；webview 端先走拒绝路径，
+              // 后续如有用户呼声再补对话框。
+              const sizeKB = Math.round(stats.size / 1024 * 100) / 100;
+              communicationService.sendMessage({
+                type: 'slash_command_result',
+                payload: {
+                  success: false,
+                  error: `DEEPV.md already exists (${sizeKB}KB). Delete or rename it first if you want to regenerate via /init.`,
+                },
+              });
+              return;
+            }
+          } else {
+            // 不存在：创建空文件
+            fs.writeFileSync(deepvMdPath, '', 'utf8');
+            info = `Created empty DEEPV.md at ${deepvMdPath}`;
+          }
+          const processedPrompt = slashCommandService.processCommandPrompt(command, args);
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: { success: true, prompt: processedPrompt, info },
+          });
+          return;
+        } catch (initErr) {
+          logger.error('Failed to prepare DEEPV.md for /init', initErr instanceof Error ? initErr : undefined);
+          communicationService.sendMessage({
+            type: 'slash_command_result',
+            payload: {
+              success: false,
+              error: `Failed to prepare DEEPV.md: ${initErr instanceof Error ? initErr.message : String(initErr)}`,
+            },
+          });
+          return;
+        }
+      }
+
+      // 默认 prompt 模式（TOML 命令 / 其它 built-in prompt 命令）
       const processedPrompt = slashCommandService.processCommandPrompt(command, args);
 
       communicationService.sendMessage({
@@ -2970,6 +3057,70 @@ function setupSlashCommandHandlers() {
       communicationService.sendMessage({
         type: 'slash_command_result',
         payload: { success: false, error: error instanceof Error ? error.message : 'Command execution failed' },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 内置 /compress 的实际执行入口：webview 收到 sideEffect:'compress' 后
+  // 会回发一条 builtin_compress 消息触发这里。我们直接调用 core 的
+  // tryCompressChat（与 CLI compressCommand 完全一致），并把结果
+  // 通过现有 system-notification / chat_compressed 通道反馈给 webview。
+  // ─────────────────────────────────────────────────────────────────
+  communicationService.addMessageHandler('builtin_compress', async () => {
+    try {
+      // 当前会话的 AIService —— 与 setupChatHandlers 内 send_message 的
+      // 取法（getCurrentInitializedAIService）保持一致。
+      const aiService = await sessionManager.getCurrentInitializedAIService();
+      const geminiClient = aiService?.getGeminiClient?.();
+      if (!geminiClient) {
+        logger.warn('[/compress] geminiClient not initialized');
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'AI client not ready. Please wait for initialization.' },
+        });
+        return;
+      }
+
+      if (geminiClient.isCompressionInProgress?.()) {
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'Compression already in progress, please wait.' },
+        });
+        return;
+      }
+
+      logger.info('[/compress] Manual compression triggered via slash command');
+      const promptId = `slash-compress-${Date.now()}`;
+      const result = await geminiClient.tryCompressChat(promptId, new AbortController().signal, true);
+
+      if (result) {
+        const before = (result as any).originalTokenCount;
+        const after = (result as any).newTokenCount;
+        logger.info(`[/compress] Compressed ${before} → ${after} tokens`);
+        const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : String(n));
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: {
+            success: true,
+            info: `Compressed ${fmt(before)} → ${fmt(after)} tokens`,
+          },
+        });
+      } else {
+        logger.warn('[/compress] tryCompressChat returned falsy result');
+        communicationService.sendMessage({
+          type: 'slash_command_result',
+          payload: { success: false, error: 'Compression returned no result. The history may already be small enough.' },
+        });
+      }
+    } catch (error) {
+      logger.error('[/compress] Compression failed', error instanceof Error ? error : undefined);
+      communicationService.sendMessage({
+        type: 'slash_command_result',
+        payload: {
+          success: false,
+          error: `Compression failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
       });
     }
   });
