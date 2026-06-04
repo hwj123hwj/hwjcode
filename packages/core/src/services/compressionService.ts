@@ -571,6 +571,9 @@ export class CompressionService {
    * @param originalTokenCount 原始token数量（可选，如果提供则跳过重复计算）
    * @param overridePreserveRatio 可选的覆盖保留比例（0-1），用于激进压缩
    * @param isModelSwitchCompression 是否是模型切换时的压缩（默认false）
+   * @param force 是否为用户主动触发的强制压缩（默认false）。强制压缩时放宽
+   *              "历史过少"与"找不到边界"两个守卫，只要有内容就尽力压缩，
+   *              并允许压缩全部历史（用于修复残缺的 tool_call 上下文）
    * @returns 压缩结果
    */
   async compressHistory(
@@ -583,7 +586,8 @@ export class CompressionService {
     abortSignal: AbortSignal,
     originalTokenCount?: number,
     overridePreserveRatio?: number,
-    isModelSwitchCompression: boolean = false
+    isModelSwitchCompression: boolean = false,
+    force: boolean = false
   ): Promise<CompressionResult> {
     try {
       // 获取或计算原始token数量
@@ -606,10 +610,18 @@ export class CompressionService {
       const conversationHistory = history.slice(this.skipEnvironmentMessages);
 
       // 如果对话历史太少，不进行压缩
-      if (conversationHistory.length <= 2) {
+      // 强制压缩（用户主动 /compress）时放宽此限制：只要有内容就允许压缩，
+      // 这样用户可以随时通过压缩来修复残缺的 tool_call 上下文。
+      if (!force && conversationHistory.length <= 2) {
         return {
           success: false,
           error: 'Insufficient conversation history to compress'
+        };
+      }
+      if (force && conversationHistory.length === 0) {
+        return {
+          success: false,
+          error: 'No conversation history to compress'
         };
       }
 
@@ -627,7 +639,7 @@ export class CompressionService {
       // 寻找最近的完整工具调用对边界，统一处理主agent和subAgent场景
       compressBeforeIndex = this.findToolCallBoundary(conversationHistory, compressBeforeIndex);
 
-      // 如果没有找到合适的压缩边界，不进行压缩
+      // 如果没有找到合适的压缩边界
       if (compressBeforeIndex === -1) {
         console.warn(`[compressHistory] Could not find suitable compression boundary. Conversation history structure may prevent compression.`);
         console.log(`[compressHistory] Last 5 messages in conversationHistory:`);
@@ -641,10 +653,19 @@ export class CompressionService {
           }).join(',') || 'empty';
           console.log(`  [${i}] role=${msg.role}, parts=[${partTypes}]`);
         }
-        return {
-          success: false,
-          error: 'Could not find suitable compression boundary'
-        };
+
+        if (force) {
+          // 用户主动压缩：即使找不到"干净"的边界也尽力而为，
+          // 退化为压缩全部对话历史（保留 0 条）。validateAndCleanHistory
+          // 会在拼接后清理孤立的 tool_use/tool_result，从而修复残缺上下文。
+          console.warn(`[compressHistory] Force compression: no clean boundary found, compressing entire conversation history.`);
+          compressBeforeIndex = conversationHistory.length;
+        } else {
+          return {
+            success: false,
+            error: 'Could not find suitable compression boundary'
+          };
+        }
       }
 
       const historyToCompress = conversationHistory.slice(0, compressBeforeIndex);
@@ -1019,7 +1040,10 @@ IMPORTANT POST-COMPRESSION RULES:
           geminiClient,
           prompt_id,
           abortSignal,
-          shouldCompressResult.tokenCount
+          shouldCompressResult.tokenCount,
+          undefined,
+          false,
+          force
         );
 
         // 如果压缩失败且没有明确的跳过原因，抛出错误以触发重试

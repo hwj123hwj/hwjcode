@@ -359,6 +359,15 @@ export const zhCN: Translations = {
     cancel: '取消',
     confirmAndSwitch: '压缩并切换',
     inProgress: '正在压缩上下文...',
+    // 手动 /compress 的 in-chat 状态文案
+    manualTitle: '上下文压缩',
+    manualInProgress: '正在压缩对话历史…',
+    manualInProgressDesc: '正在总结较早的消息，同时保留最近的上下文。请稍候片刻。',
+    manualDone: '上下文已压缩',
+    manualDoneDesc: '已从 {{original}} tokens 压缩到 {{compressed}} tokens（节省 {{saved}}，{{percent}}）。',
+    manualSkipped: '已跳过压缩',
+    manualSkippedDesc: '对话历史已经足够精简，无需压缩。',
+    manualFailed: '压缩失败',
   },
 
   reasoning: {

@@ -970,30 +970,26 @@ export const MessageInput = React.forwardRef<MessageInputHandle, MessageInputPro
             if (result.success && result.sideEffect === 'compress') {
               // ─────────────────────────────────────────────────────
               // 内置 /compress：不发 AI，转发副作用消息让 backend 调
-              // tryCompressChat。结果通过 show_notification 显示。
+              // tryCompressChat。
+              //
+              // 状态反馈走 backend 主动推送的 `compress_status`（start →
+              // done/error/skipped），由 MultiSessionApp 在对话流里插入并
+              // 原地更新一条持久的 in-chat 通知（带 spinner + 结果），
+              // 用户不再面对空白干等。这里**不再**弹 info/success toast，
+              // 避免与 in-chat 通知重复。
+              //
+              // 仅保留：早退失败的兜底 toast —— 当 geminiClient 尚未就绪
+              // 或已有压缩在进行时，backend 会直接返回 error 且**不会**发出
+              // compress_status:start（因此没有 in-chat 通知可承载该错误）。
               // ─────────────────────────────────────────────────────
               consumedBySlashCommand = true;
               console.log(`🎯 [SlashCommand] /${commandName} → side effect: compress`);
 
-              if (window.vscode && result.info) {
-                window.vscode.postMessage({
-                  type: 'show_notification',
-                  payload: { message: result.info, type: 'info' },
-                });
-              }
-
-              // 异步触发 backend 真正的压缩，结果再通知
+              // 异步触发 backend 真正的压缩。成功/进行中状态由 compress_status
+              // 驱动的 in-chat 通知体现；这里只在「压缩根本没启动」的早退失败时兜底提示。
               slashCommandHandler.triggerBuiltinCompress().then((compressResult) => {
                 if (!window.vscode) return;
-                if (compressResult.success) {
-                  window.vscode.postMessage({
-                    type: 'show_notification',
-                    payload: {
-                      message: compressResult.info || 'Compression completed.',
-                      type: 'info',
-                    },
-                  });
-                } else {
+                if (!compressResult.success) {
                   window.vscode.postMessage({
                     type: 'show_notification',
                     payload: {
