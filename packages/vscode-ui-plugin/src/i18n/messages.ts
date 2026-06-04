@@ -203,6 +203,13 @@ export const AUTH_MESSAGES = {
   AUTH_STATUS_CHECK_FAILED: '登录状态检查失败',
   LOGIN_FLOW_START_FAILED: '登录流程启动失败',
   LOGIN_TIMEOUT: '登录超时（5分钟）',
+
+  // 🎯 English counterparts (selected at runtime via vscode.env.language)
+  NO_VALID_AUTH_INFO_EN: 'No valid authentication information found',
+  NO_VALID_AUTH_INFO_NEEDS_LOGIN_EN: 'No valid authentication information found, login required',
+  AUTH_STATUS_CHECK_FAILED_EN: 'Failed to check login status',
+  LOGIN_FLOW_START_FAILED_EN: 'Failed to start login flow',
+  LOGIN_TIMEOUT_EN: 'Login timed out (5 minutes)',
 } as const;
 
 // =============================================================================
@@ -286,6 +293,32 @@ export const I18N_MESSAGES = {
   AUTH: AUTH_MESSAGES,
   COMMON: COMMON_MESSAGES,
 } as const;
+
+/**
+ * Returns true when the VS Code UI language is Chinese (zh-*).
+ * Imported lazily to avoid coupling this constants module to the vscode API at
+ * load time; callers in the extension host can pass the result of
+ * `vscode.env.language` directly.
+ */
+export function isChineseLocale(language: string): boolean {
+  return language.toLowerCase().startsWith('zh');
+}
+
+/**
+ * Picks the localized auth message based on the given VS Code UI language.
+ * @param key A base key in AUTH_MESSAGES (the zh variant); the `_EN` suffixed
+ *            entry is used for non-Chinese locales.
+ * @param language Typically `vscode.env.language`.
+ */
+export function getAuthMessage(
+  key: 'NO_VALID_AUTH_INFO' | 'NO_VALID_AUTH_INFO_NEEDS_LOGIN' | 'AUTH_STATUS_CHECK_FAILED' | 'LOGIN_FLOW_START_FAILED' | 'LOGIN_TIMEOUT',
+  language: string,
+): string {
+  if (isChineseLocale(language)) {
+    return AUTH_MESSAGES[key];
+  }
+  return AUTH_MESSAGES[`${key}_EN`];
+}
 
 export default I18N_MESSAGES;
 
