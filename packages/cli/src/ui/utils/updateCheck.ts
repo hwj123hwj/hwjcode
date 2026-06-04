@@ -40,7 +40,7 @@ interface UpdateCheckCache {
 
 // 获取缓存文件路径
 function getCacheFilePath(): string {
-  const settingsDir = join(homedir(), '.deepv');
+  const settingsDir = join(homedir(), '.easycode-user');
   return join(settingsDir, 'update-check.json');
 }
 
@@ -59,7 +59,7 @@ async function readUpdateCheckCache(): Promise<UpdateCheckCache | null> {
 async function writeUpdateCheckCache(cache: UpdateCheckCache): Promise<void> {
   try {
     const cacheFile = getCacheFilePath();
-    const settingsDir = join(homedir(), '.deepv');
+    const settingsDir = join(homedir(), '.easycode-user');
 
     // 确保目录存在
     await fs.mkdir(settingsDir, { recursive: true });

@@ -32,7 +32,7 @@ function removeDirectoryRecursive(dirPath: string) {
 }
 
 export class BinaryManager {
-  private static readonly LSP_DIR = path.join(os.homedir(), '.deepv', 'lsp');
+  private static readonly LSP_DIR = path.join(os.homedir(), '.easycode-user', 'lsp');
 
   /**
    * Find an executable on PATH.

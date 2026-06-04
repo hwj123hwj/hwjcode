@@ -3,7 +3,7 @@
  * 版本历史按钮组件 - 显示在聊天界面顶部
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useCallback } from 'react';

@@ -21,7 +21,7 @@ export class RemoteLogger {
 
   private constructor() {
     // 创建日志目录
-    const logDir = path.join(os.homedir(), '.deepv', 'logs');
+    const logDir = path.join(os.homedir(), '.easycode-user', 'logs');
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }

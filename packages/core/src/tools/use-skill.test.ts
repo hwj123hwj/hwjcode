@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 
 // Get actual paths for test assertions (before mock)
-const mockDeepvHome = path.join(os.homedir(), '.deepv');
+const mockDeepvHome = path.join(os.homedir(), '.easycode-user');
 const mockSkillsPaths = {
   DEEPV_HOME: mockDeepvHome,
   SKILLS_ROOT: path.join(mockDeepvHome, 'skills'),
@@ -26,7 +26,7 @@ vi.mock('../skills/index.js', async () => {
   const pathModule = await import('path');
   const osModule = await import('os');
 
-  const deepvHome = pathModule.join(osModule.homedir(), '.deepv');
+  const deepvHome = pathModule.join(osModule.homedir(), '.easycode-user');
 
   return {
     SkillsPaths: {

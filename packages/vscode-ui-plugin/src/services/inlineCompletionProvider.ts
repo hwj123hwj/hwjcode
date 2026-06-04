@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,7 +9,7 @@ import { CompletionCache, buildCacheKeys, isSoftMatchValid } from './completionC
 import { Logger } from '../utils/logger';
 
 /**
- * DeepV Code 的内联代码补全提供者（拉模式 - 只读缓存）
+ * Easy Code 的内联代码补全提供者（拉模式 - 只读缓存）
  *
  * 职责：
  * - 被 VSCode 频繁调用

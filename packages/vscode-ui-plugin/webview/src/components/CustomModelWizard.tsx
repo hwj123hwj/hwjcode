@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -62,7 +62,7 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     value: EASY_ROUTER_PROVIDER_VALUE,
     label: 'EasyRouter (Recommended)',
     description:
-      "DeepV Code's own router. Just paste your API key and pick which models to add — no base URL or protocol setup required.",
+      "Easy Code's own router. Just paste your API key and pick which models to add — no base URL or protocol setup required.",
   },
   {
     value: 'openai',

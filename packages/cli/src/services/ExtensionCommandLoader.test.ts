@@ -25,7 +25,7 @@ describe('ExtensionCommandLoader', () => {
 
   it('loads commands from workspace extensions', async () => {
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'my-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'my-ext', 'commands')]: {
         'test.toml': 'prompt = "test prompt"',
       },
     });
@@ -42,7 +42,7 @@ describe('ExtensionCommandLoader', () => {
   });
 
   it('loads commands from home directory extensions', async () => {
-    const homeExtDir = path.join(mockHomeDir, '.deepv', 'extensions', 'home-ext', 'commands');
+    const homeExtDir = path.join(mockHomeDir, '.easycode-user', 'extensions', 'home-ext', 'commands');
 
     // Mock home directory
     const mockFs: Record<string, unknown> = {
@@ -76,12 +76,12 @@ describe('ExtensionCommandLoader', () => {
 
   it('loads commands from both workspace and home directories', async () => {
     const mockFs: Record<string, unknown> = {
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'workspace-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'workspace-ext', 'commands')]: {
         'ws-cmd.toml': 'prompt = "workspace command"',
       },
     };
 
-    const homeExtDir = path.join(mockHomeDir, '.deepv', 'extensions', 'home-ext', 'commands');
+    const homeExtDir = path.join(mockHomeDir, '.easycode-user', 'extensions', 'home-ext', 'commands');
     mockFs[homeExtDir] = {
       'home-cmd.toml': 'prompt = "home command"',
     };
@@ -128,7 +128,7 @@ describe('ExtensionCommandLoader', () => {
 
   it('loads nested command files with correct naming', async () => {
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'my-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'my-ext', 'commands')]: {
         'simple.toml': 'prompt = "simple"',
         'nested': {
           'deep.toml': 'prompt = "deep"',
@@ -157,7 +157,7 @@ describe('ExtensionCommandLoader', () => {
 
   it('executes extension commands correctly', async () => {
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'my-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'my-ext', 'commands')]: {
         'greet.toml': 'prompt = "Hello, {{name}}!"',
       },
     });
@@ -190,7 +190,7 @@ describe('ExtensionCommandLoader', () => {
 
   it('handles extensions without commands directory', async () => {
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'no-commands-ext')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'no-commands-ext')]: {
         'gemini-extension.json': '{"name": "no-commands-ext"}',
       },
     });
@@ -209,7 +209,7 @@ describe('ExtensionCommandLoader', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'bad-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'bad-ext', 'commands')]: {
         'invalid.toml': 'this is not valid toml:::',
       },
     });
@@ -231,7 +231,7 @@ describe('ExtensionCommandLoader', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mock({
-      [path.join(mockWorkspaceDir, '.deepv', 'extensions', 'bad-def-ext', 'commands')]: {
+      [path.join(mockWorkspaceDir, '.easycode-user', 'extensions', 'bad-def-ext', 'commands')]: {
         'missing-prompt.toml': 'description = "no prompt here"',
       },
     });

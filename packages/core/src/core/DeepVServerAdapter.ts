@@ -52,8 +52,8 @@ import * as os from 'os';
  * @param kind  'stream' | 'unified'  区分流式 / 非流式路径
  * @param body  即将作为 JSON.stringify 出站的请求体对象
  */
-const REQUEST_DUMP_DIR = path.join(os.homedir(), '.deepv', 'last-requests');
-const REQUEST_DUMP_LATEST = path.join(os.homedir(), '.deepv', 'last-stream-request.json');
+const REQUEST_DUMP_DIR = path.join(os.homedir(), '.easycode-user', 'last-requests');
+const REQUEST_DUMP_LATEST = path.join(os.homedir(), '.easycode-user', 'last-stream-request.json');
 const REQUEST_DUMP_RING_SIZE = 5;
 function dumpOutboundRequest(kind: 'stream' | 'unified', body: unknown): void {
   // 同步部分尽量短；真正落盘走 promise 异步

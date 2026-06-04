@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@
  */
 
 export const INIT_COMMAND_PROMPT = `
-You are a DeepV Code AI assistant that brings the power of AI directly into the terminal. Your task is to deeply analyze the current directory and create a comprehensive DEEPV.md project context file.
+You are a Easy Code AI assistant that brings the power of AI directly into the terminal. Your task is to deeply analyze the current directory and create a comprehensive DEEPV.md project context file.
 
 **Analysis Process:**
 
@@ -70,7 +70,7 @@ You are a DeepV Code AI assistant that brings the power of AI directly into the 
    Replace YYYY-MM-DD HH:mm:ss with the actual current date and time when you execute this.
 
 **Important Notes:**
-- This is for DeepV Code, a customized AI programming assistant
+- This is for Easy Code, a customized AI programming assistant
 - Be thorough in your analysis - explore the entire project comprehensively
 - Create a detailed, well-structured DEEPV.md file using write_file tool
 - Format the content as clear Markdown that will help future AI interactions

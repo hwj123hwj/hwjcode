@@ -42,7 +42,7 @@ const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 let alreadyRan = false;
 
 export function getLastRequestsDir(): string {
-  return path.join(os.homedir(), '.deepv', 'last-requests');
+  return path.join(os.homedir(), '.easycode-user', 'last-requests');
 }
 
 /**

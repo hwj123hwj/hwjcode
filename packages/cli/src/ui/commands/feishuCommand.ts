@@ -401,7 +401,7 @@ interface FeishuProjectRoute {
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
-const ROUTE_CONFIG_FILE = path.join(os.homedir(), '.deepv', 'feishu-projects.json');
+const ROUTE_CONFIG_FILE = path.join(os.homedir(), '.easycode-user', 'feishu-projects.json');
 
 /**
  * 读取多项目路由表
@@ -2391,7 +2391,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const projectRoot = config?.getProjectRoot?.() || process.cwd();
         const fs = await import('node:fs');
         const pathModule = await import('node:path');
-        const inboundDir = pathModule.join(projectRoot, '.deepvcode', 'inbound');
+        const inboundDir = pathModule.join(projectRoot, '.easycode', 'inbound');
         fs.mkdirSync(inboundDir, { recursive: true });
 
         const filePaths: string[] = [];
@@ -2421,7 +2421,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const projectRoot = config?.getProjectRoot?.() || process.cwd();
         const fs = await import('node:fs');
         const pathModule = await import('node:path');
-        const clipboardDir = pathModule.join(projectRoot, '.deepvcode', 'clipboard');
+        const clipboardDir = pathModule.join(projectRoot, '.easycode', 'clipboard');
         fs.mkdirSync(clipboardDir, { recursive: true });
 
         const imagePaths: string[] = [];

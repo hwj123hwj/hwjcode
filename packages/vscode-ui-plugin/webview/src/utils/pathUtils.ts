@@ -9,8 +9,8 @@
  * @returns 截断后的路径
  *
  * @example
- * truncatePath('d:\\projects\\deepVCode\\dvcode-deepvlab-ai-web\\DEEPV.md', 60)
- * // => 'd:\projects\...\dvcode-deepvlab-ai-web\DEEPV.md'
+ * truncatePath('d:\\projects\\deepVCode\\easycode-deepvlab-ai-web\\DEEPV.md', 60)
+ * // => 'd:\projects\...\easycode-deepvlab-ai-web\DEEPV.md'
  */
 export function truncatePath(filePath: string, maxLength: number = 60): string {
   // 如果路径长度不超过 maxLength，直接返回
@@ -44,8 +44,8 @@ export function truncatePath(filePath: string, maxLength: number = 60): string {
  * 中间用 ... 替代，确保首尾路径清晰可见
  *
  * 示例：
- * 输入：d:\projects\deepVCode\dvcode-deepvlab-ai-web\DEEPV.md
- * 输出：d:\projects\...\dvcode-deepvlab-ai-web\DEEPV.md
+ * 输入：d:\projects\deepVCode\easycode-deepvlab-ai-web\DEEPV.md
+ * 输出：d:\projects\...\easycode-deepvlab-ai-web\DEEPV.md
  */
 export function getDisplayPath(filePath: string, maxLength: number = 55): string {
   // 如果路径长度不超过 maxLength，直接返回

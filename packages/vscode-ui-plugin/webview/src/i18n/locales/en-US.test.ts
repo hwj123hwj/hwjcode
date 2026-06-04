@@ -22,7 +22,7 @@ describe('en-US locale', () => {
   });
 
   it('should have welcome content', () => {
-    expect(enUS.welcome.titleMain).toContain('DeepV Code');
+    expect(enUS.welcome.titleMain).toContain('Easy Code');
     expect(enUS.welcome.description).toContain('code');
   });
 });

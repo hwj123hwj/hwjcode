@@ -70,7 +70,7 @@ export class TokenManager {
       ...config
     };
 
-    this.tokenDir = config.tokenDir || path.join(os.homedir(), '.deepv');
+    this.tokenDir = config.tokenDir || path.join(os.homedir(), '.easycode-user');
     this.initializeTokenManager();
   }
 
