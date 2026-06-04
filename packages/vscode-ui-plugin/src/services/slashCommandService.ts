@@ -10,7 +10,16 @@
  * Loads custom slash commands from .toml files, sharing the same configuration
  * paths as the CLI (~/.deepv/commands and <project>/.deepvcode/commands).
  *
- * This is a simplified version of CLI's FileCommandLoader, adapted for VSCode environment.
+ * Also exposes a small set of **built-in** commands that mirror high-value
+ * CLI counterparts (currently: /init, /compress).
+ *
+ * Built-in commands have two execution shapes:
+ *   1. `prompt` — same as TOML commands: returns a processed prompt string,
+ *     the webview then sends it to the AI as a normal user message.
+ *   2. `side_effect` — the command performs a backend action (e.g. compress
+ *     history) and the webview MUST NOT forward it to the AI. Side-effect
+ *     commands carry a discriminator (`sideEffect: 'compress' | …`) which
+ *     the webview switches on to dispatch the right local action.
  */
 
 import * as fs from 'fs/promises';
@@ -20,6 +29,7 @@ import * as toml from '@iarna/toml';
 import { glob } from 'glob';
 import { getUserCommandsDirs, getProjectCommandsDirs } from 'deepv-code-core';
 import { Logger } from '../utils/logger';
+import { INIT_COMMAND_PROMPT } from '../constants/initPrompt';
 
 /**
  * Slash command info sent to webview (serializable)
@@ -31,8 +41,20 @@ export interface SlashCommandInfo {
   description: string;
   /** Command source: 'file' for custom commands, 'built-in' for hardcoded */
   kind: 'file' | 'built-in';
-  /** The prompt template */
+  /** The prompt template (TOML 命令直接是用户写的；built-in 'prompt' 命令是固定文本；side-effect 命令为空字符串) */
   prompt: string;
+  /**
+   * Built-in 命令的执行风格：
+   *   - undefined / 'prompt'：和 TOML 命令一样，processCommandPrompt 返回字符串，
+   *     webview 拿去当 user message 发给 AI。
+   *   - 'side_effect'：调用方应当走副作用分支（不发 AI），由 sideEffect 字段
+   *     指明执行哪种动作。
+   */
+  execution?: 'prompt' | 'side_effect';
+  /** 副作用类型（execution === 'side_effect' 时必填） */
+  sideEffect?: 'compress';
+  /** 命令别名（webview 在 fuzzy 匹配 / 输入解析时会兼容这些别名） */
+  altNames?: string[];
 }
 
 /**
@@ -47,6 +69,36 @@ interface TomlCommandDef {
  * Placeholder for shorthand argument injection
  */
 const SHORTHAND_ARGS_PLACEHOLDER = '{{args}}';
+
+/**
+ * 内置命令清单。**故意**和 CLI `packages/cli/src/ui/commands/*.ts` 保持
+ * 字段语义一致：name / altNames / description 都从 CLI 复制过来，让用户
+ * 在两端体验一致。
+ *
+ * 现仅注册 /init 与 /compress 两个最高频的命令；后续如需移植 /clear /memory
+ * 等命令，只需在这里追加新条目并在 setupSlashCommandHandlers 中扩展副作用
+ * 分支即可。
+ */
+const BUILT_IN_COMMANDS: SlashCommandInfo[] = [
+  {
+    name: 'init',
+    description: 'Analyze the current workspace and create a DEEPV.md project context file',
+    kind: 'built-in',
+    execution: 'prompt',
+    prompt: INIT_COMMAND_PROMPT,
+  },
+  {
+    name: 'compress',
+    altNames: ['summarize', 'compact'],
+    description: 'Manually compress the conversation history to free up context (calls tryCompressChat)',
+    kind: 'built-in',
+    execution: 'side_effect',
+    sideEffect: 'compress',
+    // side-effect 命令不会被作为 prompt 发送，但保留一段说明文本，
+    // 以便万一调用方误用 processCommandPrompt 时仍有合理 fallback。
+    prompt: '[Built-in /compress invoked]',
+  },
+];
 
 /**
  * Service for managing custom slash commands in VSCode
@@ -91,10 +143,20 @@ export class SlashCommandService {
   }
 
   /**
-   * Get a specific command by name
+   * Get a specific command by name. 同时匹配主名 + altNames（CLI 行为对齐）。
    */
   getCommand(name: string): SlashCommandInfo | undefined {
-    return this.commands.get(name);
+    if (!name) return undefined;
+    // 直接命中主名（最常见路径）
+    const direct = this.commands.get(name);
+    if (direct) return direct;
+    // 退化：扫一次 altNames 命中（命令数量很少，O(n) 完全可接受）
+    for (const cmd of this.commands.values()) {
+      if (cmd.altNames && cmd.altNames.includes(name)) {
+        return cmd;
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -119,8 +181,21 @@ export class SlashCommandService {
 
   /**
    * Load commands from both user and project directories
+   *
+   * 加载顺序（后者覆盖前者）：
+   *   1) Built-in 命令（/init, /compress …）
+   *   2) 用户级 TOML 命令
+   *   3) 项目级 TOML 命令
+   *
+   * 用户的 TOML 命令可以覆盖 built-in（比如想给 /compress 自定义行为），
+   * 这与 CLI 的命令解析优先级保持一致。
    */
   private async loadCommands(): Promise<void> {
+    // 1) 先注册 built-in 命令
+    for (const cmd of BUILT_IN_COMMANDS) {
+      this.commands.set(cmd.name, cmd);
+    }
+
     const globOptions = {
       nodir: true,
       dot: true,
