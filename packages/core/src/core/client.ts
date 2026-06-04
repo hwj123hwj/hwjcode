@@ -288,6 +288,68 @@ export class GeminiClient {
   }
 
   /**
+   * 解析「大历史压缩升级」时应使用的目标模型 ID。
+   *
+   * 触发场景：sessionTokenCount > ~900K（接近 Flash 1M 上限），需要把压缩
+   * 任务交给一个能吞下 1M+ 输入的模型，否则压缩请求自身就会被上游拒。
+   *
+   * 决策分两条路：
+   *   1) DeepV 云端协议用户（非自定义模型）→ 'x-ai/grok-4.1-fast'。
+   *      DeepVServer 内部能解析这个 ID 并路由到云端 grok 实例。
+   *   2) 自定义模型直连用户（isCustomModel === true）→ 在他们配置的
+   *      customModels 列表里寻找一个 1M+ 上下文模型。优先级：
+   *        a. modelId 含 "grok"（grok-4 / grok-4-fast 等）
+   *        b. modelId 含 "gemini" + ("pro" | "flash")（任何 gemini 1M+ 变种）
+   *      找不到合适候选时，**保留** SceneManager 给出的默认值
+   *      'gemini-2.5-flash' —— 让下游 createTemporaryChat 的
+   *      isUsingCustomModel 分支再做一次 fallback（自定义 gemini-flash → 主模型）。
+   *      关键：绝不能直接吐 'x-ai/grok-4.1-fast'，因为 DeepVServer 解析不到
+   *      自定义模型用户的私有 baseUrl/apiKey，必然 401/404 静默失败。
+   *
+   * @param defaultCompressionModel SceneManager 给出的默认压缩模型 ID
+   * @returns 应该传给 compressionService 的最终模型 ID
+   */
+  private resolveLargeContextCompressionModel(defaultCompressionModel: string | undefined): string {
+    const fallback = defaultCompressionModel ?? 'gemini-2.5-flash';
+    const currentModel = this.config.getModel();
+    const isUsingCustomModel = currentModel ? isCustomModel(currentModel) : false;
+
+    if (!isUsingCustomModel) {
+      // 云端协议用户：维持原行为，让 DeepVServer 路由到云端 grok。
+      return 'x-ai/grok-4.1-fast';
+    }
+
+    // 自定义模型用户：在他们的 customModels 里搜寻 1M+ 上下文候选。
+    const customModels = this.config.getCustomModels() || [];
+    const enabled = customModels.filter(m => m.enabled !== false);
+
+    // 优先 1：grok 系（4 / 4.1-fast 等都是 1M+ 上下文）
+    const grokCandidate = enabled.find(m => {
+      const id = (m.modelId || '').toLowerCase();
+      const display = (m.displayName || '').toLowerCase();
+      return id.includes('grok') || display.includes('grok');
+    });
+    if (grokCandidate) {
+      return generateCustomModelId(grokCandidate);
+    }
+
+    // 优先 2：gemini pro/flash（gemini 系列默认就是 1M 输入上下文）
+    const geminiCandidate = enabled.find(m => {
+      const id = (m.modelId || '').toLowerCase();
+      const display = (m.displayName || '').toLowerCase();
+      const hay = `${id} ${display}`;
+      return hay.includes('gemini') && (hay.includes('pro') || hay.includes('flash'));
+    });
+    if (geminiCandidate) {
+      return generateCustomModelId(geminiCandidate);
+    }
+
+    // 找不到合适候选 → 保留默认值，由 createTemporaryChat 的兜底逻辑处理。
+    // 注意：这里 *不能* 直接返回云端 grok ID，否则自定义模型用户会 401/404。
+    return fallback;
+  }
+
+  /**
    * 获取通用内容生成器
    * DeepVServerAdapter 支持所有模型：Claude模型进行参数转换，Gemini模型直接转发
    */
@@ -1117,11 +1179,21 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
 
       // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
-      // upgrade to x-ai/grok-4.1-fast to ensure compression succeeds.
+      // upgrade the compression model so a 1M+ history can still fit.
       // Using 900,000 as a safe threshold to allow buffer for output and overhead.
+      //
+      // ⚠️ 必须分两条路：
+      //   1) DeepV 云端协议用户 → 'x-ai/grok-4.1-fast'（云端可解析）
+      //   2) 自定义模型直连用户 → 在他们配置的 customModels 里找 1M+ 上下文模型
+      //      ('grok-4' / 'gemini-...-pro' / 'gemini-...-flash' 等)。如果找不到，
+      //      就保留 SceneManager 默认值 'gemini-2.5-flash' —— 让下游
+      //      createTemporaryChat 的 isUsingCustomModel 分支再兜底替换为
+      //      用户自定义的 gemini-flash（仍然是直连他们自己的 endpoint）。
+      //   把云端模型 ID 直接塞给自定义模型用户，DeepVServer 解析不到他们的
+      //   私有 baseUrl/apiKey，必然 401/404，导致压缩静默失败。
       if (this.sessionTokenCount > 900000) {
-        console.log(`[tryCompressChat] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to x-ai/grok-4.1-fast.`);
-        compressionModel = 'x-ai/grok-4.1-fast';
+        compressionModel = this.resolveLargeContextCompressionModel(compressionModel);
+        console.log(`[tryCompressChat] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to ${compressionModel}.`);
       }
 
       const historyModel = this.config.getModel(); // history实际使用的模型，用于测算长度
@@ -1283,13 +1355,13 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       const curatedHistory = this.getChat().getHistory(true);
       let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
 
-      // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
-      // upgrade to x-ai/grok-4.1-fast to ensure compression succeeds.
-      // Using 900,000 as a safe threshold to allow buffer for output and overhead.
-      // We use sessionTokenCount as a proxy, or we could recount if needed.
+      // 🚀 Dynamic Model Upgrade: 与 tryCompressChat 路径保持一致 —— 自定义
+      //   模型用户不能被强行改写为云端 'x-ai/grok-4.1-fast'，否则 DeepVServer
+      //   解析不到他们的私有 baseUrl / apiKey，压缩 100% 失败。
+      //   resolveLargeContextCompressionModel 会按"是否自定义模型"分两条路决策。
       if (this.sessionTokenCount > 900000) {
-        console.log(`[switchModel] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to x-ai/grok-4.1-fast.`);
-        compressionModel = 'x-ai/grok-4.1-fast';
+        compressionModel = this.resolveLargeContextCompressionModel(compressionModel);
+        console.log(`[switchModel] Token count (${this.sessionTokenCount}) exceeds Flash limit. Upgrading compression model to ${compressionModel}.`);
       }
 
       // 尝试压缩以适应新模型
