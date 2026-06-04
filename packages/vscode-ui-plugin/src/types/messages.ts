@@ -500,7 +500,16 @@ export type ExtensionToWebViewMessage =
   | { type: 'stream_recovery_end'; payload: { sessionId: string } }
   // 🎯 自定义斜杠命令相关
   | { type: 'slash_commands_list'; payload: { commands: SlashCommandInfo[] } }
-  | { type: 'slash_command_result'; payload: { success: boolean; prompt?: string; error?: string } }
+  | { type: 'slash_command_result'; payload: {
+      success: boolean;
+      /** Prompt 模式：返回处理后的 prompt 给 webview 转发为 user message */
+      prompt?: string;
+      /** Side-effect 模式：webview 检测到此字段则不发 AI，转发对应消息给 backend 触发动作 */
+      sideEffect?: 'compress';
+      /** 信息提示：用于在 webview 上显示一条系统通知（成功 / 跳过等） */
+      info?: string;
+      error?: string;
+    } }
   // 🎯 模型切换压缩确认
   | { type: 'compression_confirmation_request'; payload: { requestId: string; sessionId: string; targetModel: string; currentTokens: number; targetTokenLimit: number; compressionThreshold: number; message: string } }
   // 🎯 Token使用情况更新（压缩后）
