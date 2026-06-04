@@ -22,7 +22,7 @@ describe('zh-CN locale', () => {
   });
 
   it('should have welcome content', () => {
-    expect(zhCN.welcome.titleMain).toContain('DeepV Code');
+    expect(zhCN.welcome.titleMain).toContain('Easy Code');
     expect(zhCN.welcome.description).toContain('代码');
   });
 });

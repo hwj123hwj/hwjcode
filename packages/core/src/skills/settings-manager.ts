@@ -26,7 +26,7 @@ import {
  */
 export class SkillsPaths {
   /** 用户主目录 ~/.deepv */
-  static readonly DEEPV_HOME = path.join(os.homedir(), '.deepv');
+  static readonly DEEPV_HOME = path.join(os.homedir(), '.easycode-user');
 
   /** Skills 根目录 ~/.deepv/skills */
   static readonly SKILLS_ROOT = path.join(SkillsPaths.DEEPV_HOME, 'skills');

@@ -15,7 +15,7 @@
  *   - 拼装 prompt 并以 user message 形式提交（handleSendMessage）
  *
  * @license Apache-2.0
- * Copyright 2026 DeepV Code
+ * Copyright 2026 Easy Code
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -84,7 +84,7 @@ const SYSTEM_SAFETY_RAILS = [
   '禁止递归删除文件或目录。这意味着：禁止 rm -rf、rm -r、Remove-Item -Recurse、del /s /q、rd /s /q、find ... -delete 等递归删除形式；禁止任何会一次删除多文件的通配删除（rm * 等）。如必须清理，逐个文件用 delete_file 工具删除。',
   '禁止对远程仓库执行强制推送。包括 git push --force、git push -f、git push --force-with-lease，以及任何会改写他人提交历史的推送形式。即使任务"看起来需要"force-push 才能完成，也一律不执行；改用普通 push 或新建分支推送，并在结果汇报中说明原本设想的 force-push 操作及未执行原因。',
   '禁止任何会丢弃未提交工作的操作。包括 git reset --hard（无论目标 ref）、git checkout -- <path>（覆盖未提交修改）、git clean -fd / -fdx、git restore --staged --worktree <path>（丢失未提交修改的形式）、git stash drop / clear。需要回滚时，改用 git stash 暂存、git revert 反转提交、或新建分支隔离改动；绝不破坏工作区现有内容。',
-  '绝对禁止批量杀 node 进程、杀进程树、或按进程名批量杀。理由：你自己就跑在 node 进程里——任何不限定到“单个明确 PID”的杀进程操作都会连同运行你的 dvcode/goal 会话一起终结。同样适用于 npm/npx/tsx/ts-node 等 node 包装器。遇到端口冲突或调试进程残留时，原则按优先级：(1) 能绕就绕（换个未被占用的端口、换上游服务位置、或跳过该子任务）；(2) 实在绕不开，先用端口反查拿到唯一 PID，严格确认该 PID 不是当前 dvcode/goal 进程或其父进程，再杀该单个 PID（优先 SIGTERM，谨慎使用 -9 / /F）。如果你不确定当前操作系统上查找端口 PID 和精准杀 PID 的准确命令，使用 web search 工具查证后再执行；绝不凭经验上手“全杀”。',
+  '绝对禁止批量杀 node 进程、杀进程树、或按进程名批量杀。理由：你自己就跑在 node 进程里——任何不限定到“单个明确 PID”的杀进程操作都会连同运行你的 easycode/goal 会话一起终结。同样适用于 npm/npx/tsx/ts-node 等 node 包装器。遇到端口冲突或调试进程残留时，原则按优先级：(1) 能绕就绕（换个未被占用的端口、换上游服务位置、或跳过该子任务）；(2) 实在绕不开，先用端口反查拿到唯一 PID，严格确认该 PID 不是当前 easycode/goal 进程或其父进程，再杀该单个 PID（优先 SIGTERM，谨慎使用 -9 / /F）。如果你不确定当前操作系统上查找端口 PID 和精准杀 PID 的准确命令，使用 web search 工具查证后再执行；绝不凭经验上手“全杀”。',
 ];
 
 function formatSafetyRails(): string {

@@ -42,16 +42,16 @@ const sharedPlugins = [
     apply: (compiler) => {
       compiler.hooks.beforeRun.tap('BuildStart', () => {
         if (compiler.name === 'extension') {
-          console.log(chalk.bold.cyan('\nDeepV Code Extension: Initializing bundling process...'));
+          console.log(chalk.bold.cyan('\nEasy Code Extension: Initializing bundling process...'));
         }
       });
 
       compiler.hooks.done.tap('BuildEnd', (stats) => {
         if (stats.hasErrors()) {
-          console.log(chalk.red(`\n❌ DeepV Code Extension [${compiler.name}]: Bundling process failed with errors`));
+          console.log(chalk.red(`\n❌ Easy Code Extension [${compiler.name}]: Bundling process failed with errors`));
         } else if (compiler.name === 'core') {
           // Only log final success for the last bundle in the array (core is second)
-          console.log(chalk.green(`\n✅ DeepV Code Extension: Bundling completed successfully`));
+          console.log(chalk.green(`\n✅ Easy Code Extension: Bundling completed successfully`));
         }
       });
     }

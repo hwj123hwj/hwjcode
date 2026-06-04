@@ -3,7 +3,7 @@
  * 版本更新检测服务
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 // 从VS Code webview消息获取当前版本

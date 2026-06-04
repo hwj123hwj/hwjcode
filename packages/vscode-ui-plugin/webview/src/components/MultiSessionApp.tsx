@@ -3,7 +3,7 @@
  * 多Session主应用组件
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -1833,7 +1833,7 @@ User question: ${contentStr}`;
       lastUserInteractionRef.current = Date.now();
 
       const goalContinuePrompt =
-        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '[Easy Code ⏰ GOAL WATCHDOG]\n\n' +
         '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
         '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
         '请立即执行以下检查：\n' +
@@ -1979,11 +1979,11 @@ User question: ${contentStr}`;
 
     // 生成 Markdown 内容
     let markdown = `# ${sessionTitle}\n\n`;
-    markdown += `*Exported on ${exportDate} from DeepV Code*\n\n`;
+    markdown += `*Exported on ${exportDate} from Easy Code*\n\n`;
     markdown += `---\n\n`;
 
     messages.forEach((msg: any) => {
-      const role = msg.type === 'user' ? '**User**' : '**DeepV Code**';
+      const role = msg.type === 'user' ? '**User**' : '**Easy Code**';
       markdown += `${role}\n\n`;
 
       // 处理消息内容

@@ -662,8 +662,8 @@ export class AuthTemplates {
         <div class="container">
           <div class="success">✓</div>
           <h1 class="title" data-i18n="auth.feishu.success.title">Feishu Login Successful</h1>
-          <p class="message" data-i18n="auth.success.message">You have successfully logged in with Feishu. You can now close this page and return to DeepV Code to continue your work.</p>
-          <div class="instruction" data-i18n="auth.success.instruction">Close this page and return to your terminal or IDE to continue using DeepV Code.</div>
+          <p class="message" data-i18n="auth.success.message">You have successfully logged in with Feishu. You can now close this page and return to Easy Code to continue your work.</p>
+          <div class="instruction" data-i18n="auth.success.instruction">Close this page and return to your terminal or IDE to continue using Easy Code.</div>
         </div>
         ${this.getI18nScript()}
       </body>
@@ -788,8 +788,8 @@ export class AuthTemplates {
         <div class="container">
           <div class="success">✓</div>
           <h1 class="title" data-i18n="auth.deepvlab.success.title">DeepVlab Login Successful</h1>
-          <p class="message" data-i18n="auth.success.message">You have successfully logged in with DeepVlab. You can now close this page and return to DeepV Code to continue your work.</p>
-          <div class="instruction" data-i18n="auth.success.instruction">Close this page and return to your terminal or IDE to continue using DeepV Code.</div>
+          <p class="message" data-i18n="auth.success.message">You have successfully logged in with DeepVlab. You can now close this page and return to Easy Code to continue your work.</p>
+          <div class="instruction" data-i18n="auth.success.instruction">Close this page and return to your terminal or IDE to continue using Easy Code.</div>
         </div>
         ${this.getI18nScript()}
       </body>
@@ -939,16 +939,16 @@ export class AuthTemplates {
           en: {
             'auth.feishu.success.title': 'Feishu Login Successful',
             'auth.deepvlab.success.title': 'DeepVlab Login Successful',
-            'auth.success.message': 'You have successfully logged in. You can now close this page and return to DeepV Code to continue your work.',
-            'auth.success.instruction': 'Close this page and return to your terminal or IDE to continue using DeepV Code.',
+            'auth.success.message': 'You have successfully logged in. You can now close this page and return to Easy Code to continue your work.',
+            'auth.success.instruction': 'Close this page and return to your terminal or IDE to continue using Easy Code.',
             'auth.error.title': 'Authentication Failed',
             'auth.error.instruction': '❌ Please close this page and try again in your terminal or IDE.'
           },
           zh: {
             'auth.feishu.success.title': '飞书登录成功',
             'auth.deepvlab.success.title': 'DeepVlab登录成功',
-            'auth.success.message': '您已成功登录。现在可以关闭此页面并返回 DeepV Code 继续您的工作。',
-            'auth.success.instruction': '关闭此页面并返回终端或IDE以继续使用 DeepV Code。',
+            'auth.success.message': '您已成功登录。现在可以关闭此页面并返回 Easy Code 继续您的工作。',
+            'auth.success.instruction': '关闭此页面并返回终端或IDE以继续使用 Easy Code。',
             'auth.error.title': '认证失败',
             'auth.error.instruction': '❌ 请关闭此页面并在终端或IDE中重试。'
           }

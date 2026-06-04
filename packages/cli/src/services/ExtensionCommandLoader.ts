@@ -64,8 +64,8 @@ export class ExtensionCommandLoader implements ICommandLoader {
 
     // Load from both workspace and home directories
     const extensionsDirs = [
-      path.join(this.projectRoot, '.deepv', 'extensions'), // workspace
-      path.join(os.homedir(), '.deepv', 'extensions'), // home directory
+      path.join(this.projectRoot, '.easycode-user', 'extensions'), // workspace
+      path.join(os.homedir(), '.easycode-user', 'extensions'), // home directory
     ];
 
     const globOptions = {

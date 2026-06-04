@@ -43,8 +43,8 @@ export const zhCN: Translations = {
   },
 
   welcome: {
-    title: '👋 欢迎使用 DeepV Code for VS Code',
-    titleMain: '欢迎使用 DeepV Code ',
+    title: '👋 欢迎使用 Easy Code for VS Code',
+    titleMain: '欢迎使用 Easy Code ',
     titleSub: 'for VS Code',
     description: '我可以帮助你进行代码分析、重构、调试和文档生成。',
     quickStart: '快速开始：',

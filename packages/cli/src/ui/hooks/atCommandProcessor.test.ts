@@ -58,7 +58,7 @@ describe('handleAtCommand', () => {
       }),
       getEnableRecursiveFileSearch: vi.fn(() => true),
       getProjectSettingsManager: vi.fn().mockReturnValue({
-        getConfigDirPath: vi.fn().mockReturnValue(path.join(testRootDir, '.deepv')),
+        getConfigDirPath: vi.fn().mockReturnValue(path.join(testRootDir, '.easycode-user')),
       }),
     } as unknown as Config;
 

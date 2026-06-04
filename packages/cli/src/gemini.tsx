@@ -40,6 +40,7 @@ import {
   logUserPrompt,
   AuthType,
   SessionManager,
+  migrateLegacyDirectories,
 } from 'deepv-code-core';
 import { validateAuthMethod } from './config/auth.js';
 import { loadEnvironment } from './config/settings.js';
@@ -259,6 +260,26 @@ function processWorkdirParameter(workdirPath: string | undefined): string | null
 }
 
 export async function main() {
+  // 品牌升级：执行历史配置文件夹平滑迁移 (.deepvcode -> .easycode 等)
+  try {
+    migrateLegacyDirectories(process.cwd(), () => {
+      const isZh = process.env.LANG?.startsWith('zh') || false;
+      if (isZh) {
+        console.log('\n\x1b[36m🔄 正在为您平滑迁移历史 DeepV Code 数据与配置，请稍候（请勿关闭终端）...\x1b[0m');
+        console.log('   • 项目级配置：.deepvcode ──> .easycode');
+        console.log('   • 用户级配置：~/.deepv    ──> ~/.easycode-user');
+        console.log('\x1b[32m💡 提示：下次启动可以使用 easycode 命令启动。\x1b[0m\n');
+      } else {
+        console.log('\n\x1b[36m🔄 Migrating legacy DeepV Code data and configurations, please wait (do not close the terminal)...\x1b[0m');
+        console.log('   • Project-level: .deepvcode ──> .easycode');
+        console.log('   • User-level:    ~/.deepv    ──> ~/.easycode-user');
+        console.log('\x1b[32m💡 Tip: You can use the "easycode" command to launch next time.\x1b[0m\n');
+      }
+    });
+  } catch (err) {
+    // 降级静默忽略
+  }
+
   // 🔬 Startup timing analysis - enable with STARTUP_TIMING=1
   const TIMING_ENABLED = process.env.STARTUP_TIMING === '1';
   const startupStart = Date.now();

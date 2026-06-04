@@ -52,7 +52,7 @@ esbuild
   .build({
     entryPoints: ['packages/cli/index.ts'],
     bundle: true,
-    outfile: 'bundle/dvcode.js',
+    outfile: 'bundle/easycode.js',
     platform: 'node',
     format: 'esm',
     minify: buildEnv === 'production', // 生产环境启用混淆

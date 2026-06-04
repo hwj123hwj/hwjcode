@@ -46,16 +46,17 @@ if (pkg.repository && pkg.repository.url && pkg.repository.url.includes('google-
 }
 
 // 检查 bin
-if (!pkg.bin || !pkg.bin.dvcode) {
+if (!pkg.bin || Object.keys(pkg.bin).length === 0) {
   console.error('❌ bin 字段缺失或不正确');
   hasError = true;
 } else {
-  console.log('✅ bin 字段正确: dvcode -> ' + pkg.bin.dvcode);
+  const firstBin = Object.keys(pkg.bin)[0];
+  console.log('✅ bin 字段正确: ' + firstBin + ' -> ' + pkg.bin[firstBin]);
 }
 
 // 检查 files
-if (!pkg.files || !pkg.files.includes('bundle/')) {
-  console.error('❌ files 字段需要包含 bundle/');
+if (!pkg.files || (!pkg.files.includes('bundle/') && !pkg.files.includes('bundle/dvcode.js'))) {
+  console.error('❌ files 字段需要包含 bundle/ 或其指定文件');
   hasError = true;
 } else {
   console.log('✅ files 字段正确');
@@ -75,13 +76,17 @@ if (!fs.existsSync(bundleDir)) {
   } else {
     console.log('✅ bundle/ 目录存在，包含 ' + bundleFiles.length + ' 个文件');
 
-    // 检查关键文件
-    const dvcodePath = path.join(bundleDir, 'dvcode.js');
-    if (!fs.existsSync(dvcodePath)) {
-      console.error('❌ bundle/dvcode.js 不存在');
-      hasError = true;
-    } else {
-      console.log('✅ bundle/dvcode.js 存在');
+    // 检查 bin 字段中指定的实际可执行文件是否存在
+    const binKeys = Object.keys(pkg.bin || {});
+    for (const binKey of binKeys) {
+      const binFileRelPath = pkg.bin[binKey];
+      const binFilePath = path.join(rootDir, binFileRelPath);
+      if (!fs.existsSync(binFilePath)) {
+        console.error(`❌ ${binFileRelPath} 不存在`);
+        hasError = true;
+      } else {
+        console.log(`✅ ${binFileRelPath} 存在`);
+      }
     }
   }
 }

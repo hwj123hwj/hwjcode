@@ -44,7 +44,7 @@ let credsDir: string;
 
 beforeEach(async () => {
   fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'dvcode-feishu-creds-'));
-  credsDir = path.join(fakeHome, '.deepv');
+  credsDir = path.join(fakeHome, '.easycode-user');
 });
 
 afterEach(async () => {

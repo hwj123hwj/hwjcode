@@ -7,9 +7,10 @@
 import path from 'node:path';
 import os from 'os';
 import * as crypto from 'crypto';
+import fs from 'node:fs';
 
-export const GEMINI_DIR = '.deepv';
-export const PROJECT_DIR_PREFIX = '.deepvcode';
+export const GEMINI_DIR = '.easycode-user';
+export const PROJECT_DIR_PREFIX = '.easycode';
 
 export const GOOGLE_ACCOUNTS_FILENAME = 'google_accounts.json';
 const TMP_DIR_NAME = 'tmp';
@@ -186,6 +187,7 @@ export function getUserCommandsDir(): string {
 export function getUserCommandsDirs(): string[] {
   return [
     getUserCommandsDir(),
+    path.join(os.homedir(), '.easycode-user', COMMANDS_DIR_NAME),
     path.join(os.homedir(), '.gemini', COMMANDS_DIR_NAME),
   ];
 }
@@ -207,10 +209,223 @@ export function getProjectCommandsDir(projectRoot: string): string {
 export function getProjectCommandsDirs(projectRoot: string): string[] {
   return [
     getProjectCommandsDir(projectRoot),
+    path.join(projectRoot, '.easycode', COMMANDS_DIR_NAME),
     path.join(projectRoot, '.gemini', COMMANDS_DIR_NAME),
   ];
 }
 
 export function getProjectSkillsDir(projectRoot: string): string {
   return path.join(projectRoot, PROJECT_DIR_PREFIX, SKILLS_DIR_NAME);
+}
+
+/**
+ * Recursively copies a directory to a new location.
+ */
+/**
+ * Recursively copies a directory to a new location with high-precision granular fault tolerance.
+ */
+function copyFolderRecursiveSync(source: string, target: string) {
+  if (!fs.existsSync(source)) return;
+
+  try {
+    if (!fs.existsSync(target)) {
+      fs.mkdirSync(target, { recursive: true });
+    }
+  } catch (err) {
+    return;
+  }
+
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(source);
+  } catch (err) {
+    return;
+  }
+
+  for (const file of files) {
+    const curSource = path.join(source, file);
+    const curTarget = path.join(target, file);
+
+    try {
+      const stat = fs.lstatSync(curSource);
+      if (stat.isDirectory()) {
+        copyFolderRecursiveSync(curSource, curTarget);
+      } else if (stat.isSymbolicLink()) {
+        try {
+          const symlinkTarget = fs.readlinkSync(curSource);
+          fs.symlinkSync(symlinkTarget, curTarget);
+        } catch (symlinkErr) {
+          // Suppress symlink creation privilege errors in win32
+        }
+      } else {
+        try {
+          fs.copyFileSync(curSource, curTarget);
+        } catch (copyErr) {
+          // Suppress locks / EBUSY / EPERM on individual files in win32
+        }
+      }
+    } catch (statErr) {
+      // Suppress individual stat lookup errors
+    }
+  }
+}
+
+/**
+ * Safely removes a folder recursively with per-file fault tolerance.
+ *
+ * A plain `fs.rmSync(dir, { recursive: true })` aborts the entire deletion the
+ * moment it hits a single locked file. On Windows, files inside the legacy
+ * `.deepv` dir (logs, jwt-token, installation_id, etc.) may still be held open
+ * by other early-loaded modules, causing EBUSY/EPERM and leaving the whole
+ * legacy folder behind. To make a best-effort cleanup, we delete entries one by
+ * one — skipping any individually locked file — and finally try to remove the
+ * (now hopefully empty) directory itself.
+ *
+ * @returns true if the directory was fully removed, false if anything remained.
+ */
+function safeRemoveFolderSync(dirPath: string): boolean {
+  if (!fs.existsSync(dirPath)) return true;
+
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dirPath);
+  } catch {
+    return false;
+  }
+
+  let allRemoved = true;
+  for (const entry of entries) {
+    const full = path.join(dirPath, entry);
+    try {
+      const stat = fs.lstatSync(full);
+      if (stat.isDirectory()) {
+        if (!safeRemoveFolderSync(full)) allRemoved = false;
+      } else {
+        try {
+          fs.rmSync(full, { force: true });
+        } catch {
+          // Individual file locked (EBUSY/EPERM on win32) — skip it.
+          allRemoved = false;
+        }
+      }
+    } catch {
+      allRemoved = false;
+    }
+  }
+
+  // Try to remove the directory itself only if it is now empty.
+  if (allRemoved) {
+    try {
+      fs.rmdirSync(dirPath);
+    } catch {
+      allRemoved = false;
+    }
+  }
+  return allRemoved;
+}
+
+/**
+ * Checks whether a directory lacks real data, i.e. it is missing, empty, or
+ * contains only empty subdirectories (no actual files anywhere inside).
+ *
+ * This is intentionally more lenient than a simple `readdirSync().length === 0`
+ * check: other services (e.g. mcpSettingsService, sessionPersistence) may
+ * pre-create empty placeholder subfolders like `tmp/` or `commands/` inside the
+ * new directory before migration runs. If we treated those empty folders as
+ * "has content", the migration of real legacy data would be wrongly skipped.
+ */
+function isDirWithoutRealData(dirPath: string): boolean {
+  if (!fs.existsSync(dirPath)) return true;
+  try {
+    const entries = fs.readdirSync(dirPath);
+    for (const entry of entries) {
+      const full = path.join(dirPath, entry);
+      let stat;
+      try {
+        stat = fs.lstatSync(full);
+      } catch {
+        // If we cannot stat an entry, conservatively treat it as real data.
+        return false;
+      }
+      if (stat.isDirectory()) {
+        // Recurse: an empty subdirectory does not count as real data.
+        if (!isDirWithoutRealData(full)) return false;
+      } else {
+        // Any file (or symlink) counts as real data.
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    return true;
+  }
+}
+
+/**
+ * Describes a single legacy -> new directory migration unit.
+ */
+interface LegacyMigrationUnit {
+  type: 'project' | 'user' | 'global';
+  legacyDir: string;
+  newDir: string;
+}
+
+/**
+ * Builds the list of migration units for the given project root.
+ * Centralizing this ensures `needsLegacyMigration` and
+ * `migrateLegacyDirectories` always agree on what should be migrated.
+ */
+function getLegacyMigrationUnits(projectRoot: string): LegacyMigrationUnit[] {
+  const globalBaseDir = process.platform === 'win32' ? 'C:\\ProgramData' : '/etc';
+  return [
+    // 1. Current workspace directory configuration: .deepvcode -> .easycode
+    {
+      type: 'project',
+      legacyDir: path.join(projectRoot, '.deepvcode'),
+      newDir: path.join(projectRoot, '.easycode'),
+    },
+    // 2. User home directory configuration: ~/.deepv -> ~/.easycode-user
+    {
+      type: 'user',
+      legacyDir: path.join(os.homedir(), '.deepv'),
+      newDir: path.join(os.homedir(), '.easycode-user'),
+    },
+    // 3. System global public directory configuration: [GlobalBase]/.deepv -> [GlobalBase]/.easycode-global
+    {
+      type: 'global',
+      legacyDir: path.join(globalBaseDir, '.deepv'),
+      newDir: path.join(globalBaseDir, '.easycode-global'),
+    },
+  ];
+}
+
+/**
+ * Returns true when at least one legacy directory still needs migrating, i.e.
+ * the legacy source exists AND the new target has no real data yet.
+ *
+ * This shares the exact same predicate as {@link migrateLegacyDirectories} so
+ * callers (e.g. the VS Code extension) can reliably show a "migration is about
+ * to start" prompt and know the migration will actually run afterwards.
+ */
+export function needsLegacyMigration(projectRoot: string): boolean {
+  return getLegacyMigrationUnits(projectRoot).some(
+    (unit) => fs.existsSync(unit.legacyDir) && isDirWithoutRealData(unit.newDir),
+  );
+}
+
+/**
+ * Performs configuration directory migration: copies legacy directories to new names and attempts removal.
+ */
+export function migrateLegacyDirectories(projectRoot: string, onStart?: (type: 'project' | 'user' | 'global') => void): void {
+  for (const unit of getLegacyMigrationUnits(projectRoot)) {
+    if (fs.existsSync(unit.legacyDir) && isDirWithoutRealData(unit.newDir)) {
+      try {
+        if (onStart) onStart(unit.type);
+        copyFolderRecursiveSync(unit.legacyDir, unit.newDir);
+        safeRemoveFolderSync(unit.legacyDir);
+      } catch (err) {
+        // Ignore errors
+      }
+    }
+  }
 }

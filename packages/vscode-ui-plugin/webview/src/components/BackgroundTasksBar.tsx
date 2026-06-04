@@ -5,7 +5,7 @@
  * 放置在 FilesChangedBar 上方，与其样式保持一致。
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useRef, useEffect } from 'react';

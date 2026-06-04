@@ -2805,7 +2805,7 @@ function* mapGeminiChunkToResponses(chunk: any): Generator<GenerateContentRespon
  *   - Atomic via `.tmp` + rename so an in-flight crash never leaves
  *     half-written / mixed-with-old-content bytes.
  */
-const GEMINI_DUMP_DIR_SEGMENTS = ['.deepv', 'last-requests'] as const;
+const GEMINI_DUMP_DIR_SEGMENTS = ['.easycode-user', 'last-requests'] as const;
 const GEMINI_DUMP_RING_SIZE = 5;
 
 /**

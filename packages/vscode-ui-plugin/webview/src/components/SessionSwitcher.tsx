@@ -3,7 +3,7 @@
  * Session切换器UI组件
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useRef, useEffect } from 'react';

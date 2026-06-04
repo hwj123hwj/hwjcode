@@ -110,6 +110,9 @@ async function main() {
   }
   console.log('');
 
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf-8'));
+  const pkgName = pkg.name;
+
   try {
     // Create progress bar for the overall process
     const progressBar = new cliProgress.SingleBar({
@@ -131,7 +134,7 @@ async function main() {
       progressBar.update(1, { step: '📌 Step 2: Using current version (no bump)' });
       console.log(chalk.yellow('\n   Description: Skipping version increment (--no-version-bump flag set)'));
       newVersion = currentVersion;
-      console.log(chalk.blue(`   📦 Will generate file: deepv-code-${newVersion}.tgz`));
+      console.log(chalk.blue(`   📦 Will generate file: ${pkgName}-${newVersion}.tgz`));
       console.log(chalk.cyan('   ℹ️  Version remains: ${newVersion}'));
       progressBar.increment({ step: 'Version check complete (no bump)' });
     } else {
@@ -141,7 +144,7 @@ async function main() {
       updateRootPackageVersion(newVersion);
       console.log(chalk.green(`   ✅ Root directory version updated: ${currentVersion} → ${newVersion}`));
       updateAllPackageVersions(newVersion);
-      console.log(chalk.blue(`   📦 Will generate file: deepv-code-${newVersion}.tgz`));
+      console.log(chalk.blue(`   📦 Will generate file: ${pkgName}-${newVersion}.tgz`));
       progressBar.increment({ step: 'Version increment complete' });
     }
 
@@ -149,7 +152,7 @@ async function main() {
     console.log(chalk.blue('\n   Description: npm pack will auto-execute all build steps via prepare hook'));
     console.log(chalk.blue('   📋 prepare hook executes: npm run bundle (includes build and package)'));
 
-    const tgzFileName = `deepv-code-${newVersion}.tgz`;
+    const tgzFileName = `${pkgName}-${newVersion}.tgz`;
 
     // Prepare for packaging: validate README exists
     const prepareSpinner = ora({

@@ -48,7 +48,7 @@ Do NOT use this tool:
 - \`fact\` (string, required): The specific fact or piece of information to remember. This should be a clear, self-contained statement. For example, if the user says "My favorite color is blue", the fact would be "My favorite color is blue".
 `;
 
-export const GEMINI_CONFIG_DIR = '.deepv';
+export const GEMINI_CONFIG_DIR = '.easycode-user';
 export const DEFAULT_CONTEXT_FILENAME = 'DEEPV.md';
 export const MEMORY_SECTION_HEADER = '## DeepV Code Added Memories';
 

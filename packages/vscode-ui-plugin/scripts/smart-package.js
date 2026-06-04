@@ -41,7 +41,7 @@ function smartPackage() {
     const versionType = args.find(arg => ['major', 'minor', 'patch'].includes(arg));
     const shouldBumpVersion = versionType !== undefined;
 
-    console.log(`\n${COLORS.magenta}${COLORS.bright}🚀 DeepV Code VS Code Extension Packaging Process${COLORS.reset}`);
+    console.log(`\n${COLORS.magenta}${COLORS.bright}🚀 Easy Code VS Code Extension Packaging Process${COLORS.reset}`);
     console.log(`${COLORS.dim}═══════════════════════════════════════════════════════════════${COLORS.reset}`);
     console.log(`${COLORS.blue}📋 Process Overview:${COLORS.reset}`);
     console.log(`   1. Type check (Safety check)`);

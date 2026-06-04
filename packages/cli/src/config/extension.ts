@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { glob } from 'glob';
 
-export const EXTENSIONS_DIRECTORY_NAME = path.join('.deepv', 'extensions');
+export const EXTENSIONS_DIRECTORY_NAME = path.join('.easycode-user', 'extensions');
 export const EXTENSIONS_CONFIG_FILENAME = 'gemini-extension.json';
 
 export interface Extension {

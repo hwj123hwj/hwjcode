@@ -1,0 +1,14 @@
+{
+  "presets": [
+    {
+      "topic": "看看最后一笔提交，是否达到可发布状态？",
+      "models": [
+        "claude-opus-4-7",
+        "gemini-3.5-flash",
+        "gpt-5.5"
+      ],
+      "rounds": 1,
+      "savedAt": "2026-06-03T07:27:19.366Z"
+    }
+  ]
+}

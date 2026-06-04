@@ -1,8 +1,8 @@
 {
   "name": "deepv-code-vscode-ui-plugin",
-  "displayName": "DeepV Code for VSCode",
+  "displayName": "EasyCode for VSCode",
   "description": "AI-powered programming assistant with visual interface for VS Code",
-  "version": "1.0.319",
+  "version": "1.1.0",
   "publisher": "DeepX",
   "icon": "assets/icon.png",
   "repository": {
@@ -34,87 +34,87 @@
       {
         "command": "deepv.openAIAssistant",
         "title": "Open AI Assistant",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.explainCode",
         "title": "Explain Selected Code",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.optimizeCode",
         "title": "Optimize Code",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.generateTests",
         "title": "Generate Tests",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.addToCurrentChat",
         "title": "Add Symbol to Current Chat",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.openLogFile",
         "title": "Open Log File",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.showLogPath",
         "title": "Show Log Path",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.testInlineCompletion",
         "title": "Test DeepV Suggestions",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.toggleInlineCompletion",
         "title": "Toggle DeepV Suggestions",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.toggleInlineCompletionFromStatusBar",
         "title": "Toggle DeepV Suggestions",
-        "category": "DeepV Code"
+        "category": "Easy Code"
       },
       {
         "command": "deepv.openRulesManagement",
         "title": "Manage Custom Rules",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(book)"
       },
       {
         "command": "deepv.openGoalWizard",
         "title": "Goal-Driven Mode",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(target)"
       },
       {
         "command": "deepv.revertToPrevious",
         "title": "Revert to Previous Version",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(history)"
       },
       {
         "command": "deepv.showVersionTimeline",
         "title": "Show Version Timeline",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(timeline-view-icon)"
       },
       {
         "command": "deepv.showMCPStatus",
         "title": "Show MCP Server Status",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(plug)"
       },
       {
         "command": "deepv.openMCPSettings",
         "title": "Open MCP Settings",
-        "category": "DeepV Code",
+        "category": "Easy Code",
         "icon": "$(settings-gear)"
       }
     ],
@@ -122,8 +122,8 @@
       "activitybar": [
         {
           "id": "deepv-ai-sidebar",
-          "title": "DeepV Code",
-          "icon": "./assets/icon.svg"
+          "title": "Easy Code",
+          "icon": "./assets/icon.png"
         }
       ]
     },
@@ -132,7 +132,7 @@
         {
           "type": "webview",
           "id": "deepv.aiAssistant",
-          "name": "DeepV Code",
+          "name": "Easy Code",
           "when": "true"
         }
       ]
@@ -182,7 +182,7 @@
       ]
     },
     "configuration": {
-      "title": "DeepV Code",
+      "title": "Easy Code",
       "properties": {
         "deepv.logLevel": {
           "type": "string",
@@ -230,7 +230,7 @@
           "type": "string",
           "default": "",
           "description": "Custom proxy server URL",
-          "markdownDescription": "Custom proxy server URL for enterprise deployments. Leave empty to use the default DeepV Code server. Example: `http://localhost:3001`. To deploy your own server, see [DeepVCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)"
+          "markdownDescription": "Custom proxy server URL for enterprise deployments. Leave empty to use the default Easy Code server. Example: `http://localhost:3001`. To deploy your own server, see [DeepVCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)"
         },
         "deepv.healthyUse": {
           "type": "boolean",

@@ -347,7 +347,7 @@ export class FeishuGateway {
   /** 获取去重文件的绝对路径 */
   private getProcessedMessagesFilePath(): string {
     const homeDir = os.homedir();
-    const geminiDir = path.join(homeDir, '.deepv');
+    const geminiDir = path.join(homeDir, '.easycode-user');
     return path.join(geminiDir, 'feishu-processed-messages.json');
   }
 
