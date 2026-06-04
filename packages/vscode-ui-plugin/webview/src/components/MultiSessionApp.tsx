@@ -923,6 +923,105 @@ export const MultiSessionApp: React.FC = () => {
       setStreamRecoveryVisible(false);
     }));
 
+    // 🎯 监听手动 /compress 的状态推送（start → done/error/skipped）。
+    // 目标：用户敲 /compress 后不再面对空白干等 —— 在对话流里插入一条
+    // 持久的 in-chat 通知（带 spinner），压缩结束后原地更新为最终结果，
+    // 同时复用底部 compression-progress-bar 作为全局进度提示。
+    cleanups.push(messageService.onExtensionMessage('compress_status', (payload: any) => {
+      console.log('🗜️ [MultiSessionApp] Received compress_status:', payload);
+      const targetSessionId: string | undefined =
+        payload?.sessionId || stateRef.current.currentSessionId || undefined;
+      if (!targetSessionId) {
+        console.warn('🗜️ [MultiSessionApp] compress_status without resolvable sessionId, ignoring');
+        return;
+      }
+      // 用 statusId 派生稳定的消息 id，保证 start/done/error 落到同一条通知。
+      const statusId: string = payload?.statusId || `compress-${Date.now()}`;
+      const notificationId = `notif-${statusId}`;
+
+      const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : String(n));
+
+      if (payload?.phase === 'start') {
+        // 底部进度条
+        setIsCompressing(true);
+        // in-chat 持久通知（进行中）
+        addMessage(targetSessionId, {
+          id: notificationId,
+          type: 'notification',
+          content: createTextMessageContent(''),
+          timestamp: Date.now(),
+          notificationType: 'compression',
+          notificationTitle: t('compression.manualTitle', {}, 'Context Compression'),
+          notificationDescription: t(
+            'compression.manualInProgressDesc',
+            {},
+            'Summarizing older messages while preserving recent context. This may take a moment.'
+          ),
+          severity: 'info',
+          notificationInProgress: true,
+          statusId,
+        } as any);
+        return;
+      }
+
+      // 任何结束态都要收起底部进度条
+      setIsCompressing(false);
+
+      if (payload?.phase === 'done') {
+        const original = Number(payload?.originalTokenCount);
+        const compressed = Number(payload?.newTokenCount);
+        const saved =
+          Number.isFinite(original) && Number.isFinite(compressed)
+            ? Math.max(0, original - compressed)
+            : undefined;
+        const percent =
+          Number.isFinite(original) && original > 0 && saved !== undefined
+            ? `-${Math.round((saved / original) * 100)}%`
+            : '';
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationTitle: t('compression.manualDone', {}, 'Context compressed'),
+          notificationDescription: t(
+            'compression.manualDoneDesc',
+            {
+              original: fmt(original),
+              compressed: fmt(compressed),
+              saved: fmt(saved),
+              percent,
+            },
+            `Reduced from ${fmt(original)} to ${fmt(compressed)} tokens.`
+          ),
+          severity: 'info',
+        } as any);
+        return;
+      }
+
+      if (payload?.phase === 'skipped') {
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationTitle: t('compression.manualSkipped', {}, 'Compression skipped'),
+          notificationDescription: t(
+            'compression.manualSkippedDesc',
+            {},
+            'The conversation history is already small enough — nothing to compress.'
+          ),
+          severity: 'info',
+        } as any);
+        return;
+      }
+
+      if (payload?.phase === 'error') {
+        updateMessage(targetSessionId, notificationId, {
+          notificationInProgress: false,
+          notificationType: 'warning',
+          notificationTitle: t('compression.manualFailed', {}, 'Compression failed'),
+          notificationDescription: String(payload?.error || 'Compression failed.'),
+          severity: 'error',
+        } as any);
+        return;
+      }
+    }));
+
     // 🔐 监听认证过期通知（服务端返回 HTTP 401 时由 extension 主动推送）
     cleanups.push(messageService.onAuthExpired(({ reason }) => {
       console.log('🔐 [MultiSessionApp] Auth expired notification received:', reason);
