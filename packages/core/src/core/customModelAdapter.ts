@@ -382,6 +382,101 @@ function shouldRetryCustomModel(error: Error): boolean {
 
 
 /**
+ * 跨协议通用的「tool_call ↔ tool_result id 配对」预扫描器。
+ *
+ * 三家上游（Anthropic / OpenAI Chat / OpenAI Responses）都强制要求：
+ *   工具结果块（tool_result / role:'tool' / function_call_output）携带的 id
+ *   必须能在前文找到一个完全相同 id 的工具调用块（tool_use / tool_calls /
+ *   function_call）。否则一律 400（Anthropic: invalid_request_error；OpenAI:
+ *   "tool_call_id did not have a matching tool_calls"）。
+ *
+ * 但 Gemini 原生历史里 functionCall 通常无 id，functionResponse 又被
+ * coreToolScheduler 强制写入了 `${name}-${ts}-${rand}` 形式的 callId。直接转换
+ * 会导致两侧 id 错位。本函数统一在转换前把同名 fc/fr 按 FIFO 配对，给每一对
+ * 选出唯一「权威 id」（优先 fc 原始 id，其次 fr 原始 id，最后确定性合成 id），
+ * 并返回一个 part → 权威 id 的 WeakMap，供各转换器在产出 id 时优先采用。
+ *
+ * @param contents          Gemini 格式历史
+ * @param synthPrefix       合成 id 前缀（Anthropic 用 'toolu_synth'，OpenAI 用 'call_synth'）
+ * @returns WeakMap<part, canonicalId>
+ */
+function pairToolCallIds(
+  contents: any[],
+  synthPrefix: string,
+): WeakMap<object, string> {
+  const idByPart = new WeakMap<object, string>();
+  let synthCounter = 0;
+  const hasId = (x: any) => x && typeof x.id === 'string' && x.id.length > 0;
+
+  const callPartsByName: Map<string, Array<{ part: any; fc: any }>> = new Map();
+  const respPartsByName: Map<string, Array<{ part: any; fr: any }>> = new Map();
+  for (const content of contents || []) {
+    const parts = content?.parts || [];
+    if (content?.role === MESSAGE_ROLES.MODEL) {
+      for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+        const fc = part.functionCall;
+        if (!fc || typeof fc !== 'object') continue;
+        const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+        if (!callPartsByName.has(name)) callPartsByName.set(name, []);
+        callPartsByName.get(name)!.push({ part, fc });
+      }
+    } else if (content?.role === MESSAGE_ROLES.USER) {
+      for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+        const fr = part.functionResponse;
+        if (!fr || typeof fr !== 'object') continue;
+        const name = typeof fr.name === 'string' ? fr.name : 'unknown';
+        if (!respPartsByName.has(name)) respPartsByName.set(name, []);
+        respPartsByName.get(name)!.push({ part, fr });
+      }
+    }
+  }
+
+  const allNames = new Set<string>([
+    ...callPartsByName.keys(),
+    ...respPartsByName.keys(),
+  ]);
+  for (const name of allNames) {
+    const calls = callPartsByName.get(name) ?? [];
+    const resps = respPartsByName.get(name) ?? [];
+
+    // 步骤 A：剔除「fc.id === fr.id」的自洽配对，避免 FIFO 误配。
+    const usedResp = new Set<number>();
+    const pendingCalls: Array<{ part: any; fc: any }> = [];
+    for (const c of calls) {
+      if (hasId(c.fc)) {
+        const matchIdx = resps.findIndex(
+          (r, i) => !usedResp.has(i) && hasId(r.fr) && r.fr.id === c.fc.id,
+        );
+        if (matchIdx >= 0) {
+          usedResp.add(matchIdx);
+          continue;
+        }
+      }
+      pendingCalls.push(c);
+    }
+    const pendingResps = resps.filter((_, i) => !usedResp.has(i));
+
+    // 步骤 B：剩余 fc·fr 按 FIFO 一一配对，共享权威 id（fc.id > fr.id > 合成 id）
+    const n = Math.max(pendingCalls.length, pendingResps.length);
+    for (let k = 0; k < n; k++) {
+      const c = pendingCalls[k];
+      const r = pendingResps[k];
+      let canonical: string;
+      if (c && hasId(c.fc)) canonical = c.fc.id;
+      else if (r && hasId(r.fr)) canonical = r.fr.id;
+      else if (c) canonical = `${synthPrefix}_${name}_${++synthCounter}`;
+      else continue; // 多出来的孤立 fr：交给调用方各自的 fallback 处理
+      if (c) idByPart.set(c.part, canonical);
+      if (r) idByPart.set(r.part, canonical);
+    }
+  }
+
+  return idByPart;
+}
+
+/**
  * OpenAI 格式转换工具
  */
 const OpenAIConverter = {
@@ -410,6 +505,13 @@ const OpenAIConverter = {
     const messages: any[] = [];
     let pendingReasoning = '';
 
+    // 🆕 与 Anthropic 路径一致：先做一次 tool_call ↔ tool_result 的 id 配对。
+    // OpenAI Chat 同样强制 role:'tool' 的 tool_call_id 必须能在前文 assistant
+    // 消息的 tool_calls[].id 里找到对应项，否则 400
+    // ("tool_call_id did not have a matching tool_calls")。Gemini 原生历史里
+    // functionCall 多半无 id，而 functionResponse 带 CLI callId，直接转换会错位。
+    const idByPart = pairToolCallIds(contents, 'call_synth');
+
     for (const content of contents) {
       const parts = content.parts || [];
       const role = content.role === MESSAGE_ROLES.MODEL ? 'assistant' : 'user';
@@ -436,7 +538,8 @@ const OpenAIConverter = {
           tool_calls: parts
             .filter((p: any) => p.functionCall)
             .map((p: any, idx: number) => ({
-              id: p.functionCall.id || `call_${Date.now()}_${idx}`,
+              // 权威配对 id 优先（保证与下游 tool 消息的 tool_call_id 严格一致）
+              id: idByPart.get(p) || p.functionCall.id || `call_${Date.now()}_${idx}`,
               type: 'function',
               function: {
                 name: p.functionCall.name,
@@ -462,7 +565,7 @@ const OpenAIConverter = {
         const functionResponseParts = parts.filter((p: any) => p.functionResponse);
         const toolMessages = functionResponseParts.map((p: any) => ({
           role: 'tool',
-          tool_call_id: p.functionResponse.id || `call_${p.functionResponse.name}`,
+          tool_call_id: idByPart.get(p) || p.functionResponse.id || `call_${p.functionResponse.name}`,
           content: typeof p.functionResponse.response === 'string'
             ? p.functionResponse.response
             : JSON.stringify(p.functionResponse.response || {}),
@@ -605,62 +708,32 @@ const AnthropicConverter = {
     //   blocks: toolu_<name>. Each `tool_result` block must have a corresponding
     //   `tool_use` block in the previous message.
     //
-    // 修复策略：在生成 anthropic 协议之前，先做一次「合成 id 配对」预扫描——
-    // 给所有「无 id」的 functionCall 按出现顺序分配一个稳定的合成 id，
-    // 同时按工具名建一个 FIFO 队列；遇到「无 id」的 functionResponse 时，从同名
-    // 队列里 dequeue 同一个合成 id 回填给它。这样无论原始数据有多脏，下游 Claude
-    // 都能拿到严格匹配的 id 对。
+    // 修复策略：在生成 anthropic 协议之前，先做一次「FIFO id 配对」预扫描——
+    // 把同名的 functionCall / functionResponse 按出现顺序一一配对，让每一对
+    // 共享同一个「权威 id」，从根上保证 tool_use.id === tool_result.tool_use_id。
+    //
+    // 🐛 二次修复（2026-06-04）：旧实现只给「无 id」的 fc/fr 造合成 id 并配对，
+    //   却把「fc 无 id 但 fr 带真实 id」这种最常见的脏状态漏掉了：
+    //   functionResponse 的 id 由 coreToolScheduler 用 `${name}-${ts}-${rand}`
+    //   强制写入（见 createFunctionResponsePart），几乎总是存在；而 Gemini 原生
+    //   functionCall 通常无 id。旧逻辑给 fc 造了 `toolu_synth_read_file_1`、却
+    //   因为 fr「已有 id」而跳过它，于是：
+    //     tool_use.id = toolu_synth_read_file_1
+    //     tool_result.tool_use_id = read_file-<ts>-<rand>
+    //   两侧永不相等 → Bedrock/Anthropic 400:
+    //     unexpected `tool_use_id` found in `tool_result` blocks.
+    //
+    //   现在改为：每对 fc·fr 的权威 id 优先级 = fc 原始 id > fr 原始 id（CLI callId）
+    //   > 确定性合成 id；解析出来后同时写回 fc 和 fr 对应的 part，严格一致。
     //
     // 设计要点：
-    //   - 只补「没有 id」的那部分；原本就有 id 的 part 完全不动（零行为变化）。
-    //   - 队列按 name 分桶 → 即使一条 model turn 里有多个同名 fc 也能正确配对。
-    //   - 合成 id 在整次转换中确定性（基于 counter），不依赖 Date.now() / Math.random，
-    //     避免历史里同一份 fc 被两次调用产生不同 id（例如 retry 路径）。
-    //   - 兜底：若某个 fr 找不到任何同名队列项（孤立 fr），仍退回原有的
-    //     `toolu_${name}` 行为；这种情况已被上游 sanitizeRequestContents 过滤掉，
-    //     这里只是最后一道保险。
-    const synthIdByPart = new WeakMap<object, string>();
-    const synthIdQueueByName: Map<string, string[]> = new Map();
-    let synthCounter = 0;
-    const mintId = (name: string) =>
-      `toolu_synth_${name}_${++synthCounter}`;
-
-    // 第 1 遍：收集所有 functionCall（model 消息），给无 id 者分配合成 id 并入队
-    for (const content of contents) {
-      if (content.role !== MESSAGE_ROLES.MODEL) continue;
-      const parts = content.parts || [];
-      for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
-        const fc = part.functionCall;
-        if (!fc || typeof fc !== 'object') continue;
-        if (typeof fc.id === 'string' && fc.id.length > 0) continue;
-        const name = typeof fc.name === 'string' ? fc.name : 'unknown';
-        const synth = mintId(name);
-        synthIdByPart.set(part, synth);
-        if (!synthIdQueueByName.has(name)) synthIdQueueByName.set(name, []);
-        synthIdQueueByName.get(name)!.push(synth);
-      }
-    }
-
-    // 第 2 遍：把无 id 的 functionResponse 与同名队列的合成 id 配对
-    for (const content of contents) {
-      if (content.role !== MESSAGE_ROLES.USER) continue;
-      const parts = content.parts || [];
-      for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
-        const fr = part.functionResponse;
-        if (!fr || typeof fr !== 'object') continue;
-        if (typeof fr.id === 'string' && fr.id.length > 0) continue;
-        const name = typeof fr.name === 'string' ? fr.name : 'unknown';
-        const queue = synthIdQueueByName.get(name);
-        if (queue && queue.length > 0) {
-          const synth = queue.shift()!;
-          synthIdByPart.set(part, synth);
-        }
-        // 否则：完全孤立的 fr，留给下面的 fallback `toolu_${name}` 处理
-        // （理论上 sanitizeRequestContents 已过滤掉，这里是最后一道保险）
-      }
-    }
+    //   - 已自洽（fc.id === fr.id）的配对先剔除，绝不被 FIFO 误配。
+    //   - 队列按 name 分桶 → 一条 model turn 里多个同名 fc 也能正确配对。
+    //   - 合成 id 仅在 fc/fr 双方都无 id 时才用，且基于稳定 counter（幂等，不依赖
+    //     Date.now()/Math.random()，避免 retry 路径产生不同 id）。
+    //   - 兜底：完全孤立的 fr（无任何同名 fc）仍退回原 `toolu_${name}` 行为；
+    //     这种情况通常已被上游 sanitizeRequestContents 过滤，这里只是最后一道保险。
+    const synthIdByPart = pairToolCallIds(contents, 'toolu_synth');
 
     for (const content of contents) {
       const parts = content.parts || [];
@@ -702,12 +775,14 @@ const AnthropicConverter = {
           });
         }
         if (part.functionCall) {
-          // id 解析优先级：原始 id > 预分配的合成 id > 退化随机 id
+          // id 解析优先级：配对预扫描算出的「权威 id」> 原始 id > 退化随机 id
+          // （权威 id 优先，是为了让一对 fc/fr 即便原始 id 不一致也强制对齐到同一个）
           const synth = synthIdByPart.get(part);
           const resolvedId =
-            (typeof part.functionCall.id === 'string' && part.functionCall.id.length > 0)
+            synth ||
+            ((typeof part.functionCall.id === 'string' && part.functionCall.id.length > 0)
               ? part.functionCall.id
-              : (synth || `toolu_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+              : `toolu_${Date.now()}_${Math.random().toString(36).slice(2)}`);
           anthropicParts.push({
             type: 'tool_use',
             id: resolvedId,
@@ -716,12 +791,13 @@ const AnthropicConverter = {
           });
         }
         if (part.functionResponse) {
-          // tool_use_id 解析优先级：原始 id > 同名队列里配对到的合成 id > 退化 `toolu_${name}`
+          // tool_use_id 解析优先级：配对预扫描算出的「权威 id」> 原始 id > 退化 `toolu_${name}`
           const synth = synthIdByPart.get(part);
           const resolvedToolUseId =
-            (typeof part.functionResponse.id === 'string' && part.functionResponse.id.length > 0)
+            synth ||
+            ((typeof part.functionResponse.id === 'string' && part.functionResponse.id.length > 0)
               ? part.functionResponse.id
-              : (synth || `toolu_${part.functionResponse.name}`);
+              : `toolu_${part.functionResponse.name}`);
           anthropicParts.push({
             type: 'tool_result',
             tool_use_id: resolvedToolUseId,
@@ -979,23 +1055,28 @@ const OpenAIResponsesConverter = {
   contentsToInput(contents: any[]): any[] {
     const items: any[] = [];
 
+    // 🆕 与 Anthropic / Chat 路径一致：先做 tool_call ↔ tool_result 的 id 配对。
+    // Responses API 同样强制 function_call_output.call_id 必须能在前文的
+    // function_call.call_id 里找到对应项，否则 400。
+    const idByPart = pairToolCallIds(contents, 'call_synth');
+
     for (const content of contents) {
       const parts = content.parts || [];
       const role = content.role === MESSAGE_ROLES.MODEL ? 'assistant'
                  : content.role === 'system' ? 'system'
                  : 'user';
 
-      // 收集当前 content 的各类部分
+      // 收集当前 content 的各类部分（保留 part 引用以便查权威配对 id）
       const textParts: string[] = [];
-      const functionCalls: any[] = [];
-      const functionResponses: any[] = [];
+      const functionCalls: Array<{ part: any; fc: any }> = [];
+      const functionResponses: Array<{ part: any; fr: any }> = [];
       const imageParts: any[] = [];
 
       for (const part of parts) {
         if (part.functionCall) {
-          functionCalls.push(part.functionCall);
+          functionCalls.push({ part, fc: part.functionCall });
         } else if (part.functionResponse) {
-          functionResponses.push(part.functionResponse);
+          functionResponses.push({ part, fr: part.functionResponse });
         } else if (part.text) {
           textParts.push(part.text);
         } else if (part.inlineData) {
@@ -1024,20 +1105,20 @@ const OpenAIResponsesConverter = {
       }
 
       // 函数调用作为独立的 function_call items（不包裹在 message 中）
-      for (const fc of functionCalls) {
+      for (const { part, fc } of functionCalls) {
         items.push({
           type: 'function_call',
-          call_id: fc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          call_id: idByPart.get(part) || fc.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`,
           name: fc.name,
           arguments: typeof fc.args === 'string' ? fc.args : JSON.stringify(fc.args || {}),
         });
       }
 
       // 函数响应作为独立的 function_call_output items
-      for (const fr of functionResponses) {
+      for (const { part, fr } of functionResponses) {
         items.push({
           type: 'function_call_output',
-          call_id: fr.id || `call_${fr.name}`,
+          call_id: idByPart.get(part) || fr.id || `call_${fr.name}`,
           output: typeof fr.response === 'string'
             ? fr.response
             : JSON.stringify(fr.response || {}),

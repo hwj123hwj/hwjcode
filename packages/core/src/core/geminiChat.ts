@@ -454,16 +454,33 @@ export class GeminiChat {
     //   N 个 fc 都"匹配"到唯一 1 个 fr，也不会触发 cancel 补全。
     //
     // 修复策略：进入任何 dedup 之前，专门针对「同名 ≥2 个无 id functionCall」这个
-    //   触发条件启动「合成 id 配对」—— 给这 N 个 fc 各自分配确定性合成 id，按
-    //   出现顺序入 FIFO 队列；下游 N 个无 id 同名 fr 按 FIFO 顺序 dequeue 同一个
-    //   合成 id 回填给自己。这样后续所有 dedup/匹配逻辑就能按 id 区分桶。
+    //   触发条件启动「FIFO id 配对」—— 把同名的 fc / fr 按出现顺序一一配对，
+    //   让每一对共享同一个「权威 id」，从根上消除 fc.id ≠ fr.id 的错位。
+    //
+    // 🐛 二次修复（2026-06-04，用户实拍切到 [Anthropic] claude-opus-4-8 后 400）：
+    //   错误码原文：
+    //     ValidationException: ***.***.content.1: unexpected `tool_use_id`
+    //     found in `tool_result` blocks: read_file-1780549486950-5f6pb6trd.
+    //     Each `tool_result` block must have a corresponding `tool_use` block.
+    //
+    //   病灶定位：`read_file-<ts>-<rand>` 是 coreToolScheduler 给 functionResponse
+    //   强制写入的 callId（见 createFunctionResponsePart：`id: callId`），几乎总是存在；
+    //   而 Gemini 原生 functionCall 通常无 id。旧实现的「合成 id 配对」只做了两件错事：
+    //     1) 给无 id 的 fc 造了 `gem_synth_read_file_N`；
+    //     2) 第 2 遍只回填「无 id」的 fr —— 但 fr 早就带着真实 callId，于是被整段跳过。
+    //   结果 tool_use.id = gem_synth_read_file_1，tool_result.tool_use_id =
+    //   read_file-<ts>-<rand>，两侧永不相等。更糟的是：这反而把下游 isToolMatch 的
+    //   「ID 对齐」逻辑也击穿了（双方都有 id 但不等 → 不再 name 模糊匹配 → 不对齐）。
+    //
+    //   正确做法（本次）：权威 id 取值优先级 = fc 原始 id > fr 原始 id（CLI callId）>
+    //   确定性合成 id。把这个权威 id 同时写回配对的 fc 和 fr，保证严格一致。
     //
     // 关键约束（保护现有行为，零回归）：
     //   - 仅当**同名无 id fc 出现 ≥2 次**才启动 —— 这是 bug 的唯一触发条件。
-    //     单个无 id fc 的场景（Claude 跨模型迁移）继续走原 name 模糊匹配路径。
-    //   - 任一侧已经带 id 的 fc/fr 完全不动。
-    //   - 合成 id 用稳定 counter，不依赖 Date.now()/Math.random() —— 幂等性保留。
-    //   - 没匹配上的多余无 id fr 会自然落入下面"移除孤立 functionResponse"分支。
+    //     单个无 id fc 的场景（Claude 跨模型迁移）继续走原 name 模糊匹配 + ID 对齐路径。
+    //   - 已自洽（fc.id === fr.id）的配对先剔除，绝不被 FIFO 误配。
+    //   - 合成 id 仅在 fc / fr 双方都无 id 时才用，且基于稳定 counter（幂等）。
+    //   - 没匹配上的多余孤立 fr 会自然落入下面"移除孤立 functionResponse"分支。
     //   - 与 4343cb67 在 AnthropicConverter 内的合成 id 配对独立互不干扰。
     {
       // 第 0 步：扫描所有 functionCall，统计每个 name 下「无 id」实例的数量
@@ -487,39 +504,76 @@ export class GeminiChat {
 
       if (namesNeedingSynth.size > 0) {
         let synthCounter = 0;
-        const queueByName = new Map<string, string[]>();
-        const mintId = (name: string) => `gem_synth_${name}_${++synthCounter}`;
+        const hasId = (x: any) => x && typeof x.id === 'string' && x.id.length > 0;
 
-        // 第 1 遍：给目标 name 的所有无 id functionCall 分配合成 id 并入队
+        // 收集目标 name 的 fc / fr（按文档出现顺序），用于 FIFO 配对。
+        const callsByName = new Map<string, any[]>();
+        const respsByName = new Map<string, any[]>();
         for (const content of requestContents) {
-          if (content.role !== MESSAGE_ROLES.MODEL || !content.parts) continue;
-          for (const part of content.parts) {
-            const fc = (part as any)?.functionCall;
-            if (!fc || typeof fc !== 'object') continue;
-            if (typeof fc.id === 'string' && fc.id.length > 0) continue;
-            const name = typeof fc.name === 'string' ? fc.name : 'unknown';
-            if (!namesNeedingSynth.has(name)) continue;
-            const synth = mintId(name);
-            fc.id = synth;
-            if (!queueByName.has(name)) queueByName.set(name, []);
-            queueByName.get(name)!.push(synth);
+          if (!content.parts) continue;
+          if (content.role === MESSAGE_ROLES.MODEL) {
+            for (const part of content.parts) {
+              const fc = (part as any)?.functionCall;
+              if (!fc || typeof fc !== 'object') continue;
+              const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+              if (!namesNeedingSynth.has(name)) continue;
+              if (!callsByName.has(name)) callsByName.set(name, []);
+              callsByName.get(name)!.push(fc);
+            }
+          } else if (content.role === MESSAGE_ROLES.USER) {
+            for (const part of content.parts) {
+              const fr = (part as any)?.functionResponse;
+              if (!fr || typeof fr !== 'object') continue;
+              const name = typeof fr.name === 'string' ? fr.name : 'unknown';
+              if (!namesNeedingSynth.has(name)) continue;
+              if (!respsByName.has(name)) respsByName.set(name, []);
+              respsByName.get(name)!.push(fr);
+            }
           }
         }
 
-        // 第 2 遍：目标 name 的无 id functionResponse 按 FIFO 配对回填合成 id
-        for (const content of requestContents) {
-          if (content.role !== MESSAGE_ROLES.USER || !content.parts) continue;
-          for (const part of content.parts) {
-            const fr = (part as any)?.functionResponse;
-            if (!fr || typeof fr !== 'object') continue;
-            if (typeof fr.id === 'string' && fr.id.length > 0) continue;
-            const name = typeof fr.name === 'string' ? fr.name : 'unknown';
-            if (!namesNeedingSynth.has(name)) continue;
-            const queue = queueByName.get(name);
-            if (queue && queue.length > 0) {
-              fr.id = queue.shift()!;
+        for (const name of namesNeedingSynth) {
+          const calls = callsByName.get(name) ?? [];
+          const resps = respsByName.get(name) ?? [];
+
+          // 步骤 A：先剔除「fc / fr 已带相同 id」的自洽配对，避免后续 FIFO 误配。
+          const usedResp = new Set<number>();
+          const pendingCalls: any[] = [];
+          for (const fc of calls) {
+            if (hasId(fc)) {
+              const matchIdx = resps.findIndex(
+                (fr, i) => !usedResp.has(i) && hasId(fr) && fr.id === fc.id,
+              );
+              if (matchIdx >= 0) {
+                usedResp.add(matchIdx);
+                continue;
+              }
             }
-            // 若队列耗尽：fr 找不到对应 fc，留给下面「移除孤立 functionResponse」处理
+            pendingCalls.push(fc);
+          }
+          const pendingResps = resps.filter((_, i) => !usedResp.has(i));
+
+          // 步骤 B：对剩余的 fc·fr 按 FIFO 一一配对，让每对共享同一个「权威 id」。
+          //
+          // 🔑 权威 id 优先级：fc 原始 id > fr 原始 id（如 CLI 生成的 callId）> 确定性合成 id。
+          //
+          // 这一步是本次修复的核心：旧实现只给无 id 的 fc 造合成 id、却跳过「已带真实 id 的
+          // fr」（functionResponse 的 id 由 coreToolScheduler 用 `${name}-${ts}-${rand}` 强制
+          // 写入，几乎总是存在）。结果 tool_use.id = gem_synth_read_file_1，而
+          // tool_result.tool_use_id = read_file-<ts>-<rand>，两侧永不相等 →
+          //   Anthropic/Bedrock 400: unexpected `tool_use_id` found in `tool_result` blocks.
+          // 现在改为把 fr 上已有的真实 id 回填到无 id 的 fc 上（双方共享同一 id），从根上消除错位。
+          const n = Math.max(pendingCalls.length, pendingResps.length);
+          for (let k = 0; k < n; k++) {
+            const fc = pendingCalls[k];
+            const fr = pendingResps[k];
+            let canonical: string;
+            if (hasId(fc)) canonical = fc.id;
+            else if (hasId(fr)) canonical = fr.id;
+            else if (fc) canonical = `gem_synth_${name}_${++synthCounter}`;
+            else continue; // 多出来的孤立 fr（无对应 fc）：留给下面「移除孤立 functionResponse」处理
+            if (fc) fc.id = canonical;
+            if (fr) fr.id = canonical;
           }
         }
       }

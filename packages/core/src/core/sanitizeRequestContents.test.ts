@@ -874,3 +874,145 @@ describe('GeminiChat.sanitizeRequestContents > 并行同名工具调用兜底', 
     expect(onceAgain).toEqual(once);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 8. 二次事故：并行同名 fc 无 id + fr 带「真实 CLI callId」(2026-06-04 用户实拍)
+//
+// 现场：[Gemini] 期间并行 read_file × 2（fc 无 id），coreToolScheduler 给两个
+//   fr 各写入了 `read_file-<ts>-<rand>` 形式的真实 callId。切到 [Anthropic]
+//   claude-opus-4-8 后上游 400：
+//     unexpected `tool_use_id` found in `tool_result` blocks:
+//     read_file-1780549486950-5f6pb6trd.
+//
+// 病灶：旧的并行兜底只给无 id 的 fc 造合成 id、第 2 遍只回填「无 id」的 fr，
+//   而 fr 早已带真实 id 被跳过 → fc.id(gem_synth_*) ≠ fr.id(read_file-*)。
+//
+// 修复后要求：fc 必须借用 fr 的真实 id（权威 id = fr.id），双方严格一致。
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 并行无 id fc + 真实 id fr 对齐', () => {
+  it('并行 read_file×2（fc 无 id，fr 带 CLI callId）：fc 必须借用 fr 的真实 id 且一一对齐', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '同时读两个文件' } as any] },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { absolute_path: '/a' } } as any },
+          { functionCall: { name: 'read_file', args: { absolute_path: '/b' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', id: 'read_file-1780549486950-5f6pb6trd', response: { output: 'AAA' } } as any },
+          { functionResponse: { name: 'read_file', id: 'read_file-1780549486951-qq11ww22e', response: { output: 'BBB' } } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    const frs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse);
+
+    // 数量守恒
+    expect(fcs.length).toBe(2);
+    expect(frs.length).toBe(2);
+
+    // 关键：每个 fc 的 id 都必须等于某个 fr 的真实 id（且不是合成 id）
+    const frIds = frs.map((f: any) => f.id).sort();
+    const fcIds = fcs.map((f: any) => f.id).sort();
+    expect(fcIds).toEqual(frIds);
+    expect(frIds).toEqual([
+      'read_file-1780549486950-5f6pb6trd',
+      'read_file-1780549486951-qq11ww22e',
+    ]);
+    // 绝不能出现合成前缀（那正是 bug 的症状）
+    expect(fcIds.some((id: string) => id.startsWith('gem_synth_'))).toBe(false);
+
+    // FIFO 对齐：第 1 个 fc 配第 1 个 fr 的 id
+    const orderedFc = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    const orderedFr = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse);
+    expect(orderedFc[0].id).toBe(orderedFr[0].id);
+    expect(orderedFc[1].id).toBe(orderedFr[1].id);
+  });
+
+  it('并行 read_file×2：仅 fc 无 id，fr 也无 id → 退回合成 id（与旧并行兜底行为一致）', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', response: { from: 'a' } } as any },
+          { functionResponse: { name: 'read_file', response: { from: 'b' } } as any },
+        ],
+      },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+    const frs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse);
+    expect(fcs.length).toBe(2);
+    expect(frs.length).toBe(2);
+    // 双方都无 id → 用合成 id，且配对一致
+    expect(fcs[0].id).toBe(frs[0].id);
+    expect(fcs[1].id).toBe(frs[1].id);
+    expect(fcs[0].id).not.toBe(fcs[1].id);
+    expect(fcs[0].id).toMatch(/^gem_synth_read_file_/);
+  });
+
+  it('并行 read_file×3，fr 顺序与 fc 不一致但 id 各异：仍按 id 自洽配对，数量守恒', () => {
+    // fr 带 3 个不同真实 id，但乱序到达；fc 无 id。
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'c' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', id: 'rf-A', response: { v: 'a' } } as any },
+          { functionResponse: { name: 'read_file', id: 'rf-B', response: { v: 'b' } } as any },
+          { functionResponse: { name: 'read_file', id: 'rf-C', response: { v: 'c' } } as any },
+        ],
+      },
+    ];
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcIds = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).map((p: any) => p.functionCall.id).sort();
+    const frIds = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).map((p: any) => p.functionResponse.id).sort();
+    expect(fcIds).toEqual(['rf-A', 'rf-B', 'rf-C']);
+    expect(frIds).toEqual(['rf-A', 'rf-B', 'rf-C']);
+  });
+
+  it('幂等性：并行无 id fc + 真实 id fr，连续清洗两次结果一致', () => {
+    const dirty: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', id: 'rf-1', response: { from: 'a' } } as any },
+          { functionResponse: { name: 'read_file', id: 'rf-2', response: { from: 'b' } } as any },
+        ],
+      },
+    ];
+    const once = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(dirty)));
+    const twice = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(dirty)));
+    expect(twice).toEqual(once);
+    const onceAgain = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(once)));
+    expect(onceAgain).toEqual(once);
+  });
+});
+
