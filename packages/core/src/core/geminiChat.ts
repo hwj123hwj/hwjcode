@@ -437,6 +437,94 @@ export class GeminiChat {
    * 函数体保持不变；如需更新清洗规则，只在这里修改即可。
    */
   static sanitizeRequestContents(requestContents: Content[]): Content[] {
+    // 🆕 [并行同名工具调用兜底] —— 在任何 dedup 之前给「同名 ≥2 且都无 id」的 fc/fr 配合成 id
+    //
+    // 触发场景（用户实拍 400，状态栏全程 [Gemini] gemini-3.5-flash，没切模型）：
+    //   Gemini 原生上游报：
+    //     "Please ensure that the number of function response parts
+    //      is equal to the number of function call parts of the function call turn."
+    //
+    // 根因：Gemini 协议下 functionCall / functionResponse 的 `id` 字段不强制必填。
+    //   当 Gemini 在一个 turn 里**并行调用 N 次同名工具**（比如同时 read_file
+    //   多个文件、并行 replace 多处），写回的 N 个 fr 全是同 name 无 id。
+    //   而下面去重阶段使用的 key = `id || name:${name}` 会让这 N 个 fr 全部 collide
+    //   到同一个桶，只保留 1 个 → API 收到 N 个 fc 但只有 1 个 fr → 数量不等 → 400。
+    //
+    //   `unmatchedCalls` 那一步用的 isToolMatch 在双方都无 id 时回退到「只看 name」，
+    //   N 个 fc 都"匹配"到唯一 1 个 fr，也不会触发 cancel 补全。
+    //
+    // 修复策略：进入任何 dedup 之前，专门针对「同名 ≥2 个无 id functionCall」这个
+    //   触发条件启动「合成 id 配对」—— 给这 N 个 fc 各自分配确定性合成 id，按
+    //   出现顺序入 FIFO 队列；下游 N 个无 id 同名 fr 按 FIFO 顺序 dequeue 同一个
+    //   合成 id 回填给自己。这样后续所有 dedup/匹配逻辑就能按 id 区分桶。
+    //
+    // 关键约束（保护现有行为，零回归）：
+    //   - 仅当**同名无 id fc 出现 ≥2 次**才启动 —— 这是 bug 的唯一触发条件。
+    //     单个无 id fc 的场景（Claude 跨模型迁移）继续走原 name 模糊匹配路径。
+    //   - 任一侧已经带 id 的 fc/fr 完全不动。
+    //   - 合成 id 用稳定 counter，不依赖 Date.now()/Math.random() —— 幂等性保留。
+    //   - 没匹配上的多余无 id fr 会自然落入下面"移除孤立 functionResponse"分支。
+    //   - 与 4343cb67 在 AnthropicConverter 内的合成 id 配对独立互不干扰。
+    {
+      // 第 0 步：扫描所有 functionCall，统计每个 name 下「无 id」实例的数量
+      const noIdCallsByName = new Map<string, number>();
+      for (const content of requestContents) {
+        if (content.role !== MESSAGE_ROLES.MODEL || !content.parts) continue;
+        for (const part of content.parts) {
+          const fc = (part as any)?.functionCall;
+          if (!fc || typeof fc !== 'object') continue;
+          if (typeof fc.id === 'string' && fc.id.length > 0) continue;
+          const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+          noIdCallsByName.set(name, (noIdCallsByName.get(name) ?? 0) + 1);
+        }
+      }
+
+      // 仅对「同名 ≥2 个无 id fc」的 name 启动 FIFO 合成 id 配对
+      const namesNeedingSynth = new Set<string>();
+      for (const [name, count] of noIdCallsByName) {
+        if (count >= 2) namesNeedingSynth.add(name);
+      }
+
+      if (namesNeedingSynth.size > 0) {
+        let synthCounter = 0;
+        const queueByName = new Map<string, string[]>();
+        const mintId = (name: string) => `gem_synth_${name}_${++synthCounter}`;
+
+        // 第 1 遍：给目标 name 的所有无 id functionCall 分配合成 id 并入队
+        for (const content of requestContents) {
+          if (content.role !== MESSAGE_ROLES.MODEL || !content.parts) continue;
+          for (const part of content.parts) {
+            const fc = (part as any)?.functionCall;
+            if (!fc || typeof fc !== 'object') continue;
+            if (typeof fc.id === 'string' && fc.id.length > 0) continue;
+            const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+            if (!namesNeedingSynth.has(name)) continue;
+            const synth = mintId(name);
+            fc.id = synth;
+            if (!queueByName.has(name)) queueByName.set(name, []);
+            queueByName.get(name)!.push(synth);
+          }
+        }
+
+        // 第 2 遍：目标 name 的无 id functionResponse 按 FIFO 配对回填合成 id
+        for (const content of requestContents) {
+          if (content.role !== MESSAGE_ROLES.USER || !content.parts) continue;
+          for (const part of content.parts) {
+            const fr = (part as any)?.functionResponse;
+            if (!fr || typeof fr !== 'object') continue;
+            if (typeof fr.id === 'string' && fr.id.length > 0) continue;
+            const name = typeof fr.name === 'string' ? fr.name : 'unknown';
+            if (!namesNeedingSynth.has(name)) continue;
+            const queue = queueByName.get(name);
+            if (queue && queue.length > 0) {
+              fr.id = queue.shift()!;
+            }
+            // 若队列耗尽：fr 找不到对应 fc，留给下面「移除孤立 functionResponse」处理
+          }
+        }
+      }
+    }
+
     const fixedContents: Content[] = [];
 
     // 🔍 辅助函数：判断 functionCall 和 functionResponse 是否匹配
