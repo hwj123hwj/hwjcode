@@ -7,6 +7,7 @@
 
 
 import { logIfNotSilent } from '../utils/logging.js';
+import { getUserAgent } from '../utils/userAgent.js';
 
 /**
  * 认证HTTP客户端
@@ -44,10 +45,10 @@ export class AuthenticatedHttpClient {
     options: RequestInit = {}
   ): Promise<Response> {
     const url = `${this.baseURL}${endpoint}`;
-    
+
     // 准备请求选项
     const requestOptions = await this.prepareRequestOptions(options);
-    
+
     // 发送请求
     let response = await fetch(url, requestOptions);
 
@@ -70,8 +71,8 @@ export class AuthenticatedHttpClient {
    * POST请求
    */
   async post(
-    endpoint: string, 
-    body?: any, 
+    endpoint: string,
+    body?: any,
     options: RequestInit = {}
   ): Promise<Response> {
     const requestOptions: RequestInit = {
@@ -94,8 +95,8 @@ export class AuthenticatedHttpClient {
    * PUT请求
    */
   async put(
-    endpoint: string, 
-    body?: any, 
+    endpoint: string,
+    body?: any,
     options: RequestInit = {}
   ): Promise<Response> {
     const requestOptions: RequestInit = {
@@ -126,7 +127,7 @@ export class AuthenticatedHttpClient {
    */
   private async prepareRequestOptions(options: RequestInit): Promise<RequestInit> {
     const headers: HeadersInit = {
-      'User-Agent': 'DeepCode CLI',
+      'User-Agent': getUserAgent(),
       ...options.headers
     };
 
@@ -159,7 +160,7 @@ export class AuthenticatedHttpClient {
    * 处理401未授权响应
    */
   private async handleUnauthorized(
-    url: string, 
+    url: string,
     originalOptions: RequestInit
   ): Promise<Response> {
     if (this.isRefreshing) {
@@ -177,13 +178,13 @@ export class AuthenticatedHttpClient {
 
     try {
       logIfNotSilent('log', '🔄 Access token expired, attempting refresh...');
-      
+
       // 尝试刷新令牌
       const newToken = await this.tokenManager.refreshAccessToken();
-      
+
       if (newToken) {
         logIfNotSilent('log', '✅ Token refreshed successfully');
-        
+
         // 更新请求头中的令牌
         const updatedOptions = {
           ...originalOptions,
@@ -205,23 +206,23 @@ export class AuthenticatedHttpClient {
       }
     } catch (error) {
       console.error('❌ Token refresh failed:', error);
-      
+
       // 清除令牌
       if (this.tokenManager.clearTokens) {
         await this.tokenManager.clearTokens();
       } else if (this.tokenManager.clear) {
         this.tokenManager.clear();
       }
-      
+
       // 拒绝队列中的所有请求
       this.rejectRequestQueue(new Error('Authentication required'));
-      
+
       // 触发重新认证流程
       if (this.onAuthenticationRequired) {
         logIfNotSilent('log', '🔄 Authentication required, triggering auth flow...');
         this.onAuthenticationRequired();
       }
-      
+
       // 抛出认证错误
       throw new AuthenticationError('Authentication required - please re-authenticate');
     } finally {
@@ -234,7 +235,7 @@ export class AuthenticatedHttpClient {
    */
   private processRequestQueue(newToken: string): void {
     const queue = this.requestQueue.splice(0);
-    
+
     queue.forEach(({ resolve, reject, request }) => {
       request()
         .then((response) => resolve(response))
@@ -247,7 +248,7 @@ export class AuthenticatedHttpClient {
    */
   private rejectRequestQueue(error: Error): void {
     const queue = this.requestQueue.splice(0);
-    
+
     queue.forEach(({ reject }) => {
       reject(error);
     });

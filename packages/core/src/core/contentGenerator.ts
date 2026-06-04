@@ -79,12 +79,10 @@ export async function createContentGenerator(
   gcConfig: Config,
   sessionId?: string,
 ): Promise<ContentGenerator> {
-  const version = process.env.CLI_VERSION || process.version;
-  const httpOptions = {
-    headers: {
-      'User-Agent': `GeminiCLI/${version} (${process.platform}; ${process.arch})`,
-    },
-  };
+  // NOTE: The DeepV server path below (the only active path) builds its request
+  // headers — including the User-Agent — via proxyAuthManager.getUserHeaders(),
+  // which uses the unified getUserAgent() from utils/userAgent.ts. No local
+  // httpOptions/User-Agent is needed here.
 
   // 🎯 统一DeepV Server处理：所有模型都使用DeepVServerAdapter，但路由逻辑会自动选择正确的API端点
   const isDeepVServer = true; // 现在所有模型都通过DeepV Server，适配器内部会根据模型类型选择正确路径
