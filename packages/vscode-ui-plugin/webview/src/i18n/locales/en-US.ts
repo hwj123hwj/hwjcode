@@ -359,6 +359,15 @@ export const enUS: Translations = {
     cancel: 'Cancel',
     confirmAndSwitch: 'Compress & Switch',
     inProgress: 'Compressing context...',
+    // 手动 /compress 的 in-chat 状态文案
+    manualTitle: 'Context Compression',
+    manualInProgress: 'Compressing conversation history…',
+    manualInProgressDesc: 'Summarizing older messages while preserving recent context. This may take a moment.',
+    manualDone: 'Context compressed',
+    manualDoneDesc: 'Reduced from {{original}} to {{compressed}} tokens (saved {{saved}}, {{percent}}).',
+    manualSkipped: 'Compression skipped',
+    manualSkippedDesc: 'The conversation history is already small enough — nothing to compress.',
+    manualFailed: 'Compression failed',
   },
 
   reasoning: {
