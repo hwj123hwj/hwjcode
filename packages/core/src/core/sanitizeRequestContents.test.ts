@@ -664,3 +664,213 @@ describe('GeminiChat.sanitizeRequestContents > 协议不变量', () => {
     assertContractInvariants(GeminiChat.sanitizeRequestContents(input));
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// 9. 并行同名工具调用兜底（用户实拍 400 回归）
+//
+//   状态栏 [Gemini] gemini-3.5-flash 全程未切模型，
+//   错误是 Gemini 原生上游 400：
+//     "Please ensure that the number of function response parts is equal
+//      to the number of function call parts of the function call turn."
+//
+//   触发条件：单个 model turn 里**并行调用 N 次同名工具**（如同时
+//   read_file 多个文件、replace 多处），按 Gemini 原生协议 functionCall /
+//   functionResponse 的 id 都允许缺省，于是 N 个 fr 都同名无 id，去重阶段
+//   误判为「重复响应」只保留 1 个 → 400。
+//
+//   修复行为：sanitize 在最开头做 FIFO 合成 id 配对，仅当**同名 ≥2 个无 id
+//   fc** 触发；任一侧已带 id / 单条无 id 都不动（保护现有 Claude 跨模型场景）。
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > 并行同名工具调用兜底', () => {
+  it('单 turn 内并行调用 2 次同名工具（双方都无 id）：两组 fc/fr 全部保留', () => {
+    const input: Content[] = [
+      { role: MESSAGE_ROLES.USER, parts: [{ text: '同时读两个文件' } as any] },
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { absolute_path: '/a.css' } } as any },
+          { functionCall: { name: 'read_file', args: { absolute_path: '/b.css' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', response: { output: 'AAA' } } as any },
+          { functionResponse: { name: 'read_file', response: { output: 'BBB' } } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+
+    // 关键不变量：fc 的数量必须 === fr 的数量（这正是 Gemini 400 的判定式）
+    const fcCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).length;
+    const frCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).length;
+    expect(fcCount).toBe(2);
+    expect(frCount).toBe(2);
+
+    // 两组 fr 的内容必须都被保留（按出现顺序 FIFO 配对到 fc）
+    const frs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    const outputs = frs.map((p: any) => p.functionResponse.response.output).sort();
+    expect(outputs).toEqual(['AAA', 'BBB']);
+  });
+
+  it('并行 N 次同名工具（N=5，双方都无 id）：全部 5 组 fc/fr 都保留，数量严格相等', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: Array.from({ length: 5 }, (_, i) => ({
+          functionCall: { name: 'replace', args: { idx: i } } as any,
+        })),
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: Array.from({ length: 5 }, (_, i) => ({
+          functionResponse: { name: 'replace', response: { idx: i } } as any,
+        })),
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).length;
+    const frCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).length;
+    expect(fcCount).toBe(5);
+    expect(frCount).toBe(5);
+  });
+
+  it('并行调用混合多个名字（read_file × 2 + glob × 2）：各自按 name 独立 FIFO，互不串扰', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'glob', args: { p: '**/*' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+          { functionCall: { name: 'glob', args: { p: '*.ts' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', response: { from: 'a' } } as any },
+          { functionResponse: { name: 'glob', response: { from: '**/*' } } as any },
+          { functionResponse: { name: 'read_file', response: { from: 'b' } } as any },
+          { functionResponse: { name: 'glob', response: { from: '*.ts' } } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const frs = result
+      .flatMap(c => c.parts || [])
+      .filter((p: any) => p.functionResponse)
+      .map((p: any) => `${p.functionResponse.name}:${p.functionResponse.response.from}`)
+      .sort();
+    expect(frs).toEqual(['glob:**/*', 'glob:*.ts', 'read_file:a', 'read_file:b']);
+  });
+
+  it('并行调用但 fr 比 fc 少（fc=3 fr=2）：少出来的那个 fc 应触发 cancel 补全', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'c' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', response: { from: 'a' } } as any },
+          { functionResponse: { name: 'read_file', response: { from: 'b' } } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall).length;
+    const frCount = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse).length;
+    // 数量必须严格相等（Gemini 400 的判定式）
+    expect(fcCount).toBe(frCount);
+    expect(fcCount).toBe(3);
+
+    // 必有恰好 1 个 cancel 占位（补给那个少出来的 fc），另外 2 个是真实 fr
+    const frs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionResponse);
+    const cancels = frs.filter((p: any) => p.functionResponse.response?.result === 'user cancel');
+    expect(cancels.length).toBe(1);
+  });
+
+  it('单条无 id fc + 单条无 id fr：不触发合成 id 路径，按原 name 模糊匹配（行为零变化）', () => {
+    // 这条防御了 Claude 跨模型迁移场景（commit e5f01a81）
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [{ functionCall: { name: 'glob', args: { pattern: '**/*' } } as any }],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [{ functionResponse: { name: 'glob', response: { ok: true } } as any }],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fc = result.flatMap(c => c.parts || []).find((p: any) => p.functionCall);
+    const fr = result.flatMap(c => c.parts || []).find((p: any) => p.functionResponse);
+    // 单条无 id 不应该被加合成 id —— 维持原始无 id 状态（兼容现有 Claude 测试期望）
+    expect((fc as any).functionCall.id).toBeUndefined();
+    expect((fr as any).functionResponse.id).toBeUndefined();
+  });
+
+  it('并行同名 fc 已经带 id：完全不走合成 id 路径，原 id 保留', () => {
+    const input: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', id: 'real-1', args: {} } as any },
+          { functionCall: { name: 'read_file', id: 'real-2', args: {} } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', id: 'real-1', response: {} } as any },
+          { functionResponse: { name: 'read_file', id: 'real-2', response: {} } as any },
+        ],
+      },
+    ];
+
+    const result = GeminiChat.sanitizeRequestContents(input);
+    const fcs = result.flatMap(c => c.parts || []).filter((p: any) => p.functionCall);
+    expect((fcs[0] as any).functionCall.id).toBe('real-1');
+    expect((fcs[1] as any).functionCall.id).toBe('real-2');
+  });
+
+  it('幂等性：并行同名场景下，连续清洗两次结果完全一致', () => {
+    const dirty: Content[] = [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: 'read_file', args: { p: 'a' } } as any },
+          { functionCall: { name: 'read_file', args: { p: 'b' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          { functionResponse: { name: 'read_file', response: { from: 'a' } } as any },
+          { functionResponse: { name: 'read_file', response: { from: 'b' } } as any },
+        ],
+      },
+    ];
+
+    // 注意：sanitize 会 mutate 原对象，所以两次必须用各自的深拷贝
+    const once = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(dirty)));
+    const twice = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(dirty)));
+    expect(twice).toEqual(once);
+
+    // 把第一次的产出再次清洗，结果也应稳定
+    const onceAgain = GeminiChat.sanitizeRequestContents(JSON.parse(JSON.stringify(once)));
+    expect(onceAgain).toEqual(once);
+  });
+});
