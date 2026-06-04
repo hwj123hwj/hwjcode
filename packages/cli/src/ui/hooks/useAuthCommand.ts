@@ -41,6 +41,11 @@ export const useAuthCommand = (
     const checkAuthOnStartup = async () => {
       const authType = settings.merged.selectedAuthType;
 
+      // 🟢 已配置自定义模型（preferredModel 以 custom: 开头）：
+      // 视为“自定义模型专用模式”，跳过登录对话框，直接进入可聊天状态。
+      // 自定义模型走本地配置，不依赖 DeepV 登录态。
+      const usingCustomModel = settings.merged.preferredModel?.startsWith('custom:');
+
       // 如果没有设置认证类型，直接标记检查完成
       if (!authType) {
         setStartupAuthCheckCompleted(true);
@@ -65,6 +70,8 @@ export const useAuthCommand = (
           if (!userInfo) {
             if (customProxyUrl) {
               console.log('[AuthCommand] Custom proxy URL configured, skipping auto-login dialog on startup');
+            } else if (usingCustomModel) {
+              console.log('[AuthCommand] Custom model configured, skipping auto-login dialog on startup');
             } else {
               console.log('[AuthCommand] auth expired at startup, opening auth dialog');
               openAuthDialog();
@@ -80,6 +87,8 @@ export const useAuthCommand = (
           } catch (error) {
             if (customProxyUrl) {
               console.log('[AuthCommand] Custom proxy URL configured, skipping auto-login dialog on startup');
+            } else if (usingCustomModel) {
+              console.log('[AuthCommand] Custom model configured, skipping auto-login dialog on startup');
             } else {
               console.log('[AuthCommand] auth expired at startup, opening auth dialog');
               openAuthDialog();
