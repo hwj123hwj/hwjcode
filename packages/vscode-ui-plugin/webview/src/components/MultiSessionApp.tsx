@@ -939,8 +939,6 @@ export const MultiSessionApp: React.FC = () => {
       const statusId: string = payload?.statusId || `compress-${Date.now()}`;
       const notificationId = `notif-${statusId}`;
 
-      const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : String(n));
-
       if (payload?.phase === 'start') {
         // 底部进度条
         setIsCompressing(true);
@@ -968,28 +966,13 @@ export const MultiSessionApp: React.FC = () => {
       setIsCompressing(false);
 
       if (payload?.phase === 'done') {
-        const original = Number(payload?.originalTokenCount);
-        const compressed = Number(payload?.newTokenCount);
-        const saved =
-          Number.isFinite(original) && Number.isFinite(compressed)
-            ? Math.max(0, original - compressed)
-            : undefined;
-        const percent =
-          Number.isFinite(original) && original > 0 && saved !== undefined
-            ? `-${Math.round((saved / original) * 100)}%`
-            : '';
         updateMessage(targetSessionId, notificationId, {
           notificationInProgress: false,
           notificationTitle: t('compression.manualDone', {}, 'Context compressed'),
           notificationDescription: t(
             'compression.manualDoneDesc',
-            {
-              original: fmt(original),
-              compressed: fmt(compressed),
-              saved: fmt(saved),
-              percent,
-            },
-            `Reduced from ${fmt(original)} to ${fmt(compressed)} tokens.`
+            {},
+            'Conversation history compressed successfully.'
           ),
           severity: 'info',
         } as any);

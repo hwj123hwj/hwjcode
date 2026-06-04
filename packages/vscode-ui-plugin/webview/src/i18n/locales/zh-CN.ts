@@ -364,7 +364,7 @@ export const zhCN: Translations = {
     manualInProgress: '正在压缩对话历史…',
     manualInProgressDesc: '正在总结较早的消息，同时保留最近的上下文。请稍候片刻。',
     manualDone: '上下文已压缩',
-    manualDoneDesc: '已从 {{original}} tokens 压缩到 {{compressed}} tokens（节省 {{saved}}，{{percent}}）。',
+    manualDoneDesc: '对话历史已成功压缩。',
     manualSkipped: '已跳过压缩',
     manualSkippedDesc: '对话历史已经足够精简，无需压缩。',
     manualFailed: '压缩失败',
