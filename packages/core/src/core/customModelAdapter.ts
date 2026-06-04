@@ -591,6 +591,77 @@ const AnthropicConverter = {
     const messages: any[] = [];
     const systemBlocks: any[] = [];
 
+    // 🆕 跨模型迁移 → Anthropic：tool_use / tool_result 必须 id 严格一致
+    //
+    // Gemini 原生历史里的 functionCall / functionResponse 大多是「无 id」的
+    // （Gemini 协议本身不强制要求 callId）。如果直接把这种历史塞给 Claude，
+    // 旧实现里：
+    //
+    //   - functionCall.id  缺失 → tool_use.id  退化成 `toolu_${Date.now()}_${rand}`
+    //   - functionResponse.id 缺失 → tool_result.tool_use_id 退化成 `toolu_${name}`
+    //
+    // 两个 fallback 各自独立、永不可能相等 → Bedrock / Anthropic 直接 400：
+    //   ValidationException: unexpected `tool_use_id` found in `tool_result`
+    //   blocks: toolu_<name>. Each `tool_result` block must have a corresponding
+    //   `tool_use` block in the previous message.
+    //
+    // 修复策略：在生成 anthropic 协议之前，先做一次「合成 id 配对」预扫描——
+    // 给所有「无 id」的 functionCall 按出现顺序分配一个稳定的合成 id，
+    // 同时按工具名建一个 FIFO 队列；遇到「无 id」的 functionResponse 时，从同名
+    // 队列里 dequeue 同一个合成 id 回填给它。这样无论原始数据有多脏，下游 Claude
+    // 都能拿到严格匹配的 id 对。
+    //
+    // 设计要点：
+    //   - 只补「没有 id」的那部分；原本就有 id 的 part 完全不动（零行为变化）。
+    //   - 队列按 name 分桶 → 即使一条 model turn 里有多个同名 fc 也能正确配对。
+    //   - 合成 id 在整次转换中确定性（基于 counter），不依赖 Date.now() / Math.random，
+    //     避免历史里同一份 fc 被两次调用产生不同 id（例如 retry 路径）。
+    //   - 兜底：若某个 fr 找不到任何同名队列项（孤立 fr），仍退回原有的
+    //     `toolu_${name}` 行为；这种情况已被上游 sanitizeRequestContents 过滤掉，
+    //     这里只是最后一道保险。
+    const synthIdByPart = new WeakMap<object, string>();
+    const synthIdQueueByName: Map<string, string[]> = new Map();
+    let synthCounter = 0;
+    const mintId = (name: string) =>
+      `toolu_synth_${name}_${++synthCounter}`;
+
+    // 第 1 遍：收集所有 functionCall（model 消息），给无 id 者分配合成 id 并入队
+    for (const content of contents) {
+      if (content.role !== MESSAGE_ROLES.MODEL) continue;
+      const parts = content.parts || [];
+      for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+        const fc = part.functionCall;
+        if (!fc || typeof fc !== 'object') continue;
+        if (typeof fc.id === 'string' && fc.id.length > 0) continue;
+        const name = typeof fc.name === 'string' ? fc.name : 'unknown';
+        const synth = mintId(name);
+        synthIdByPart.set(part, synth);
+        if (!synthIdQueueByName.has(name)) synthIdQueueByName.set(name, []);
+        synthIdQueueByName.get(name)!.push(synth);
+      }
+    }
+
+    // 第 2 遍：把无 id 的 functionResponse 与同名队列的合成 id 配对
+    for (const content of contents) {
+      if (content.role !== MESSAGE_ROLES.USER) continue;
+      const parts = content.parts || [];
+      for (const part of parts) {
+        if (!part || typeof part !== 'object') continue;
+        const fr = part.functionResponse;
+        if (!fr || typeof fr !== 'object') continue;
+        if (typeof fr.id === 'string' && fr.id.length > 0) continue;
+        const name = typeof fr.name === 'string' ? fr.name : 'unknown';
+        const queue = synthIdQueueByName.get(name);
+        if (queue && queue.length > 0) {
+          const synth = queue.shift()!;
+          synthIdByPart.set(part, synth);
+        }
+        // 否则：完全孤立的 fr，留给下面的 fallback `toolu_${name}` 处理
+        // （理论上 sanitizeRequestContents 已过滤掉，这里是最后一道保险）
+      }
+    }
+
     for (const content of contents) {
       const parts = content.parts || [];
 
@@ -631,17 +702,29 @@ const AnthropicConverter = {
           });
         }
         if (part.functionCall) {
+          // id 解析优先级：原始 id > 预分配的合成 id > 退化随机 id
+          const synth = synthIdByPart.get(part);
+          const resolvedId =
+            (typeof part.functionCall.id === 'string' && part.functionCall.id.length > 0)
+              ? part.functionCall.id
+              : (synth || `toolu_${Date.now()}_${Math.random().toString(36).slice(2)}`);
           anthropicParts.push({
             type: 'tool_use',
-            id: part.functionCall.id || `toolu_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            id: resolvedId,
             name: part.functionCall.name,
             input: part.functionCall.args || {},
           });
         }
         if (part.functionResponse) {
+          // tool_use_id 解析优先级：原始 id > 同名队列里配对到的合成 id > 退化 `toolu_${name}`
+          const synth = synthIdByPart.get(part);
+          const resolvedToolUseId =
+            (typeof part.functionResponse.id === 'string' && part.functionResponse.id.length > 0)
+              ? part.functionResponse.id
+              : (synth || `toolu_${part.functionResponse.name}`);
           anthropicParts.push({
             type: 'tool_result',
-            tool_use_id: part.functionResponse.id || `toolu_${part.functionResponse.name}`,
+            tool_use_id: resolvedToolUseId,
             content: typeof part.functionResponse.response === 'string'
               ? part.functionResponse.response
               : JSON.stringify(part.functionResponse.response || {}),
