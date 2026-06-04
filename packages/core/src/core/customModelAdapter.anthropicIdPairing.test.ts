@@ -374,10 +374,90 @@ describe('Anthropic tool_use/tool_result id pairing (cross-model migration)', ()
   });
 
   // ───────────────────────────────────────────────────────────────────────
+  // Case 7：二次事故复现 — fc 无 id，fr 带「真实 CLI callId」(2026-06-04)
+  //
+  // 现场：[Gemini] 期间并行 read_file×2（fc 无 id），coreToolScheduler 给两个
+  //   fr 各写入 `read_file-<ts>-<rand>` 真实 callId；切到 [Anthropic] 后 400：
+  //     unexpected `tool_use_id` found in `tool_result` blocks:
+  //     read_file-1780549486950-5f6pb6trd.
+  //
+  // 旧实现给 fc 造合成 id、跳过「已有 id」的 fr → tool_use.id ≠ tool_result.id。
+  // 修复后：fc 必须借用 fr 的真实 id，双方严格一致。
+  // ───────────────────────────────────────────────────────────────────────
+  it('case 7: 并行 read_file×2，fc 无 id + fr 带真实 callId → fc 借用 fr 的真实 id 配对', async () => {
+    const getBody = makeFetchSpy();
+    await callAnthropicModel(claudeConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '同时读两个文件' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [
+            { functionCall: { name: 'read_file', args: { absolute_path: '/a' } } },
+            { functionCall: { name: 'read_file', args: { absolute_path: '/b' } } },
+          ],
+        },
+        {
+          role: MESSAGE_ROLES.USER,
+          parts: [
+            { functionResponse: { name: 'read_file', id: 'read_file-1780549486950-5f6pb6trd', response: { output: 'AAA' } } },
+            { functionResponse: { name: 'read_file', id: 'read_file-1780549486951-qq11ww22e', response: { output: 'BBB' } } },
+          ],
+        },
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' }] },
+      ],
+    });
+
+    const body = getBody();
+    const { toolUses, toolResults } = collectToolPairs(body.messages);
+    expect(toolUses.length).toBe(2);
+    expect(toolResults.length).toBe(2);
+
+    // 每个 tool_use.id 必须等于真实 CLI callId（绝不是合成前缀）
+    const useIds = toolUses.map(u => u.id).sort();
+    expect(useIds).toEqual([
+      'read_file-1780549486950-5f6pb6trd',
+      'read_file-1780549486951-qq11ww22e',
+    ]);
+    expect(useIds.some(id => id.startsWith('toolu_synth_'))).toBe(false);
+
+    // 报错的字面量绝不能再出现在 wire body 里（无匹配 tool_use）
+    const flat = JSON.stringify(body.messages);
+    expect(flat).toContain('read_file-1780549486950-5f6pb6trd');
+    assertEveryResultHasMatchingUse(body.messages);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Case 8：单次 read_file，fc 无 id + fr 带真实 callId（最常见的单工具场景）
+  // ───────────────────────────────────────────────────────────────────────
+  it('case 8: 单次 fc 无 id + fr 带真实 callId → tool_use 借用该真实 id', async () => {
+    const getBody = makeFetchSpy();
+    await callAnthropicModel(claudeConfig as any, {
+      contents: [
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '读文件' }] },
+        {
+          role: MESSAGE_ROLES.MODEL,
+          parts: [{ functionCall: { name: 'read_file', args: { absolute_path: '/x' } } }],
+        },
+        {
+          role: MESSAGE_ROLES.USER,
+          parts: [{ functionResponse: { name: 'read_file', id: 'read_file-999-abc', response: { output: 'X' } } }],
+        },
+        { role: MESSAGE_ROLES.USER, parts: [{ text: '继续' }] },
+      ],
+    });
+    const body = getBody();
+    const { toolUses, toolResults } = collectToolPairs(body.messages);
+    expect(toolUses.length).toBe(1);
+    expect(toolResults.length).toBe(1);
+    expect(toolUses[0].id).toBe('read_file-999-abc');
+    expect(toolResults[0].tool_use_id).toBe('read_file-999-abc');
+    assertEveryResultHasMatchingUse(body.messages);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
   // 兜底场景：彻底孤立的 fr（没有任何 fc 配对，理论上 sanitize 已过滤）
   // ───────────────────────────────────────────────────────────────────────
-  it('sanity: 彻底孤立的 fr 仍然走旧 fallback，不抛异常', async () => {
-    const getBody = makeFetchSpy();
+  it('sanity: 彻底孤立的 fr 仍然走旧 fallback，不抛异常', async () => {    const getBody = makeFetchSpy();
     await callAnthropicModel(claudeConfig as any, {
       contents: [
         { role: MESSAGE_ROLES.USER, parts: [{ text: 'orphan' }] },
