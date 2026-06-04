@@ -510,6 +510,19 @@ export type ExtensionToWebViewMessage =
       info?: string;
       error?: string;
     } }
+  // 🎯 手动 /compress 的状态推送（让 webview 在对话流里展示"正在压缩 / 压缩结果"）
+  | { type: 'compress_status'; payload: {
+      /** start = 开始压缩；done = 完成；skipped = 历史太小无需压缩；error = 失败 */
+      phase: 'start' | 'done' | 'skipped' | 'error';
+      /** 同一次压缩的稳定 id，让 start → done/error 落到同一条 in-chat 通知 */
+      statusId: string;
+      sessionId: string | null;
+      /** done 时携带：压缩前后的 token 数 */
+      originalTokenCount?: number;
+      newTokenCount?: number;
+      /** error 时携带：错误信息 */
+      error?: string;
+    } }
   // 🎯 模型切换压缩确认
   | { type: 'compression_confirmation_request'; payload: { requestId: string; sessionId: string; targetModel: string; currentTokens: number; targetTokenLimit: number; compressionThreshold: number; message: string } }
   // 🎯 Token使用情况更新（压缩后）

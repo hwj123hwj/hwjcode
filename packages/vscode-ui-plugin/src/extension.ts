@@ -3068,6 +3068,12 @@ function setupSlashCommandHandlers() {
   // 通过现有 system-notification / chat_compressed 通道反馈给 webview。
   // ─────────────────────────────────────────────────────────────────
   communicationService.addMessageHandler('builtin_compress', async () => {
+    // 本次压缩对应的 session（用于 webview 把状态消息归位到正确的会话）。
+    const compressSessionId = sessionManager.getCurrentSession()?.info.id || null;
+    // 给本次压缩分配一个稳定 statusId，让 webview 能把 start → done/error 的
+    // 多条 compress_status 更新到同一条 in-chat 通知上（而不是不断追加新条目）。
+    const statusId = `compress-${Date.now()}`;
+
     try {
       // 当前会话的 AIService —— 与 setupChatHandlers 内 send_message 的
       // 取法（getCurrentInitializedAIService）保持一致。
@@ -3090,6 +3096,14 @@ function setupSlashCommandHandlers() {
         return;
       }
 
+      // ── 阶段 1：start ──────────────────────────────────────────────
+      // 立即把"正在压缩"状态推给 webview，让它在对话流里插入一条持久的
+      // in-chat 通知 + 底部进度条，用户不再面对一片空白干等。
+      communicationService.sendMessage({
+        type: 'compress_status',
+        payload: { phase: 'start', statusId, sessionId: compressSessionId },
+      });
+
       logger.info('[/compress] Manual compression triggered via slash command');
       const promptId = `slash-compress-${Date.now()}`;
       const result = await geminiClient.tryCompressChat(promptId, new AbortController().signal, true);
@@ -3099,6 +3113,20 @@ function setupSlashCommandHandlers() {
         const after = (result as any).newTokenCount;
         logger.info(`[/compress] Compressed ${before} → ${after} tokens`);
         const fmt = (n: any) => (typeof n === 'number' ? n.toLocaleString() : String(n));
+
+        // ── 阶段 2：done ─────────────────────────────────────────────
+        // 把压缩结果（前后 token 数）回写到同一条 in-chat 通知上。
+        communicationService.sendMessage({
+          type: 'compress_status',
+          payload: {
+            phase: 'done',
+            statusId,
+            sessionId: compressSessionId,
+            originalTokenCount: before,
+            newTokenCount: after,
+          },
+        });
+
         communicationService.sendMessage({
           type: 'slash_command_result',
           payload: {
@@ -3108,6 +3136,12 @@ function setupSlashCommandHandlers() {
         });
       } else {
         logger.warn('[/compress] tryCompressChat returned falsy result');
+        // ── 阶段 2'：skipped ─────────────────────────────────────────
+        // 历史本来就不大、无需压缩：也要给一个明确的结束态，避免进度条悬挂。
+        communicationService.sendMessage({
+          type: 'compress_status',
+          payload: { phase: 'skipped', statusId, sessionId: compressSessionId },
+        });
         communicationService.sendMessage({
           type: 'slash_command_result',
           payload: { success: false, error: 'Compression returned no result. The history may already be small enough.' },
@@ -3115,6 +3149,16 @@ function setupSlashCommandHandlers() {
       }
     } catch (error) {
       logger.error('[/compress] Compression failed', error instanceof Error ? error : undefined);
+      // ── 阶段 2''：error ───────────────────────────────────────────
+      communicationService.sendMessage({
+        type: 'compress_status',
+        payload: {
+          phase: 'error',
+          statusId,
+          sessionId: compressSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
       communicationService.sendMessage({
         type: 'slash_command_result',
         payload: {
