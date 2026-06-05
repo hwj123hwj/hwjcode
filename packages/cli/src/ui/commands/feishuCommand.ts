@@ -1215,6 +1215,66 @@ async function sendDetectedFiles(
 }
 
 /**
+ * 归一化 ask_user_question 的工具入参，彻底防止
+ * `(args.questions || []).map is not a function` 这类崩溃。
+ *
+ * 背景：飞书网关拦截 ask_user_question 时，args / args.questions 有时不是
+ * 期望的对象/数组，而是被序列化成了 JSON 字符串（模型偶发行为或链路序列化）。
+ * 直接 `.map` 会因为字符串没有 map 方法而抛错。
+ *
+ * 本函数把以下各种形态都安全收敛为 `{ questions: AskUserQuestion[] }`：
+ *   - 正常对象 { questions: [...] }                        → 原样
+ *   - { questions: "<json array string>" }                → parse 出数组
+ *   - "<整个 args 的 json 字符串>"                          → 先 parse 再递归归一
+ *   - 双重编码（args 字符串 → questions 仍是字符串）         → 逐层 parse
+ *   - 直接传单个问题对象 { question, options }             → 包成单元素数组
+ *   - null / undefined / 垃圾 / 非数组                      → { questions: [] }
+ *
+ * 该函数是纯函数、绝不抛异常，便于单测与防御性兜底。
+ */
+export function normalizeAskUserQuestionArgs(args: unknown): {
+  questions: Array<Record<string, unknown>>;
+} {
+  // 1) 整个 args 是字符串：尝试 parse（失败则视为空）
+  if (typeof args === 'string') {
+    try {
+      return normalizeAskUserQuestionArgs(JSON.parse(args));
+    } catch {
+      return { questions: [] };
+    }
+  }
+
+  if (!args || typeof args !== 'object') {
+    return { questions: [] };
+  }
+
+  const obj = args as Record<string, unknown>;
+  let questions: unknown = obj['questions'];
+
+  // 2) questions 是字符串：尝试 parse
+  if (typeof questions === 'string') {
+    try {
+      questions = JSON.parse(questions);
+    } catch {
+      return { questions: [] };
+    }
+  }
+
+  // 3) questions 是数组：直接采用
+  if (Array.isArray(questions)) {
+    return { questions: questions as Array<Record<string, unknown>> };
+  }
+
+  // 4) 没有 questions，但 args 本身看起来就是单个问题对象 → 包一层
+  if ('question' in obj || 'options' in obj) {
+    return { questions: [obj] };
+  }
+
+  // 5) 其余一律安全兜底
+  return { questions: [] };
+}
+
+/**
  * 飞书模式下拦截 ask_user_question：发送交互「表单卡片」，等用户提交
  *
  * 主路径：用 gateway.askQuestionsViaForm() 发一张 schema 2.0 表单卡片，
@@ -1240,8 +1300,10 @@ async function handleAskUserQuestionViaCard(
   },
   callId: string,
 ): Promise<Part> {
-  // 🚀 数据容错与自愈：处理 questions 数组中可能出现的字符串或非标准对象
-  const normalizedQuestions = (args.questions || []).map((item: any) => {
+  // 🚀 数据容错与自愈：先把 args 归一化（防止 args/questions 是 JSON 字符串
+  //    导致 `.map is not a function` 崩溃），再处理每个 question 的字段。
+  const safeArgs = normalizeAskUserQuestionArgs(args);
+  const normalizedQuestions = safeArgs.questions.map((item: any) => {
     if (!item) return { question: 'Question', options: [] };
     if (typeof item === 'string') {
       return {
