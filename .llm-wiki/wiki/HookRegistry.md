@@ -15,8 +15,8 @@ sources: [raw/05-hooks-system.md]
 
 ## Configuration Sources (precedence)
 
-1. Project: `.deepvcode/settings.json`
-2. Global: `~/.deepv/settings.json`
+1. Project: `.easycode/settings.json`
+2. Global: `~/.easycode-user/settings.json`
 3. System
 4. Extensions
 

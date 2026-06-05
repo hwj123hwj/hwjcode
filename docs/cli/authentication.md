@@ -50,8 +50,8 @@
 ### 配置位置
 
 用户配置文件位置：
-- **Linux/Mac**: `~/.deepv/settings.json`
-- **Windows**: `%USERPROFILE%\.deepv\settings.json`
+- **Linux/Mac**: `~/.easycode-user/settings.json`
+- **Windows**: `%USERPROFILE%\.easycode-user\settings.json`
 
 ### 示例配置
 
@@ -82,15 +82,15 @@
 
 当多个配置来源同时存在时，优先级如下（从高到低）：
 
-1. **System Settings** (`/Library/Application Support/DeepVCli/settings.json` 等)
+1. **System Settings** (`/Library/Application Support/EasyCodeCli/settings.json` 等)
    - 系统管理员配置，覆盖所有其他设置
-2. **Workspace Settings** (`./.deepv/settings.json`)
+2. **Workspace Settings** (`./.easycode-user/settings.json`)
    - 项目级配置，团队共享
-3. **User Settings** (`~/.deepv/settings.json`)
+3. **User Settings** (`~/.easycode-user/settings.json`)
    - 个人用户配置
 4. **环境变量** (`DEEPX_SERVER_URL`)
    - 动态配置，用于临时覆盖或 CI/CD
-5. **默认值** (`https://api-code.deepvlab.ai`)
+5. **默认值** (`https://api-code.easycode-userlab.ai`)
    - 源码硬编码的后备值
 
 详细信息请参考 [自定义代理服务器优先级](../custom-proxy-server-priority.md)

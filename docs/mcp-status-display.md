@@ -10,22 +10,22 @@
 
 1. **初始启动/连接中**
    ```
-   Using: 1 DEEPV.md file | 0/3 MCP servers (connecting...)
+   Using: 1 EASYCODE.md file | 0/3 MCP servers (connecting...)
    ```
 
 2. **部分连接成功**
    ```
-   Using: 1 DEEPV.md file | 2/3 MCP servers
+   Using: 1 EASYCODE.md file | 2/3 MCP servers
    ```
 
 3. **全部连接成功**
    ```
-   Using: 1 DEEPV.md file | 3 MCP servers (ctrl+t to view)
+   Using: 1 EASYCODE.md file | 3 MCP servers (ctrl+t to view)
    ```
 
 4. **全部连接失败**
    ```
-   Using: 1 DEEPV.md file | 0/3 MCP servers (failed)
+   Using: 1 EASYCODE.md file | 0/3 MCP servers (failed)
    ```
 
 ## 技术实现
@@ -43,7 +43,7 @@
 import {
   addMCPStatusChangeListener,
   removeMCPStatusChangeListener,
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 const [mcpStatusUpdateTrigger, setMcpStatusUpdateTrigger] = useState(0);
 
@@ -76,7 +76,7 @@ const connectedMcpServerCount = Array.from(allStatuses.entries()).filter(
 
 ## 相关API
 
-### 从 `deepv-code-core` 导出
+### 从 `easycode-core` 导出
 
 - `getAllMCPServerStatuses()`: 获取所有MCP服务器的状态Map
 - `getMCPServerStatus(name)`: 获取单个服务器的状态

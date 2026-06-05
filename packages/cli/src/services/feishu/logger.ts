@@ -24,12 +24,12 @@ const DEBUG_ENABLED = (() => {
   if (process.env['VITEST'] || process.env['NODE_ENV'] === 'test') {
     return false;
   }
-  const v = process.env['DEEPV_DEBUG_FEISHU'];
+  const v = process.env['EASYCODE_DEBUG_FEISHU'] ?? process.env['DEEPV_DEBUG_FEISHU'];
   if (v !== undefined) {
     const lower = v.toLowerCase();
     return lower !== '0' && lower !== 'false' && lower !== 'no' && lower !== '';
   }
-  return true; // 🚀 飞书模式下默认开启所有日志打印，方便用户调试卡片回调
+  return false; // 🚀 默认关闭所有原始 stderr 日志打印，防止破坏和滚动污染终端 TUI 布局。需要调试时可设置 EASYCODE_DEBUG_FEISHU=1 开启。
 })();
 
 function ts(): string {

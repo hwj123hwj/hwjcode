@@ -71,7 +71,7 @@ UI updates via task events
 
 ### Get Task Manager
 ```typescript
-import { getBackgroundTaskManager } from 'deepv-code-core';
+import { getBackgroundTaskManager } from 'easycode-core';
 const manager = getBackgroundTaskManager();
 ```
 

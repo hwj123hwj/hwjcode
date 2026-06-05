@@ -114,13 +114,13 @@ Access settings via `File > Preferences > Settings` and search for "Easy Code":
 
 ## 🆘 Support & Feedback
 
-- **Issues & Bug Reports**: [GitHub Issues](https://github.com/OrionStarAI/DeepVCode/issues)
-- **Documentation**: [Full Documentation](https://github.com/OrionStarAI/DeepVCode)
+- **Issues & Bug Reports**: [GitHub Issues](https://github.com/OrionStarAI/EasyCodeCode/issues)
+- **Documentation**: [Full Documentation](https://github.com/OrionStarAI/EasyCodeCode)
 - **Feature Requests**: We welcome your ideas and suggestions!
 
 ## 📝 License
 
-Apache-2.0 License - see the [LICENSE](https://github.com/OrionStarAI/DeepVCode/blob/main/LICENSE) file for details.
+Apache-2.0 License - see the [LICENSE](https://github.com/OrionStarAI/EasyCodeCode/blob/main/LICENSE) file for details.
 
 ## 🌟 Why Choose Easy Code?
 

@@ -83,13 +83,13 @@ EasyCode/
 │   │   │
 │   │   ├── package.json
 │   │   │   └── dependencies: {
-│   │   │       "deepv-code-core": "file:../core"  ← 依赖 core
+│   │   │       "easycode-core": "file:../core"  ← 依赖 core
 │   │   │     }
 │   │   └── dist/
 │   │
 │   └── vscode-ui-plugin/
 │       ├── src/
-│       │   ├── extension.ts               (导入 deepv-code-core)
+│       │   ├── extension.ts               (导入 easycode-core)
 │       │   ├── services/
 │       │   │   ├── authManager.ts         (导入 core)
 │       │   │   ├── aiService.ts           (导入 core)
@@ -98,7 +98,7 @@ EasyCode/
 │       │
 │       ├── package.json
 │       │   └── dependencies: {
-│       │       没有显式的 deepv-code-core  ← 但通过 import 使用 core
+│       │       没有显式的 easycode-core  ← 但通过 import 使用 core
 │       │     }
 │       └── dist/
 │
@@ -179,7 +179,7 @@ EasyCode/
 ### 2. 统一安全策略
 
 ```
-一份 .deepvcode/settings.json 配置：
+一份 .easycode/settings.json 配置：
 
 {
   "hooks": {
@@ -212,7 +212,7 @@ EasyCode/
 - 相同的安全策略
 
 用户体验：
-CLI: dvcode → 享受 Hooks ✅
+CLI: easycode → 享受 Hooks ✅
 VSCode: VSCode 插件 → 享受 Hooks ✅
 ```
 
@@ -295,7 +295,7 @@ import {
   HookSystem,
   HookEventHandler,
   type HooksConfig
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 // 初始化 Hooks 系统
 const hookSystem = new HookSystem(config);
@@ -313,7 +313,7 @@ import {
   HookSystem,
   HookEventHandler,
   type HooksConfig
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 // 同样初始化和使用
 const hookSystem = new HookSystem(config);
@@ -342,13 +342,13 @@ await hookSystem.fireEvent('BeforeAgent', agentInput);
 使用场景：某公司同时使用 CLI 和 VSCode UI 插件
 
 配置管理：
-~/.deepv/settings.json (全局配置)
+~/.easycode-user/settings.json (全局配置)
   ├── Hooks 配置
   ├── MCP 配置
   ├── 命令配置
   └── ...
 
-.deepvcode/settings.json (项目配置)
+.easycode/settings.json (项目配置)
   ├── Hooks 配置 ← 同一个！
   ├── MCP 配置
   ├── 命令配置
@@ -368,10 +368,10 @@ await hookSystem.fireEvent('BeforeAgent', agentInput);
   │
   └─→ 创建 Hooks 脚本和配置
       │
-      ├─→ .deepvcode/hooks/security-gate.sh
-      ├─→ .deepvcode/hooks/audit-logger.sh
-      ├─→ .deepvcode/hooks/rbac.sh
-      └─→ .deepvcode/settings.json
+      ├─→ .easycode/hooks/security-gate.sh
+      ├─→ .easycode/hooks/audit-logger.sh
+      ├─→ .easycode/hooks/rbac.sh
+      └─→ .easycode/settings.json
           │
           ├─→ 上传到项目 Git 仓库
           │
@@ -412,12 +412,12 @@ packages/vscode-ui-plugin/src/hooks/... (❌ 避免)
 
 ```
 ✅ 推荐：单一配置文件
-.deepvcode/settings.json
+.easycode/settings.json
   └─ 同时被 CLI 和 VSCode UI 加载
 
 ❌ 避免：多份配置
-.deepvcode/cli-settings.json
-.deepvcode/vscode-settings.json
+.easycode/cli-settings.json
+.easycode/vscode-settings.json
   └─ 维护成本高，容易不一致
 ```
 
@@ -429,14 +429,14 @@ packages/vscode-ui-plugin/src/hooks/... (❌ 避免)
 packages/new-client/
   ├── package.json
   │   └── dependencies: {
-  │       "deepv-code-core": "file:../core" ← 依赖 core
+  │       "easycode-core": "file:../core" ← 依赖 core
   │     }
   │
   ├── src/
   │   ├── main.ts
   │   └── services/
   │       └── hookService.ts
-  │           └── import from 'deepv-code-core'
+  │           └── import from 'easycode-core'
   │
   └── dist/
 
@@ -469,7 +469,7 @@ Hooks 系统（HookSystem、HookRegistry、HookRunner 等）
 ### 关键点 3：一份配置，多个客户端
 
 ```
-.deepvcode/settings.json 中的 Hooks 配置
+.easycode/settings.json 中的 Hooks 配置
 被 CLI 加载时：享受 Hooks 保护
 被 VSCode UI 加载时：也享受 Hooks 保护
 ```
@@ -489,7 +489,7 @@ VSCode UI 开发者：只需在插件中导入和使用 core 的 Hooks
 ```typescript
 // packages/cli/src/core/agent.ts
 
-import { HookEventHandler } from 'deepv-code-core';
+import { HookEventHandler } from 'easycode-core';
 
 export class Agent {
   private hookHandler: HookEventHandler;
@@ -526,7 +526,7 @@ export class Agent {
 ```typescript
 // packages/vscode-ui-plugin/src/services/aiService.ts
 
-import { HookEventHandler } from 'deepv-code-core';
+import { HookEventHandler } from 'easycode-core';
 
 export class AIService {
   private hookHandler: HookEventHandler;
@@ -560,7 +560,7 @@ export class AIService {
 |-----|------|
 | **实现位置** | `packages/core/src/hooks/` (2,800+ 行) |
 | **共享方式** | Core 是库，被 CLI 和 VSCode UI 作为依赖导入 |
-| **配置位置** | `.deepvcode/settings.json` (单一配置) |
+| **配置位置** | `.easycode/settings.json` (单一配置) |
 | **享受客户端** | CLI ✅、VSCode UI ✅、未来的新客户端 ✅ |
 | **代码重用** | 100% - Hooks 代码只实现一次 |
 | **维护成本** | 最低 - 改一处影响所有客户端 |

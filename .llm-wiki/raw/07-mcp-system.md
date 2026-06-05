@@ -1,4 +1,4 @@
-# DeepV Code — MCP System Facts
+# Easy Code — MCP System Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 

@@ -37,7 +37,7 @@ const [mcpStatusUpdateTrigger, setMcpStatusUpdateTrigger] = useState(0);
 
 useEffect(() => {
   const { addMCPStatusChangeListener, removeMCPStatusChangeListener } =
-    require('deepv-code-core');
+    require('easycode-core');
 
   const handleMCPStatusChange = () => {
     // 触发重新渲染以更新MCP服务器计数
@@ -62,7 +62,7 @@ import {
   MCPServerStatus,
   getMCPDiscoveryState,
   MCPDiscoveryState,
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 // 获取实际连接状态
 const allStatuses = getAllMCPServerStatuses();

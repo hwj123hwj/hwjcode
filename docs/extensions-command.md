@@ -5,7 +5,7 @@ Extensions 命令用于管理 Easy Code CLI 的扩展。扩展可以添加自定
 ## 命令概览
 
 ```bash
-dvcode extensions <subcommand> [options]
+easycode extensions <subcommand> [options]
 ```
 
 支持的子命令：
@@ -21,7 +21,7 @@ dvcode extensions <subcommand> [options]
 ### 从 Git 仓库安装
 
 ```bash
-dvcode extensions install <repository-url> [options]
+easycode extensions install <repository-url> [options]
 ```
 
 **参数**：
@@ -36,34 +36,34 @@ dvcode extensions install <repository-url> [options]
 **示例**：
 ```bash
 # 从 GitHub 安装最新版本
-dvcode extensions install https://github.com/user/my-extension
+easycode extensions install https://github.com/user/my-extension
 
 # 指定特定分支
-dvcode extensions install https://github.com/user/my-extension --ref develop
+easycode extensions install https://github.com/user/my-extension --ref develop
 
 # 启用自动更新
-dvcode extensions install https://github.com/user/my-extension --auto-update
+easycode extensions install https://github.com/user/my-extension --auto-update
 
 # 跳过确认提示
-dvcode extensions install https://github.com/user/my-extension --consent
+easycode extensions install https://github.com/user/my-extension --consent
 ```
 
 ### 从本地路径安装
 
 ```bash
-dvcode extensions install <local-path>
+easycode extensions install <local-path>
 ```
 
 **示例**：
 ```bash
-dvcode extensions install ./my-extension
-dvcode extensions install /absolute/path/to/extension
+easycode extensions install ./my-extension
+easycode extensions install /absolute/path/to/extension
 ```
 
 ## uninstall - 卸载扩展
 
 ```bash
-dvcode extensions uninstall <name>
+easycode extensions uninstall <name>
 ```
 
 **参数**：
@@ -72,16 +72,16 @@ dvcode extensions uninstall <name>
 **示例**：
 ```bash
 # 按扩展名卸载
-dvcode extensions uninstall my-extension
+easycode extensions uninstall my-extension
 
 # 按源路径卸载
-dvcode extensions uninstall https://github.com/user/my-extension
+easycode extensions uninstall https://github.com/user/my-extension
 ```
 
 ## list - 列出已安装的扩展
 
 ```bash
-dvcode extensions list
+easycode extensions list
 ```
 
 显示所有已安装的扩展信息，包括：
@@ -94,13 +94,13 @@ dvcode extensions list
 
 **示例**：
 ```bash
-$ dvcode extensions list
+$ easycode extensions list
 
 Installed Extensions:
 
   📦 my-extension (1.0.0)
      Source: https://github.com/user/my-extension
-     Path: ~/.deepv/extensions/my-extension
+     Path: ~/.easycode-user/extensions/my-extension
      Commands: /ext:my-extension:analyze, /ext:my-extension:generate
      MCP Servers: my-tools
 ```
@@ -110,7 +110,7 @@ Installed Extensions:
 用于开发时快速测试本地扩展。链接的扩展会在每次启动时读取最新文件，无需重新安装。
 
 ```bash
-dvcode extensions link <path>
+easycode extensions link <path>
 ```
 
 **参数**：
@@ -118,16 +118,16 @@ dvcode extensions link <path>
 
 **示例**：
 ```bash
-dvcode extensions link ./extensions/my-extension
+easycode extensions link ./extensions/my-extension
 
 # 之后可以通过扩展名卸载
-dvcode extensions uninstall my-extension
+easycode extensions uninstall my-extension
 ```
 
 ## new - 创建新扩展
 
 ```bash
-dvcode extensions new <path> [template]
+easycode extensions new <path> [template]
 ```
 
 **参数**：
@@ -137,13 +137,13 @@ dvcode extensions new <path> [template]
 **示例**：
 ```bash
 # 创建基础扩展结构
-dvcode extensions new ./my-extension
+easycode extensions new ./my-extension
 
 # 基于模板创建
-dvcode extensions new ./my-extension basic
+easycode extensions new ./my-extension basic
 
 # 创建后可以测试链接
-dvcode extensions link ./my-extension
+easycode extensions link ./my-extension
 ```
 
 创建的扩展包含：
@@ -152,7 +152,7 @@ dvcode extensions link ./my-extension
 ## validate - 验证扩展
 
 ```bash
-dvcode extensions validate <path>
+easycode extensions validate <path>
 ```
 
 验证扩展配置的有效性，检查：
@@ -165,7 +165,7 @@ dvcode extensions validate <path>
 
 **示例**：
 ```bash
-dvcode extensions validate ./my-extension
+easycode extensions validate ./my-extension
 ```
 
 ## 扩展目录结构
@@ -254,7 +254,7 @@ commands/
 ## 安装位置
 
 扩展安装到用户主目录：
-- **用户级**：`~/.deepv/extensions/`
+- **用户级**：`~/.easycode-user/extensions/`
 
 ## 常见问题
 
@@ -262,32 +262,32 @@ commands/
 
 1. 创建扩展结构：
    ```bash
-   dvcode extensions new ./my-extension
+   easycode extensions new ./my-extension
    ```
 
 2. 编辑配置和命令
 
 3. 链接本地扩展进行测试：
    ```bash
-   dvcode extensions link ./my-extension
+   easycode extensions link ./my-extension
    ```
 
 4. 验证扩展：
    ```bash
-   dvcode extensions validate ./my-extension
+   easycode extensions validate ./my-extension
    ```
 
 ### 如何从 Git 分支测试？
 
 ```bash
-dvcode extensions install https://github.com/user/my-extension --ref develop
+easycode extensions install https://github.com/user/my-extension --ref develop
 ```
 
 ### 如何更新已安装的扩展？
 
 重新运行 install 命令会更新现有扩展：
 ```bash
-dvcode extensions install https://github.com/user/my-extension
+easycode extensions install https://github.com/user/my-extension
 ```
 
 ### 安装失败怎么办？
@@ -296,8 +296,8 @@ dvcode extensions install https://github.com/user/my-extension
 2. 确认 Git URL 有效
 3. 尝试卸载后重新安装：
    ```bash
-   dvcode extensions uninstall my-extension
-   dvcode extensions install https://github.com/user/my-extension
+   easycode extensions uninstall my-extension
+   easycode extensions install https://github.com/user/my-extension
    ```
 
 ### 如何禁用特定工具？

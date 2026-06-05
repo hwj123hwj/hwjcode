@@ -1156,7 +1156,16 @@ export interface CustomModelInfo {
   baseUrl: string;
 }
 
-export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, promptRegistryOrUserRules?: PromptRegistry | string, agentStyle: AgentStyle = 'default', modelId?: string, preferredLanguage?: string, customModelInfo?: CustomModelInfo): string {
+export function getCoreSystemPrompt(
+  userMemory?: string,
+  isVSCode?: boolean,
+  promptRegistryOrUserRules?: PromptRegistry | string,
+  agentStyle: AgentStyle = 'default',
+  modelId?: string,
+  preferredLanguage?: string,
+  customModelInfo?: CustomModelInfo,
+  isFeishu?: boolean,
+): string {
   // Handle backward compatibility: promptRegistryOrUserRules can be PromptRegistry or userRules string
   let promptRegistry: PromptRegistry | undefined;
   let userRules: string | undefined;
@@ -1276,6 +1285,10 @@ export function getCoreSystemPrompt(userMemory?: string, isVSCode?: boolean, pro
   // Inject user rules if provided
   if (userRules && userRules.trim()) {
     finalPrompt += `\n\n---\n\n## User Rules\n\nThe user has defined the following rules that you MUST follow:\n\n${userRules.trim()}`;
+  }
+
+  if (isFeishu) {
+    finalPrompt += `\n\n---\n\n## Environment Awareness: Feishu (Lark) Channel Context\n- **Current Channel**: You are communicating with the user via **Feishu/Lark Chat Gateway** (e.g. group chat or direct message).\n- **User Device/Environment**: The user is likely using a mobile device or chat client and may not have immediate physical access to their local PC or terminal.\n- **Mobile-Friendly Layout Guidelines**:\n  - Keep your explanations clear, compact, and highly structured.\n  - Avoid generating extremely wide tables, complex multi-line ASCII architecture diagrams, or massive blocks of unbroken text, as they render poorly on mobile screens. Use bullet points or code snippets with clear explanations instead.\n- **Reference Native Chat Actions**:\n  - Refer to native chat commands (like \`/goal\`, \`/bind\`, \`/help\`) and interactive cards when guiding the user on how to interact with you, rather than telling them to run raw terminal commands or type in a TTY.\n- **Strict Guidelines for Sending Files & Media via \`SendFeishuFileTool\`**:\n  - You have access to \`SendFeishuFileTool\` to send local files (e.g., generated reports, compiled packages, code blocks, screenshots) directly into this active Feishu chat.\n  - **Prudence & Spam Prevention**: You must **never** send files automatically/spontaneously on every output turn to avoid spamming the chat and creating distraction.\n  - **When to send**: ONLY send a file if (a) the user **explicitly asks** you to send/transfer/download a file (e.g., "send me the file...", "download it for me"), or (b) there is an **absolute necessity** for the user to view/inspect a file or media (such as a newly generated document, test report, or diagnostic file) to complete the current task.\n  - If neither condition is met, simply report the task completion or output in standard text form; do not invoke \`SendFeishuFileTool\`.`;
   }
 
   return finalPrompt.trim();

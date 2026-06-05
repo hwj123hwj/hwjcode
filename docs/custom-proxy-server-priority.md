@@ -6,17 +6,17 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  1. System Settings (最高) - ~/.deepv/settings.json │
+│  1. System Settings (最高) - ~/.easycode-user/settings.json │
 │     + customProxyServerUrl field                    │
 └─────────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────────┐
-│  2. Workspace Settings - ./.deepv/settings.json     │
+│  2. Workspace Settings - ./.easycode-user/settings.json     │
 │     + customProxyServerUrl field                    │
 └─────────────────────────────────────────────────────┘
                          ↓
 ┌─────────────────────────────────────────────────────┐
-│  3. User Settings - ~/.deepv/settings.json          │
+│  3. User Settings - ~/.easycode-user/settings.json          │
 │     + customProxyServerUrl field                    │
 └─────────────────────────────────────────────────────┘
                          ↓
@@ -26,7 +26,7 @@
                          ↓
 ┌─────────────────────────────────────────────────────┐
 │  5. Source Code Default (最低)                      │
-│     + https://api-code.deepvlab.ai                  │
+│     + https://api-code.easycode-userlab.ai                  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -34,9 +34,9 @@
 
 ### 优先级 1：System Settings（系统级设置）
 - **位置**: 由环境变量 `GEMINI_CLI_SYSTEM_SETTINGS_PATH` 指定或平台默认位置
-  - macOS: `/Library/Application Support/DeepVCli/settings.json`
-  - Windows: `C:\ProgramData\deepv-cli\settings.json`
-  - Linux: `/etc/deepv-cli/settings.json`
+  - macOS: `/Library/Application Support/EasyCodeCli/settings.json`
+  - Windows: `C:\ProgramData\easycode-cli\settings.json`
+  - Linux: `/etc/easycode-cli/settings.json`
 - **谁可以设置**: 系统管理员
 - **用途**: 为整个系统的所有用户设置统一的代理服务器
 - **优先级最高**: 覆盖所有其他配置
@@ -48,7 +48,7 @@
 ```
 
 ### 优先级 2：Workspace Settings（工作区级设置）
-- **位置**: `./.deepv/settings.json`（项目目录中）
+- **位置**: `./.easycode-user/settings.json`（项目目录中）
 - **谁可以设置**: 开发团队（检入版本控制）
 - **用途**: 为特定项目设置代理服务器
 - **优先级**: 仅次于系统设置，高于用户设置
@@ -60,7 +60,7 @@
 ```
 
 ### 优先级 3：User Settings（用户级设置）
-- **位置**: `~/.deepv/settings.json`（用户主目录）
+- **位置**: `~/.easycode-user/settings.json`（用户主目录）
 - **谁可以设置**: 个人用户
 - **用途**: 个人偏好的代理服务器配置
 - **优先级**: 低于系统和工作区设置
@@ -92,14 +92,14 @@ $env:DEEPX_SERVER_URL = "https://dev-proxy.example.com"
 ```
 
 ### 优先级 5：Source Code Default（源码硬编码默认值）
-- **值**: `https://api-code.deepvlab.ai`
+- **值**: `https://api-code.easycode-userlab.ai`
 - **位置**: `packages/core/src/config/proxyConfig.ts`
 - **谁可以修改**: 源码贡献者
 - **用途**: 后备默认值，当没有任何其他配置时使用
 
 ```typescript
 // packages/core/src/config/proxyConfig.ts
-url: process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai',
+url: process.env.DEEPX_SERVER_URL || 'https://api-code.easycode-userlab.ai',
 ```
 
 ## 实现逻辑
@@ -118,7 +118,7 @@ if (customProxyUrl) {
 ```typescript
 // packages/core/src/config/proxyConfig.ts
 const proxyServers = getProxyServers();
-// 返回: [{ url: process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai' }]
+// 返回: [{ url: process.env.DEEPX_SERVER_URL || 'https://api-code.easycode-userlab.ai' }]
 ```
 
 ## 常见场景
@@ -132,7 +132,7 @@ gemini
 
 ### 场景 2：团队统一配置
 ```json
-// ./.deepv/settings.json（工作区设置）
+// ./.easycode-user/settings.json（工作区设置）
 {
   "customProxyServerUrl": "https://team.example.com",
   "selectedAuthType": "proxy-auth"
@@ -142,17 +142,17 @@ gemini
 
 ### 场景 3：个人配置优先于团队配置
 ```json
-// ~/.deepv/settings.json（用户设置）
+// ~/.easycode-user/settings.json（用户设置）
 {
   "customProxyServerUrl": "https://personal-test.example.com"
 }
 ```
-即使项目中有 `.deepv/settings.json`，个人设置不会覆盖（因为工作区优先级更高）。
+即使项目中有 `.easycode-user/settings.json`，个人设置不会覆盖（因为工作区优先级更高）。
 如果要个人优先，只能使用环境变量。
 
 ### 场景 4：系统管理员为所有用户设置代理
 ```json
-// /Library/Application Support/DeepVCli/settings.json（macOS 示例）
+// /Library/Application Support/EasyCodeCli/settings.json（macOS 示例）
 {
   "customProxyServerUrl": "https://corporate-proxy.company.com",
   "theme": "default-dark"
@@ -181,7 +181,7 @@ gemini
 ├─ 是 → 使用环境变量的值 ✓
 └─ 否 → 继续
     ↓
-使用源码硬编码默认值: https://api-code.deepvlab.ai ✓
+使用源码硬编码默认值: https://api-code.easycode-userlab.ai ✓
 ```
 
 ## 故障排除
@@ -192,19 +192,19 @@ gemini
 1. 检查是否有系统级设置（System Settings）覆盖了你的配置
    ```bash
    # 查看系统设置文件（如果存在）
-   cat "/Library/Application Support/DeepVCli/settings.json"  # macOS
-   cat "C:\ProgramData\deepv-cli\settings.json"             # Windows
-   cat "/etc/deepv-cli/settings.json"                       # Linux
+   cat "/Library/Application Support/EasyCodeCli/settings.json"  # macOS
+   cat "C:\ProgramData\easycode-cli\settings.json"             # Windows
+   cat "/etc/easycode-cli/settings.json"                       # Linux
    ```
 
 2. 检查是否有工作区设置（Workspace Settings）覆盖了你的配置
    ```bash
-   cat ./.deepv/settings.json
+   cat ./.easycode-user/settings.json
    ```
 
 3. 确认你的用户设置文件语法正确
    ```bash
-   cat ~/.deepv/settings.json
+   cat ~/.easycode-user/settings.json
    ```
 
 4. 检查启动时是否设置了环境变量（会被忽略，因为 settings 优先级更高）
@@ -223,7 +223,7 @@ gemini
    ```
    或
    ```
-   [DeepX] Connecting to Easy Code server: https://api-code.deepvlab.ai
+   [DeepX] Connecting to Easy Code server: https://api-code.easycode-userlab.ai
    ```
 
 ### 问题：想要在 CI/CD 中使用不同的服务器
@@ -241,7 +241,7 @@ gemini --prompt "analyze the code"
 | 配置来源 | 位置 | 设置者 | 优先级 | 用途 |
 |---------|------|--------|--------|------|
 | System Settings | `/Library/App.../settings.json` | 系统管理员 | 1 (最高) | 系统范围配置 |
-| Workspace Settings | `./.deepv/settings.json` | 开发团队 | 2 | 项目级配置 |
-| User Settings | `~/.deepv/settings.json` | 个人用户 | 3 | 个人偏好 |
+| Workspace Settings | `./.easycode-user/settings.json` | 开发团队 | 2 | 项目级配置 |
+| User Settings | `~/.easycode-user/settings.json` | 个人用户 | 3 | 个人偏好 |
 | Environment Variable | `DEEPX_SERVER_URL` | 开发人员 | 4 | 临时/动态配置 |
 | Source Default | `proxyConfig.ts` | 源码 | 5 (最低) | 后备默认值 |

@@ -235,9 +235,9 @@ export class BuiltinCommandLoader implements ICommandLoader {
 
 ```bash
 $ npm run typecheck
-✅ deepv-code-cli: PASSED
-✅ deepv-code-core: PASSED
-✅ deepv-code-vscode-ui-plugin: PASSED
+✅ easycode-cli: PASSED
+✅ easycode-core: PASSED
+✅ easycode-ai-vscode-ui-plugin: PASSED
 ```
 
 ### 编译构建
@@ -245,8 +245,8 @@ $ npm run typecheck
 ```bash
 $ npm run build
 ✅ TypeScript compilation completed successfully
-✅ deepv-code-core build completed
-✅ deepv-code-cli build completed
+✅ easycode-core build completed
+✅ easycode-cli build completed
 ✅ Webview build completed
 ✅ Build completed successfully
 ```

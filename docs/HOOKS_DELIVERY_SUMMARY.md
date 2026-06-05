@@ -36,7 +36,7 @@
   - 配置选项详解
   - 最佳实践和调试技巧
 
-- ✅ **DeepV_Code_Whitepaper.md** - 白皮书中的 Hooks 章节（第 8 章）
+- ✅ **EasyCode_Code_Whitepaper.md** - 白皮书中的 Hooks 章节（第 8 章）
   - Hooks 核心能力介绍
   - 11 个事件的完整说明表
   - 5 个企业级应用场景
@@ -92,14 +92,14 @@ packages/core (Hooks 系统实现于此)
 **这意味着：**
 - ✅ **CLI 用户** - 通过命令行自动获得 Hooks 的所有能力（权限控制、审计、定制等）
 - ✅ **VSCode UI 用户** - 通过 VS Code 插件自动获得 Hooks 的所有能力
-- ✅ **统一管理** - 一份 `.deepvcode/settings.json` 配置对所有客户端生效
+- ✅ **统一管理** - 一份 `.easycode/settings.json` 配置对所有客户端生效
 - ✅ **无代码重复** - Hooks 系统只在 core 实现一次，其他客户端自动继承
 - ✅ **未来扩展** - 任何新增客户端只需依赖 core，立即获得 Hooks 功能
 
 ### 5 层核心架构
 
 ```
-用户配置 (.deepvcode/settings.json)
+用户配置 (.easycode/settings.json)
          ↓
 HookRegistry (加载验证配置)
          ↓
@@ -139,12 +139,12 @@ HookEventHandler (触发 11 个事件)
 ```
 用户想了解什么？              → 推荐阅读
 ─────────────────────────────────────────
-Hooks 是什么？基本概念        → DeepV_Code_Whitepaper.md (第 8 章)
+Hooks 是什么？基本概念        → EasyCode_Code_Whitepaper.md (第 8 章)
 如何快速开始？                → docs/hooks-user-guide.md (快速开始)
 想看 5 分钟体验               → docs/hooks-user-guide.md (5 分钟快速体验)
 想要完整示例代码              → docs/hooks-examples.md
 有问题需要解答                → docs/hooks-user-guide.md (FAQ)
-已集成到 CLI 帮助             → `dvcode` 命令行中 Q15
+已集成到 CLI 帮助             → `easycode` 命令行中 Q15
 ```
 
 ### 给开发者的文档
@@ -191,7 +191,7 @@ Hooks 是什么？基本概念        → DeepV_Code_Whitepaper.md (第 8 章)
 
 ### 最简配置示例
 
-**创建 `.deepvcode/settings.json`：**
+**创建 `.easycode/settings.json`：**
 ```json
 {
   "hooks": {
@@ -200,7 +200,7 @@ Hooks 是什么？基本概念        → DeepV_Code_Whitepaper.md (第 8 章)
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/security-gate.sh"
+            "command": "bash .easycode/hooks/security-gate.sh"
           }
         ]
       }
@@ -209,7 +209,7 @@ Hooks 是什么？基本概念        → DeepV_Code_Whitepaper.md (第 8 章)
 }
 ```
 
-**创建 `.deepvcode/hooks/security-gate.sh`：**
+**创建 `.easycode/hooks/security-gate.sh`：**
 ```bash
 #!/bin/bash
 read INPUT
@@ -223,7 +223,7 @@ fi
 
 **执行权限：**
 ```bash
-chmod +x .deepvcode/hooks/security-gate.sh
+chmod +x .easycode/hooks/security-gate.sh
 ```
 
 **完成！**用户现在有了自动的安全网关。
@@ -232,7 +232,7 @@ chmod +x .deepvcode/hooks/security-gate.sh
 
 ## 📖 关键文档要点总结
 
-### White Paper (DeepV_Code_Whitepaper.md - 第 8 章)
+### White Paper (EasyCode_Code_Whitepaper.md - 第 8 章)
 
 **篇幅**：约 1500 字
 **内容**：
@@ -297,7 +297,7 @@ chmod +x .deepvcode/hooks/security-gate.sh
 
 ```
 Easy Code/
-├── DeepV_Code_Whitepaper.md           ← 白皮书第 8 章
+├── EasyCode_Code_Whitepaper.md           ← 白皮书第 8 章
 ├── HOOKS_IMPLEMENTATION_SUMMARY.md    ← 给开发者的总结
 ├── HOOKS_DELIVERY_SUMMARY.md          ← 本文件（交付总结）
 ├── packages/
@@ -469,7 +469,7 @@ Easy Code/
 ### 参考资源
 
 - 🔗 Gemini CLI 参考：`gemini-cli-0.20.2/HOOKS_GUIDE.md`
-- 📝 白皮书：`DeepV_Code_Whitepaper.md`（第 8 章）
+- 📝 白皮书：`EasyCode_Code_Whitepaper.md`（第 8 章）
 - 🎯 源代码：`packages/core/src/hooks/`
 
 ---

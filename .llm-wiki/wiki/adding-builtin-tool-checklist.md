@@ -200,16 +200,16 @@ After changes to `packages/core/src/tools/`:
 npm run build
 ```
 
-This is mandatory — `bundle/dvcode.js` is what the CLI actually runs.
+This is mandatory — `bundle/easycode.js` is what the CLI actually runs.
 Source-only changes won't take effect until the bundle is rebuilt.
 
 To verify the tool ended up in the bundle:
 
 ```bash
-findstr /C:"MyTool:()=>" bundle\dvcode.js
+findstr /C:"MyTool:()=>" bundle\easycode.js
 ```
 
-(Linux/macOS: `grep -o 'MyTool:()=>' bundle/dvcode.js`)
+(Linux/macOS: `grep -o 'MyTool:()=>' bundle/easycode.js`)
 
 ## Reference Tools by Complexity
 
@@ -236,7 +236,7 @@ without scheduling anything.
 
 Diagnosis order:
 
-1. **Confirm registration** — `findstr "MyTool, this" bundle/dvcode.js`
+1. **Confirm registration** — `findstr "MyTool, this" bundle/easycode.js`
    (won't match exact text after minify; check `grep MyToolName bundle/...`).
 2. **Re-check description string** for leading whitespace, em-dashes,
    embedded quotes, control characters.

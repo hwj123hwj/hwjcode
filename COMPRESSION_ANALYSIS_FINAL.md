@@ -396,9 +396,9 @@ if (!success)
 ## 构建验证结果
 
 ```
-✅ deepv-code-core build completed successfully
-✅ deepv-code-cli build completed successfully
-✅ DeepV Webview: Build completed successfully
+✅ easycode-core build completed successfully
+✅ easycode-cli build completed successfully
+✅ EasyCode Webview: Build completed successfully
 ✅ Webview build completed
 ✅ Extension bundle completed
 🎉 Build completed in 2.77s
