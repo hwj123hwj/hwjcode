@@ -1742,7 +1742,7 @@ export class FeishuGateway {
 
       const body = {
         name,
-        description: 'DeepV Code 自动创建的项目专属协作群',
+        description: 'Easy Code 自动创建的项目专属协作群',
         user_id_list: [userOpenId],
       };
 
