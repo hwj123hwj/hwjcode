@@ -517,7 +517,7 @@ describe('parseAndFormatApiError', () => {
       const result = parseAndFormatApiError(errorMessage);
 
       expect(result).toContain('🌍 Region Access Restricted (451)');
-      expect(result).toContain('DeepV Code service is not available in your current region');
+      expect(result).toContain('Easy Code service is not available in your current region');
     });
 
     it('should format a 451 structured error', () => {

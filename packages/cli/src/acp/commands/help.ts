@@ -26,7 +26,7 @@ export class HelpCommand implements Command {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const lines = [
-      'DeepV Code Help:',
+      'Easy Code Help:',
       '',
       '### Basics',
       '- **Add context**: Use `@` to reference files (e.g. `@src/myFile.ts`).',

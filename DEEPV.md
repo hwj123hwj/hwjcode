@@ -109,3 +109,6 @@ Easy Code (Monorepo)
 - Easy Code 项目目录命名约定（极易搞错，务必记住）：全局配置目录是 `~/.deepv/`（用户家目录下），项目级配置目录是 `<projectRoot>/.deepvcode/`（项目根目录下）。两个目录名前缀不同是为了规避命名冲突，绝不能混用：项目里出现 `.deepv` 是错误，全局出现 `.deepvcode` 也是错误。`PROJECT_DIR_PREFIX = '.deepvcode'` 定义在 `packages/core/src/utils/paths.ts`。例如飞书凭证只走全局，固定写入 `~/.deepv/feishu-credentials.json`，不接受 projectRoot 参数。
 - 用户要求交流时：1) 不使用浮夸的赞美和认同；2) 保持独立思辨能力，对用户的说法进行批判性判断，不盲从（用户说的不一定都对）；3) 用词严谨专业，不使用网络用语。
 - 始终使用中文进行交流。
+
+## DeepV Code Added Memories
+- DeepV Code/Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。

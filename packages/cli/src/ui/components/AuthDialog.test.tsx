@@ -89,7 +89,7 @@ describe('AuthDialog', () => {
       );
 
       // This is a bit brittle, but it's the best way to check which item is selected.
-      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to DeepV Code');
+      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to Easy Code');
     });
 
     it('should fall back to default if DEEPV_DEFAULT_AUTH_TYPE is not set', () => {
@@ -118,7 +118,7 @@ describe('AuthDialog', () => {
       );
 
       // Default is DeepVlab auth
-      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to DeepV Code');
+      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to Easy Code');
     });
 
     it('should show an error and fall back to default if DEEPV_DEFAULT_AUTH_TYPE is invalid', () => {
@@ -153,7 +153,7 @@ describe('AuthDialog', () => {
       );
 
       // Default is DeepVlab auth
-      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to DeepV Code');
+      expect(stripAnsi(lastFrame())).toContain('• 1. Press Enter to sign in to Easy Code');
     });
   });
 

@@ -69,7 +69,7 @@ class MemoryAddSubCommand implements Command {
 
 export class MemoryCommand implements Command {
   readonly name = 'memory';
-  readonly description = 'Manage DeepV Code memory';
+  readonly description = 'Manage Easy Code memory';
   readonly subCommands: Command[] = [
     new MemoryShowSubCommand(),
     new MemoryRefreshSubCommand(),
