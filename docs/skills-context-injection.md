@@ -605,4 +605,4 @@ AI 应该自动调用 `use_skill(skillName="superpowers:superpowers:brainstormin
 ---
 
 **维护联系：** Easy Code Team
-**问题反馈：** https://gitlab.liebaopay.com/ai_native/EasyCode/DeepVcodeClient/-/issues
+**问题反馈：** https://github.com/OrionStarAI/DeepVCode/issues
