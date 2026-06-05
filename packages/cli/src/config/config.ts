@@ -82,6 +82,7 @@ export interface CliArgs {
   testAudio: boolean | undefined;
   workdir: string | undefined;
   login: string | undefined;
+  feishu: boolean | undefined;
 }
 
 export async function parseArguments(extensions: Extension[] = []): Promise<CliArgs> {
@@ -192,6 +193,11 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('acp', {
       type: 'boolean',
       description: 'Starts the agent in ACP mode',
+    })
+    .option('feishu', {
+      type: 'boolean',
+      description:
+        'Launch directly into Feishu/Lark gateway mode (auto-runs /feishu start after startup). Used by self-update auto-restart.',
     })
     .option('experimental-acp', {
       type: 'boolean',
@@ -575,6 +581,7 @@ export async function loadCliConfig(
     targetDir: process.cwd(),
     debugMode,
     question: argv.promptInteractive || argv.prompt || '',
+    feishuAutoStart: argv.feishu || false,
     fullContext: argv.allFiles || argv.all_files || false,
     coreTools: settings.coreTools || undefined,
     excludeTools,
