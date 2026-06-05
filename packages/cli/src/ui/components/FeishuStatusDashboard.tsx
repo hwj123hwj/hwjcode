@@ -125,7 +125,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
       {/* ── 顶部状态栏 ── */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Text bold color={Colors.AccentCyan}>
-          {platform === 'lark' ? '🌐 Lark Bot' : '🌐 飞书 Bot'}
+          {platform === 'lark' ? t('feishu.dashboard.mode_lark') : t('feishu.dashboard.mode_feishu')}
         </Text>
         <Text>
           {isConnected ? (
