@@ -142,6 +142,18 @@ export function shortenProjectPath(p?: string): string {
 }
 
 /**
+ * 安全截断日志中文本，防止超长系统提示词/契约泄露在 TUI 终端，同时保持日志可读性并避免多行打乱排版。
+ */
+export function safeTruncateForLog(text: string, limit = 150): string {
+  if (!text) return '';
+  const trimmed = text.trim();
+  // 替换换行符为空格，避免多行输出破坏终端排版，并截断
+  const singleLine = trimmed.replace(/\r?\n/g, ' ');
+  if (singleLine.length <= limit) return singleLine;
+  return singleLine.slice(0, limit) + `... (truncated, total ${trimmed.length} chars)`;
+}
+
+/**
  * 渲染 /feishu status 里的「绑定项目」段落（纯文本行数组）。
  *
  * 设计为模块级纯函数，便于单测，且不依赖运行时网关/凭证状态。群名解析
@@ -2503,7 +2515,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // 这些命令完全由系统控制或脚本程序处理，不进入 LLM 上下文，也不存在长耗时。
     // 为了极致的用户体验，它们应该完全绕过异步消息队列，直接高优先级秒速执行响应，绝不参与排队！
     if (messageText.startsWith('/')) {
-      dlog(`[Router] High-priority slash command matched: ${messageText}`);
+      dlog(`[Router] High-priority slash command matched: "${safeTruncateForLog(messageText)}"`);
       try {
         // 1. 尝试匹配飞书特定的专用命令
         const cmdResult = await handleFeishuCommand(messageText, currentClient, currentConfig, msg.chatId);
@@ -2693,7 +2705,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // 实时展示（emitFeishuMessageLog(...'in')），避免主屏与仪表板重复刷屏。
 
     // 🎯 DEBUG: Log the raw messageText to understand image attachment format
-    dlog(`[Feishu Debug] Raw messageText from Feishu: "${messageText}"`);
+    dlog(`[Feishu Debug] Raw messageText from Feishu: "${safeTruncateForLog(messageText)}"`);
 
     if (!geminiClient || !config) {
       const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
@@ -2760,7 +2772,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         msg.text = reconstructedText;
         messageTextForAI = reconstructedText.trim();
-        dlog(`[Feishu] Reconstructed message with file paths: "${messageTextForAI}"`);
+        dlog(`[Feishu] Reconstructed message with file paths: "${safeTruncateForLog(messageTextForAI)}"`);
       }
 
       // 2. 处理图片下载 (落盘至 .deepvcode/clipboard/)
@@ -2790,7 +2802,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         msg.text = reconstructedText;
         messageTextForAI = reconstructedText.trim();
-        dlog(`[Feishu] Reconstructed message with image paths: "${messageTextForAI}"`);
+        dlog(`[Feishu] Reconstructed message with image paths: "${safeTruncateForLog(messageTextForAI)}"`);
 
         // 🎯 完美多模态对齐：既保留文本绝对路径，又在消息中附加实际图片的 base64 作为 inlineData Part
         // 这可以让支持多模态的模型直接读取图片提高效率，同时让非多模态模型依然能利用路径通过工具访问图片，实现自适应！
