@@ -146,9 +146,9 @@ Please answer the user's question directly.`;
     const lang = HelpSubagent.detectLanguage();
 
     if (lang === 'zh') {
-      return '💡 **DeepV Code AI 智能帮助助手**\n\n我可以回答任何关于 CLI 功能和命令的问题！请问你需要什么帮助？\n\n_提示：按 Esc 键退出 • 此功能会消耗 token • 如只需查看命令列表，请使用 /help_';
+      return '💡 **Easy Code AI 智能帮助助手**\n\n我可以回答任何关于 CLI 功能和命令的问题！请问你需要什么帮助？\n\n_提示：按 Esc 键退出 • 此功能会消耗 token • 如只需查看命令列表，请使用 /help_';
     } else {
-      return '💡 **DeepV Code AI Help Assistant**\n\nI can answer any questions about CLI features and commands! What help do you need?\n\n_Tip: Press Esc to exit • Uses tokens • For command list, use /help instead_';
+      return '💡 **Easy Code AI Help Assistant**\n\nI can answer any questions about CLI features and commands! What help do you need?\n\n_Tip: Press Esc to exit • Uses tokens • For command list, use /help instead_';
     }
   }
 
