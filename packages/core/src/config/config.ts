@@ -234,6 +234,7 @@ export interface ConfigParameters {
   ideClient?: IdeClient;
   silentMode?: boolean;
   vsCodePluginMode?: boolean;
+  feishuMode?: boolean;
   memoryTokenCount?: number; // 新增
   hooks?: { [K in HookEventName]?: HookDefinition[] };
   healthyUse?: boolean;
@@ -312,6 +313,7 @@ export class Config {
   private readonly experimentalAcp: boolean = false;
   private readonly silentMode: boolean;
   private readonly vsCodePluginMode: boolean;
+  private readonly feishuMode: boolean;
   private projectSettingsManager: ProjectSettingsManager;
   private planModeActive: boolean = false;
   private readonly hooks: { [K in HookEventName]?: HookDefinition[] };
@@ -391,6 +393,7 @@ export class Config {
     this.ideMode = params.ideMode ?? false;
     this.ideClient = params.ideClient;
     this.vsCodePluginMode = params.vsCodePluginMode ?? false;
+    this.feishuMode = params.feishuMode ?? false;
     this.hooks = params.hooks ?? {};
     this.healthyUse = params.healthyUse ?? true;
     this.preferredLanguage = params.preferredLanguage;
@@ -1042,6 +1045,10 @@ export class Config {
 
   getVsCodePluginMode(): boolean {
     return this.vsCodePluginMode;
+  }
+
+  getFeishuMode(): boolean {
+    return this.feishuMode;
   }
 
   getHooks(): { [K in HookEventName]?: HookDefinition[] } {

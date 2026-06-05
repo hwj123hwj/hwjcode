@@ -89,6 +89,18 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
   const routeEntries = Object.entries(routes);
   const hasActiveGroups = activeGroupChatIds.size > 0;
 
+  // 🚀 限制最多展示 3 个绑定项目，防止群过多时撑爆终端高度导致滚动，从而造成 Ink 缓存清空失败而疯狂刷屏！
+  //    优先按“当前活跃”排序，确保正在对话的群绝对可见，多余的项目展示折叠概要。
+  const sortedRouteEntries = [...routeEntries].sort(([idA], [idB]) => {
+    const actA = activeGroupChatIds.has(idA) ? 1 : 0;
+    const actB = activeGroupChatIds.has(idB) ? 1 : 0;
+    return actB - actA;
+  });
+
+  const MAX_VISIBLE_PROJECTS = 3;
+  const visibleProjects = sortedRouteEntries.slice(0, MAX_VISIBLE_PROJECTS);
+  const remainingCount = sortedRouteEntries.length - MAX_VISIBLE_PROJECTS;
+
   // ── 日志窗口聚焦的群 ──
   // 可能多个群同时在干活；日志窗口只展示一个，选「正在干活的群中最近有日志活动」的那个，
   // 让窗口跟随当前最活跃的对话。
@@ -114,16 +126,14 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
 
   return (
     <Box
-      borderStyle="round"
-      borderColor={Colors.AccentBlue}
       paddingX={1}
       paddingY={0}
       marginBottom={1}
       flexDirection="column"
-      width={Math.min(terminalWidth - 2, 100)}
+      width={Math.min(terminalWidth, 100)}
     >
       {/* ── 顶部状态栏 ── */}
-      <Box justifyContent="space-between" marginBottom={1}>
+      <Box justifyContent="space-between" marginBottom={0}>
         <Text bold color={Colors.AccentCyan}>
           {platform === 'lark' ? t('feishu.dashboard.mode_lark') : t('feishu.dashboard.mode_feishu')}
         </Text>
@@ -142,12 +152,8 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
         </Text>
       </Box>
 
-      {/* ── 分隔线 ── */}
-      <Box marginY={1}>
-        <Text color={Colors.Gray} dimColor>
-          {'─'.repeat(Math.min(terminalWidth - 6, 96))}
-        </Text>
-      </Box>
+      {/* ── 换行留白代替分隔线 ── */}
+      <Box marginTop={1} />
 
       {/* ── 绑定项目列表 ── */}
       <Box flexDirection="column" marginBottom={1}>
@@ -161,7 +167,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
           </Box>
         ) : (
           <Box flexDirection="column" marginTop={0}>
-            {routeEntries.map(([chatId, route]) => {
+            {visibleProjects.map(([chatId, route]) => {
               const isActive = activeGroupChatIds.has(chatId);
               // 优先展示已解析的群名；无群名时 fallback 到 chatId。
               // 屏幕足够宽时（>= 85 字符），显示完整的 chatId，否则使用短 chatId 截断，保证不换行。
@@ -191,6 +197,13 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
                 </Box>
               );
             })}
+            {remainingCount > 0 ? (
+              <Box marginLeft={3} marginTop={0}>
+                <Text color={Colors.Gray} dimColor>
+                  ... ⏳ and {remainingCount} other bound projects (hidden to fit terminal height)
+                </Text>
+              </Box>
+            ) : null}
           </Box>
         )}
       </Box>
@@ -200,11 +213,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
         <Box
           flexDirection="column"
           marginTop={1}
-          paddingX={1}
-          paddingY={0}
-          borderStyle="single"
-          borderColor={Colors.Gray}
-          borderDimColor={true}
+          paddingLeft={1}
         >
           <Box marginBottom={0}>
             <Text bold color={Colors.AccentCyan}>
@@ -220,8 +229,8 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
                 ? entry.text.slice(0, terminalWidth - 27) + '...'
                 : entry.text;
               return (
-                <Box key={i} flexDirection="row">
-                  <Text dimColor>{time}</Text>
+                <Box key={i} flexDirection="row" paddingLeft={1}>
+                  <Text color={Colors.Gray} dimColor>{time}</Text>
                   <Text>{' '}</Text>
                   <Text
                     color={

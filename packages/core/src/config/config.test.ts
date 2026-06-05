@@ -183,6 +183,14 @@ describe('Server Config (config.ts)', () => {
     expect(config.getTargetDir()).toBe(path.resolve(TARGET_DIR)); // Check resolved path
   });
 
+  it('Config constructor should store feishuMode correctly', () => {
+    const configWithFeishu = new Config({ ...baseParams, feishuMode: true });
+    expect(configWithFeishu.getFeishuMode()).toBe(true);
+
+    const configWithoutFeishu = new Config({ ...baseParams });
+    expect(configWithoutFeishu.getFeishuMode()).toBe(false);
+  });
+
   it('Config constructor should default userMemory to empty string if not provided', () => {
     const paramsWithoutMemory: ConfigParameters = { ...baseParams };
     delete paramsWithoutMemory.userMemory;

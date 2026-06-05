@@ -17,14 +17,12 @@
  */
 
 import { useCallback, useState } from 'react';
-import { ApprovalMode, type Config } from 'deepv-code-core';
+import { type Config } from 'deepv-code-core';
 import type { PartListUnion } from '@google/genai';
 import { MessageType } from '../types.js';
 import type { HistoryItem } from '../types.js';
-import {
-  buildGoalPrompt,
-  type GoalWizardResult,
-} from '../components/GoalWizard.js';
+import { type GoalWizardResult } from '../components/GoalWizard.js';
+import { launchGoalMode } from './launchGoalMode.js';
 import { t, tp } from '../utils/i18n.js';
 
 interface UseGoalWizardArgs {
@@ -66,35 +64,40 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
     (result: GoalWizardResult) => {
       setIsOpen(false);
 
-      // 1) Auto-enable YOLO mode if not already on.
-      if (config) {
-        const currentMode = config.getApprovalMode();
-        if (currentMode !== ApprovalMode.YOLO) {
-          try {
-            config.setApprovalModeWithProjectSync(ApprovalMode.YOLO, true);
-            addItem(
-              {
-                type: MessageType.INFO,
-                text: t('goalWizard.yolo_auto_enabled'),
-              },
-              Date.now(),
-            );
-          } catch (err) {
-            addItem(
-              {
-                type: MessageType.ERROR,
-                text: tp('goalWizard.yolo_enable_failed', {
-                  error: err instanceof Error ? err.message : String(err),
-                }),
-              },
-              Date.now(),
-            );
-            return;
-          }
-        }
+      if (!config) {
+        return;
       }
 
-      // 2) Announce.
+      // 启动目标模式（YOLO + buildGoalPrompt + setGoalContext）——与飞书共用同一内核。
+      let outcome;
+      try {
+        outcome = launchGoalMode(config, result);
+      } catch (err) {
+        // 唯一会抛出的情况：开启 YOLO 失败。中止启动并提示。
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: tp('goalWizard.yolo_enable_failed', {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          },
+          Date.now(),
+        );
+        return;
+      }
+
+      // YOLO 自动开启提示（仅当本次确实开启了）。
+      if (outcome.yoloWasEnabled) {
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: t('goalWizard.yolo_auto_enabled'),
+          },
+          Date.now(),
+        );
+      }
+
+      // 启动播报。
       const intensityLabel = t(`goalWizard.intensity.${result.intensity}`);
       addItem(
         {
@@ -107,48 +110,9 @@ export function useGoalWizard(args: UseGoalWizardArgs): UseGoalWizardReturn {
         Date.now(),
       );
 
-      // 3) Assemble prompt and submit silently — the prompt content is
-      //    intentionally NOT shown in the chat history (its system rails /
-      //    discipline framing is internal). The "info" line above is the
-      //    only visible artifact of this turn from the user's perspective.
-      const prompt = buildGoalPrompt(result);
-
-      // 3a) Persist goal context in core so it survives auto-compression.
-      //     Without this, the LLM-generated summary will likely strip away
-      //     the contract clauses (min-hours floor, no-stop discipline, T0,
-      //     safety rails), causing the agent to drift into "let me continue"
-      //     stalls after compression. tryCompressChat re-injects this
-      //     context after every compression cycle.
-      //
-      //     T0 is captured here (server-side wallclock) rather than relying
-      //     on the model's first local_time call — that way it survives
-      //     even if compression fires before the model gets a chance to
-      //     record T0 itself.
-      if (config) {
-        try {
-          const client = config.getGeminiClient();
-          // getGeminiClient() may throw if the client is not yet initialized
-          // (shouldn't happen by the time the wizard is reachable, but guard
-          // anyway — failure here must not block goal launch).
-          if (client) {
-            client.setGoalContext({
-              originalPrompt: prompt,
-              startedAt: Date.now(),
-              hours: result.hours,
-              task: result.task,
-            });
-          }
-        } catch (err) {
-          // Log but don't abort: the goal still launches, just without
-          // post-compression resilience.
-          console.warn(
-            `[useGoalWizard] Failed to register goal context for compression resilience: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-
+      // 把 prompt 静默喂给 agent loop（prompt 内容含系统红线，不显示在历史里）。
       setTimeout(() => {
-        submitQuery(prompt, { silent: true });
+        submitQuery(outcome.prompt, { silent: true });
       }, 50);
     },
     [config, addItem, submitQuery],
