@@ -1,7 +1,7 @@
 {
-  "name": "deepv-code",
+  "name": "easycode",
   "version": "1.0.271",
-  "description": "DeepV Code - AI-powered coding assistant with enhanced capabilities",
+  "description": "Easy Code - AI-powered coding assistant with enhanced capabilities",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/google-gemini/gemini-cli.git"

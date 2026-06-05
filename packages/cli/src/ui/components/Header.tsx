@@ -44,7 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
         </Box>
         <Box flexDirection="column" justifyContent="center">
           <Text bold>
-            DeepV Code v{version}
+            Easy Code v{version}
           </Text>
           <Text dimColor color={Colors.Gray}>
             Gemini · API Usage Billing

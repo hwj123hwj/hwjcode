@@ -135,7 +135,7 @@ describe('InputPrompt', () => {
     keyPressHandler = null;
 
     mockCommandContext = createMockCommandContext();
-    const configDirPath = path.join('test', 'project', '.deepv');
+    const configDirPath = path.join('test', 'project', '.easycode-user');
 
     mockBuffer = {
       text: '',

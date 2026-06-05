@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,6 +10,9 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
 import { type Config, SessionManager, ProxyAuthManager } from 'deepv-code-core';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { t } from '../utils/i18n.js';
 import { cuteVLogo } from './AsciiArt.js';
 import { getShortModelName } from '../utils/footerUtils.js';
@@ -52,6 +55,36 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   config,
   version,
 }) => {
+  // 判定是否展示品牌升级公告（显示次数限制 3 次，次数存放在 ~/.easycode-user/brand_upgrade_status.json 里）
+  const shouldShowUpgradeNotice = useMemo(() => {
+    try {
+      const statusDir = path.join(os.homedir(), '.easycode-user');
+      const statusPath = path.join(statusDir, 'brand_upgrade_status.json');
+
+      // 保证新目录存在
+      if (!fs.existsSync(statusDir)) {
+        fs.mkdirSync(statusDir, { recursive: true });
+      }
+
+      let showCount = 0;
+      if (fs.existsSync(statusPath)) {
+        const raw = fs.readFileSync(statusPath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        showCount = typeof parsed.showCount === 'number' ? parsed.showCount : 0;
+      }
+
+      if (showCount < 3) {
+        // 次数递增并同步写回
+        fs.writeFileSync(statusPath, JSON.stringify({ showCount: showCount + 1 }, null, 2), 'utf-8');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // 容错降级默认显示
+      return true;
+    }
+  }, []);
+
   const userName = useMemo(() => {
     const authManager = ProxyAuthManager.getInstance();
     const userInfo = authManager.getUserInfo();
@@ -128,9 +161,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
     <Box flexDirection="column" width={COMPACT_WIDTH} marginBottom={0}>
       {/* 顶部标题行 */}
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={Colors.AccentBlue} bold>DeepV Code v{version}</Text>
+        <Text color={Colors.AccentBlue} bold>Easy Code v{version}</Text>
         <Text dimColor wrap="truncate-middle">{fullPath}</Text>
       </Box>
+
+      {/* 品牌升级公告 */}
+      {shouldShowUpgradeNotice && (
+        <Box paddingX={1} marginY={0}>
+          <Text color={Colors.AccentCyan}>{t('welcome.brand.upgrade' as any)}</Text>
+        </Box>
+      )}
 
       {/* 内容主体 */}
       <Box

@@ -2,7 +2,7 @@
 
 ## ✅ 完整支持空格路径
 
-DeepV Code CLI 的 `--workdir` 参数**完全支持**包含空格和特殊字符的路径。内部使用 Node.js 原生 API，自动处理所有路径复杂性。
+Easy Code CLI 的 `--workdir` 参数**完全支持**包含空格和特殊字符的路径。内部使用 Node.js 原生 API，自动处理所有路径复杂性。
 
 ## 测试验证结果
 
@@ -231,7 +231,7 @@ dvcode --workdir "%path%"
 ### GitHub Actions
 
 ```yaml
-- name: DeepV Code Analysis
+- name: Easy Code Analysis
   run: dvcode --workdir "${{ github.workspace }}" --prompt "Code review" --yolo
 ```
 

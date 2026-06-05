@@ -1,4 +1,4 @@
-# DeepV Code Hooks 架构设计说明
+# Easy Code Hooks 架构设计说明
 
 > 本文档详细说明 Hooks 系统如何在 `packages/core` 中实现，以及它如何被所有客户端自动继承的架构设计。
 
@@ -50,7 +50,7 @@
 ## 📦 项目结构
 
 ```
-DeepVCode/
+EasyCode/
 ├── packages/
 │   ├── core/
 │   │   ├── src/

@@ -713,8 +713,8 @@ export class GeminiClient {
     });
 
     const context = `
-🚀 **CRITICAL SYSTEM CONTEXT - DeepV Code AI Assistant** 🚀
-This is the DeepV Code CLI with enhanced environment awareness.
+🚀 **CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant** 🚀
+This is the Easy Code CLI with enhanced environment awareness.
 **Date:** ${today}
 **Platform:** ${environmentInfo}
 **🎯 CRITICAL: Always use ${process.platform}-appropriate commands!**

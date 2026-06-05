@@ -842,7 +842,7 @@ export async function cleanupSpecificClipboardImages(
     let cleanedCount = 0;
     for (const imagePath of imagePaths) {
       // Only clean files in the clipboard directory AND with system-generated names
-      if (isClipboardPath(imagePath, baseDir, '.deepvcode')) {
+      if (isClipboardPath(imagePath, baseDir, '.easycode')) {
         const filename = path.basename(imagePath);
         const isSystemClipboardFile = /^clipboard-\d+\.(png|jpg|jpeg|gif|bmp|webp|svg)$/i.test(filename);
 

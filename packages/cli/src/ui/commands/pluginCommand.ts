@@ -1,5 +1,5 @@
 /**
- * DeepV Code Plugin Command
+ * Easy Code Plugin Command
  *
  * This is an alias/wrapper for the /skill command system,
  * providing a plugin-centric view compatible with ClaudeCode.

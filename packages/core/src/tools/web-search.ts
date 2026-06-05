@@ -291,7 +291,7 @@ export class WebSearchTool extends BaseTool<
         sources,
       };
     } catch (error: unknown) {
-      // 检测是否使用自定义模型（用户可能未登录 DeepV Code）
+      // 检测是否使用自定义模型（用户可能未登录 Easy Code）
       const currentModel = this.config.getModel();
       const isUsingCustomModel = isCustomModel(currentModel);
 
@@ -299,8 +299,8 @@ export class WebSearchTool extends BaseTool<
       const is401Error = this.is401Error(error);
       if (is401Error) {
         const notLoggedInMessage = isUsingCustomModel
-          ? `This tool (${WebSearchTool.Name}) is currently unavailable because you are not logged in to DeepV Code. ` +
-            `Web search requires a DeepV Code account. ` +
+          ? `This tool (${WebSearchTool.Name}) is currently unavailable because you are not logged in to Easy Code. ` +
+            `Web search requires a Easy Code account. ` +
             `Do NOT retry this tool until the user logs in. ` +
             `You can continue to assist the user using other tools and your own knowledge.`
           : `This tool (${WebSearchTool.Name}) is currently unavailable due to authentication failure. ` +
@@ -317,11 +317,11 @@ export class WebSearchTool extends BaseTool<
       // 检测积分不足错误（402 配额错误）
       if (isDeepXQuotaError(error)) {
         const quotaExceededMessage = isUsingCustomModel
-          ? `This tool (${WebSearchTool.Name}) is currently unavailable because your DeepV Code account has insufficient credits. ` +
+          ? `This tool (${WebSearchTool.Name}) is currently unavailable because your Easy Code account has insufficient credits. ` +
             `Web search requires available credits in your account. ` +
             `Do NOT retry this tool until the user's credit balance is restored. ` +
             `You can continue to assist the user using other tools and your own knowledge.`
-          : `This tool (${WebSearchTool.Name}) is currently unavailable due to insufficient credits in your DeepV Code account. ` +
+          : `This tool (${WebSearchTool.Name}) is currently unavailable due to insufficient credits in your Easy Code account. ` +
             `Please ask the user to check their account balance or upgrade their plan. ` +
             `Do NOT retry this tool until credits are available.`;
 

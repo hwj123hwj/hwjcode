@@ -26,7 +26,7 @@ import { DefaultLight } from '../ui/themes/default-light.js';
 import { DefaultDark } from '../ui/themes/default.js';
 import { CustomTheme } from '../ui/themes/theme.js';
 
-export const SETTINGS_DIRECTORY_NAME = '.deepv';
+export const SETTINGS_DIRECTORY_NAME = '.easycode-user';
 export const USER_SETTINGS_DIR = path.join(homedir(), SETTINGS_DIRECTORY_NAME);
 export const USER_SETTINGS_PATH = path.join(USER_SETTINGS_DIR, 'settings.json');
 
@@ -458,7 +458,7 @@ export function loadSettings(workspaceDir: string): LoadedSettings {
   let projectSettings: Settings = {};
   const projectSettingsPath = path.join(
     workspaceDir,
-    '.deepvcode',
+    '.easycode',
     'settings.json',
   );
   try {

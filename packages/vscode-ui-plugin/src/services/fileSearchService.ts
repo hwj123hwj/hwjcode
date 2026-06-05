@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  * SPDX-License-Identifier: Apache-2.0
  */
 

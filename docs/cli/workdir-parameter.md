@@ -2,7 +2,7 @@
 
 ## 概述
 
-`--workdir` 参数允许你在启动 DeepV Code CLI 时指定工作目录，无需手动切换目录。此参数兼容 Windows 和 Linux 路径格式。
+`--workdir` 参数允许你在启动 Easy Code CLI 时指定工作目录，无需手动切换目录。此参数兼容 Windows 和 Linux 路径格式。
 
 ## 参数说明
 

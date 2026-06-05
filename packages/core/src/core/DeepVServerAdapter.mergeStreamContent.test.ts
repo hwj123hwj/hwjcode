@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2026 DeepV Code team
+ * Copyright 2026 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -354,7 +354,10 @@ describe('mergeStreamContent + finalize end-to-end (streamed local_time call)', 
 });
 
 describe('DeepVServerAdapter.cleanContents', () => {
-  const cleanContents = (contents: any[]) => proto.cleanContents.call({}, contents);
+  // cleanContents 内部会调用 this.removeOrphanedToolResponses，
+  // 白盒测试需提供一个挂载了该方法的 this 上下文。
+  const ctx = { removeOrphanedToolResponses: proto.removeOrphanedToolResponses };
+  const cleanContents = (contents: any[]) => proto.cleanContents.call(ctx, contents);
 
   it('filters out empty or whitespace-only text parts within a message', () => {
     const input = [
@@ -400,5 +403,203 @@ describe('DeepVServerAdapter.cleanContents', () => {
     expect(result).toHaveLength(1);
     expect(result[0].parts).toHaveLength(1);
     expect(result[0].parts[0].text).toBe('Keep this');
+  });
+});
+
+/**
+ * 单元测试：DeepVServerAdapter.removeOrphanedToolResponses
+ *
+ * 守护生产 bug 修复（用户实拍 easyrouter 400）：
+ *   "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+ *
+ * 根因：上下文压缩/历史截断把 functionCall 切掉、却保留了它的 functionResponse，
+ *   形成"孤儿 functionResponse"。该孤儿被客户端 sanitizeRequestContents 的
+ *   "全局 name 兜底"误判为有配对而存活，发往云端转 OpenAI 格式后变成无前驱
+ *   tool_calls 的 role:'tool' 消息 → 严格网关 (easyrouter) 报 400。
+ *
+ * 修复策略（对 Gemini / Claude / OpenAI 三家均无害）：在发往云端的出口处，
+ *   按"真实配对关系 + 计数消耗"删除真孤儿——
+ *     - 优先 id 精确配对（消耗，防两个 fr 抢同一个 fc）
+ *     - 回退 name 计数配对（N 个同名 fc 最多配 N 个 fr，多出的才删）
+ *   合法会话里 fr 数 ≤ 同名 fc 数，计数永远够，不会删任何合法配对。
+ */
+describe('DeepVServerAdapter.removeOrphanedToolResponses', () => {
+  const removeOrphans = (contents: any[]) =>
+    proto.removeOrphanedToolResponses.call({}, contents);
+
+  it('removes a truly orphaned functionResponse (its functionCall was dropped)', () => {
+    // 压缩后场景：只剩下一个 functionResponse，对应的 functionCall 已被截断丢弃
+    const input = [
+      { role: 'user', parts: [{ text: 'do something' }] },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { id: 'read_file-123-abc', name: 'read_file', response: { ok: true } } },
+        ],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    // 孤儿 fr 被删除 → 该 user 消息只剩 0 个有效 part → 整条消息移除
+    expect(result).toHaveLength(1);
+    expect(result[0].parts[0].text).toBe('do something');
+  });
+
+  it('keeps a functionResponse that has a matching functionCall by id', () => {
+    const input = [
+      {
+        role: 'model',
+        parts: [{ functionCall: { id: 'call_1', name: 'read_file', args: { path: 'a.ts' } } }],
+      },
+      {
+        role: 'user',
+        parts: [{ functionResponse: { id: 'call_1', name: 'read_file', response: { ok: true } } }],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toHaveLength(2);
+    expect(result[1].parts[0].functionResponse.id).toBe('call_1');
+  });
+
+  it('keeps a functionResponse matched by name when ids are absent (Gemini native)', () => {
+    // Gemini 原生：functionCall 常无 id，functionResponse 靠 name 配对
+    const input = [
+      {
+        role: 'model',
+        parts: [{ functionCall: { name: 'get_weather', args: { city: 'SH' } } }],
+      },
+      {
+        role: 'user',
+        parts: [{ functionResponse: { name: 'get_weather', response: { temp: 20 } } }],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toHaveLength(2);
+    expect(result[1].parts[0].functionResponse.name).toBe('get_weather');
+  });
+
+  it('does NOT mis-delete parallel same-name calls (N functionCalls ↔ N functionResponses)', () => {
+    // 并行同名工具调用：3 个 read_file 全无 id，3 个 fr 也全无 id（或仅 name）
+    const input = [
+      {
+        role: 'model',
+        parts: [
+          { functionCall: { name: 'read_file', args: { path: 'a.ts' } } },
+          { functionCall: { name: 'read_file', args: { path: 'b.ts' } } },
+          { functionCall: { name: 'read_file', args: { path: 'c.ts' } } },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { name: 'read_file', response: { c: 'A' } } },
+          { functionResponse: { name: 'read_file', response: { c: 'B' } } },
+          { functionResponse: { name: 'read_file', response: { c: 'C' } } },
+        ],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    // 3 个 fr 全部保留（计数 3 配 3）
+    expect(result).toHaveLength(2);
+    expect(result[1].parts).toHaveLength(3);
+    expect(result[1].parts.every((p: any) => p.functionResponse?.name === 'read_file')).toBe(true);
+  });
+
+  it('removes only the EXCESS orphan when fr count exceeds same-name fc count', () => {
+    // 2 个 fc 但 3 个 fr：保留 2 个、删除 1 个多余孤儿
+    const input = [
+      {
+        role: 'model',
+        parts: [
+          { functionCall: { name: 'read_file', args: { path: 'a.ts' } } },
+          { functionCall: { name: 'read_file', args: { path: 'b.ts' } } },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { name: 'read_file', response: { c: 'A' } } },
+          { functionResponse: { name: 'read_file', response: { c: 'B' } } },
+          { functionResponse: { name: 'read_file', response: { c: 'C' } } },
+        ],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toHaveLength(2);
+    expect(result[1].parts).toHaveLength(2);
+  });
+
+  it('does not consume one functionCall for two functionResponses (id pool exhaustion)', () => {
+    // 1 个 fc (id=call_1) 但 2 个 fr 都声称 id=call_1：只保留 1 个，另一个判为孤儿
+    const input = [
+      {
+        role: 'model',
+        parts: [{ functionCall: { id: 'call_1', name: 'read_file', args: {} } }],
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { id: 'call_1', name: 'read_file', response: { c: 'A' } } },
+          { functionResponse: { id: 'call_1', name: 'read_file', response: { c: 'B' } } },
+        ],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toHaveLength(2);
+    expect(result[1].parts).toHaveLength(1);
+  });
+
+  it('leaves contents unchanged when there are no functionResponses', () => {
+    const input = [
+      { role: 'user', parts: [{ text: 'hello' }] },
+      { role: 'model', parts: [{ text: 'hi there' }] },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toEqual(input);
+  });
+
+  it('leaves a fully paired history untouched (idempotent on healthy data)', () => {
+    const input = [
+      { role: 'user', parts: [{ text: 'q' }] },
+      { role: 'model', parts: [{ functionCall: { id: 'c1', name: 'read_file', args: {} } }] },
+      { role: 'user', parts: [{ functionResponse: { id: 'c1', name: 'read_file', response: {} } }] },
+      { role: 'model', parts: [{ text: 'answer' }] },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toEqual(input);
+  });
+
+  it('preserves non-functionResponse parts in the same message when removing an orphan', () => {
+    // 同一条 user 消息里既有孤儿 fr 又有正常文本：只删 fr，保留文本
+    const input = [
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { id: 'ghost-999', name: 'ghost_tool', response: {} } },
+          { text: 'user follow-up text' },
+        ],
+      },
+    ];
+
+    const result = removeOrphans(input);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].text).toBe('user follow-up text');
   });
 });

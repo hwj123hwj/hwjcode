@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 /** 项目级配置目录前缀，与 core/src/utils/paths.ts 保持一致 */
-const PROJECT_DIR_PREFIX = '.deepvcode';
+const PROJECT_DIR_PREFIX = '.easycode';
 
 export interface ImageContent {
   fileName: string;

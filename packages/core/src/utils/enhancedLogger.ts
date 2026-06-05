@@ -42,7 +42,7 @@ export class EnhancedLogger {
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-');
       this.config.filePath = path.join(
         os.homedir(),
-        '.deepv',
+        '.easycode-user',
         'logs',
         `deepv-${timestamp}.log`
       );

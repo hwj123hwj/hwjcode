@@ -3,7 +3,7 @@
  * 独立抽离的 / 符号处理逻辑，参考 atSymbolHandler 设计
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { MenuTextMatch, MenuOption } from '@lexical/react/LexicalTypeaheadMenuPlugin';

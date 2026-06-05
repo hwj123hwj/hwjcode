@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,6 +13,7 @@ import * as zlib from 'node:zlib';
 import { spawn, spawnSync } from 'node:child_process';
 import { request } from 'undici';
 import JSZip from 'jszip';
+import { getUserAgent } from '../utils/userAgent.js';
 
 /**
  * 递归删除目录
@@ -32,7 +33,7 @@ function removeDirectoryRecursive(dirPath: string) {
 }
 
 export class BinaryManager {
-  private static readonly LSP_DIR = path.join(os.homedir(), '.deepv', 'lsp');
+  private static readonly LSP_DIR = path.join(os.homedir(), '.easycode-user', 'lsp');
 
   /**
    * Find an executable on PATH.
@@ -269,7 +270,7 @@ export class BinaryManager {
       console.log(`[LSP] Downloading ${repo} from GitHub ${owner}/${repo}...`);
 
       const token = process.env.GITHUB_TOKEN || process.env.GITHUB_PAT;
-      const headers: Record<string, string> = { 'User-Agent': 'DeepV-Code-Agent' };
+      const headers: Record<string, string> = { 'User-Agent': getUserAgent() };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }

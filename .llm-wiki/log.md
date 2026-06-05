@@ -43,7 +43,7 @@
 ## [2026-05-29] feat | Release Process Guide
 
 ### Pages Added
-- `wiki/release-process.md` — 详细记录了 DeepV Code 项目的规范化发布流程和核心校验规则。
+- `wiki/release-process.md` — 详细记录了 Easy Code 项目的规范化发布流程和核心校验规则。
   - 核心限制：已推送的提交禁止 Amend 机制。
   - 核心红线：`package.json` 中的版本号必须严格低于 release tag 里的版本号，否则 CI/CD 编译发布必将失败。
   - 检索最新 Tag：使用 `git tag -l "cli-release-v*" --sort=-v:refname` 查询最新 tag 并以此计算递增下一个版本号。

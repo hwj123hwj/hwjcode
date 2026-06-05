@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2026 DeepV Code team
+ * Copyright 2026 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  *
  * Per-project persistence for debate presets.
@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import stripJsonComments from 'strip-json-comments';
 
-const STORAGE_DIR = '.deepvcode';
+const STORAGE_DIR = '.easycode';
 const STORAGE_FILE = 'debate-history.json';
 const MAX_PRESETS = 3;
 

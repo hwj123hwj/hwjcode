@@ -1,6 +1,6 @@
 # ACP 双向能力现代化改造 TODO
 
-> **目标**：让 DeepV Code 同时支持
+> **目标**：让 Easy Code 同时支持
 > - 作为 **Agent** 被外部 GUI（Zed 等）调用
 > - 作为 **Client** 调用外部 ACP Agent（Claude Code / 其他 dvcode 实例 / 自定义 agent）
 >

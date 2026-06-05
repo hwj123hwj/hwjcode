@@ -1,11 +1,11 @@
-# DeepV Code Skills System User Guide / DeepV Code Skills System 使用指南
+# Easy Code Skills System User Guide / Easy Code Skills System 使用指南
 
 [English Version](#english-version) | [中文版](#chinese-version)
 
 <a id="english-version"></a>
 ## 🇬🇧 English Version
 
-This document details the architecture and usage of the Skills system in DeepV Code.
+This document details the architecture and usage of the Skills system in Easy Code.
 
 ### 1. System Architecture Overview
 
@@ -20,7 +20,7 @@ The Skills system adopts a three-layer architecture designed to modularly extend
 
 ### 2. CLI Command Usage
 
-The DeepV Code CLI introduces the `/skill` command family to manage the entire lifecycle.
+The Easy Code CLI introduces the `/skill` command family to manage the entire lifecycle.
 
 #### 2.1 Marketplace Management
 
@@ -199,7 +199,7 @@ Skills 系统采用三层架构设计，旨在模块化扩展 AI 的能力：
 
 ### 2. CLI 命令使用说明
 
-DeepV Code CLI 新增了 `/skill` 命令族，用于管理整个生命周期。
+Easy Code CLI 新增了 `/skill` 命令族，用于管理整个生命周期。
 
 #### 2.1 Marketplace 管理
 

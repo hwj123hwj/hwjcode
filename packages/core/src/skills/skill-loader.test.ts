@@ -418,7 +418,7 @@ Content
   describe('symlink discovery', () => {
     it('discovers symlinked skill directories alongside real ones', async () => {
       // Project skill root (isolated by the `testRoot` wiring in beforeEach).
-      const projectSkillsDir = path.join(testRoot, '.deepv', 'skills');
+      const projectSkillsDir = path.join(testRoot, '.easycode-user', 'skills');
       await fs.ensureDir(projectSkillsDir);
 
       // 1. A regular skill directory — the "happy path" baseline.

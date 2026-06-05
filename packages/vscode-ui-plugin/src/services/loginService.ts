@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import { ProxyAuthManager, AuthType, AuthServer, AuthTemplates } from 'deepv-code-core';
 import { Logger } from '../utils/logger';
-import { AUTH_MESSAGES } from '../i18n/messages';
+import { AUTH_MESSAGES, getAuthMessage } from '../i18n/messages';
 
 export interface LoginResult {
   success: boolean;
@@ -103,14 +103,14 @@ export class LoginService {
       this.logger.info(`❌ ${AUTH_MESSAGES.NO_VALID_AUTH_INFO_NEEDS_LOGIN}`);
       return {
         isLoggedIn: false,
-        error: AUTH_MESSAGES.NO_VALID_AUTH_INFO
+        error: getAuthMessage('NO_VALID_AUTH_INFO', vscode.env.language)
       };
 
     } catch (error) {
       this.logger.error('❌ 检查登录状态失败', error instanceof Error ? error : undefined);
       return {
         isLoggedIn: false,
-        error: error instanceof Error ? error.message : AUTH_MESSAGES.AUTH_STATUS_CHECK_FAILED
+        error: error instanceof Error ? error.message : getAuthMessage('AUTH_STATUS_CHECK_FAILED', vscode.env.language)
       };
     }
   }

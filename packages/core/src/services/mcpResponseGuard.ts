@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -155,7 +155,7 @@ export class MCPResponseGuard {
       const maxDepth = 10; // 最多向上查找10层
 
       while (depth < maxDepth) {
-        const deepvcodePath = path.join(currentDir, '.deepvcode');
+        const deepvcodePath = path.join(currentDir, '.easycode');
         if (fs.existsSync(deepvcodePath)) {
           return path.join(deepvcodePath, 'mcp-tmp');
         }
@@ -171,7 +171,7 @@ export class MCPResponseGuard {
     // 备选：使用 HOME/.deepv/mcp-tmp
     const homeDir = process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH;
     if (homeDir) {
-      return path.join(homeDir, '.deepv', 'mcp-tmp');
+      return path.join(homeDir, '.easycode-user', 'mcp-tmp');
     }
 
     // 最后的备选：使用系统临时目录

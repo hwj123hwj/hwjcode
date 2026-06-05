@@ -1,6 +1,6 @@
 # 代理服务器配置优先级
 
-本文档详细说明了在 DeepV Code 中配置自定义代理服务器时的优先级规则。
+本文档详细说明了在 Easy Code 中配置自定义代理服务器时的优先级规则。
 
 ## 优先级概览（从高到低）
 
@@ -163,7 +163,7 @@ gemini
 ## 决策流程图
 
 ```
-启动 DeepV Code
+启动 Easy Code
     ↓
 是否在 System Settings 中定义了 customProxyServerUrl?
 ├─ 是 → 使用 System Settings 的值 ✓
@@ -223,7 +223,7 @@ gemini
    ```
    或
    ```
-   [DeepX] Connecting to DeepV Code server: https://api-code.deepvlab.ai
+   [DeepX] Connecting to Easy Code server: https://api-code.deepvlab.ai
    ```
 
 ### 问题：想要在 CI/CD 中使用不同的服务器

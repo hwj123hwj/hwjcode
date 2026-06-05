@@ -7,11 +7,11 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 # Core Module
 
-> `packages/core` — The backend engine of DeepV Code.
+> `packages/core` — The backend engine of Easy Code.
 
 ## Overview
 
-Core 是 DeepV Code 的后端包（NPM 名 `deepv-code-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
+Core 是 Easy Code 的后端包（NPM 名 `deepv-code-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
 
 ## Package Info
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-DeepV Code 现在完全支持在 Ubuntu/Linux 系统上处理剪切板中的图片，实现了与 Windows 和 macOS 相同的图片粘贴功能。
+Easy Code 现在完全支持在 Ubuntu/Linux 系统上处理剪切板中的图片，实现了与 Windows 和 macOS 相同的图片粘贴功能。
 
 ## 功能特性
 
@@ -134,9 +134,9 @@ if (await clipboardHasImage()) {
 }
 ```
 
-### 在 DeepV Code 中使用
+### 在 Easy Code 中使用
 1. 复制任意图片到剪切板（截图、从浏览器复制等）
-2. 在 DeepV Code 对话界面按 Ctrl+V
+2. 在 Easy Code 对话界面按 Ctrl+V
 3. 图片将自动检测并插入对话中进行 AI 分析
 
 ## 兼容性

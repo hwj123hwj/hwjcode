@@ -276,7 +276,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         {!isCheckingAuth && (
           <div className="login-page__footer">
             <p className="login-page__footer-text">
-              DeepV Code uses secure OAuth2 authentication flow
+              Easy Code uses secure OAuth2 authentication flow
             </p>
             <p className="login-page__footer-subtext">
               Your authentication information will be securely stored locally

@@ -66,7 +66,7 @@ export class GeminiAgent {
         {
           id: AuthType.USE_PROXY_AUTH,
           name: 'DeepV proxy auth',
-          description: 'Use DeepV Code proxy authentication',
+          description: 'Use Easy Code proxy authentication',
           _meta: {
             'api-key': {
               provider: 'deepv',
@@ -80,7 +80,7 @@ export class GeminiAgent {
       ],
       agentInfo: {
         name: 'dvcode',
-        title: 'DeepV Code',
+        title: 'Easy Code',
         version,
       },
       agentCapabilities: {

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -428,5 +428,176 @@ describe('interceptFeishuLifecycleCommand', () => {
   it('does not intercept when start/stop appear as plain words, not the subcommand', () => {
     expect(interceptFeishuLifecycleCommand('please feishu stop')).toBeNull();
     expect(interceptFeishuLifecycleCommand('/feishustop')).toBeNull();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// deriveUiHistoryFromClientHistory — 把 AI 客户端历史派生成 UI 视角 history，
+//   用于让 SessionManager.getLastActiveSession(true) 的"含 user 消息"判断成立。
+// ───────────────────────────────────────────────────────────────────────────
+describe('deriveUiHistoryFromClientHistory', () => {
+  it('extracts only user-role text entries as {type:user, text}', async () => {
+    const { deriveUiHistoryFromClientHistory } = await import(
+      './feishuCommand.js'
+    );
+    const clientHistory = [
+      { role: 'user', parts: [{ text: '记住数字 6' }] },
+      { role: 'model', parts: [{ text: '好的，记住了：6。' }] },
+      { role: 'user', parts: [{ text: '刚才说的是几？' }] },
+    ];
+    const ui = deriveUiHistoryFromClientHistory(clientHistory);
+    expect(ui).toEqual([
+      { type: 'user', text: '记住数字 6' },
+      { type: 'user', text: '刚才说的是几？' },
+    ]);
+  });
+
+  it('skips function calls, empty text, and non-array input defensively', async () => {
+    const { deriveUiHistoryFromClientHistory } = await import(
+      './feishuCommand.js'
+    );
+    expect(deriveUiHistoryFromClientHistory([])).toEqual([]);
+    expect(deriveUiHistoryFromClientHistory(null as any)).toEqual([]);
+    expect(
+      deriveUiHistoryFromClientHistory([
+        { role: 'user', parts: [{ functionCall: { name: 'x' } }] },
+        { role: 'user', parts: [{ text: '   ' }] },
+        { role: 'user' }, // no parts
+      ]),
+    ).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 飞书 session 持久化 + 续接 round-trip
+//   验证 saveFeishuSessionHistory 写入的会话能被 resolveResumableSessionId
+//   找回（必须经过 SessionManager 的 index.json 与 metadata.json）。
+//   这是 /feishu start 自动恢复会话的核心契约。
+// ───────────────────────────────────────────────────────────────────────────
+describe('feishu session persistence round-trip', () => {
+  it('saved session is discoverable by resolveResumableSessionId', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const { saveFeishuSessionHistory, resolveResumableSessionId } =
+      await import('./feishuCommand.js');
+
+    // 用隔离的 home 目录，避免污染真实 ~/.easycode-user。
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-home-'));
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-proj-'));
+    const originalHome = process.env['HOME'];
+    const originalUserprofile = process.env['USERPROFILE'];
+    process.env['HOME'] = tmpHome;
+    process.env['USERPROFILE'] = tmpHome;
+
+    try {
+      const sessionId = `feishu-oc_test_${Date.now()}`;
+      const clientHistory = [
+        { role: 'user', parts: [{ text: '记住数字 6' }] },
+        { role: 'model', parts: [{ text: '好的，记住了：6。' }] },
+      ];
+
+      // 模拟最小化的 Config + GeminiClient 接口。
+      const fakeConfig = {
+        getProjectRoot: () => tmpProj,
+        getSessionId: () => sessionId,
+      } as any;
+      const fakeClient = {
+        getHistory: async () => clientHistory,
+      } as any;
+
+      await saveFeishuSessionHistory(fakeConfig, fakeClient);
+
+      const resumed = await resolveResumableSessionId(tmpProj);
+      expect(resumed.sessionId).toBe(sessionId);
+      expect(resumed.clientHistory).toEqual(clientHistory);
+    } finally {
+      if (originalHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = originalHome;
+      if (originalUserprofile === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = originalUserprofile;
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps returning the latest history after multiple turns', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const { saveFeishuSessionHistory, resolveResumableSessionId } =
+      await import('./feishuCommand.js');
+
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-home-'));
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-proj-'));
+    const originalHome = process.env['HOME'];
+    const originalUserprofile = process.env['USERPROFILE'];
+    process.env['HOME'] = tmpHome;
+    process.env['USERPROFILE'] = tmpHome;
+
+    try {
+      const sessionId = `feishu-oc_test_${Date.now()}`;
+      let history: any[] = [
+        { role: 'user', parts: [{ text: '记住数字 6' }] },
+        { role: 'model', parts: [{ text: '好的，记住了：6。' }] },
+      ];
+      const fakeConfig = {
+        getProjectRoot: () => tmpProj,
+        getSessionId: () => sessionId,
+      } as any;
+      const fakeClient = {
+        getHistory: async () => history,
+      } as any;
+
+      await saveFeishuSessionHistory(fakeConfig, fakeClient);
+
+      history = [
+        ...history,
+        { role: 'user', parts: [{ text: '我刚才说的数字是几？' }] },
+        { role: 'model', parts: [{ text: '6' }] },
+      ];
+      await saveFeishuSessionHistory(fakeConfig, fakeClient);
+
+      const resumed = await resolveResumableSessionId(tmpProj);
+      expect(resumed.sessionId).toBe(sessionId);
+      expect(resumed.clientHistory).toHaveLength(4);
+      expect((resumed.clientHistory as any[])[2].parts[0].text).toContain(
+        '刚才说的数字',
+      );
+    } finally {
+      if (originalHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = originalHome;
+      if (originalUserprofile === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = originalUserprofile;
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty when no session was ever saved', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const os = await import('node:os');
+    const { resolveResumableSessionId } = await import('./feishuCommand.js');
+
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-home-'));
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), 'fsh-proj-'));
+    const originalHome = process.env['HOME'];
+    const originalUserprofile = process.env['USERPROFILE'];
+    process.env['HOME'] = tmpHome;
+    process.env['USERPROFILE'] = tmpHome;
+
+    try {
+      const resumed = await resolveResumableSessionId(tmpProj);
+      expect(resumed.sessionId).toBeUndefined();
+      expect(resumed.clientHistory).toBeUndefined();
+    } finally {
+      if (originalHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = originalHome;
+      if (originalUserprofile === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = originalUserprofile;
+      await fs.rm(tmpHome, { recursive: true, force: true });
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
   });
 });

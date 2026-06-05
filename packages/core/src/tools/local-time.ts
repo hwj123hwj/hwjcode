@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -36,7 +36,7 @@ export class LocalTimeTool extends BaseTool<LocalTimeParams, ToolResult> {
     super(
       LocalTimeTool.Name,
       'LocalTime',
-      'Returns the current wall-clock local time of the machine running DeepV Code. Use this tool to determine the current real-world time, record a start time at the beginning of a long task, calculate elapsed task duration by comparing two readings, or timestamp checkpoints, logs, or todo updates. The tool is fast, side-effect free, and never requires user confirmation, so you may call it as often as needed. Returned JSON fields: iso (ISO 8601 UTC timestamp), unix_ms (number), unix_s (number), timezone (IANA name), local (YYYY-MM-DD HH:MM:SS), weekday (English).',
+      'Returns the current wall-clock local time of the machine running Easy Code. Use this tool to determine the current real-world time, record a start time at the beginning of a long task, calculate elapsed task duration by comparing two readings, or timestamp checkpoints, logs, or todo updates. The tool is fast, side-effect free, and never requires user confirmation, so you may call it as often as needed. Returned JSON fields: iso (ISO 8601 UTC timestamp), unix_ms (number), unix_s (number), timezone (IANA name), local (YYYY-MM-DD HH:MM:SS), weekday (English).',
       Icon.Info,
       {
         type: Type.OBJECT,

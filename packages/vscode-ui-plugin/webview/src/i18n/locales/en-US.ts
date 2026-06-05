@@ -43,8 +43,8 @@ export const enUS: Translations = {
   },
 
   welcome: {
-    title: '👋 Welcome to DeepV Code for VS Code',
-    titleMain: 'Welcome to DeepV Code ',
+    title: '👋 Welcome to Easy Code for VS Code',
+    titleMain: 'Welcome to Easy Code ',
     titleSub: 'for VS Code',
     description: 'I can help you with code analysis, refactoring, debugging, and documentation generation.',
     quickStart: 'Quick Start:',
@@ -248,7 +248,7 @@ export const enUS: Translations = {
   },
 
   app: {
-    title: '🤖 DeepV Code',
+    title: '🤖 Easy Code',
     toggleSidebar: 'Toggle Sidebar',
     expandSidebar: 'Expand Sidebar',
     collapseSidebar: 'Collapse Sidebar',
