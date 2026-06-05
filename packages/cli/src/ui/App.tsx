@@ -893,6 +893,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   }, []);
 
   const initialPromptSubmitted = useRef(false);
+  const feishuAutoStartTriggered = useRef(false);
 
   const errorCount = useMemo(
     () =>
@@ -2536,6 +2537,40 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     showPrivacyNotice,
     geminiClient,
     sendPromptImmediately,
+  ]);
+
+  // 🚀 --feishu 自启：启动就绪后自动执行 `/feishu start`，进入飞书常驻模式。
+  //    用于 self_update 自更新重启后无人值守地恢复飞书机器人。
+  //    用 handleSlashCommand（真正执行斜杠命令），不是 sendPromptImmediately（那会当成 AI prompt）。
+  useEffect(() => {
+    if (
+      config.getFeishuAutoStart?.() &&
+      !feishuAutoStartTriggered.current &&
+      !isAuthenticating &&
+      !isPreparingEnvironment &&
+      !isAuthDialogOpen &&
+      !isLoginDialogOpen &&
+      !isThemeDialogOpen &&
+      !isModelDialogOpen &&
+      !isEditorDialogOpen &&
+      !showPrivacyNotice &&
+      geminiClient?.isInitialized?.()
+    ) {
+      feishuAutoStartTriggered.current = true;
+      void handleSlashCommand('/feishu start');
+    }
+  }, [
+    config,
+    isAuthenticating,
+    isPreparingEnvironment,
+    isAuthDialogOpen,
+    isLoginDialogOpen,
+    isThemeDialogOpen,
+    isModelDialogOpen,
+    isEditorDialogOpen,
+    showPrivacyNotice,
+    geminiClient,
+    handleSlashCommand,
   ]);
 
   // Store quitting render content but don't return early to avoid hooks order issues
