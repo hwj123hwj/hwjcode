@@ -13,7 +13,7 @@
 | **用户（想快速开始）** | [`HOOKS_START_HERE.md`](./HOOKS_START_HERE.md) | 5 分钟 |
 | **开发者（想学习使用）** | [`docs/hooks-user-guide.md`](./docs/hooks-user-guide.md) | 30 分钟 |
 | **架构师（想理解设计）** | [`HOOKS_ARCHITECTURE.md`](./HOOKS_ARCHITECTURE.md) | 20 分钟 |
-| **决策者（想了解价值）** | [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) (第 8 章) | 10 分钟 |
+| **决策者（想了解价值）** | [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) (第 8 章) | 10 分钟 |
 | **代码审查者** | [`HOOKS_IMPLEMENTATION_SUMMARY.md`](./HOOKS_IMPLEMENTATION_SUMMARY.md) | 15 分钟 |
 
 ---
@@ -105,7 +105,7 @@
 
 ### 🟣 集成文档（集成在现有文件中）
 
-#### 8. [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) - 第 8 章
+#### 8. [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) - 第 8 章
 - **内容**：Hooks 在白皮书中的完整说明
 - **长度**：1,500+ 字
 - **适合**：想了解战略价值的决策者
@@ -132,7 +132,7 @@
 
 | 需求 | 最佳文档 | 备选文档 |
 |-----|--------|--------|
-| **快速了解是什么** | [`HOOKS_START_HERE.md`](./HOOKS_START_HERE.md) | [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) 第 8 章 |
+| **快速了解是什么** | [`HOOKS_START_HERE.md`](./HOOKS_START_HERE.md) | [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) 第 8 章 |
 | **5 分钟快速体验** | [`docs/hooks-user-guide.md#5分钟快速体验`](./docs/hooks-user-guide.md#5分钟快速体验) | 无 |
 | **复用完整代码** | [`docs/hooks-examples.md`](./docs/hooks-examples.md) | [`docs/hooks-user-guide.md#常见场景实践`](./docs/hooks-user-guide.md#常见场景实践) |
 | **理解架构设计** | [`HOOKS_ARCHITECTURE.md`](./HOOKS_ARCHITECTURE.md) | [`docs/hooks-implementation.md`](./docs/hooks-implementation.md) |
@@ -176,7 +176,7 @@
 ### 安全和权限
 - 需要权限控制 → [`docs/hooks-examples.md` - 场景 2 或 4](./docs/hooks-examples.md)
 - 需要安全网关 → [`docs/hooks-examples.md` - 场景 1](./docs/hooks-examples.md)
-- 想了解安全架构 → [`DeepV_Code_Whitepaper.md` 第 8.8 节](./DeepV_Code_Whitepaper.md)
+- 想了解安全架构 → [`EasyCode_Code_Whitepaper.md` 第 8.8 节](./EasyCode_Code_Whitepaper.md)
 
 ### 审计和日志
 - 需要审计日志 → [`docs/hooks-examples.md` - 场景 3](./docs/hooks-examples.md)
@@ -315,7 +315,7 @@ EasyCode/
 │       └── hooks-implementation.md
 │
 ├── 🟢 集成文档
-│   ├── DeepV_Code_Whitepaper.md (第 8 章)
+│   ├── EasyCode_Code_Whitepaper.md (第 8 章)
 │   ├── packages/cli/src/assets/help/cli-help-knowledge.md (Q15)
 │   ├── HOOKS_DELIVERY_SUMMARY.md
 │   └── HOOKS_IMPLEMENTATION_SUMMARY.md

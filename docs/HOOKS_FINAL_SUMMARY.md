@@ -16,7 +16,7 @@ Hooks 在 packages/core 中实现
     CLI 依赖 core（自动享受 Hooks）
     VSCode UI 依赖 core（自动享受 Hooks）
         ↓
-    一份 Hooks 配置：.deepvcode/settings.json
+    一份 Hooks 配置：.easycode/settings.json
         ↓
     CLI 和 VSCode UI 都使用相同配置
         ↓
@@ -75,7 +75,7 @@ Hooks 在 packages/core 中实现
   - 集成指南
 
 **项目文档**
-- ✅ **`DeepV_Code_Whitepaper.md`** - 第 8 章 Hooks 系统
+- ✅ **`EasyCode_Code_Whitepaper.md`** - 第 8 章 Hooks 系统
 - ✅ **`cli-help-knowledge.md`** - Q15 CLI 集成帮助
 - ✅ **`HOOKS_IMPLEMENTATION_SUMMARY.md`** - 实现清单
 - ✅ **`HOOKS_DELIVERY_SUMMARY.md`** - 交付总结
@@ -99,11 +99,11 @@ export { HookRegistry } from './hookRegistry.js';
 
 // packages/cli/package.json
 "dependencies": {
-  "deepv-code-core": "file:../core"  // ← 依赖 core
+  "easycode-core": "file:../core"  // ← 依赖 core
 }
 
 // packages/vscode-ui-plugin/src/services/aiService.ts
-import { HookSystem, HookEventHandler } from 'deepv-code-core';  // ← 使用 core
+import { HookSystem, HookEventHandler } from 'easycode-core';  // ← 使用 core
 ```
 
 **结果**：✅ Core 实现，两个客户端自动享受
@@ -111,7 +111,7 @@ import { HookSystem, HookEventHandler } from 'deepv-code-core';  // ← 使用 c
 ### ✅ 确认 2：配置统一
 
 ```json
-// .deepvcode/settings.json（一份配置）
+// .easycode/settings.json（一份配置）
 {
   "hooks": {
     "BeforeTool": [{
@@ -131,8 +131,8 @@ import { HookSystem, HookEventHandler } from 'deepv-code-core';  // ← 使用 c
 ```
 Hooks 系统代码：
 ├── 实现位置：packages/core/src/hooks/（唯一）
-├── CLI 使用：import from 'deepv-code-core'
-└── VSCode UI 使用：import from 'deepv-code-core'
+├── CLI 使用：import from 'easycode-core'
+└── VSCode UI 使用：import from 'easycode-core'
 
 代码行数：
 - Hooks 核心代码：只写一份（2,850+ 行）
@@ -199,7 +199,7 @@ Hooks 系统代码：
 3. 查看源代码 `packages/core/src/hooks/`
 
 ### 特定问题
-1. Hooks 是什么？ → [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) 第 8 章
+1. Hooks 是什么？ → [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) 第 8 章
 2. 如何使用？ → [`docs/hooks-user-guide.md`](./docs/hooks-user-guide.md) 常见场景
 3. 架构如何？ → [`HOOKS_ARCHITECTURE.md`](./HOOKS_ARCHITECTURE.md)
 4. 常见问题？ → [`docs/hooks-user-guide.md#常见问题-faq`](./docs/hooks-user-guide.md#常见问题-faq)
@@ -222,7 +222,7 @@ VSCode UI 依赖 core → 自动获得 Hooks
 
 ### 3️⃣ **一份配置，多客户端生效**
 ```
-.deepvcode/settings.json
+.easycode/settings.json
 ↓
 用于 CLI → ✅ 享受保护
 用于 VSCode UI → ✅ 享受保护
@@ -351,7 +351,7 @@ packages/vscode-ui-plugin/
 | 我有常见问题 | [`docs/hooks-user-guide.md#常见问题-faq`](./docs/hooks-user-guide.md#常见问题-faq) |
 | 我需要调试帮助 | [`docs/hooks-user-guide.md#调试和排查`](./docs/hooks-user-guide.md#调试和排查) |
 | 我想深入实现细节 | [`docs/hooks-implementation.md`](./docs/hooks-implementation.md) |
-| 我想看白皮书 | [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) 第 8 章 |
+| 我想看白皮书 | [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) 第 8 章 |
 
 ---
 

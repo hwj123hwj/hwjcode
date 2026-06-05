@@ -176,7 +176,7 @@
   - wiki/core-module.md, wiki/cli-module.md, wiki/tools-system.md
   - wiki/hooks-system.md, wiki/mcp-system.md, wiki/build-system.md, wiki/skills-system.md
 - Created 10 class/component entity pages:
-  - wiki/GeminiClient.md, wiki/ContentGenerator.md, wiki/DeepVServerAdapter.md
+  - wiki/GeminiClient.md, wiki/ContentGenerator.md, wiki/EasyCodeServerAdapter.md
   - wiki/SceneManager.md, wiki/Turn.md, wiki/SubAgent.md
   - wiki/ToolRegistry.md, wiki/BaseTool.md, wiki/ToolExecutionEngine.md
   - wiki/DiscoveredMCPTool.md, wiki/mcp-client.md

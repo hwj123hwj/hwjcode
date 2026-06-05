@@ -139,8 +139,8 @@
 ## 配置管理
 
 ### 配置范围
-- `workspace`: 项目级配置 (默认) - `.deepv/settings.json`
-- `user`: 用户全局配置 - `~/.deepv/settings.json`
+- `workspace`: 项目级配置 (默认) - `.easycode-user/settings.json`
+- `user`: 用户全局配置 - `~/.easycode-user/settings.json`
 - `system`: 系统级配置 - 系统配置目录
 
 ### 验证和状态
@@ -252,7 +252,7 @@ echo "MCP服务器配置完成！"
 ```
 
 ### 配置文件编辑
-直接编辑 `.deepv/settings.json`:
+直接编辑 `.easycode-user/settings.json`:
 ```json
 {
   "mcpServers": {

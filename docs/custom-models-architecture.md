@@ -33,7 +33,7 @@ T3: 实例A的云端更新逻辑触发
 ### 架构设计：文件分离
 
 ```
-~/.deepv/
+~/.easycode-user/
 ├── settings.json           # 云端控制（云端模型、系统设置）
 └── custom-models.json      # 用户控制（自定义模型配置）
 ```
@@ -94,7 +94,7 @@ export function saveCustomModels(models: CustomModelConfig[]): void {
 
   // 2. 准备数据（带metadata）
   const data = {
-    $schema: 'https://deepvlab.ai/schemas/custom-models.json',
+    $schema: 'https://easycodelab.ai/schemas/custom-models.json',
     models: models,
     _metadata: {
       version: '1.0',
@@ -122,7 +122,7 @@ export function saveCustomModels(models: CustomModelConfig[]): void {
 function getCustomModels() {
   // 1. 从独立文件读取（推荐）
   try {
-    return loadCustomModels();  // ~/.deepv/custom-models.json
+    return loadCustomModels();  // ~/.easycode-user/custom-models.json
   } catch (error) {
     console.warn('Failed to load from file');
   }

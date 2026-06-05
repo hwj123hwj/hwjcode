@@ -28,7 +28,7 @@ npm run sync-to-github
 
 1. 访问仓库设置页面：
    ```
-   https://github.com/OrionStarAI/DeepVCode/settings/actions
+   https://github.com/OrionStarAI/EasyCodeCode/settings/actions
    ```
 
 2. 找到 **"Workflow permissions"** 部分
@@ -51,7 +51,7 @@ npm run sync-to-github
 
 1. **访问 GitHub Actions 页面**
    ```
-   https://github.com/OrionStarAI/DeepVCode/actions/workflows/release.yml
+   https://github.com/OrionStarAI/EasyCodeCode/actions/workflows/release.yml
    ```
 
 2. **点击右上角 "Run workflow" 按钮**
@@ -71,7 +71,7 @@ npm run sync-to-github
 6. **等待构建完成**（约 3-5 分钟）
 
 7. **查看结果**：
-   - 访问 [Releases 页面](https://github.com/OrionStarAI/DeepVCode/releases) 查看新发布的版本
+   - 访问 [Releases 页面](https://github.com/OrionStarAI/EasyCodeCode/releases) 查看新发布的版本
    - 或在 workflow 运行页面的 Artifacts 区域下载构建产物
 
 ### 方式 2: 推送 Git Tag 自动触发（推荐）
@@ -157,23 +157,23 @@ Release v1.0.262
 
 ### 从 GitHub Release 下载
 
-1. 访问 [Releases 页面](https://github.com/OrionStarAI/DeepVCode/releases)
+1. 访问 [Releases 页面](https://github.com/OrionStarAI/EasyCodeCode/releases)
 2. 找到对应版本
-3. 下载 `deepv-code-x.x.x.tgz` 文件
+3. 下载 `easycode-ai-x.x.x.tgz` 文件
 4. 安装：
    ```bash
-   npm install -g ./deepv-code-1.0.262.tgz
+   npm install -g ./easycode-ai-1.0.262.tgz
    ```
 
 ### 从 npm 安装（发布到 npm 后）
 
 ```bash
-npm install -g deepv-code@1.0.262
+npm install -g easycode-ai@1.0.262
 ```
 
 ### 从 Workflow Artifacts 下载（用于测试）
 
-1. 访问 [Actions 页面](https://github.com/OrionStarAI/DeepVCode/actions/workflows/release.yml)
+1. 访问 [Actions 页面](https://github.com/OrionStarAI/EasyCodeCode/actions/workflows/release.yml)
 2. 点击对应的工作流运行
 3. 在页面底部的 "Artifacts" 区域下载
 4. 解压后安装
@@ -269,7 +269,7 @@ git push origin v1.0.262-beta.1
 
 然后在 GitHub 仓库设置中添加 `NPM_TOKEN` secret：
 
-1. 访问 `https://github.com/OrionStarAI/DeepVCode/settings/secrets/actions`
+1. 访问 `https://github.com/OrionStarAI/EasyCodeCode/settings/secrets/actions`
 2. 点击 "New repository secret"
 3. Name: `NPM_TOKEN`
 4. Value: 你的 npm token（从 https://www.npmjs.com/settings/YOUR_USERNAME/tokens 获取）
@@ -356,10 +356,10 @@ files: |
 
 ## 🔗 快速链接
 
-- [🎬 触发构建](https://github.com/OrionStarAI/DeepVCode/actions/workflows/release.yml)
-- [📦 查看 Releases](https://github.com/OrionStarAI/DeepVCode/releases)
-- [📊 Actions 运行历史](https://github.com/OrionStarAI/DeepVCode/actions)
-- [⚙️ 仓库 Actions 设置](https://github.com/OrionStarAI/DeepVCode/settings/actions)
+- [🎬 触发构建](https://github.com/OrionStarAI/EasyCodeCode/actions/workflows/release.yml)
+- [📦 查看 Releases](https://github.com/OrionStarAI/EasyCodeCode/releases)
+- [📊 Actions 运行历史](https://github.com/OrionStarAI/EasyCodeCode/actions)
+- [⚙️ 仓库 Actions 设置](https://github.com/OrionStarAI/EasyCodeCode/settings/actions)
 
 ## 💡 提示
 

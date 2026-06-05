@@ -8,7 +8,7 @@
 
 ```json
 {
-  "name": "deepv-code",  // ✅ 包名（如果想发布到自己的 scope，可以改为 @你的用户名/deepv-code）
+  "name": "easycode-ai",  // ✅ 包名（如果想发布到自己的 scope，可以改为 @你的用户名/easycode-ai）
   "version": "1.0.179",  // ✅ 版本号
   "private": false,      // ❌ 删除这行或改为 false（当前是 "true"，会阻止发布）
 
@@ -22,7 +22,7 @@
   "keywords": [
     "ai",
     "coding-assistant",
-    "deepv-code",
+    "easycode-ai",
     "cli",
     "gemini",
     "code-generation"
@@ -73,7 +73,7 @@ npm pack
 这会生成一个 `.tgz` 文件，你可以解压查看内容：
 
 ```bash
-tar -tzf deepv-code-1.0.179.tgz
+tar -tzf easycode-ai-1.0.179.tgz
 ```
 
 ## 🚀 发布步骤
@@ -109,10 +109,10 @@ npm publish --dry-run
 **首次发布：**
 
 ```bash
-# 如果包名不带 @scope（如 deepv-code）
+# 如果包名不带 @scope（如 easycode-ai）
 npm publish
 
-# 如果包名带 @scope（如 @yourname/deepv-code）
+# 如果包名带 @scope（如 @yourname/easycode-ai）
 npm publish --access public
 ```
 
@@ -153,7 +153,7 @@ npm publish
 ### 选项 1：使用简单包名（如果可用）
 ```json
 {
-  "name": "deepv-code"
+  "name": "easycode-ai"
 }
 ```
 
@@ -162,14 +162,14 @@ npm publish
 
 检查包名是否可用：
 ```bash
-npm view deepv-code
+npm view easycode-ai
 # 如果显示 404，说明可用
 ```
 
 ### 选项 2：使用 scoped 包名
 ```json
 {
-  "name": "@你的npm用户名/deepv-code"
+  "name": "@你的npm用户名/easycode-ai"
 }
 ```
 
@@ -189,13 +189,13 @@ npm publish --access public
 ## 安装
 
 \`\`\`bash
-npm install -g deepv-code
+npm install -g easycode-ai
 \`\`\`
 
 ## 使用
 
 \`\`\`bash
-dvcode
+easycode
 \`\`\`
 ```
 
@@ -208,8 +208,8 @@ dvcode
 ### 3. 添加徽章到 README
 
 ```markdown
-[![npm version](https://badge.fury.io/js/deepv-code.svg)](https://www.npmjs.com/package/deepv-code)
-[![Downloads](https://img.shields.io/npm/dm/deepv-code.svg)](https://www.npmjs.com/package/deepv-code)
+[![npm version](https://badge.fury.io/js/easycode-ai.svg)](https://www.npmjs.com/package/easycode-ai)
+[![Downloads](https://img.shields.io/npm/dm/easycode-ai.svg)](https://www.npmjs.com/package/easycode-ai)
 ```
 
 ## 🔄 自动化发布脚本
@@ -249,7 +249,7 @@ npm run publish:patch   # 发布补丁版本
 
 ### Q3: 用户安装后找不到命令
 - 检查 `package.json` 中的 `bin` 字段是否正确
-- 检查 `bundle/dvcode.js` 第一行是否有 `#!/usr/bin/env node`
+- 检查 `bundle/easycode.js` 第一行是否有 `#!/usr/bin/env node`
 
 ### Q4: 包太大
 - 检查 `.npmignore` 是否正确配置
@@ -288,9 +288,9 @@ npm publish
 git push && git push --tags
 
 # 7. 验证发布
-npm view deepv-code
-npm install -g deepv-code@latest
-dvcode --version
+npm view easycode-ai
+npm install -g easycode-ai@latest
+easycode --version
 ```
 
 ## 📚 相关资源

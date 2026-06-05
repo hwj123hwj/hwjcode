@@ -7,11 +7,11 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 # ProxyAuthManager
 
-> Singleton managing JWT authentication via DeepV Lab proxy servers.
+> Singleton managing JWT authentication via EasyCode Lab proxy servers.
 
 ## Overview
 
-`ProxyAuthManager` 以单例模式管理通过 DeepV Lab 服务器的 JWT 认证。是 Easy Code 的主要认证机制（proxy-first auth）。
+`ProxyAuthManager` 以单例模式管理通过 EasyCode Lab 服务器的 JWT 认证。是 Easy Code 的主要认证机制（proxy-first auth）。
 
 ## Pattern
 
@@ -23,5 +23,5 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 ## Related
 
-- [[DeepVServerAdapter]] — uses ProxyAuthManager for API auth
+- [[EasyCodeServerAdapter]] — uses ProxyAuthManager for API auth
 - [[core-module]]

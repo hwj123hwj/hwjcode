@@ -37,48 +37,48 @@
 
 #### 交互式模式
 ```cmd
-dvcode --workdir C:\Users\YourName\my-project
+easycode --workdir C:\Users\YourName\my-project
 ```
 
 #### 非交互式模式（传递提示）
 ```cmd
-dvcode --workdir D:\projects\deepVcode --prompt "修复这个bug"
+easycode --workdir D:\projects\deepVcode --prompt "修复这个bug"
 ```
 
 #### 使用相对路径
 ```cmd
-dvcode --workdir .\src\components
+easycode --workdir .\src\components
 ```
 
 #### 与其他参数组合
 ```cmd
-dvcode --workdir C:\projects\app --model gemini-2.0-flash --yolo
+easycode --workdir C:\projects\app --model gemini-2.0-flash --yolo
 ```
 
 ### Linux/Mac 示例
 
 #### 交互式模式
 ```bash
-dvcode --workdir /home/user/my-project
+easycode --workdir /home/user/my-project
 ```
 
 #### 非交互式模式
 ```bash
-dvcode --workdir ~/projects/app --prompt "Add error handling"
+easycode --workdir ~/projects/app --prompt "Add error handling"
 ```
 
 #### 使用相对路径
 ```bash
-dvcode --workdir ./src --yolo
+easycode --workdir ./src --yolo
 ```
 
 ### 跨平台兼容的路径格式
 ```bash
 # Windows 命令行也支持这种格式
-dvcode --workdir C:/Users/YourName/project
+easycode --workdir C:/Users/YourName/project
 
 # Linux/Mac
-dvcode --workdir C:/Users/YourName/project  # 会被规范化为 C:\Users\YourName\project（Windows）
+easycode --workdir C:/Users/YourName/project  # 会被规范化为 C:\Users\YourName\project（Windows）
 ```
 
 ## 常见用途
@@ -87,23 +87,23 @@ dvcode --workdir C:/Users/YourName/project  # 会被规范化为 C:\Users\YourNa
 ```bash
 # build.sh
 #!/bin/bash
-dvcode --workdir /path/to/project --prompt "Run tests"
+easycode --workdir /path/to/project --prompt "Run tests"
 ```
 
 ### 2. 从上级目录快速访问子项目
 ```bash
-dvcode --workdir ./microservices/auth-service --yolo
+easycode --workdir ./microservices/auth-service --yolo
 ```
 
 ### 3. 使用绝对路径避免相对路径问题
 ```bash
-dvcode --workdir /absolute/path/to/workspace
+easycode --workdir /absolute/path/to/workspace
 ```
 
 ### 4. CI/CD 流程中使用
 ```bash
 # pipeline.yml
-- run: dvcode --workdir ${{ github.workspace }} --prompt "Run linting"
+- run: easycode --workdir ${{ github.workspace }} --prompt "Run linting"
 ```
 
 ## 错误处理
@@ -129,7 +129,7 @@ Details: [具体错误信息]
 
 1. 使用 `--prompt` 和 `--yolo` 标志进行快速测试：
    ```bash
-   dvcode --workdir /path/to/test --prompt "pwd" --yolo
+   easycode --workdir /path/to/test --prompt "pwd" --yolo
    ```
 
 2. 查看 CLI 启动时是否显示正确的工作目录标题
@@ -142,19 +142,19 @@ Details: [具体错误信息]
 
 ```bash
 # 会话管理
-dvcode --workdir /path/to/project --continue
+easycode --workdir /path/to/project --continue
 
 # 模型选择
-dvcode --workdir /path/to/project --model gemini-2.0-flash
+easycode --workdir /path/to/project --model gemini-2.0-flash
 
 # 扩展
-dvcode --workdir /path/to/project --extensions ext1 ext2
+easycode --workdir /path/to/project --extensions ext1 ext2
 
 # 沙盒模式
-dvcode --workdir /path/to/project --sandbox
+easycode --workdir /path/to/project --sandbox
 
 # 所有组合
-dvcode --workdir /path/to/project --model gemini-2.0-flash --yolo --all-files
+easycode --workdir /path/to/project --model gemini-2.0-flash --yolo --all-files
 ```
 
 ## 路径解析流程

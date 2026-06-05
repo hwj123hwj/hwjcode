@@ -26,7 +26,7 @@ git checkout -b github_main origin/github_main
 
 ```bash
 # 添加 GitHub 远程仓库
-git remote add github https://github.com/OrionStarAI/DeepVCode.git
+git remote add github https://github.com/OrionStarAI/EasyCodeCode.git
 
 # 验证远程仓库
 git remote -v
@@ -34,10 +34,10 @@ git remote -v
 
 应该看到类似输出：
 ```
-github  https://github.com/OrionStarAI/DeepVCode.git (fetch)
-github  https://github.com/OrionStarAI/DeepVCode.git (push)
-origin  https://your-internal-git.example.com/group/DeepVcodeClient.git (fetch)
-origin  https://your-internal-git.example.com/group/DeepVcodeClient.git (push)
+github  https://github.com/OrionStarAI/EasyCodeCode.git (fetch)
+github  https://github.com/OrionStarAI/EasyCodeCode.git (push)
+origin  https://your-internal-git.example.com/group/EasyCodecodeClient.git (fetch)
+origin  https://your-internal-git.example.com/group/EasyCodecodeClient.git (push)
 ```
 
 ## 🚀 使用方法
@@ -63,7 +63,7 @@ npm run sync-to-github
 ```
 🚀 开始同步当前分支到 github_main...
 📍 当前分支: master
-🔗 GitHub 远程仓库: https://github.com/OrionStarAI/DeepVCode.git
+🔗 GitHub 远程仓库: https://github.com/OrionStarAI/EasyCodeCode.git
 🔍 github_main 分支最后一个 commit: 8d5ab4ca
 📌 找到原始 commit: 2ac3b9b4
 

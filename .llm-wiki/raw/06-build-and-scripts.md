@@ -1,17 +1,17 @@
-# DeepV Code — Build System & Scripts Facts
+# Easy Code — Build System & Scripts Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 
 ## Two Build Pipelines
 
 1. **NPM Publication Path**: `tsc` transpiles packages individually into `dist/` directories
-2. **Bundle Path** (GitHub npx): `esbuild` creates single `bundle/dvcode.js`
+2. **Bundle Path** (GitHub npx): `esbuild` creates single `bundle/easycode.js`
 
 ## Build Flow (`npm run bundle:prod`)
 
 ```
 1. npm run build           → scripts/build.js (tsc: core → cli → vscode)
-2. node esbuild.config.js  → esbuild bundle → bundle/dvcode.js
+2. node esbuild.config.js  → esbuild bundle → bundle/easycode.js
 3. node scripts/copy_bundle_assets.js → .sb, .vsix, help, ripgrep binaries
 ```
 
@@ -20,14 +20,14 @@
 | Setting | Value |
 |---------|-------|
 | Entry | `packages/cli/index.ts` |
-| Output | `bundle/dvcode.js` |
+| Output | `bundle/easycode.js` |
 | Platform | `node` |
 | Format | `esm` |
 | Minify | `true` in production only |
 | Externals | `@vscode/ripgrep`, `sharp` |
 | Alias | `is-in-ci` → custom patch |
 | Banner | CJS compatibility shim (creates `require`, `__filename`, `__dirname` in ESM) |
-| Define | `CLI_VERSION`, `DEEPX_SERVER_URL` (default: `https://api-code.deepvlab.ai`), `NODE_ENV`, `DEV` |
+| Define | `CLI_VERSION`, `DEEPX_SERVER_URL` (default: `https://api-code.easycode-userlab.ai`), `NODE_ENV`, `DEV` |
 | Env loading | `dotenv` from `packages/cli/.env.{production,development,test}` |
 
 ## CI/CD: GitLab CI
@@ -45,7 +45,7 @@
 | `release` | Extract version from tag → `npm version` → `npm publish` to npmjs.org |
 | `release-vscode` | Build core → build vscode → publish to VS Code Marketplace (`vsce`) AND Open VSX (`ovsx`) |
 
-Runner: `deepvcode-docker-runner`, `node:20` image
+Runner: `easycodecode-docker-runner`, `node:20` image
 
 ## CI/CD: GitHub Actions
 
@@ -63,8 +63,8 @@ Steps:
 
 ## NPM Package
 
-- **Name**: `deepv-code`
-- **Binary**: `dvcode` → `bundle/dvcode.js`
+- **Name**: `easycode-ai`
+- **Binary**: `easycode` → `bundle/easycode.js`
 - **Published files**: `bundle/`, `README.md`, `LICENSE`
 
 ### Lifecycle Scripts

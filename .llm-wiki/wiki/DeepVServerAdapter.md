@@ -5,13 +5,13 @@ tags: [class, core, adapter, proxy-api]
 sources: [raw/01-architecture.md, raw/02-core-module.md]
 ---
 
-# DeepVServerAdapter
+# EasyCodeServerAdapter
 
-> Adapter implementing [[ContentGenerator]] for the DeepV Lab proxy API.
+> Adapter implementing [[ContentGenerator]] for the EasyCode Lab proxy API.
 
 ## Overview
 
-`DeepVServerAdapter` 将 DeepV Lab 的代理 API 适配为 [[ContentGenerator]] 接口，使 [[GeminiClient]] 能够通过代理服务器与多种 AI 模型（Gemini、Claude 等）交互。
+`EasyCodeServerAdapter` 将 EasyCode Lab 的代理 API 适配为 [[ContentGenerator]] 接口，使 [[GeminiClient]] 能够通过代理服务器与多种 AI 模型（Gemini、Claude 等）交互。
 
 ## Pattern
 
@@ -19,7 +19,7 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 ## Default Server
 
-`https://api-code.deepvlab.ai` (configured via `DEEPX_SERVER_URL` build define)
+`https://api-code.easycode-userlab.ai` (configured via `DEEPX_SERVER_URL` build define)
 
 ## Related
 

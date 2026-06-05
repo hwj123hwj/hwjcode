@@ -12,7 +12,7 @@
 
 1. 访问 GitHub Actions 页面：
    ```
-   https://github.com/OrionStarAI/DeepVCode/actions/workflows/release.yml
+   https://github.com/OrionStarAI/EasyCodeCode/actions/workflows/release.yml
    ```
 
 2. 点击右上角 **"Run workflow"** 按钮
@@ -55,10 +55,10 @@ git push origin v1.0.261
 
 访问 Releases 页面：
 ```
-https://github.com/OrionStarAI/DeepVCode/releases
+https://github.com/OrionStarAI/EasyCodeCode/releases
 ```
 
-下载 `deepv-code-x.x.x.tgz` 文件。
+下载 `easycode-ai-x.x.x.tgz` 文件。
 
 **方式 2: 从 workflow artifacts 下载**
 
@@ -159,6 +159,6 @@ A: 添加一个新步骤：
 
 #### 🔗 快速链接
 
-- [查看工作流运行历史](https://github.com/OrionStarAI/DeepVCode/actions/workflows/release.yml)
-- [查看所有 Releases](https://github.com/OrionStarAI/DeepVCode/releases)
-- [仓库 Actions 设置](https://github.com/OrionStarAI/DeepVCode/settings/actions)
+- [查看工作流运行历史](https://github.com/OrionStarAI/EasyCodeCode/actions/workflows/release.yml)
+- [查看所有 Releases](https://github.com/OrionStarAI/EasyCodeCode/releases)
+- [仓库 Actions 设置](https://github.com/OrionStarAI/EasyCodeCode/settings/actions)
