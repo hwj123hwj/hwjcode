@@ -49,11 +49,11 @@ MCPResponseGuard 自动检查
 
 ## 临时文件位置
 
-临时文件默认存储在项目的 `.deepvcode/mcp-tmp/` 文件夹下：
+临时文件默认存储在项目的 `.easycode/mcp-tmp/` 文件夹下：
 
 ```
 项目根目录/
-├── .deepvcode/
+├── .easycode/
 │   └── mcp-tmp/
 │       ├── mcp-response-read-many-files-1699564800000.json
 │       ├── mcp-response-read-file-1699564801000.json

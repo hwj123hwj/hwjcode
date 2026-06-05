@@ -37,7 +37,7 @@
 |------|------|---------|----------|
 | [GeminiClient](wiki/GeminiClient.md) | entity | Facade | `core/src/core/client.ts` |
 | [ContentGenerator](wiki/ContentGenerator.md) | entity | Strategy/Adapter | `core/src/core/contentGenerator.ts` |
-| [DeepVServerAdapter](wiki/DeepVServerAdapter.md) | entity | Adapter | `core/src/core/` |
+| [EasyCodeServerAdapter](wiki/EasyCodeServerAdapter.md) | entity | Adapter | `core/src/core/` |
 | [SceneManager](wiki/SceneManager.md) | entity | Strategy | `core/src/core/sceneManager.ts` |
 | [Turn](wiki/Turn.md) | entity | State Machine | `core/src/core/turn.ts` |
 | [SubAgent](wiki/SubAgent.md) | entity | Agent | `core/src/core/subAgent.ts` |
@@ -75,7 +75,7 @@
 | Page | Description |
 |------|-------------|
 | [adding-builtin-tool-checklist](wiki/adding-builtin-tool-checklist.md) | Checklist & pitfalls when adding a built-in tool to `core/src/tools/` (derived from `local_time` debugging) |
-| [release-process](wiki/release-process.md) | Standardized release process guide for deepv-code client, including strict tag and commit rules |
+| [release-process](wiki/release-process.md) | Standardized release process guide for easycode-ai client, including strict tag and commit rules |
 
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->

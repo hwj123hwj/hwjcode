@@ -19,7 +19,7 @@ sources: [raw/02-core-module.md, raw/01-architecture.md]
 - History compression (via CompressionService)
 - Loop detection (via LoopDetectionService)
 - Token limit enforcement (max 100 turns)
-- Delegates AI calls to [[ContentGenerator]] / [[DeepVServerAdapter]]
+- Delegates AI calls to [[ContentGenerator]] / [[EasyCodeServerAdapter]]
 
 ## Pattern
 

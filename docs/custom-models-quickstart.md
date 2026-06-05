@@ -21,8 +21,8 @@
   Anthropic Claude
   Claude API (claude.ai)
 
-  DeepV Custom
-  Custom DeepV-compatible endpoint (OpenAI format)
+  EasyCode Custom
+  Custom EasyCode-compatible endpoint (OpenAI format)
 ```
 
 使用 ↑/↓ 或 k/j 选择，按 Enter 确认
@@ -230,7 +230,7 @@ Max Tokens:   8192
 - 尝试重启 Easy Code
 
 ### 配置保存失败？
-- 检查 `~/.deepv` 目录是否有写入权限
+- 检查 `~/.easycode-user` 目录是否有写入权限
 - 查看错误提示信息
 
 ### 模型不显示？

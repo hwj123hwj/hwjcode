@@ -21,7 +21,7 @@ source: raw/02-core-module.md
 | `tools/` | 30+ tool implementations — [[ToolRegistry]], [[BaseTool]], shell, edit, read-file, web-fetch, [[mcp-client]] |
 | `config/` | Configuration — models, capabilities, server config, proxy, project settings |
 | `services/` | Infrastructure — [[SessionManager]], GitService, FileDiscoveryService, CompressionService, LoopDetectionService, BackgroundTaskManager |
-| `auth/` | Authentication — [[ProxyAuthManager]], AuthServer, deepvlabAuth |
+| `auth/` | Authentication — [[ProxyAuthManager]], AuthServer, easycodelabAuth |
 | `hooks/` | Lifecycle — [[HookSystem]], [[HookRegistry]], HookRunner, HookAggregator, HookPlanner, HookEventHandler |
 | `skills/` | Marketplace — [[SkillLoader]], [[MarketplaceManager]], PluginInstaller, ScriptExecutor, SkillContextInjector |
 | `mcp/` | MCP OAuth — MCPOAuthProvider, token storage, utils |
@@ -40,7 +40,7 @@ source: raw/02-core-module.md
 |-------|---------|------|
 | [[GeminiClient]] | Facade | Central orchestrator; chat, compression, loop detection, max 100 turns |
 | [[ContentGenerator]] | Strategy/Adapter | Abstract AI backend interface |
-| [[DeepVServerAdapter]] | Adapter | Implements ContentGenerator for proxy API |
+| [[EasyCodeServerAdapter]] | Adapter | Implements ContentGenerator for proxy API |
 | [[Turn]] | State Machine | Single conversation turn with `GeminiEventType` enum |
 | [[ToolRegistry]] | Registry | Tool discovery, registration, MCP sync, name sanitization |
 | [[BaseTool]] | Abstract Base | Concrete base implementing Tool interface |

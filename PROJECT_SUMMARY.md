@@ -68,9 +68,9 @@ c8fd9a23 ← docs: add project completion report
 ### 编译验证
 ```
 ✅ npm run typecheck
-   • deepv-code-cli ..................... PASSED
-   • deepv-code-core .................... PASSED
-   • deepv-code-vscode-ui-plugin ........ PASSED
+   • easycode-cli ..................... PASSED
+   • easycode-core .................... PASSED
+   • easycode-ai-vscode-ui-plugin ........ PASSED
 
 ✅ npm run build
    • TypeScript compilation ............. OK

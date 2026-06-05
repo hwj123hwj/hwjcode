@@ -46,7 +46,7 @@ npm run env:test
 
 ```bash
 # 生产环境
-DEEPX_SERVER_URL=https://code.deepvlab.ai
+DEEPX_SERVER_URL=https://code.easycode-userlab.ai
 NODE_ENV=production
 
 # 本地开发环境
@@ -72,7 +72,7 @@ npm start
 ## 🌍 预设环境
 
 ### 生产环境 (production)
-- **服务器**: https://code.deepvlab.ai
+- **服务器**: https://code.easycode-userlab.ai
 - **用途**: 正式线上环境
 - **配置文件**: `.env.production`
 
@@ -83,7 +83,7 @@ npm start
 - **额外功能**: 启用调试模式
 
 ### 测试环境 (test)
-- **服务器**: https://test.deepvlab.ai  
+- **服务器**: https://test.easycode-userlab.ai  
 - **用途**: 测试和预发布
 - **配置文件**: `.env.test`
 

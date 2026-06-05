@@ -36,9 +36,9 @@ Sends Events (Messages, Clicks)             FeishuGateway.ts (Dispatches events)
 
 To protect sensitive corporate App Secrets, credentials are encrypted on disk:
 
-- **Storage Location**: `~/.deepv/feishu-credentials.json` (Global, not project-specific).
+- **Storage Location**: `~/.easycode-user/feishu-credentials.json` (Global, not project-specific).
 - **Encryption Scheme**: Encrypted using **AES-256-GCM** with standard authenticity validation.
-- **Key Storage**: Symmetric key stored separately in `~/.deepv/feishu-key`.
+- **Key Storage**: Symmetric key stored separately in `~/.easycode-user/feishu-key`.
 - **System Permissions**: Both files are written using strictly **0o600 permissions** (owner read/write only) on POSIX-compliant systems.
 - **Backward Compatibility**: Decrypts legacy, unvalidated AES-256-CBC credentials, automatically upgrading them to GCM format on save.
 

@@ -30,7 +30,7 @@ packages/core/src/hooks/ （Hooks 系统核心）
 **想了解**：Hooks 对企业有什么好处？安全性和合规性如何？
 
 📄 **推荐阅读**：
-1. [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) - 第 8 章
+1. [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) - 第 8 章
 2. [`HOOKS_DELIVERY_SUMMARY.md`](./HOOKS_DELIVERY_SUMMARY.md) - 了解完整项目
 
 **需要 5 分钟？** → 看白皮书第 8.1-8.2 节
@@ -49,10 +49,10 @@ packages/core/src/hooks/ （Hooks 系统核心）
 **快速例子**：
 ```bash
 # 第 1 步：创建 hooks 目录
-mkdir -p .deepvcode/hooks
+mkdir -p .easycode/hooks
 
 # 第 2 步：创建第一个 hook（见下方）
-cat > .deepvcode/hooks/security-gate.sh << 'EOF'
+cat > .easycode/hooks/security-gate.sh << 'EOF'
 #!/bin/bash
 read INPUT
 TOOL=$(echo "$INPUT" | jq -r '.tool_name')
@@ -64,10 +64,10 @@ fi
 EOF
 
 # 第 3 步：设置权限
-chmod +x .deepvcode/hooks/security-gate.sh
+chmod +x .easycode/hooks/security-gate.sh
 
 # 第 4 步：配置 settings.json
-cat > .deepvcode/settings.json << 'EOF'
+cat > .easycode/settings.json << 'EOF'
 {
   "hooks": {
     "BeforeTool": [
@@ -75,7 +75,7 @@ cat > .deepvcode/settings.json << 'EOF'
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/security-gate.sh"
+            "command": "bash .easycode/hooks/security-gate.sh"
           }
         ]
       }
@@ -123,7 +123,7 @@ EOF
 2. [`docs/hooks-user-guide.md` - 常见问题 FAQ](./docs/hooks-user-guide.md#常见问题-faq)
 
 **快速排查清单**：
-- [ ] `settings.json` 中的 JSON 格式正确？ → 用 `jq . .deepvcode/settings.json` 验证
+- [ ] `settings.json` 中的 JSON 格式正确？ → 用 `jq . .easycode/settings.json` 验证
 - [ ] Hook 脚本有执行权限？ → `chmod +x script.sh`
 - [ ] Hook 脚本输出有效的 JSON？ → `cat test.json | bash script.sh | jq .`
 - [ ] 使用了 `jq` 工具？ → `brew install jq`
@@ -173,7 +173,7 @@ EOF
 
 | 文件 | 位置 | 内容 | 适合人群 |
 |------|------|------|--------|
-| 白皮书 Hooks 章节 | `DeepV_Code_Whitepaper.md` (第 8 章) | Hooks 概念、企业应用、架构 | 决策者、架构师 |
+| 白皮书 Hooks 章节 | `EasyCode_Code_Whitepaper.md` (第 8 章) | Hooks 概念、企业应用、架构 | 决策者、架构师 |
 | 用户实践指南 | `docs/hooks-user-guide.md` | 快速开始、5 个场景、调试、FAQ | **开发者（首推）** |
 | 完整示例库 | `docs/hooks-examples.md` | 7 个可复用的 Hook 脚本 | **开发者（代码参考）** |
 | 实现指南 | `docs/hooks-implementation.md` | 5 层架构、集成步骤、完整说明 | 系统架构师 |
@@ -220,7 +220,7 @@ EOF
 
 ### ⏱️ 有 30 分钟
 
-1. 理解概念：`DeepV_Code_Whitepaper.md` 第 8 章
+1. 理解概念：`EasyCode_Code_Whitepaper.md` 第 8 章
 2. 学习实践：`docs/hooks-user-guide.md` 的快速开始部分
 3. 复用示例：`docs/hooks-examples.md` 选择你需要的
 
@@ -242,7 +242,7 @@ EOF
 | **输入/输出格式** | JSON（标准化、易于集成） |
 | **默认超时** | 60 秒（可配置） |
 | **执行模式** | 并行或顺序（支持 Hook 链式处理） |
-| **配置位置** | `.deepvcode/settings.json` 或 `~/.deepv/settings.json` |
+| **配置位置** | `.easycode/settings.json` 或 `~/.easycode-user/settings.json` |
 | **与 Gemini CLI 兼容** | ✅ 完全兼容，Hook 脚本无需修改 |
 
 ---
@@ -252,19 +252,19 @@ EOF
 ### 第 1 步：创建 Hook 脚本
 
 ```bash
-mkdir -p .deepvcode/hooks
-cat > .deepvcode/hooks/my-hook.sh << 'EOF'
+mkdir -p .easycode/hooks
+cat > .easycode/hooks/my-hook.sh << 'EOF'
 #!/bin/bash
 read INPUT
 echo '{"decision":"allow"}'
 EOF
-chmod +x .deepvcode/hooks/my-hook.sh
+chmod +x .easycode/hooks/my-hook.sh
 ```
 
 ### 第 2 步：配置 settings.json
 
 ```bash
-cat > .deepvcode/settings.json << 'EOF'
+cat > .easycode/settings.json << 'EOF'
 {
   "hooks": {
     "BeforeTool": [
@@ -272,7 +272,7 @@ cat > .deepvcode/settings.json << 'EOF'
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/my-hook.sh"
+            "command": "bash .easycode/hooks/my-hook.sh"
           }
         ]
       }
@@ -285,7 +285,7 @@ EOF
 ### 第 3 步：测试
 
 ```bash
-echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"BeforeTool","timestamp":"2025-01-15T10:00:00Z","tool_name":"read_file","tool_input":{}}' | bash .deepvcode/hooks/my-hook.sh
+echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"BeforeTool","timestamp":"2025-01-15T10:00:00Z","tool_name":"read_file","tool_input":{}}' | bash .easycode/hooks/my-hook.sh
 ```
 
 预期输出：`{"decision":"allow"}`
@@ -302,7 +302,7 @@ echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"BeforeTool","timestam
 | 代码示例 | [`docs/hooks-examples.md`](./docs/hooks-examples.md) |
 | 调试问题 | [`docs/hooks-user-guide.md#调试和排查`](./docs/hooks-user-guide.md#调试和排查) |
 | 架构细节 | [`docs/hooks-implementation.md`](./docs/hooks-implementation.md) |
-| 概念理解 | [`DeepV_Code_Whitepaper.md`](./DeepV_Code_Whitepaper.md) 第 8 章 |
+| 概念理解 | [`EasyCode_Code_Whitepaper.md`](./EasyCode_Code_Whitepaper.md) 第 8 章 |
 
 ---
 
@@ -326,8 +326,8 @@ echo '{"session_id":"test","cwd":"/tmp","hook_event_name":"BeforeTool","timestam
 - ✅ 多 Hook 链式处理（顺序执行）
 
 **配置位置：**
-- `.deepvcode/settings.json`（项目级，优先）
-- `~/.deepv/settings.json`（全局级）
+- `.easycode/settings.json`（项目级，优先）
+- `~/.easycode-user/settings.json`（全局级）
 
 ---
 

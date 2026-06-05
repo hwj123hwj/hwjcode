@@ -239,10 +239,10 @@ npm run build
 npm run build
 
 # 2. 启动生产服务器
-./dist/deepv --local-mode
+./dist/easycode --local-mode
 
 # 3. 使用Docker (如果有)
-docker run -p 4058:4058 deepv-code:latest --local-mode
+docker run -p 4058:4058 easycode-ai:latest --local-mode
 ```
 
 ### 客户端连接
@@ -370,7 +370,7 @@ npm run start -- --auth
 ### 调试模式
 ```bash
 # 启用详细日志
-DEBUG=deepv:remote npm run start -- --local-mode
+DEBUG=easycode:remote npm run start -- --local-mode
 
 # 查看WebSocket消息
 npm run start -- --local-mode --debug-ws

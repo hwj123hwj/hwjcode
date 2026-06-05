@@ -87,7 +87,7 @@ private async discoverMcpToolsAsync(): Promise<void> {
 
 ### 测试1：检查工具列表
 ```bash
-dvcode -p "请列出你当前可以使用的所有工具名称"
+easycode -p "请列出你当前可以使用的所有工具名称"
 ```
 
 预期结果：应该包含MCP服务器提供的工具
@@ -95,7 +95,7 @@ dvcode -p "请列出你当前可以使用的所有工具名称"
 ### 测试2：使用特定MCP工具
 假设配置了一个提供`database_query`工具的MCP服务器：
 ```bash
-dvcode -p "请使用database_query工具查询用户表"
+easycode -p "请使用database_query工具查询用户表"
 ```
 
 预期结果：AI应该能够识别并使用该工具，而不是回复"没有这个工具"

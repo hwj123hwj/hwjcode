@@ -18,10 +18,10 @@ Configuration is applied in the following order of precedence (lower numbers are
 Gemini CLI uses `settings.json` files for persistent configuration. There are three locations for these files:
 
 - **User settings file:**
-  - **Location:** `~/.deepv/settings.json` (where `~` is your home directory).
+  - **Location:** `~/.easycode-user/settings.json` (where `~` is your home directory).
   - **Scope:** Applies to all Gemini CLI sessions for the current user.
 - **Project settings file:**
-  - **Location:** `.deepv/settings.json` within your project's root directory.
+  - **Location:** `.easycode-user/settings.json` within your project's root directory.
   - **Scope:** Applies only when running Gemini CLI from that specific project. Project settings override user settings.
 - **System settings file:**
   - **Location:** `/etc/gemini-cli/settings.json` (Linux), `C:\ProgramData\gemini-cli\settings.json` (Windows) or `/Library/Application Support/GeminiCli/settings.json` (macOS). The path can be overridden using the `GEMINI_CLI_SYSTEM_SETTINGS_PATH` environment variable.
@@ -423,7 +423,7 @@ Non-interactive mode allows you to invoke Gemini CLI programmatically without re
 **Example 1: Simple automation with JSONL output**
 
 ```bash
-dvcode --output-format stream-json --yolo "Analyze the code and suggest improvements"
+easycode --output-format stream-json --yolo "Analyze the code and suggest improvements"
 ```
 
 This will output events as JSONL, one per line, allowing easy parsing by external tools.
@@ -431,13 +431,13 @@ This will output events as JSONL, one per line, allowing easy parsing by externa
 **Example 2: Piping to another tool**
 
 ```bash
-dvcode --output-format stream-json --yolo "Generate unit tests" | jq '.content' | grep -E "describe|test"
+easycode --output-format stream-json --yolo "Generate unit tests" | jq '.content' | grep -E "describe|test"
 ```
 
 **Example 3: Integration with CI/CD**
 
 ```bash
-dvcode \
+easycode \
   --output-format stream-json \
   --yolo \
   --model gemini-2.5-flash \

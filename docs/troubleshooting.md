@@ -54,10 +54,10 @@ This guide provides solutions to common issues and debugging tips.
   - **Cause:** SSH/WSL environments may have limited terminal capabilities or network latency affecting escape sequence processing.
   - **Solution:**
     1. **Automatic detection:** CLI should automatically detect SSH/WSL environments and enable compatibility mode.
-    2. **Manual override:** Set environment variable `DEEPV_SSH_MODE=1` to force compatibility mode:
+    2. **Manual override:** Set environment variable `EASYCODE_SSH_MODE=1` to force compatibility mode:
        ```bash
-       export DEEPV_SSH_MODE=1
-       deepv
+       export EASYCODE_SSH_MODE=1
+       easycode
        ```
     3. **Terminal type:** Ensure proper terminal type is set:
        ```bash
@@ -76,7 +76,7 @@ This guide provides solutions to common issues and debugging tips.
   - **Cause:** Windows Terminal or legacy console compatibility.
   - **Solution:**
     1. Use latest Windows Terminal version
-    2. For PowerShell: `$env:DEEPV_SSH_MODE = "1"`
+    2. For PowerShell: `$env:EASYCODE_SSH_MODE = "1"`
     3. Ensure UTF-8 encoding: `export LANG=en_US.UTF-8`
 
 - **CLI is not interactive in "CI" environments**

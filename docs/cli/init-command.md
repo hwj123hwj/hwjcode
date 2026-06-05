@@ -1,13 +1,13 @@
 # `/init` Command
 
-The `/init` command is a powerful feature in Easy Code that automatically analyzes your project and creates a tailored `DEEPV.md` file to provide context for future AI interactions.
+The `/init` command is a powerful feature in Easy Code that automatically analyzes your project and creates a tailored `EASYCODE.md` file to provide context for future AI interactions.
 
 ## Overview
 
 The `/init` command helps you quickly set up project-specific context by:
 1. Analyzing your project structure and files
 2. Identifying the project type (code project vs. non-code project)
-3. Generating a comprehensive `DEEPV.md` file with relevant project information
+3. Generating a comprehensive `EASYCODE.md` file with relevant project information
 
 ## Usage
 
@@ -31,7 +31,7 @@ Simply type `/init` in the Easy Code CLI:
 
 ### Generated Content
 
-For **Code Projects**, the generated `DEEPV.md` includes:
+For **Code Projects**, the generated `EASYCODE.md` includes:
 - **Project Overview**: Purpose, technologies, and architecture
 - **Building and Running**: Key commands for build, run, and test
 - **Development Conventions**: Coding styles, testing practices, contribution guidelines
@@ -44,13 +44,13 @@ For **Non-Code Projects**, it includes:
 
 ## Behavior
 
-- **File Exists**: If `DEEPV.md` already exists, the command will inform you and make no changes
-- **New File**: Creates an empty `DEEPV.md` file, then analyzes the project to populate it
+- **File Exists**: If `EASYCODE.md` already exists, the command will inform you and make no changes
+- **New File**: Creates an empty `EASYCODE.md` file, then analyzes the project to populate it
 - **Error Handling**: Provides clear error messages if configuration is unavailable
 
 ## Integration with Easy Code
 
-The generated `DEEPV.md` file becomes part of Easy Code's memory system, providing:
+The generated `EASYCODE.md` file becomes part of Easy Code's memory system, providing:
 - Project-specific context for AI interactions
 - Development workflow understanding
 - Build and testing command awareness
@@ -83,4 +83,4 @@ This is a React application built with TypeScript and Vite, designed for...
 - `/help` - View all available commands
 - `/chat save` - Save conversation state
 
-This command is inspired by the Gemini CLI's `/init` command but adapted specifically for Easy Code's workflow and `DEEPV.md` context system.
+This command is inspired by the Gemini CLI's `/init` command but adapted specifically for Easy Code's workflow and `EASYCODE.md` context system.
