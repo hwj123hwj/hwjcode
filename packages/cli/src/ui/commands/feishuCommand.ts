@@ -72,6 +72,8 @@ import {
   SkillLoader,
   getSpecificMimeType,
   AudioReaderTool,
+  SelfUpdateTool,
+  launchRelaunchHelper,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -2174,6 +2176,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return lifecycleHint;
     }
 
+    // 🆘 拦截 `/feishu restart`（或 /飞书 restart）：热重启网关进程，用于 AI 卡死/
+    //    失去响应时的兜底恢复。由网关在 AI 处理之前直接处理（不经过 agent 循环，
+    //    因为 AI 可能已经卡住）。复用 self_update 的同一套跨平台外挂脚本，仅重启不更新。
+    const restartMatch = messageText.trim().match(/^\/(?:feishu|飞书)\s+restart\b/i);
+    if (restartMatch) {
+      try {
+        launchRelaunchHelper({ type: 'none' });
+        // 给一点时间把回复发回飞书，再退出当前进程，让 detached 外挂接管重启。
+        setTimeout(() => {
+          process.exit(0);
+        }, 1500).unref?.();
+        return '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。';
+      } catch (e: any) {
+        return `❌ 重启失败：${e?.message || String(e)}`;
+      }
+    }
+
     // 拦截群内自助绑定的 `/bind` 命令
     if (messageText.startsWith('/bind')) {
       const parts = messageText.split(/\s+/);
@@ -2357,6 +2376,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 注册飞书模式专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
+
+        // 注册飞书模式专属的自更新重启工具（普通 CLI 模式绝不注册）
+        toolRegistry.registerTool(new SelfUpdateTool(isolatedConfig));
 
         await isolatedClient.setTools();
         dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
@@ -3644,6 +3666,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 🎯 动态注册专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(config));
 
+        // 🎯 动态注册自更新重启工具（仅飞书模式可见）：模型一调用即升级 easycode-ai
+        //    到 latest 并以 `easycode --feishu` 自动重启。普通 CLI 模式绝不注册。
+        toolRegistry.registerTool(new SelfUpdateTool(config));
+
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');
       } catch (toolErr: any) {
@@ -3759,7 +3785,8 @@ async function handleStop(context?: CommandContext): Promise<string> {
       const removed = toolRegistry.unregisterTool(SendFeishuFileTool.Name);
       const removedGroupTool = toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
       const removedAudioTool = toolRegistry.unregisterTool(AudioReaderTool.Name);
-      if (removed || removedGroupTool || removedAudioTool) {
+      const removedSelfUpdate = toolRegistry.unregisterTool(SelfUpdateTool.Name);
+      if (removed || removedGroupTool || removedAudioTool || removedSelfUpdate) {
         await geminiClient.setTools();
         dlog('Unregistered Feishu file-send and group-chat tools successfully.');
       }
@@ -4029,6 +4056,7 @@ async function handleLogout(context?: CommandContext): Promise<string> {
         toolRegistry.unregisterTool(SendFeishuFileTool.Name);
         toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
         toolRegistry.unregisterTool(AudioReaderTool.Name);
+        toolRegistry.unregisterTool(SelfUpdateTool.Name);
         await geminiClient.setTools();
       } catch {
         // ignore
