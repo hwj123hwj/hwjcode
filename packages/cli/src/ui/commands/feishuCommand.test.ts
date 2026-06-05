@@ -11,6 +11,7 @@ import {
   buildBoundProjectsLines,
   shortenProjectPath,
   interceptFeishuLifecycleCommand,
+  normalizeAskUserQuestionArgs,
 } from './feishuCommand.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import * as credentials from '../../services/feishu/credentials.js';
@@ -599,5 +600,86 @@ describe('feishu session persistence round-trip', () => {
       await fs.rm(tmpHome, { recursive: true, force: true });
       await fs.rm(tmpProj, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * normalizeAskUserQuestionArgs — 守护飞书网关下 ask_user_question 的崩溃修复。
+ *
+ * 生产 bug：飞书拦截 ask_user_question 时报 `(n.questions || []).map is not a function`。
+ * 根因：某些情况下 args 或 args.questions 是 JSON 字符串而非数组，
+ *   `("..." || []).map` 在字符串上调用 .map 抛错。
+ * 此函数把各种输入安全归一化为 { questions: AskUserQuestion[] }。
+ */
+describe('normalizeAskUserQuestionArgs', () => {
+  it('passes through a well-formed object with questions array', () => {
+    const input = {
+      questions: [
+        { question: 'Pick one', header: 'Choice', options: [{ label: 'A' }, { label: 'B' }] },
+      ],
+    };
+    const out = normalizeAskUserQuestionArgs(input);
+    expect(Array.isArray(out.questions)).toBe(true);
+    expect(out.questions).toHaveLength(1);
+    expect(out.questions[0].question).toBe('Pick one');
+  });
+
+  it('parses args.questions when it is a JSON string (the crash case)', () => {
+    const input = {
+      questions: JSON.stringify([
+        { question: 'Q1', options: [{ label: 'A' }] },
+      ]),
+    };
+    const out = normalizeAskUserQuestionArgs(input as any);
+    expect(Array.isArray(out.questions)).toBe(true);
+    expect(out.questions).toHaveLength(1);
+    expect(out.questions[0].question).toBe('Q1');
+  });
+
+  it('parses the entire args when args itself is a JSON string', () => {
+    const input = JSON.stringify({
+      questions: [{ question: 'Whole-args string', options: [{ label: 'X' }] }],
+    });
+    const out = normalizeAskUserQuestionArgs(input as any);
+    expect(Array.isArray(out.questions)).toBe(true);
+    expect(out.questions[0].question).toBe('Whole-args string');
+  });
+
+  it('handles a double-encoded args (string whose parse yields questions string)', () => {
+    // args 是字符串，parse 后得到 { questions: "<json string>" }
+    const input = JSON.stringify({
+      questions: JSON.stringify([{ question: 'Nested', options: [] }]),
+    });
+    const out = normalizeAskUserQuestionArgs(input as any);
+    expect(Array.isArray(out.questions)).toBe(true);
+    expect(out.questions[0].question).toBe('Nested');
+  });
+
+  it('returns empty questions for null / undefined', () => {
+    expect(normalizeAskUserQuestionArgs(null as any).questions).toEqual([]);
+    expect(normalizeAskUserQuestionArgs(undefined as any).questions).toEqual([]);
+  });
+
+  it('returns empty questions when questions is missing', () => {
+    expect(normalizeAskUserQuestionArgs({} as any).questions).toEqual([]);
+  });
+
+  it('returns empty questions for non-array / non-parsable questions', () => {
+    expect(normalizeAskUserQuestionArgs({ questions: 42 } as any).questions).toEqual([]);
+    expect(normalizeAskUserQuestionArgs({ questions: 'not json at all {' } as any).questions).toEqual([]);
+    expect(normalizeAskUserQuestionArgs({ questions: { not: 'array' } } as any).questions).toEqual([]);
+  });
+
+  it('never throws on garbage input (defensive)', () => {
+    expect(() => normalizeAskUserQuestionArgs('@@@not-json@@@' as any)).not.toThrow();
+    expect(normalizeAskUserQuestionArgs('@@@not-json@@@' as any).questions).toEqual([]);
+  });
+
+  it('wraps a single question object (not wrapped in questions) gracefully', () => {
+    // 极端容错：模型直接把单个问题对象当 args 传
+    const input = { question: 'Direct question', options: [{ label: 'A' }] };
+    const out = normalizeAskUserQuestionArgs(input as any);
+    expect(Array.isArray(out.questions)).toBe(true);
+    expect(out.questions[0].question).toBe('Direct question');
   });
 });
