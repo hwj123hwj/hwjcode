@@ -622,10 +622,12 @@ export class FeishuGateway {
   /**
    * 获取合并转发消息的子消息列表
    */
-  async getMergedForwardMessages(messageId: string): Promise<any[]> {
+  async getMergedForwardMessages(messageId: string): Promise<{ items: any[]; error?: string }> {
     try {
       const token = await this.getTenantToken();
-      if (!token) return [];
+      if (!token) {
+        return { items: [], error: '无法获取 tenant_access_token' };
+      }
 
       const res = await fetch(
         `${this.apiBaseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/merged_forward`,
@@ -638,14 +640,14 @@ export class FeishuGateway {
 
       if (data.code !== 0) {
         dlog(`[Feishu] getMergedForwardMessages(${messageId}) failed: ${JSON.stringify(data)}`);
-        return [];
+        return { items: [], error: `飞书接口返回错误 (code: ${data.code}): ${data.msg || '未知错误'}` };
       }
 
       const items = data.data?.items || data.data?.messages || (Array.isArray(data.data) ? data.data : []);
-      return items;
+      return { items };
     } catch (e: any) {
       dlog(`[Feishu] getMergedForwardMessages(${messageId}) threw: ${e?.message || e}`);
-      return [];
+      return { items: [], error: `网络或未知请求异常: ${e?.message || e}` };
     }
   }
 
@@ -865,7 +867,7 @@ export class FeishuGateway {
         if (msgType === 'merge_forward') {
           try {
             dlog(`Received merge_forward message, fetching sub-messages for ${message.message_id}...`);
-            const subMessages = await this.getMergedForwardMessages(message.message_id);
+            const { items: subMessages, error } = await this.getMergedForwardMessages(message.message_id);
             if (subMessages && subMessages.length > 0) {
               const parts: string[] = [];
               parts.push(`📢 **[合并转发的消息记录]**`);
@@ -890,7 +892,7 @@ export class FeishuGateway {
               }
               text = parts.join('\n');
             } else {
-              text = `[合并转发消息，但未获取到任何子消息内容]`;
+              text = `[合并转发消息，但未获取到任何子消息内容${error ? `。原因: ${error}` : ''}]`;
             }
           } catch (err: any) {
             derror(`Failed to parse merge_forward message:`, err);
