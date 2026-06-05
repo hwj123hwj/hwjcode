@@ -412,6 +412,117 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.pendingFiles[0].fileKey).toBe('file_sub_2');
     expect(receivedMsg.pendingFiles[0].fileName).toBe('nested.zip');
   });
+
+  it('correctly generates unique placeholders for multiple rich-text images across sub-messages within merge_forward', async () => {
+    await gateway.connect();
+
+    const mockFetchOk = (body: any) => ({
+      ok: true,
+      json: async () => body,
+    });
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/merged_forward')) {
+        return mockFetchOk({
+          code: 0,
+          msg: 'success',
+          data: {
+            items: [
+              {
+                message_id: 'om_sub_post_1',
+                message_type: 'post',
+                content: JSON.stringify({
+                  zh_cn: {
+                    title: 'First post',
+                    content: [
+                      [
+                        { tag: 'text', text: 'Check first: ' },
+                        { tag: 'img', image_key: 'img_key_1' },
+                      ],
+                    ],
+                  },
+                }),
+                create_time: '1615367851000',
+                sender: {
+                  id: 'ou_user_1',
+                  id_type: 'open_id',
+                  sender_type: 'user',
+                },
+              },
+              {
+                message_id: 'om_sub_post_2',
+                message_type: 'post',
+                content: JSON.stringify({
+                  zh_cn: {
+                    title: 'Second post',
+                    content: [
+                      [
+                        { tag: 'text', text: 'Check second: ' },
+                        { tag: 'img', image_key: 'img_key_2' },
+                      ],
+                    ],
+                  },
+                }),
+                create_time: '1615367852000',
+                sender: {
+                  id: 'ou_user_2',
+                  id_type: 'open_id',
+                  sender_type: 'user',
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({
+          tenant_access_token: 't-mock-token',
+          expire: 7200,
+        });
+      }
+      return mockFetchOk({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_merge_125',
+          message_type: 'merge_forward',
+          content: 'Merged posts with images',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+
+    expect(receivedMsg.pendingImages).toBeDefined();
+    expect(receivedMsg.pendingImages).toHaveLength(2);
+    expect(receivedMsg.pendingImages[0].imageKey).toBe('img_key_1');
+    expect(receivedMsg.pendingImages[0].placeholder).toBe('[图片_1]');
+    expect(receivedMsg.pendingImages[1].imageKey).toBe('img_key_2');
+    expect(receivedMsg.pendingImages[1].placeholder).toBe('[图片_2]');
+
+    expect(receivedMsg.text).toContain('[图片_1]');
+    expect(receivedMsg.text).toContain('[图片_2]');
+  });
 });
 
 // ---------------------------------------------------------------------------

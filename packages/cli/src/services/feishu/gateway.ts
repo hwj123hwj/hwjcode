@@ -871,20 +871,14 @@ export class FeishuGateway {
               parts.push(`📢 **[合并转发的消息记录]**`);
               parts.push(`---`);
               for (const subMsg of subMessages) {
-                const subPendingImages: Array<{ imageKey: string; placeholder: string }> = [];
-                const subPendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }> = [];
                 const subMsgType = subMsg.message_type || 'text';
                 const subText = this.parseSingleMessageContent(
                   subMsg.message_id,
                   subMsgType,
                   subMsg.content,
-                  subPendingImages,
-                  subPendingFiles
+                  pendingImages,
+                  pendingFiles
                 );
-
-                // 收集子消息的所有图片和文件
-                pendingImages.push(...subPendingImages);
-                pendingFiles.push(...subPendingFiles);
 
                 // 获取子消息发送者的名字或信息
                 const senderName = subMsg.sender?.id || '匿名';
