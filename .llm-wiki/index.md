@@ -1,6 +1,6 @@
 # LLM Wiki Index
 
-> Auto-maintained by DeepV Code. Do not edit manually.
+> Auto-maintained by Easy Code. Do not edit manually.
 
 ## Sources
 

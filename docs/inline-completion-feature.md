@@ -2,7 +2,7 @@
 
 ## 概述
 
-DeepV Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitHub Copilot 和 Augment Code，能够在您编码时实时提供智能建议。
+Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitHub Copilot 和 Augment Code，能够在您编码时实时提供智能建议。
 
 ## 功能特性
 
@@ -49,8 +49,8 @@ DeepV Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 Git
 
 ### 快速开始
 
-1. **安装插件**：确保已安装 DeepV Code VSCode 扩展
-2. **登录认证**：完成 DeepV Code 登录流程
+1. **安装插件**：确保已安装 Easy Code VSCode 扩展
+2. **登录认证**：完成 Easy Code 登录流程
 3. **开始编码**：在任何文件中输入代码，补全建议将自动出现
 
 ### 状态栏快捷开关 ⭐
@@ -84,7 +84,7 @@ DeepV Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 Git
 
 ## 配置选项
 
-在 VSCode 设置中搜索 "DeepV Code" 以访问以下配置：
+在 VSCode 设置中搜索 "Easy Code" 以访问以下配置：
 
 ### `deepv.enableInlineCompletion`
 
@@ -101,7 +101,7 @@ DeepV Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 Git
 **控制方式（多种方式同步）：**
 
 1. **状态栏按钮**（推荐）：点击右下角的 `D✓` 或 `D✗` 图标
-2. **命令面板**：`DeepV Code: Toggle Inline Completion`
+2. **命令面板**：`Easy Code: Toggle Inline Completion`
 3. **设置界面**：搜索 `deepv.enableInlineCompletion` 勾选/取消勾选
 4. **settings.json**：直接修改配置文件
 
@@ -205,7 +205,7 @@ Provider 内部维护以下统计数据（开发者模式）：
 
 ## 与 Augment Code 的对比
 
-| 功能                   | DeepV Code | Augment Code |
+| 功能                   | Easy Code | Augment Code |
 |------------------------|------------|--------------|
 | 行内补全               | ✅         | ✅           |
 | 上下文感知             | ✅         | ✅           |
@@ -221,9 +221,9 @@ Provider 内部维护以下统计数据（开发者模式）：
 
 1. **检查状态栏图标**：确认状态栏右下角显示 `D✓`（启用状态）
 2. **检查配置**：`deepv.enableInlineCompletion = true`
-3. **确认已登录**：DeepV Code 已完成认证
+3. **确认已登录**：Easy Code 已完成认证
 4. **检查网络**：确保网络连接正常
-5. **查看日志**：输出面板（Output > DeepV Code AI Assistant）
+5. **查看日志**：输出面板（Output > Easy Code AI Assistant）
 
 ### 补全速度慢
 
@@ -241,7 +241,7 @@ Provider 内部维护以下统计数据（开发者模式）：
 
 ### 状态栏图标不显示
 
-1. **检查扩展状态**：确认 DeepV Code 扩展已激活
+1. **检查扩展状态**：确认 Easy Code 扩展已激活
 2. **重启 VSCode**：完全关闭并重新打开 VSCode
 3. **查看日志**：检查是否有初始化错误
 4. **重新安装**：卸载并重新安装扩展
@@ -299,7 +299,7 @@ interface InlineCompletionResponse {
 #### 方法 1：通过命令（推荐）
 
 ```
-Cmd+Shift+P → "DeepV Code: Select Inline Completion Model"
+Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 ```
 
 选择模型（仅提供 3 个最优选项）：
@@ -310,7 +310,7 @@ Cmd+Shift+P → "DeepV Code: Select Inline Completion Model"
 #### 方法 2：通过设置界面
 
 1. 打开 VSCode 设置：`Cmd+,`（Mac）或 `Ctrl+,`（Windows/Linux）
-2. 搜索：`DeepV Code: Inline Completion Model`
+2. 搜索：`Easy Code: Inline Completion Model`
 3. 从下拉菜单选择模型
 
 #### 方法 3：通过 settings.json
@@ -398,7 +398,7 @@ Cmd+Shift+P → "DeepV Code: Select Inline Completion Model"
 
 如遇到问题或有功能建议，请：
 
-1. 查看日志：`DeepV Code > Open Log File`
+1. 查看日志：`Easy Code > Open Log File`
 2. 提交 Issue：[GitHub Issues](https://github.com/OrionStarAI/DeepVCode/issues)
 3. 社区讨论：[GitHub Discussions](https://github.com/OrionStarAI/DeepVCode/discussions)
 

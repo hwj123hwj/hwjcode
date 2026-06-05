@@ -11,7 +11,7 @@ sources: [raw/07-mcp-system.md]
 
 ## Overview
 
-MCP（Model Context Protocol）系统允许 DeepV Code 连接外部 MCP 服务器，动态发现和使用第三方工具。支持 Stdio、SSE 和 Streamable HTTP 三种传输方式，以及完整的 OAuth 认证流程。
+MCP（Model Context Protocol）系统允许 Easy Code 连接外部 MCP 服务器，动态发现和使用第三方工具。支持 Stdio、SSE 和 Streamable HTTP 三种传输方式，以及完整的 OAuth 认证流程。
 
 ## Two-Phase Loading
 

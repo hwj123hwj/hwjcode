@@ -36,8 +36,8 @@ git remote -v
 ```
 github  https://github.com/OrionStarAI/DeepVCode.git (fetch)
 github  https://github.com/OrionStarAI/DeepVCode.git (push)
-origin  https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient.git (fetch)
-origin  https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient.git (push)
+origin  https://gitlab.liebaopay.com/ai_native/EasyCode/DeepVcodeClient.git (fetch)
+origin  https://gitlab.liebaopay.com/ai_native/EasyCode/DeepVcodeClient.git (push)
 ```
 
 ## 🚀 使用方法

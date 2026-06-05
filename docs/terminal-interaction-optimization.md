@@ -188,4 +188,4 @@ const SMALL_WINDOW_THRESHOLDS = {
 
 ---
 
-通过这些优化，DeepV Code CLI在各种终端环境下都能提供稳定、流畅的交互体验。
+通过这些优化，Easy Code CLI在各种终端环境下都能提供稳定、流畅的交互体验。

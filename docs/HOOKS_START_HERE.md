@@ -1,4 +1,4 @@
-# 🎯 DeepV Code Hooks 系统 - 开始这里
+# 🎯 Easy Code Hooks 系统 - 开始这里
 
 > 欢迎！本文件帮助你快速找到你需要的 Hooks 文档。
 

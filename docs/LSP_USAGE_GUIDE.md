@@ -1,13 +1,13 @@
-# 🚀 DeepV Code LSP (语言服务协议) 使用指南
+# 🚀 Easy Code LSP (语言服务协议) 使用指南
 
-DeepV Code 现在集成了强大的 **LSP (Language Server Protocol)** 能力。这意味着 AI 不再仅仅是通过“搜索字符串”来猜你的代码，而是像真正的 IDE 一样，能够完全“读懂”代码的语义。
+Easy Code 现在集成了强大的 **LSP (Language Server Protocol)** 能力。这意味着 AI 不再仅仅是通过“搜索字符串”来猜你的代码，而是像真正的 IDE 一样，能够完全“读懂”代码的语义。
 
 ---
 
 ## 1. 什么是 LSP？
 
 **LSP (Language Server Protocol)** 是由微软、Google 和 RedHat 共同推出的行业标准。
-它将代码分析逻辑（Brain）与编辑器（UI）分离。通过 LSP，DeepV Code 可以调用各语言官方或社区最专业的分析引擎，为 AI 提供极致的代码感知力。
+它将代码分析逻辑（Brain）与编辑器（UI）分离。通过 LSP，Easy Code 可以调用各语言官方或社区最专业的分析引擎，为 AI 提供极致的代码感知力。
 
 ### 为什么 LSP 比传统搜索（Search/Grep）更强？
 
@@ -23,10 +23,10 @@ DeepV Code 现在集成了强大的 **LSP (Language Server Protocol)** 能力。
 ## 2. 核心黑科技：小白式“零配置”体验
 
 传统的 LSP 使用需要用户手动安装各种环境（如 `npm install -g ...` 或下载 `.exe`）。
-在 DeepV Code 中，我们实现了 **自动二进制管理 (BinaryManager)**：
+在 Easy Code 中，我们实现了 **自动二进制管理 (BinaryManager)**：
 
 - **按需触发**：当你第一次询问某种语言的问题时，系统才会启动。
-- **静默安装**：如果你的电脑没装对应的 LSP 服务端，DeepV Code 会**自动在后台下载并安装**到隔离目录。
+- **静默安装**：如果你的电脑没装对应的 LSP 服务端，Easy Code 会**自动在后台下载并安装**到隔离目录。
 - **无感运行**：用户无需配置环境变量，无需查看安装文档，真正做到“开箱即用”。
 
 ---
@@ -72,4 +72,4 @@ DeepV Code 现在集成了强大的 **LSP (Language Server Protocol)** 能力。
 
 ---
 
-**DeepV Code - 赋予 AI 真正的代码直觉。**
+**Easy Code - 赋予 AI 真正的代码直觉。**

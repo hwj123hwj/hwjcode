@@ -189,4 +189,4 @@ export const SMALL_WINDOW_THRESHOLDS = {
 
 ---
 
-通过这些优化措施，DeepV Code CLI在小窗口环境下将显著减少闪屏现象，提供更流畅的用户体验。
+通过这些优化措施，Easy Code CLI在小窗口环境下将显著减少闪屏现象，提供更流畅的用户体验。

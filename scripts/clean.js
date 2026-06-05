@@ -28,7 +28,7 @@ const COLORS = {
 };
 
 const LOGO = `
-${COLORS.cyan}${COLORS.bright}DeepV Code Maintenance & Cleanup Utility${COLORS.reset}
+${COLORS.cyan}${COLORS.bright}Easy Code Maintenance & Cleanup Utility${COLORS.reset}
 `;
 
 function printHeader(step, total, title) {

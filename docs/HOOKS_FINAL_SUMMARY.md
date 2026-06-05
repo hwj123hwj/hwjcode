@@ -1,8 +1,8 @@
-# DeepV Code Hooks 系统 - 最终完整总结
+# Easy Code Hooks 系统 - 最终完整总结
 
 ## ✅ 项目完成状态
 
-**100% 完成** - DeepV Code Hooks 系统实现完毕，所有文档准备就绪
+**100% 完成** - Easy Code Hooks 系统实现完毕，所有文档准备就绪
 
 ---
 
@@ -357,7 +357,7 @@ packages/vscode-ui-plugin/
 
 ## 🎉 最后的话
 
-DeepV Code Hooks 系统已完全就绪。
+Easy Code Hooks 系统已完全就绪。
 
 **核心设计的完美性：**
 - 在 `packages/core` 实现
@@ -377,4 +377,4 @@ DeepV Code Hooks 系统已完全就绪。
 **版本**：1.0 Final
 **完成日期**：2025-01-15
 **状态**：✅ 100% 完成，生产就绪
-**维护者**：DeepV Code 团队
+**维护者**：Easy Code 团队

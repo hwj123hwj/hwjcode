@@ -7,7 +7,7 @@ sources: [raw/05-hooks-system.md]
 
 # Hooks System
 
-> 5-layer lifecycle hook pipeline for intercepting and modifying DeepV Code behavior.
+> 5-layer lifecycle hook pipeline for intercepting and modifying Easy Code behavior.
 
 ## Overview
 

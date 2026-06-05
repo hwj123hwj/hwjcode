@@ -6,7 +6,7 @@ tags: [release, git, tag, ci-cd, npm, workflow]
 
 # Release Process Guide
 
-> 本文档详细记录了 DeepV Code 项目的规范化发布流程和核心校验规则。
+> 本文档详细记录了 Easy Code 项目的规范化发布流程和核心校验规则。
 
 ## 核心规则与纪律
 

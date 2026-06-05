@@ -7,11 +7,11 @@ sources: [raw/01-architecture.md, raw/03-cli-module.md]
 
 # CLI Module
 
-> `packages/cli` — The terminal frontend of DeepV Code.
+> `packages/cli` — The terminal frontend of Easy Code.
 
 ## Overview
 
-CLI 是 DeepV Code 的终端前端包（NPM 名 `deepv-code-cli`），使用 Ink/React 构建交互式终端 UI，提供流式 AI 响应、50+ 斜杠命令、主题系统和工具确认界面。
+CLI 是 Easy Code 的终端前端包（NPM 名 `deepv-code-cli`），使用 Ink/React 构建交互式终端 UI，提供流式 AI 响应、50+ 斜杠命令、主题系统和工具确认界面。
 
 ## Package Info
 

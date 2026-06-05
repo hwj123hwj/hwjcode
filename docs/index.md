@@ -1,10 +1,10 @@
-# Welcome to DeepV Code Documentation
+# Welcome to Easy Code Documentation
 
-This documentation provides a comprehensive guide to installing, using, and developing DeepV Code. DeepV Code is an AI-powered coding assistant that brings advanced AI capabilities to your development workflow through both a command-line interface and VS Code extension.
+This documentation provides a comprehensive guide to installing, using, and developing Easy Code. Easy Code is an AI-powered coding assistant that brings advanced AI capabilities to your development workflow through both a command-line interface and VS Code extension.
 
 ## Overview
 
-DeepV Code is a monorepo project consisting of:
+Easy Code is a monorepo project consisting of:
 - **`packages/cli`**: Command-line interface with interactive REPL environment
 - **`packages/core`**: Core functionality library (AI client, tools, MCP, hooks, skills)
 - **`packages/vscode-ui-plugin`**: Full-featured VS Code extension with webview UI
@@ -17,10 +17,10 @@ The CLI and VS Code extension communicate with AI models through the core librar
 ## 📚 Documentation Index
 
 ### 🚀 Getting Started
-- **[Deployment Guide](./deployment.md)** - Installation, setup, and running DeepV Code
+- **[Deployment Guide](./deployment.md)** - Installation, setup, and running Easy Code
 - **[Architecture Overview](./architecture.md)** - High-level system design and component interactions
 - **[Troubleshooting Guide](./troubleshooting.md)** - Common problems and solutions
-- **[Uninstall Guide](./Uninstall.md)** - How to remove DeepV Code
+- **[Uninstall Guide](./Uninstall.md)** - How to remove Easy Code
 
 ### 🖥️ CLI Documentation
 - **[CLI Introduction](./cli/index.md)** - Overview of the command-line interface
@@ -136,7 +136,7 @@ The CLI and VS Code extension communicate with AI models through the core librar
 - **[Quota and Pricing](./quota-and-pricing.md)** - Usage limits and pricing
 
 ### 🤝 Contributing
-- **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to DeepV Code
+- **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to Easy Code
 - **[Project Knowledge Base](../DEEPV.md)** - Core project information for AI assistants
 
 ### 📝 Examples
@@ -167,7 +167,7 @@ This documentation is structured into logical sections:
 
 ## 💡 Quick Navigation Tips
 
-- **New to DeepV Code?** Start with [Deployment Guide](./deployment.md)
+- **New to Easy Code?** Start with [Deployment Guide](./deployment.md)
 - **CLI User?** Check [CLI Introduction](./cli/index.md) and [Commands](./cli/commands.md)
 - **VS Code User?** See [VS Code Extension Documentation](../packages/vscode-ui-plugin/README.md)
 - **Enterprise Admin?** Read [Hooks START HERE](./HOOKS_START_HERE.md)
@@ -177,4 +177,4 @@ This documentation is structured into logical sections:
 
 ---
 
-We hope this documentation helps you make the most of DeepV Code! 🚀
+We hope this documentation helps you make the most of Easy Code! 🚀
