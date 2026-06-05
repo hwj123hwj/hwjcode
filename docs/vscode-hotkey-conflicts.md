@@ -2,7 +2,7 @@
 
 ## 问题描述
 
-在VSCode内置终端中使用DeepV Code时，某些热键会被VSCode拦截，导致功能无法正常使用。
+在VSCode内置终端中使用Easy Code时，某些热键会被VSCode拦截，导致功能无法正常使用。
 
 ## 已知冲突热键
 

@@ -7,7 +7,7 @@ sources: [packages/core/src/services/compressionService.ts, packages/core/src/se
 
 # Context Compression & Restoration
 
-Context Compression is DeepV Code's automated, high-reliability memory pruning mechanism. It prevents large LLM sessions from exceeding their Context Window limit while preserving crucial state and reasoning context.
+Context Compression is Easy Code's automated, high-reliability memory pruning mechanism. It prevents large LLM sessions from exceeding their Context Window limit while preserving crucial state and reasoning context.
 
 ## The Challenge of Context Bloat
 
@@ -18,7 +18,7 @@ As the AI agent calls tools, processes code files, and receives linter messages,
 
 ## Architectural Mechanisms
 
-DeepV Code features a dual-layer compression pipeline consisting of **CompressionService** and **MicroCompactService**:
+Easy Code features a dual-layer compression pipeline consisting of **CompressionService** and **MicroCompactService**:
 
 ```
 Token Threshold Tripped (or >6m) → MicroCompactService

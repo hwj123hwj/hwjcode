@@ -2,7 +2,7 @@
 
 ## 概述
 
-DeepV Code 现在支持自定义模型配置，允许用户添加任何 OpenAI 兼容格式或 Claude API 格式的模型端点。
+Easy Code 现在支持自定义模型配置，允许用户添加任何 OpenAI 兼容格式或 Claude API 格式的模型端点。
 
 ## 主要特性
 
@@ -110,7 +110,7 @@ set OPENAI_API_KEY=your-api-key-here
 
 ### 使用自定义模型
 
-启动 DeepV Code 后：
+启动 Easy Code 后：
 
 ```
 /model
@@ -302,7 +302,7 @@ if (customModel) {
 
 1. 检查 `id` 是否以 `custom-` 开头
 2. 确认 `enabled` 不为 `false`
-3. 重启 DeepV Code
+3. 重启 Easy Code
 
 ### API 调用错误
 
@@ -315,7 +315,7 @@ if (customModel) {
 
 1. 确保变量已在 shell 环境中设置
 2. 使用 `${VAR_NAME}` 格式（带花括号）
-3. 重启 DeepV Code
+3. 重启 Easy Code
 
 ## 更新日志
 

@@ -2,7 +2,7 @@
 
 ## 🎯 项目目标
 
-为 DeepV Code CLI 实现一个**隐藏的快捷命令** `/new`，允许用户直接创建新会话，而无需通过 `/session new` 菜单导航。
+为 Easy Code CLI 实现一个**隐藏的快捷命令** `/new`，允许用户直接创建新会话，而无需通过 `/session new` 菜单导航。
 
 ## 📋 交付成果
 
@@ -220,7 +220,7 @@ export const listSessionsShortcut: SlashCommand = {
 学习如何使用 `hidden: true` 创建只需直接输入的命令
 
 ### 2. 斜杠命令系统架构
-理解 DeepV Code 的命令加载、路由、执行流程
+理解 Easy Code 的命令加载、路由、执行流程
 
 ### 3. 命令服务化
 了解如何通过 CommandService 管理多个来源的命令
@@ -286,6 +286,6 @@ A: 参照 `newCommand.ts` 创建新文件，然后在 `BuiltinCommandLoader.ts` 
 ---
 
 **实现日期**: 2026-04-02
-**开发者**: DeepV Code Team
+**开发者**: Easy Code Team
 **版本**: v1.0.316+
 **状态**: ✅ 完成并提交

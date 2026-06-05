@@ -1,10 +1,10 @@
-# DeepV Code RemoteServer 技术分析文档
+# Easy Code RemoteServer 技术分析文档
 
 > **更新日志**: 本文档最近更新于2025年8月27日，新增了性能优化建议和故障排除指南。
 
 ## 📋 概述
 
-RemoteServer是DeepV Code项目中的核心远程访问组件，它通过WebSocket协议和Web界面，将命令行工具扩展为可远程访问的现代化应用。本文档详细分析了RemoteServer的架构设计、功能特性和使用方法。
+RemoteServer是Easy Code项目中的核心远程访问组件，它通过WebSocket协议和Web界面，将命令行工具扩展为可远程访问的现代化应用。本文档详细分析了RemoteServer的架构设计、功能特性和使用方法。
 
 **⚡ 快速特性**：
 - 🌐 支持跨平台远程访问 (iOS/Android/Web)
@@ -18,7 +18,7 @@ RemoteServer是DeepV Code项目中的核心远程访问组件，它通过WebSock
 ### 架构图
 ```
 ┌─────────────────┐    WebSocket     ┌─────────────────┐    直接调用    ┌─────────────────┐
-│   移动端/Web    │ ◄─────────────► │  RemoteServer   │ ◄────────────► │  DeepV Code CLI │
+│   移动端/Web    │ ◄─────────────► │  RemoteServer   │ ◄────────────► │  Easy Code CLI │
 │     客户端      │                 │   (桥梁服务器)   │                │                 │
 └─────────────────┘                 └─────────────────┘                └─────────────────┘
         │                                   │
@@ -390,7 +390,7 @@ npm run start -- --local-mode --debug-ws
 
 ## 📝 总结
 
-RemoteServer是DeepV Code项目的重要创新，它将传统的命令行工具转变为现代化的远程访问应用。通过WebSocket协议和Web界面，用户可以在任何设备上享受完整的AI编程体验。
+RemoteServer是Easy Code项目的重要创新，它将传统的命令行工具转变为现代化的远程访问应用。通过WebSocket协议和Web界面，用户可以在任何设备上享受完整的AI编程体验。
 
 ### 核心价值
 1. **无缝体验**: 移动端和Web端与CLI完全一致的功能
@@ -405,5 +405,5 @@ RemoteServer不仅是技术突破，更是用户体验的重大提升，为AI编
 **文档版本**: v1.2  
 **最后更新**: 2025年8月27日  
 **维护者**: @yykingking  
-**技术支持**: DeepV Code Team  
+**技术支持**: Easy Code Team  
 **工具演示**: ✅ 已完成所有CLI工具功能验证

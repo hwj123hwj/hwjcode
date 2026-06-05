@@ -1,8 +1,8 @@
-# DeepVCode Hooks System Implementation Guide
+# EasyCode Hooks System Implementation Guide
 
 ## Overview
 
-DeepVCode已实现完整的Hooks系统，提供11个事件钩子来拦截和修改系统行为。本文档说明如何在项目中使用和集成hooks机制。
+EasyCode已实现完整的Hooks系统，提供11个事件钩子来拦截和修改系统行为。本文档说明如何在项目中使用和集成hooks机制。
 
 ## Architecture
 
@@ -408,7 +408,7 @@ Hook执行会自动记录遥测数据，包括：
 
 ## 与Gemini CLI的兼容性
 
-DeepVCode的hooks实现基于Gemini CLI 0.20.2的设计：
+EasyCode的hooks实现基于Gemini CLI 0.20.2的设计：
 - 相同的输入输出格式
 - 相同的事件模型
 - 相同的配置结构

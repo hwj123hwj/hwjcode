@@ -1,6 +1,6 @@
 # Extensions 命令使用指南
 
-Extensions 命令用于管理 DeepV Code CLI 的扩展。扩展可以添加自定义命令、提供 MCP 工具和上下文信息。
+Extensions 命令用于管理 Easy Code CLI 的扩展。扩展可以添加自定义命令、提供 MCP 工具和上下文信息。
 
 ## 命令概览
 

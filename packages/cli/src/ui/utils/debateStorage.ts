@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2026 DeepV Code team
+ * Copyright 2026 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  *
  * Per-project persistence for debate presets.

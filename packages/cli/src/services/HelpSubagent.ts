@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -105,7 +105,7 @@ export class HelpSubagent {
     const lang = HelpSubagent.detectLanguage();
 
     if (lang === 'zh') {
-      return `你是 DeepV Code CLI 的智能帮助助手。
+      return `你是 Easy Code CLI 的智能帮助助手。
 
 你的知识库包含了所有 CLI 命令和功能的详细信息。请根据以下知识库内容回答用户的问题：
 
@@ -121,7 +121,7 @@ ${knowledgeBase}
 
 请直接回答用户的问题。`;
     } else {
-      return `You are the intelligent help assistant for DeepV Code CLI.
+      return `You are the intelligent help assistant for Easy Code CLI.
 
 Your knowledge base contains detailed information about all CLI commands and features. Please answer user questions based on the following knowledge base:
 

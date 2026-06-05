@@ -1,6 +1,6 @@
 # `local_time` Tool
 
-A built-in tool that returns the current wall-clock local time of the machine running DeepV Code.
+A built-in tool that returns the current wall-clock local time of the machine running Easy Code.
 
 ## Purpose
 

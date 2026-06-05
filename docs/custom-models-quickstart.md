@@ -4,7 +4,7 @@
 
 ### 第一步：启动配置向导
 
-在 DeepV Code 中输入：
+在 Easy Code 中输入：
 
 ```
 /add-model
@@ -226,8 +226,8 @@ Max Tokens:   8192
 ## 🔧 故障排除
 
 ### 向导打不开？
-- 确保使用最新版本的 DeepV Code
-- 尝试重启 DeepV Code
+- 确保使用最新版本的 Easy Code
+- 尝试重启 Easy Code
 
 ### 配置保存失败？
 - 检查 `~/.deepv` 目录是否有写入权限
@@ -236,7 +236,7 @@ Max Tokens:   8192
 ### 模型不显示？
 - 检查 ID 是否以 `custom-` 开头
 - 检查 `enabled` 字段是否为 `true`
-- 重启 DeepV Code
+- 重启 Easy Code
 
 ### API调用失败？
 - 验证 API Key 是否正确
@@ -247,7 +247,7 @@ Max Tokens:   8192
 ### 环境变量未生效？
 - 确保使用 `${VAR_NAME}` 格式（带花括号）
 - 检查环境变量是否已设置
-- 重启 DeepV Code
+- 重启 Easy Code
 
 ## 📚 更多信息
 

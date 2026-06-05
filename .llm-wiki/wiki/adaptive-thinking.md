@@ -7,7 +7,7 @@ sources: [packages/core/src/core/customModelAdapter.ts, packages/cli/src/ui/comm
 
 # Adaptive Thinking Mode & Reasoning
 
-DeepV Code features an advanced Adaptive Thinking Mode that provides a unified, highly optimized interface for managing LLM reasoning capabilities (such as Anthropic's Claude Thinking Budget, OpenAI's reasoning effort, and Google's Gemini thinking budget parameters).
+Easy Code features an advanced Adaptive Thinking Mode that provides a unified, highly optimized interface for managing LLM reasoning capabilities (such as Anthropic's Claude Thinking Budget, OpenAI's reasoning effort, and Google's Gemini thinking budget parameters).
 
 ## The Core Concept
 
@@ -16,7 +16,7 @@ Modern frontier models support "thinking/reasoning" before outputting their fina
 - **Google Gemini**: Uses `thinking_budget` configuration.
 - **Anthropic Claude**: Uses `thinking` with explicit `max_tokens` budgets.
 
-DeepV Code maps these distinct specifications into a unified **Thinking Effort Selector** that works across all supported models.
+Easy Code maps these distinct specifications into a unified **Thinking Effort Selector** that works across all supported models.
 
 ```
 User Selection (Thinking / Effort level)
@@ -27,7 +27,7 @@ User Selection (Thinking / Effort level)
 
 ## UI & UX Implementations
 
-Reasoning tokens can bloat the chat screen. DeepV Code renders reasoning beautifully:
+Reasoning tokens can bloat the chat screen. Easy Code renders reasoning beautifully:
 1. **Terminal / CLI UI**:
    - Displays a custom `🧠` Brain icon in front of the active model's name in the footer.
    - Collapses live thinking thoughts into an elegant, styled inline markdown block (`ReasoningDisplay.tsx`).

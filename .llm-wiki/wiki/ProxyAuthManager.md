@@ -11,7 +11,7 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 ## Overview
 
-`ProxyAuthManager` 以单例模式管理通过 DeepV Lab 服务器的 JWT 认证。是 DeepV Code 的主要认证机制（proxy-first auth）。
+`ProxyAuthManager` 以单例模式管理通过 DeepV Lab 服务器的 JWT 认证。是 Easy Code 的主要认证机制（proxy-first auth）。
 
 ## Pattern
 
