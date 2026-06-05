@@ -322,6 +322,96 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.pendingImages[0].imageKey).toBe('img_v2_123');
     expect(receivedMsg.pendingImages[0].placeholder).toBe('[图片_1]');
   });
+
+  it('correctly parses merge_forward message and extracts nested sub-messages', async () => {
+    await gateway.connect();
+
+    const mockFetchOk = (body: any) => ({
+      ok: true,
+      json: async () => body,
+    });
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/merged_forward')) {
+        return mockFetchOk({
+          code: 0,
+          msg: 'success',
+          data: {
+            items: [
+              {
+                message_id: 'om_sub_1',
+                message_type: 'text',
+                content: JSON.stringify({ text: 'hello from sub1' }),
+                create_time: '1615367851000',
+                sender: {
+                  id: 'ou_user_1',
+                  id_type: 'open_id',
+                  sender_type: 'user',
+                },
+              },
+              {
+                message_id: 'om_sub_2',
+                message_type: 'file',
+                content: JSON.stringify({ file_key: 'file_sub_2', file_name: 'nested.zip' }),
+                create_time: '1615367852000',
+                sender: {
+                  id: 'ou_user_2',
+                  id_type: 'open_id',
+                  sender_type: 'user',
+                },
+              },
+            ],
+          },
+        });
+      }
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({
+          tenant_access_token: 't-mock-token',
+          expire: 7200,
+        });
+      }
+      return mockFetchOk({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_merge_123',
+          message_type: 'merge_forward',
+          content: 'Merged and Forwarded Message',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+    expect(receivedMsg.text).toContain('[合并转发的消息记录]');
+    expect(receivedMsg.text).toContain('ou_user_1');
+    expect(receivedMsg.text).toContain('hello from sub1');
+    expect(receivedMsg.text).toContain('ou_user_2');
+    expect(receivedMsg.text).toContain('[文件消息: nested.zip]');
+    expect(receivedMsg.pendingFiles).toBeDefined();
+    expect(receivedMsg.pendingFiles).toHaveLength(1);
+    expect(receivedMsg.pendingFiles[0].fileKey).toBe('file_sub_2');
+    expect(receivedMsg.pendingFiles[0].fileName).toBe('nested.zip');
+  });
 });
 
 // ---------------------------------------------------------------------------
