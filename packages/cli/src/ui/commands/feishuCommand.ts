@@ -190,17 +190,20 @@ export function buildBoundProjectsLines(
     return lines;
   }
 
+  lines.push('');
+  lines.push(`| ${t('feishu.status.col_status')} | ${t('feishu.status.col_chat')} | ${t('feishu.status.col_path')} |`);
+  lines.push('| :---: | :--- | :--- |');
+
   for (const [chatId, route] of entries) {
     const isActive = activeSet.has(chatId);
     const name = chatNames[chatId];
     // 主显示名：优先群名（附带 chatId 便于排查），否则直接 chatId。
     const display = name ? `${name} (${chatId})` : chatId;
-    const prefix = isActive ? '🟢 ' : '   ';
-    const suffix = isActive ? ` ${t('feishu.status.bound_active_suffix')}` : '';
+    const statusPart = isActive ? `🟢 ${t('feishu.status.bound_active_suffix')}` : ' ';
     const pathPart = route?.projectRoot
-      ? `  📂 ${shortenProjectPath(route.projectRoot)}`
-      : '';
-    lines.push(`${prefix}${display}${suffix}${pathPart}`);
+      ? `\`${shortenProjectPath(route.projectRoot)}\``
+      : '-';
+    lines.push(`| ${statusPart} | ${display} | ${pathPart} |`);
   }
 
   return lines;

@@ -97,7 +97,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
     return actB - actA;
   });
 
-  const MAX_VISIBLE_PROJECTS = 3;
+  const MAX_VISIBLE_PROJECTS = 8;
   const visibleProjects = sortedRouteEntries.slice(0, MAX_VISIBLE_PROJECTS);
   const remainingCount = sortedRouteEntries.length - MAX_VISIBLE_PROJECTS;
 
