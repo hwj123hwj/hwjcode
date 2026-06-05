@@ -1,6 +1,6 @@
 ---
 type: entity
-date: 2026-05-30
+date: 2026-06-05
 tags: [feishu, lark, gateway, bot-integration, services]
 sources: [packages/cli/src/services/feishu/gateway.ts, packages/cli/src/ui/commands/feishuCommand.ts, packages/cli/src/services/feishu/credentials.ts]
 ---
@@ -69,6 +69,15 @@ The `SendFeishuFileTool` (`feishu-send-file-tool.ts`) exposes file uploads to th
 ### ⚡ Live Output Streaming & Fallbacks
 - Executes `lark-cli` operations directly, capturing dynamic outputs.
 - Gracefully handles browser flow login and permission approvals asynchronously, updating status cards in real-time.
+
+### 🔒 Security, Logging & UI Layout Protections
+To guarantee a clean TUI (terminal) display and protect sensitive corporate prompt secrets, the Feishu integration uses two critical safeguards:
+1. **Safe Logging Truncation (`safeTruncateForLog`)**:
+   - Logging full user messages or compiled system instructions directly to `process.stderr` (e.g. `[Feishu Debug] Raw messageText from Feishu`) would leak private system prompts (especially the compiled `/goal` mode contract containing hundreds of lines of constraints) and completely clutter/corrupt the terminal's React-Ink layout.
+   - All inbound and paths-reconstructed message text logged in the terminal is automatically sanitized using `safeTruncateForLog`. It converts all newlines into single spaces (preventing multi-line spill-over) and truncates text to 150 characters with a total character suffix (e.g. `... (truncated, total 12053 chars)`).
+2. **Tool Card Display Clamping (`clampCodeBlock`)**:
+   - Standard Feishu cards have strict character limits. A single massive tool block output (like a large file write or a lengthy bash stdout) can exceed Feishu's limits, causing card failures or unwanted pagination.
+   - Large tool blocks are parsed and clamped via `clampCodeBlock` using a dual-constraint model (lines + characters), preserving readability while guaranteeing layout compliance on all screens.
 
 ## Related Pages
 - [[lark-cli-tool]]
