@@ -4,8 +4,8 @@
 
 **AI-Powered Intelligent Software Engineering Assistant**
 
-> ℹ️ **Rebranding notice**: This project was previously known as **DeepV Code** and has been renamed to **Easy Code**.
-> Package names, command names, and config directories (`deepv-code` / `dvcode` / `.deepvcode/` etc.) are kept in the transition period for backward compatibility; new docs and UI use the new brand name.
+> ℹ️ **Rebranding notice**: This project was previously known as **Easy Code** and has been renamed to **Easy Code**.
+> Package names, command names, and config directories (`easycode-ai` / `easycode` / `.easycode/` etc.) are kept in the transition period for backward compatibility; new docs and UI use the new brand name.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
@@ -45,22 +45,22 @@ Unlike traditional code completion tools, Easy Code is an intelligent agent capa
 ### Option 1: npm Global Install (Recommended)
 
 ```bash
-npm install -g deepv-code
+npm install -g easycode-ai
 ```
 
 Or using yarn / pnpm:
 
 ```bash
-yarn global add deepv-code
+yarn global add easycode-ai
 # or
-pnpm add -g deepv-code
+pnpm add -g easycode-ai
 ```
 
 ### Option 2: Build from Source
 
 ```bash
 # Clone repository
-git clone https://github.com/OrionStarAI/DeepVCode.git
+git clone https://github.com/OrionStarAI/EasyCodeCode.git
 cd EasyCode
 
 # Install dependencies
@@ -76,7 +76,7 @@ npm run dev
 
 If you want to deploy the Easy Code server locally or in a private environment, you can use our open-source version:
 
-**Open Source Server:** [EasyCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
+**Open Source Server:** [EasyCode-Server-mini](https://github.com/OrionStarAI/EasyCodeCode-Server-mini)
 
 To start the CLI and connect to your local server:
 
@@ -92,26 +92,26 @@ cross-env DEEPX_SERVER_URL=http://localhost:8000 npm run start
 After installation, start in any project directory:
 
 ```bash
-dvcode
+easycode
 ```
 
 ### Basic Usage Examples
 
 ```bash
 # Start interactive session
-dvcode
+easycode
 
 # Use specific model
-dvcode -m gemini-2.0-flash
+easycode -m gemini-2.0-flash
 
 # Execute single prompt (non-interactive mode)
-dvcode -p "Explain the architecture of this project"
+easycode -p "Explain the architecture of this project"
 
 # Continue last session
-dvcode -c
+easycode -c
 
 # Enable YOLO mode (auto-execute all operations)
-dvcode -y
+easycode -y
 ```
 
 ### Slash Commands
@@ -249,7 +249,7 @@ MCP allows AI models to:
 
 ### Configuring MCP Servers
 
-Create `.deepvcode/settings.json` in your project root:
+Create `.easycode/settings.json` in your project root:
 
 #### Method 1: Standard Mode (Command-based)
 
@@ -373,7 +373,7 @@ Then select **"Model Management"** option and follow the wizard prompts:
 
 #### Method 2: Manual Configuration File
 
-Edit `~/.deepv/custom-models.json`:
+Edit `~/.easycode-user/custom-models.json`:
 
 ```json
 {
@@ -531,7 +531,7 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 - Full integration with all Easy Code features
 
 ⚠️ **Notes:**
-- Custom models don't consume DeepV credits
+- Custom models don't consume EasyCode credits
 - Pay directly to API providers
 - Some advanced features may be unavailable depending on provider limitations
 - Token counting determined by provider
@@ -546,7 +546,7 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 
 ## 📖 Documentation
 
-- 📘 **[Whitepaper](./DeepV_Code_Whitepaper.md)** - Complete product and technical documentation
+- 📘 **[Whitepaper](./EasyCode_Code_Whitepaper.md)** - Complete product and technical documentation
 - 📗 **[Architecture Overview](./docs/architecture.md)** - System architecture design
 - 📙 **[Hooks User Guide](./docs/hooks-user-guide.md)** - Hooks mechanism details
 - 📕 **[MCP Integration](./docs/mcp-improvements-summary.md)** - MCP protocol integration
@@ -575,7 +575,7 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 3. Use `npm run lint` to ensure code standards
 4. Run `npm run test` before submitting PR
 
-> 💡 **Tip**: We recommend using `dvcode` for self-development. The project's `DEEPV.md` provides development guidelines for the AI model.
+> 💡 **Tip**: We recommend using `easycode` for self-development. The project's `EASYCODE.md` provides development guidelines for the AI model.
 
 ---
 
@@ -591,13 +591,13 @@ We welcome community contributions! Please follow these steps:
 
 ### Reporting Issues
 
-If you find bugs or have feature suggestions, please [create an Issue](https://github.com/OrionStarAI/DeepVCode/issues).
+If you find bugs or have feature suggestions, please [create an Issue](https://github.com/OrionStarAI/EasyCodeCode/issues).
 
 ---
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=OrionStarAI/DeepVCode&type=date&legend=top-left)](https://www.star-history.com/#OrionStarAI/DeepVCode&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=OrionStarAI/EasyCodeCode&type=date&legend=top-left)](https://www.star-history.com/#OrionStarAI/EasyCodeCode&type=date&legend=top-left)
 
 ---
 
@@ -609,10 +609,10 @@ This project is open-sourced under the [Apache License 2.0](LICENSE).
 
 ## 🔗 Links
 
-- 🌐 **Official Website**: [https://dvcode.deepvlab.ai](https://dvcode.deepvlab.ai)
-- 📦 **npm Package**: [deepv-code](https://www.npmjs.com/package/deepv-code)
-- 🖥️ **Open Source Server**: [EasyCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
-- 🐦 **Issue Tracker**: [GitHub Issues](https://github.com/OrionStarAI/DeepVCode/issues)
+- 🌐 **Official Website**: [https://easycode.bot](https://easycode.bot)
+- 📦 **npm Package**: [easycode-ai](https://www.npmjs.com/package/easycode-ai)
+- 🖥️ **Open Source Server**: [EasyCode-Server-mini](https://github.com/OrionStarAI/EasyCodeCode-Server-mini)
+- 🐦 **Issue Tracker**: [GitHub Issues](https://github.com/OrionStarAI/EasyCodeCode/issues)
 
 ---
 

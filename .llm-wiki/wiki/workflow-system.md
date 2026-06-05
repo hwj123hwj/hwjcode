@@ -174,7 +174,7 @@ function filterToolsByMessage(userContent: Content, tools: unknown): unknown {
 
 | 层级 | 超时值 | 位置 | 触发场景 |
 |------|--------|------|----------|
-| stream fetch 连接层 | 300s | `DeepVServerAdapter.executeStreamAPICall` | 服务端接受请求但迟迟不发响应头 |
+| stream fetch 连接层 | 300s | `EasyCodeServerAdapter.executeStreamAPICall` | 服务端接受请求但迟迟不发响应头 |
 | stream per-chunk | 300s | `createStreamGenerator` | 流建立后 chunk 间隔超时 |
 | 工具回调等待 | 10min | `SubAgent.processAndStorePendingToolResults` | shell/工具调用挂起，回调永不返回 |
 | 单 agent 整体 | 30min (soft) | `WorkflowAgentBridge.run` warningTimer | 复杂任务运行过长，仅打印警告 |
@@ -293,7 +293,7 @@ compressHistory() ← 原有重型压缩
 
 ---
 
-### P3：自定义 Agent 定义文件夹（`.deepvcode/agents/`）
+### P3：自定义 Agent 定义文件夹（`.easycode/agents/`）
 
 **背景**：Claude Code 支持在 `.claude/agents/*.md` 里用 YAML frontmatter 定义可复用的专属 sub-agent，在 workflow 脚本中通过 `agent_type: 'my-agent-name'` 引用。
 

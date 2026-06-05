@@ -1353,3 +1353,98 @@ describe('FeishuGateway - getChatName', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Goal-driven mode form card structure (regression for Feishu code=230099)
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway - askGoalFormViaCard (goal contract form card)', () => {
+  let gateway: FeishuGateway;
+
+  const mockFetchOk = (body: any) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+  });
+
+  // 飞书 select_static 组件【不支持】label 属性。早期版本误给 intensity 下拉
+  // 加了 label，导致整卡 JSON 校验失败（code=230099 "unknown property:
+  // label, path: ... select_static"），表单根本发不出去 → 用户看到
+  // "目标表单发送失败"。此用例锁死该回归。
+  it('does NOT put a `label` property on any select_static (Feishu rejects it)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_goal_1' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askGoalFormViaCard('oc_goal_chat', 50);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/open-apis/im/v1/messages');
+    const card = JSON.parse(JSON.parse(init?.body as string).content);
+    expect(card.schema).toBe('2.0');
+
+    const form = card.body.elements.find((e: any) => e.tag === 'form');
+    expect(form).toBeTruthy();
+
+    const selects = form.elements.filter(
+      (e: any) => e.tag === 'select_static' || e.tag === 'multi_select_static',
+    );
+    expect(selects.length).toBeGreaterThan(0);
+    for (const sel of selects) {
+      expect(sel).not.toHaveProperty('label');
+    }
+
+    await promise; // 让超时 resolve，避免悬挂
+  });
+
+  it('builds a complete goal form: task/criteria/forbidden/hours inputs + intensity select + submit', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockFetchOk({ code: 0, data: { message_id: 'om_goal_2' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const promise = gateway.askGoalFormViaCard('oc_goal_chat', 50);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const [, init] = fetchMock.mock.calls[0];
+    const card = JSON.parse(JSON.parse(init?.body as string).content);
+    const form = card.body.elements.find((e: any) => e.tag === 'form');
+
+    const inputNames = form.elements
+      .filter((e: any) => e.tag === 'input')
+      .map((e: any) => e.name);
+    expect(inputNames).toEqual(
+      expect.arrayContaining(['task', 'criteria', 'forbidden', 'hours']),
+    );
+
+    const select = form.elements.find((e: any) => e.tag === 'select_static');
+    expect(select.name).toBe('intensity');
+    expect(select.options.map((o: any) => o.value)).toEqual([
+      'steady',
+      'standard',
+      'intense',
+    ]);
+
+    const submit = form.elements.find((e: any) => e.tag === 'button');
+    expect(submit.form_action_type).toBe('submit');
+    expect(submit.name).toBe('submit_btn');
+
+    await promise;
+  });
+
+  it('returns ok:false (non-timeout) when card send fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockFetchOk({ code: 230099, msg: 'parse card json err' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await gateway.askGoalFormViaCard('oc_goal_chat', 50);
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBeFalsy();
+  });
+});
+

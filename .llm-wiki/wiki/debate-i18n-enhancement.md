@@ -254,7 +254,7 @@ const {
   "preferredLanguage": "zh"  // 或 "en"，或自定义如 "日语"
 }
 ```
-- 存储位置：`.deepv/settings.json`（用户级）或 `.deepvcode/settings.json`（工作区级）
+- 存储位置：`.easycode-user/settings.json`（用户级）或 `.easycode/settings.json`（工作区级）
 - 使用 `settings.setValue(SettingScope.Workspace, 'preferredLanguage', lang)` 保存
 
 ## 完整 i18n 文本列表

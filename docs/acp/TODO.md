@@ -2,7 +2,7 @@
 
 > **目标**：让 Easy Code 同时支持
 > - 作为 **Agent** 被外部 GUI（Zed 等）调用
-> - 作为 **Client** 调用外部 ACP Agent（Claude Code / 其他 dvcode 实例 / 自定义 agent）
+> - 作为 **Client** 调用外部 ACP Agent（Claude Code / 其他 easycode 实例 / 自定义 agent）
 >
 > **协议标准**：[Agent Client Protocol](https://agentclientprotocol.com/) 官方版（`@zed-industries/agent-client-protocol` npm 包）
 >
@@ -90,7 +90,7 @@
 ### 2.1 入口替换
 - [ ] 新建 `acp/agent/runAgent.ts`（替代 `runAcpPeer`）
   - [ ] 设置 stderr 日志重定向
-  - [ ] 构造 `AgentSideConnection`，注入 `DeepVAgent`
+  - [ ] 构造 `AgentSideConnection`，注入 `EasyCodeAgent`
 - [ ] 修改 `packages/cli/src/gemini.tsx:833`
   ```ts
   if (config.getExperimentalAcp()) {
@@ -108,8 +108,8 @@
   - [ ] `get(id)`、`delete(id)`、`cancelAll()`
   - [ ] （可选）`load(id)` 支持 `session/load` 方法做会话恢复
 
-### 2.3 DeepVAgent 主类
-- [ ] 新建 `acp/agent/DeepVAgent.ts`（替代 `GeminiAgent`），实现官方 `Agent` 接口：
+### 2.3 EasyCodeAgent 主类
+- [ ] 新建 `acp/agent/EasyCodeAgent.ts`（替代 `GeminiAgent`），实现官方 `Agent` 接口：
   - [ ] `initialize(params)` → 返回 `protocolVersion`、`agentCapabilities`、`authMethods`
     - [ ] 读取客户端 `clientCapabilities` 存到 SessionManager
     - [ ] 声明支持的 `promptCapabilities`：`image: true`、`audio: false`、`embeddedContext: true`
@@ -167,7 +167,7 @@
 ### 3.2 进程生命周期
 - [ ] 新建 `acp/client/AgentProcessManager.ts`
   - [ ] `spawn(config: AgentConfig)` —— child_process.spawn 外部 agent
-  - [ ] 监听 stderr 日志转发到 DeepV debug channel
+  - [ ] 监听 stderr 日志转发到 EasyCode debug channel
   - [ ] 崩溃检测 + 退出码上报
   - [ ] `dispose()` —— SIGTERM → 超时后 SIGKILL
   - [ ] 心跳/健康检查（可选，优先简单实现）
@@ -176,7 +176,7 @@
 ### 3.3 Client 能力提供（反向被 Agent 调用）
 - [ ] 新建 `acp/client/capabilities/fsProvider.ts`
   - [ ] `fs/read_text_file` —— 复用 `packages/core/src/tools/read-file.ts` 的过滤逻辑
-    - [ ] 尊重 `.gitignore` / `.deepvignore`
+    - [ ] 尊重 `.gitignore` / `.easycode-userignore`
     - [ ] 校验路径在 session cwd 内，防目录穿越
   - [ ] `fs/write_text_file` —— 复用 `write-file.ts` + Hook 检查
     - [ ] 必须走 `PreToolUse` hook（安全边界）
@@ -184,16 +184,16 @@
   - [ ] `terminal/create` / `terminal/output` / `terminal/wait_for_exit` / `terminal/kill` / `terminal/release`
   - [ ] 通过 settings 开关控制：`acpAgents.<name>.allowTerminal: true`
 - [ ] 权限桥接 `acp/client/capabilities/permissionBridge.ts`
-  - [ ] 收到外部 agent 的 `session/request_permission` → 在 DeepV TUI 弹确认对话框
+  - [ ] 收到外部 agent 的 `session/request_permission` → 在 EasyCode TUI 弹确认对话框
   - [ ] 复用现有 `PermissionDialog` 组件（`packages/cli/src/ui/components/`）
-  - [ ] 把 DeepV 的 outcome 映射回 `{ selected: { optionId } }` 或 `{ cancelled }`
+  - [ ] 把 EasyCode 的 outcome 映射回 `{ selected: { optionId } }` 或 `{ cancelled }`
 
 ### 3.4 session/update 消费
 - [ ] 在 `AgentConnection` 注册 `sessionUpdate` 处理器
   - [ ] `agent_message_chunk` → 流式追加到 ExternalAgentTool 的 `streamingContentUpdater`
   - [ ] `thought_chunk` → 可选展示（灰色文本 / 折叠）
   - [ ] `plan` → 渲染嵌套 todo 展示
-  - [ ] `tool_call` / `tool_call_update` → 在 DeepV TUI 显示**嵌套** tool call（缩进一级）
+  - [ ] `tool_call` / `tool_call_update` → 在 EasyCode TUI 显示**嵌套** tool call（缩进一级）
   - [ ] `available_commands_update` → 记录外部 agent 支持的 slash 命令（可选）
 
 ---
@@ -282,15 +282,15 @@
 
 ### 6.2 E2E 自闭环测试
 - [ ] `acp/__tests__/loopback.test.ts`
-  - [ ] 在测试中 spawn 一个 `dvcode --experimental-acp` 子进程
+  - [ ] 在测试中 spawn 一个 `easycode --experimental-acp` 子进程
   - [ ] 用 `ClientSideConnection` 连上去
   - [ ] 发起 prompt，验证 sessionUpdate 流和最终 stopReason
   - [ ] 测试 fs/read_text_file 反向调用
 
 ### 6.3 手动验收清单
-- [ ] 用 Zed 连接 `dvcode --experimental-acp`，跑完整对话 + 工具调用 + 权限确认
-- [ ] 用 DeepV 连接另一个 `dvcode --experimental-acp` 实例（闭环）
-- [ ] 用 DeepV 连接 Claude Code（需确认 Claude Code 是否支持 ACP）
+- [ ] 用 Zed 连接 `easycode --experimental-acp`，跑完整对话 + 工具调用 + 权限确认
+- [ ] 用 EasyCode 连接另一个 `easycode --experimental-acp` 实例（闭环）
+- [ ] 用 EasyCode 连接 Claude Code（需确认 Claude Code 是否支持 ACP）
 - [ ] 网络断开 / agent 崩溃恢复行为
 - [ ] 大文件场景（读写 1MB+）
 - [ ] 中文消息 / emoji 编码
@@ -329,22 +329,22 @@
 
 ## 附录 A：协议方法映射表
 
-### Agent 方法（外部 → DeepV）
+### Agent 方法（外部 → EasyCode）
 
 | 旧 (0.0.9) | 新 (官方标准) | 实现位置 |
 |---|---|---|
-| `initialize` | `initialize` | `DeepVAgent.initialize` |
-| `authenticate` | `authenticate` | `DeepVAgent.authenticate` |
-| — | `session/new` | `DeepVAgent.newSession` |
-| — | `session/load` | `DeepVAgent.loadSession`（可选） |
-| `sendUserMessage` | `session/prompt` | `DeepVAgent.prompt` |
-| `cancelSendMessage` | `session/cancel` | `DeepVAgent.cancel` |
+| `initialize` | `initialize` | `EasyCodeAgent.initialize` |
+| `authenticate` | `authenticate` | `EasyCodeAgent.authenticate` |
+| — | `session/new` | `EasyCodeAgent.newSession` |
+| — | `session/load` | `EasyCodeAgent.loadSession`（可选） |
+| `sendUserMessage` | `session/prompt` | `EasyCodeAgent.prompt` |
+| `cancelSendMessage` | `session/cancel` | `EasyCodeAgent.cancel` |
 
-### Client 方法（DeepV 反向调用外部 / 或作为 Client 被外部 agent 调用）
+### Client 方法（EasyCode 反向调用外部 / 或作为 Client 被外部 agent 调用）
 
 | 旧 (0.0.9) | 新 (官方标准) | 实现位置 |
 |---|---|---|
-| `streamAssistantMessageChunk` | `session/update` (agent_message_chunk) | `DeepVAgent.prompt` emit |
+| `streamAssistantMessageChunk` | `session/update` (agent_message_chunk) | `EasyCodeAgent.prompt` emit |
 | — | `session/update` (thought_chunk) | 同上 |
 | `pushToolCall` + `updateToolCall` | `session/update` (tool_call / tool_call_update) | `toolMapper.ts` |
 | `requestToolCallConfirmation` | `session/request_permission` | `toolMapper.ts` |
@@ -354,13 +354,13 @@
 
 ### 能力声明
 
-**Agent Capabilities**（DeepV 作为 Agent 声明）：
+**Agent Capabilities**（EasyCode 作为 Agent 声明）：
 - `loadSession`: false（初版）
 - `promptCapabilities.image`: true
 - `promptCapabilities.audio`: false
 - `promptCapabilities.embeddedContext`: true
 
-**Client Capabilities**（DeepV 作为 Client 声明，或接收 Agent 端的）：
+**Client Capabilities**（EasyCode 作为 Client 声明，或接收 Agent 端的）：
 - `fs.readTextFile`: true
 - `fs.writeTextFile`: true
 - `terminal`: 按配置开关
@@ -374,7 +374,7 @@
 packages/cli/src/acp/
 ├── agent/
 │   ├── runAgent.ts
-│   ├── DeepVAgent.ts
+│   ├── EasyCodeAgent.ts
 │   ├── sessionManager.ts
 │   ├── contentMapper.ts
 │   └── toolMapper.ts
@@ -423,14 +423,14 @@ docs/acp/troubleshooting.md
 | # | 风险 | 影响 | 缓解措施 |
 |---|---|---|---|
 | R1 | 官方 ACP 版本演进快，breaking change | 高 | 锁定版本 + 在 `package.json` 用 `~` 而非 `^`；封装 SDK 减少爆炸半径 |
-| R2 | 外部 Agent 崩溃或 hang 导致 DeepV UI 卡死 | 高 | 所有调用加超时；心跳检测；异步非阻塞；明确的 loading/error 状态 |
+| R2 | 外部 Agent 崩溃或 hang 导致 EasyCode UI 卡死 | 高 | 所有调用加超时；心跳检测；异步非阻塞；明确的 loading/error 状态 |
 | R3 | 权限桥接漏洞：外部 Agent 绕过 Hook 写文件 | 严重（安全） | fsProvider 必须走 Hook 检查；不直接暴露 Node `fs` 句柄 |
 | R4 | 嵌套 tool call 在 TUI 显示混乱 | 中 | 设计缩进层级规则；限制嵌套深度（最多 2 层）；溢出折叠 |
 | R5 | 旧版用户升级后连不上 | 中 | 清晰的错误消息指引；migration 文档；保留一个 git tag 作为回滚点 |
 | R6 | 大文件 / 大 token 在 JSON-RPC 上性能差 | 低 | 使用流式 chunk；fs 读取分段；必要时 base64 + 压缩（未来优化） |
 | R7 | Windows 平台 stdio 管道编码问题 | 中 | 显式 UTF-8；测试 Windows Terminal + CMD + PowerShell 三种环境 |
 | R8 | ToolRegistry 动态注册 API 可能不存在 | 中 | 阶段 4.2 先探查，若缺则补；注意并发安全 |
-| R9 | 外部 Agent 的 `session/request_permission` 和 DeepV 原生 permission UI 竞争 | 中 | 串行化：同一时刻只允许一个 permission 对话框；队列管理 |
+| R9 | 外部 Agent 的 `session/request_permission` 和 EasyCode 原生 permission UI 竞争 | 中 | 串行化：同一时刻只允许一个 permission 对话框；队列管理 |
 | R10 | Client 端作为长连接时内存泄漏 | 中 | 明确生命周期；断开时清理所有 pending request；压测验证 |
 
 ---

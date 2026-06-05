@@ -1,4 +1,4 @@
-# DeepV Code — CLI Module Facts
+# Easy Code — CLI Module Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 

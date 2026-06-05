@@ -1,6 +1,6 @@
 ---
 type: entity
-date: 2026-05-30
+date: 2026-06-05
 tags: [goal, watchdog, agent, commands]
 sources: [packages/cli/src/ui/commands/goalCommand.ts, packages/cli/src/ui/hooks/useGoalActive.ts, packages/cli/src/ui/hooks/useGoalWizard.ts]
 ---
@@ -37,6 +37,13 @@ To prevent the agent from getting stuck in infinite loops, silent errors, or idl
   - Automatically triggers `/goal clear` logic.
   - Clears `activeGoalContext` inside the Gemini client memory so subsequent context compressions do not re-inject stale goal prompts.
   - Injects a system prompt reminding the AI that its contract is now dissolved and it is free to halt.
+
+## Feishu Integration Details & Routing
+
+When executing `/goal` in the Feishu Channel, special routing is applied to maintain the session lifecycle:
+- **Interactive Form Card**: When a user inputs `/goal` or `/goal new` in a Feishu chat, the command intercepts the request and issues an interactive card form (`askGoalFormViaCard`) to the user.
+- **Deferred Launch**: Setting YOLO mode and activating the goal watchdog must be deferred until the session-specific, isolated config/client is fully initialized. Initiating them on the shared CLI config will trigger the watchdog on the main TUI hall, causing execution leak.
+- **Synchronized Message Queue**: Once the form is submitted, the compiled goal prompt (assembled via `buildGoalPrompt`) is written back to both `messageText` and `msg.text` to guarantee it safely reaches the isolated queue consumer.
 
 ## Sub-commands Reference
 

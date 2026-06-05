@@ -1,4 +1,4 @@
-# DeepV Code — Core Module Facts
+# Easy Code — Core Module Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 
@@ -14,7 +14,7 @@
 | `tools/` | 30+ tool implementations — `tools.ts` (base), `tool-registry.ts`, `shell.ts`, `edit.ts`, `read-file.ts`, `web-fetch.ts`, `mcp-client.ts` |
 | `config/` | Configuration — `config.ts`, `models.ts`, `modelCapabilities.ts`, `serverConfig.ts`, `proxyConfig.ts`, `projectSettings.ts` |
 | `services/` | Infrastructure — `sessionManager.ts`, `gitService.ts`, `fileDiscoveryService.ts`, `compressionService.ts`, `loopDetectionService.ts`, `backgroundTaskManager.ts` |
-| `auth/` | Authentication — `authenticatedHttpClient.ts`, `authNavigator.ts`, `login/authServer.ts`, `login/deepvlabAuth.ts` |
+| `auth/` | Authentication — `authenticatedHttpClient.ts`, `authNavigator.ts`, `login/authServer.ts`, `login/easycodelabAuth.ts` |
 | `hooks/` | Lifecycle hooks — `hookSystem.ts`, `hookRegistry.ts`, `hookRunner.ts`, `hookAggregator.ts`, `hookPlanner.ts`, `hookEventHandler.ts` |
 | `skills/` | Skills marketplace — `skill-loader.ts`, `marketplace-manager.ts`, `plugin-installer.ts`, `script-executor.ts`, `skill-context-injector.ts` |
 | `mcp/` | MCP integration — `oauth-provider.ts`, `oauth-token-storage.ts`, `oauth-utils.ts`, `login-provider.ts` |
@@ -33,7 +33,7 @@
 | Class | Pattern | Responsibility |
 |-------|---------|---------------|
 | `GeminiClient` | Facade | Central orchestrator; manages chat, compression, loop detection, token limits. Max 100 turns per session |
-| `ContentGenerator` | Strategy/Adapter | Abstract interface for AI backends. Implemented by `DeepVServerAdapter` |
+| `ContentGenerator` | Strategy/Adapter | Abstract interface for AI backends. Implemented by `EasyCodeServerAdapter` |
 | `Turn` | State Machine | Single conversation turn with events via `GeminiEventType` enum |
 | `ToolRegistry` | Registry | Tool discovery, registration, MCP sync; tool name sanitization |
 | `Tool<TParams, TResult>` | Interface | Base tool interface — `validateToolParams()`, `execute()`, `shouldConfirmExecute()`, `getAffectedFiles()` |

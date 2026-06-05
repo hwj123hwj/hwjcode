@@ -11,12 +11,12 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 ## Overview
 
-Core 是 Easy Code 的后端包（NPM 名 `deepv-code-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
+Core 是 Easy Code 的后端包（NPM 名 `easycode-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
 
 ## Package Info
 
 - **Path**: `packages/core`
-- **NPM**: `deepv-code-core`
+- **NPM**: `easycode-core`
 - **Entry**: `index.ts` → re-exports from `src/index.ts`
 
 ## Key Subdirectories

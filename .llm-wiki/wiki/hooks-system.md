@@ -41,7 +41,7 @@ Coordinator: [[HookSystem]] wires all layers together.
 
 ## Configuration Precedence
 
-Project `.deepvcode/settings.json` > Global `~/.deepv/settings.json` > System > Extensions
+Project `.easycode/settings.json` > Global `~/.easycode-user/settings.json` > System > Extensions
 
 ## Sources
 

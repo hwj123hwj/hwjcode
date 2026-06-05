@@ -10,6 +10,7 @@ import {
   feishuCommand,
   buildBoundProjectsLines,
   shortenProjectPath,
+  safeTruncateForLog,
   interceptFeishuLifecycleCommand,
   normalizeAskUserQuestionArgs,
 } from './feishuCommand.js';
@@ -274,6 +275,31 @@ describe('shortenProjectPath', () => {
   it('returns empty string for empty input', () => {
     expect(shortenProjectPath('')).toBe('');
     expect(shortenProjectPath(undefined as any)).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safeTruncateForLog — 安全截断日志中文本，防止超长提示词泄露
+// ---------------------------------------------------------------------------
+
+describe('safeTruncateForLog', () => {
+  it('returns empty string for empty input', () => {
+    expect(safeTruncateForLog('')).toBe('');
+    expect(safeTruncateForLog(undefined as any)).toBe('');
+  });
+
+  it('keeps text unchanged when it is within the limit and has no newlines', () => {
+    expect(safeTruncateForLog('hello world')).toBe('hello world');
+  });
+
+  it('replaces newlines with spaces', () => {
+    expect(safeTruncateForLog('line1\nline2\r\nline3')).toBe('line1 line2 line3');
+  });
+
+  it('truncates text and appends suffix when it exceeds the limit', () => {
+    const longText = 'a'.repeat(200);
+    const result = safeTruncateForLog(longText, 50);
+    expect(result).toBe('a'.repeat(50) + '... (truncated, total 200 chars)');
   });
 });
 

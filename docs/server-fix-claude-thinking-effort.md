@@ -221,8 +221,8 @@ logger.info('[Claude DEBUG] full incoming request', {
 客户端这边的相关实现：
 
 - 字段构造：`packages/core/src/types/customModel.ts::applyAnthropicAdaptiveThinking()`
-- 注入到请求体：`packages/core/src/core/DeepVServerAdapter.ts::applyGenAIThinkingConfig()`
-- 自定义模型直连路径（不走 DeepV 服务端，参考用）：`packages/core/src/core/customModelAdapter.ts::callAnthropicModelStream()`
+- 注入到请求体：`packages/core/src/core/EasyCodeServerAdapter.ts::applyGenAIThinkingConfig()`
+- 自定义模型直连路径（不走 EasyCode 服务端，参考用）：`packages/core/src/core/customModelAdapter.ts::callAnthropicModelStream()`
 
 调试日志开关：客户端启用 `[thinking-debug]` 日志（已加在 `applyGenAIThinkingConfig` 入口和出口），可逐请求打印实际发送的字段，方便联调比对。
 

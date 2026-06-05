@@ -137,7 +137,7 @@ The CLI and VS Code extension communicate with AI models through the core librar
 
 ### 🤝 Contributing
 - **[Contributing Guide](../CONTRIBUTING.md)** - How to contribute to Easy Code
-- **[Project Knowledge Base](../DEEPV.md)** - Core project information for AI assistants
+- **[Project Knowledge Base](../EASYCODE.md)** - Core project information for AI assistants
 
 ### 📝 Examples
 - **[Proxy Script Example](./examples/proxy-script.md)** - Custom proxy configuration example

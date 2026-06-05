@@ -11,7 +11,7 @@ sources: [raw/02-core-module.md, raw/01-architecture.md]
 
 ## Overview
 
-`ContentGenerator` 是 AI 后端的抽象接口，定义了与 AI 模型交互的标准协议。由 [[DeepVServerAdapter]] 实现，适配代理 API 到统一的内容生成接口。
+`ContentGenerator` 是 AI 后端的抽象接口，定义了与 AI 模型交互的标准协议。由 [[EasyCodeServerAdapter]] 实现，适配代理 API 到统一的内容生成接口。
 
 ## Pattern
 
@@ -19,7 +19,7 @@ sources: [raw/02-core-module.md, raw/01-architecture.md]
 
 ## Implementation
 
-- [[DeepVServerAdapter]] — adapts DeepV Lab proxy API
+- [[EasyCodeServerAdapter]] — adapts EasyCode Lab proxy API
 
 ## Location
 

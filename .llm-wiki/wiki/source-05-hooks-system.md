@@ -43,8 +43,8 @@ All logic in [[core-module]], shared by CLI and VSCode.
 ## Configuration
 
 ### Precedence (high → low)
-1. Project: `.deepvcode/settings.json`
-2. Global: `~/.deepv/settings.json`
+1. Project: `.easycode/settings.json`
+2. Global: `~/.easycode-user/settings.json`
 3. System
 4. Extensions
 
@@ -57,7 +57,7 @@ All logic in [[core-module]], shared by CLI and VSCode.
       "sequential": false,
       "hooks": [{
         "type": "command",
-        "command": "bash .deepvcode/hooks/security-gate.sh",
+        "command": "bash .easycode/hooks/security-gate.sh",
         "timeout": 30000
       }]
     }]

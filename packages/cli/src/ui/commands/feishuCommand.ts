@@ -85,6 +85,13 @@ import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command
 import { SettingScope } from '../../config/settings.js';
 import { getAvailableModels } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
+import { launchGoalMode } from '../hooks/launchGoalMode.js';
+import {
+  buildGoalPrompt,
+  type GoalWizardResult,
+} from '../components/GoalWizard.js';
+import { normalizeGoalFields } from './feishuGoalForm.js';
+import { clampCodeBlock } from './feishuToolDisplay.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
 import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { t, tp } from '../utils/i18n.js';
@@ -135,6 +142,18 @@ export function shortenProjectPath(p?: string): string {
 }
 
 /**
+ * 安全截断日志中文本，防止超长系统提示词/契约泄露在 TUI 终端，同时保持日志可读性并避免多行打乱排版。
+ */
+export function safeTruncateForLog(text: string, limit = 150): string {
+  if (!text) return '';
+  const trimmed = text.trim();
+  // 替换换行符为空格，避免多行输出破坏终端排版，并截断
+  const singleLine = trimmed.replace(/\r?\n/g, ' ');
+  if (singleLine.length <= limit) return singleLine;
+  return singleLine.slice(0, limit) + `... (truncated, total ${trimmed.length} chars)`;
+}
+
+/**
  * 渲染 /feishu status 里的「绑定项目」段落（纯文本行数组）。
  *
  * 设计为模块级纯函数，便于单测，且不依赖运行时网关/凭证状态。群名解析
@@ -171,17 +190,22 @@ export function buildBoundProjectsLines(
     return lines;
   }
 
+  lines.push('');
+  lines.push(`| ${t('feishu.status.col_chat')} | ${t('feishu.status.col_path')} |`);
+  lines.push('| :--- | :--- |');
+
   for (const [chatId, route] of entries) {
     const isActive = activeSet.has(chatId);
     const name = chatNames[chatId];
     // 主显示名：优先群名（附带 chatId 便于排查），否则直接 chatId。
-    const display = name ? `${name} (${chatId})` : chatId;
-    const prefix = isActive ? '🟢 ' : '   ';
-    const suffix = isActive ? ` ${t('feishu.status.bound_active_suffix')}` : '';
+    let display = name ? `${name} (${chatId})` : chatId;
+    if (isActive) {
+      display = `🟢 ${display} ${t('feishu.status.bound_active_suffix')}`;
+    }
     const pathPart = route?.projectRoot
-      ? `  📂 ${shortenProjectPath(route.projectRoot)}`
-      : '';
-    lines.push(`${prefix}${display}${suffix}${pathPart}`);
+      ? `\`${shortenProjectPath(route.projectRoot)}\``
+      : '-';
+    lines.push(`| ${display} | ${pathPart} |`);
   }
 
   return lines;
@@ -2043,9 +2067,9 @@ async function handleCliSlashCommandInFeishu(
                   `  • \`/debate continue\` - 继续暂停的辩论\n` +
                   `  • \`/debate end\` - 强制结束当前辩论`;
         } else if (dialogType === 'goal-wizard') {
-          hint += `\n\n💡 **目标驱动模式在飞书端暂仅支持清空操作**:\n` +
-                  `  • \`/goal clear\` - 结束当前 goal 模式，释放契约约束\n\n` +
-                  `*(如需开启新目标契约任务，请直接在您的 CLI 终端物理机上通过 \`/goal\` 设定)*`;
+          hint += `\n\n💡 **目标驱动模式（飞书端已支持）**:\n` +
+                  `  • \`/goal\` 或 \`/goal new\` - 弹出目标表单卡片，填写后启动目标模式\n` +
+                  `  • \`/goal clear\` - 结束当前 goal 模式，释放契约约束`;
         }
 
         collectedTexts.push(hint);
@@ -2261,6 +2285,54 @@ async function handleStart(context?: CommandContext): Promise<string> {
       debugTrail.push(`step0=noActiveConfig`);
     }
 
+    // 🎯 拦截 `/goal` 或 `/goal new`：发送目标表单卡片收集字段，提交后启动目标驱动模式。
+    //    （`/goal clear` 不在此拦截，继续走下方通用 CLI 斜杠命令处理。）
+    //    复用 CLI 已有内核：buildGoalPrompt 组装 prompt（此处），launchGoalMode
+    //    的 YOLO+setGoalContext 延迟到隔离 session 就绪后执行（见下方）。
+    const goalMatch = messageText.trim().match(/^\/(?:goal|目标)(?:\s+(new|新建))?\s*$/i);
+    // ⚠️ 暂存本次 /goal 表单结果。launchGoalMode 必须延迟到隔离 session 的
+    //    config/client 就绪后再执行——否则 setGoalContext + YOLO 会错误地
+    //    落到【主 TUI 的共享 config】上，触发 App.tsx 的 goal watchdog 在
+    //    TUI 大厅里 submitQuery，把本应发往飞书卡片的输出泄漏到终端。
+    //    详见下方 currentConfig 就绪后的延迟启动逻辑。
+    let pendingGoalResult: GoalWizardResult | null = null;
+    if (goalMatch) {
+      if (!activeConfig) {
+        return '❌ 目标模式暂不可用：AI 客户端尚未就绪，请稍后重试。';
+      }
+      try {
+        // 发表单卡片并等待用户提交
+        const formResult = await gateway.askGoalFormViaCard(
+          msg.chatId,
+          10 * 60 * 1000,
+          msg.messageId,
+        );
+        if (!formResult.ok || !formResult.fields) {
+          return formResult.timedOut
+            ? '⏰ 目标表单等待超时，已取消。需要时请重新发送 `/goal`。'
+            : '❌ 目标表单发送失败，请稍后重新发送 `/goal`。';
+        }
+
+        // 校验 + 归一化（失败提示重填）
+        const normalized = normalizeGoalFields(formResult.fields);
+        if (!normalized.ok || !normalized.result) {
+          return `❌ ${normalized.error}`;
+        }
+
+        // 组装 goal prompt（buildGoalPrompt 是纯函数，不依赖 config）。
+        // ⚠️ 必须同时更新 messageText 与 msg.text：本条消息最终是以 `msg`
+        //    为载体入队（queue.push({ msg })），由队列消费者 handleSingleFeishuMessage
+        //    重新读取 msg.text 作为喂给 agent 的内容。只改局部 messageText 而不改
+        //    msg.text，goal prompt 会在入队边界丢失，agent 收到的仍是 "/goal"。
+        // YOLO + setGoalContext 的真正启动推迟到 currentConfig 就绪后执行。
+        pendingGoalResult = normalized.result;
+        messageText = buildGoalPrompt(normalized.result);
+        msg = { ...msg, text: messageText };
+      } catch (e: any) {
+        return `❌ 启动目标模式失败：${e?.message || String(e)}`;
+      }
+    }
+
     // 🎯 1. 实时更新当前会话上下文辅助数据（供 session 隔离下的工具调用读取最新状态）
     chatLastMessageId.set(msg.chatId, msg.messageId);
     activeSenderOpenIds.set(msg.chatId, msg.senderOpenId);
@@ -2317,6 +2389,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const isolatedConfig = new Config({
         sessionId: effectiveSessionId,
         cwd: workspaceRoot,
+        feishuMode: true,
         debugMode: config?.getDebugMode() || false,
         targetDir: workspaceRoot,
         model: route?.model || settings?.merged?.preferredModel || 'auto',
@@ -2415,11 +2488,39 @@ async function handleStart(context?: CommandContext): Promise<string> {
       currentClient = session.geminiClient;
     }
 
+    // 🎯 延迟启动目标驱动模式：此刻 currentConfig/currentClient（隔离 session）
+    //    已就绪，对它们执行 YOLO + setGoalContext。绝不能用主 TUI 的 activeConfig，
+    //    否则 App.tsx 的 goal watchdog 会读到共享 client 的 goalContext，在 TUI
+    //    大厅里 submitQuery，导致输出泄漏到终端而非飞书卡片。
+    if (pendingGoalResult && currentConfig) {
+      try {
+        const outcome = launchGoalMode(currentConfig, pendingGoalResult);
+        const intensityCn =
+          pendingGoalResult.intensity === 'steady'
+            ? '稳健'
+            : pendingGoalResult.intensity === 'intense'
+              ? '激进'
+              : '标准';
+        await gateway.sendMarkdown(
+          msg.chatId,
+          `🎯 **目标驱动模式已启动**\n` +
+            `• 目标：${pendingGoalResult.task}\n` +
+            `• 最少持续：${pendingGoalResult.hours} 小时\n` +
+            `• 强度：${intensityCn}\n` +
+            (outcome.yoloWasEnabled ? `• 已自动开启 YOLO 自动执行\n` : '') +
+            `\n我将持续推进直至达成目标。随时可用 \`/goal clear\` 结束。`,
+          msg.messageId,
+        );
+      } catch (e: any) {
+        return `❌ 启动目标模式失败：${e?.message || String(e)}`;
+      }
+    }
+
     // 🚀 斜杠命令（/help, /new, /stop, /bind 等）高优先级快速通道拦截：
     // 这些命令完全由系统控制或脚本程序处理，不进入 LLM 上下文，也不存在长耗时。
     // 为了极致的用户体验，它们应该完全绕过异步消息队列，直接高优先级秒速执行响应，绝不参与排队！
     if (messageText.startsWith('/')) {
-      dlog(`[Router] High-priority slash command matched: ${messageText}`);
+      dlog(`[Router] High-priority slash command matched: "${safeTruncateForLog(messageText)}"`);
       try {
         // 1. 尝试匹配飞书特定的专用命令
         const cmdResult = await handleFeishuCommand(messageText, currentClient, currentConfig, msg.chatId);
@@ -2609,7 +2710,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // 实时展示（emitFeishuMessageLog(...'in')），避免主屏与仪表板重复刷屏。
 
     // 🎯 DEBUG: Log the raw messageText to understand image attachment format
-    dlog(`[Feishu Debug] Raw messageText from Feishu: "${messageText}"`);
+    dlog(`[Feishu Debug] Raw messageText from Feishu: "${safeTruncateForLog(messageText)}"`);
 
     if (!geminiClient || !config) {
       const errorDetail = initErrorMsg ? `\n\n📌 **底层初始化失败原因**: \`${initErrorMsg}\`` : '';
@@ -2676,7 +2777,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         msg.text = reconstructedText;
         messageTextForAI = reconstructedText.trim();
-        dlog(`[Feishu] Reconstructed message with file paths: "${messageTextForAI}"`);
+        dlog(`[Feishu] Reconstructed message with file paths: "${safeTruncateForLog(messageTextForAI)}"`);
       }
 
       // 2. 处理图片下载 (落盘至 .deepvcode/clipboard/)
@@ -2706,7 +2807,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         msg.text = reconstructedText;
         messageTextForAI = reconstructedText.trim();
-        dlog(`[Feishu] Reconstructed message with image paths: "${messageTextForAI}"`);
+        dlog(`[Feishu] Reconstructed message with image paths: "${safeTruncateForLog(messageTextForAI)}"`);
 
         // 🎯 完美多模态对齐：既保留文本绝对路径，又在消息中附加实际图片的 base64 作为 inlineData Part
         // 这可以让支持多模态的模型直接读取图片提高效率，同时让非多模态模型依然能利用路径通过工具访问图片，实现自适应！
@@ -3486,7 +3587,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const rawOutput = output || '';
       const lines = rawOutput.split('\n');
       const totalLines = lines.length;
-      // 取最后 15 行
+      // 取最后 15 行（shell 输出尾部信息更重要，故取尾而非取头）
       const maxLinesToShow = 15;
       let displayedLines = lines;
       if (lines.length > maxLinesToShow) {
@@ -3495,8 +3596,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
       branchLine = `\n └ ... (showing last ${displayedLines.length} lines, ${totalLines} lines total)`;
 
+      // 字符数兜底：取尾 15 行后，单行若极长仍可能撑爆卡片，再做字符硬截断。
+      // 此处不按行数二次裁剪（已取尾），仅用 clampCodeBlock 的字符上限能力。
+      const clampedShell = clampCodeBlock(displayedLines.join('\n'), {
+        maxLines: maxLinesToShow,
+        maxChars: 2000,
+      });
       // 直接使用飞书原生支持的最美观且自适应等宽的代码框组件，确保在任何端上绝不乱行
-      contentBox = `\n\`\`\`bash\n${displayedLines.join('\n')}\n\`\`\``;
+      contentBox = `\n\`\`\`bash\n${clampedShell.text}\n\`\`\``;
     } else if (toolName === 'read_file') {
       const startLine = args.offset !== undefined ? args.offset + 1 : 1;
       const limit = args.limit !== undefined ? args.limit : 'all';
@@ -3542,27 +3649,26 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
 
         branchLine = `\n └ ( apply replacements completed )`;
-        contentBox = `\n\`\`\`diff\n${diff.join('\n')}\n\`\`\``;
+        // ⚠️ diff 必须裁剪：一个大 replace 的完整 diff 会撑爆整张飞书卡片、
+        //    被迫分页。施加行数 + 字符数双重上限。
+        const clampedDiff = clampCodeBlock(diff.join('\n'));
+        contentBox = `\n\`\`\`diff\n${clampedDiff.text}\n\`\`\``;
       } else {
         branchLine = `\n └ ( apply replacements completed )`;
       }
     } else if (toolName === 'write_file') {
       const content = args.content || '';
-      const lines = content.split('\n');
-      const totalLines = lines.length;
-      const maxLinesToShow = 15;
-      let displayedLines = lines;
-      if (lines.length > maxLinesToShow) {
-        displayedLines = lines.slice(0, maxLinesToShow);
-      }
-
-      branchLine = `\n └ ( file write completed, showing first ${displayedLines.length} lines of ${totalLines} total )`;
+      const totalLines = content.split('\n').length;
 
       const filePath = args.file_path || args.absolute_path || '';
       const ext = filePath.split('.').pop()?.toLowerCase() || '';
       const lang = ['js', 'ts', 'jsx', 'tsx', 'py', 'json', 'md', 'html', 'css', 'yaml', 'yml', 'sh', 'bash'].includes(ext) ? ext : 'text';
 
-      contentBox = `\n\`\`\`${lang}\n${displayedLines.join('\n')}\n${lines.length > maxLinesToShow ? '...\n' : ''}\`\`\``;
+      // ⚠️ 不能只按行数裁剪：write_file 单行可能极长（压缩 JSON / 长字符串），
+      //    15 行也能撑爆卡片。用行数 + 字符数双重上限。
+      const clamped = clampCodeBlock(content);
+      branchLine = `\n └ ( file write completed, ${totalLines} lines total${clamped.truncated ? ', preview truncated' : ''} )`;
+      contentBox = `\n\`\`\`${lang}\n${clamped.text}\n\`\`\``;
     } else if (toolName === 'todo_write' || isTodoDisplay) {
       const todos = args?.todos || todoData?.items;
       if (todos && Array.isArray(todos)) {

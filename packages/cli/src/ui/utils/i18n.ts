@@ -1545,6 +1545,9 @@ export const translations = {
     'feishu.status.bound_projects_none': '  No projects bound yet. Send /bind <path> in a group chat to link a workspace.',
     'feishu.status.bound_active_suffix': '(Active)',
     'feishu.status.bound_resolving_names': '  (resolving group names…)',
+    'feishu.status.col_status': 'Status',
+    'feishu.status.col_chat': 'Feishu Chat / Chat ID',
+    'feishu.status.col_path': 'Bound Local Path',
 
     // Logout handler
     'feishu.logout.cleared': '🗑️ Feishu credentials cleared, Bot disconnected.',
@@ -3203,6 +3206,9 @@ export const translations = {
     'feishu.status.bound_projects_none': '  暂无绑定项目。在群聊中发送 /bind <路径> 即可绑定工作区。',
     'feishu.status.bound_active_suffix': '(活跃中)',
     'feishu.status.bound_resolving_names': '  (正在解析群名称…)',
+    'feishu.status.col_status': '状态',
+    'feishu.status.col_chat': '飞书群聊 / Chat ID',
+    'feishu.status.col_path': '绑定本地目录',
 
     // Logout handler
     'feishu.logout.cleared': '🗑️ 飞书凭证已清除，Bot 已断开。',

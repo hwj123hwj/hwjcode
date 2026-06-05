@@ -11,14 +11,14 @@ sources: [raw/01-architecture.md, raw/03-cli-module.md]
 
 ## Overview
 
-CLI 是 Easy Code 的终端前端包（NPM 名 `deepv-code-cli`），使用 Ink/React 构建交互式终端 UI，提供流式 AI 响应、50+ 斜杠命令、主题系统和工具确认界面。
+CLI 是 Easy Code 的终端前端包（NPM 名 `easycode-cli`），使用 Ink/React 构建交互式终端 UI，提供流式 AI 响应、50+ 斜杠命令、主题系统和工具确认界面。
 
 ## Package Info
 
 - **Path**: `packages/cli`
-- **NPM**: `deepv-code-cli`
+- **NPM**: `easycode-cli`
 - **Entry**: `index.ts` → shebang → `main()` from `src/gemini.tsx`
-- **Binary**: `dvcode`
+- **Binary**: `easycode`
 
 ## Two Modes
 
