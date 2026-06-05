@@ -3,7 +3,7 @@
  * 显示不支持的二进制文件拖拽警告
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useEffect } from 'react';

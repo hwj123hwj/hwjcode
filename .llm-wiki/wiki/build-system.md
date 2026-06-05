@@ -11,7 +11,7 @@ sources: [raw/06-build-and-scripts.md]
 
 ## Overview
 
-DeepV Code 使用两条构建管道：NPM 发布路径使用 `tsc` 逐包编译到 `dist/`，Bundle 路径使用 `esbuild` 打包为单一 `bundle/dvcode.js` 文件。
+Easy Code 使用两条构建管道：NPM 发布路径使用 `tsc` 逐包编译到 `dist/`，Bundle 路径使用 `esbuild` 打包为单一 `bundle/dvcode.js` 文件。
 
 ## Pipelines
 

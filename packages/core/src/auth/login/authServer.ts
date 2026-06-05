@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,6 +14,7 @@ import { createDeepvlabAuthHandler } from './deepvlabAuth.js';
 import { getFeishuConfigFromServer, getFeishuTenantsFromServer } from '../../config/serverConfig.js';
 import { ProxyAuthManager } from '../../core/proxyAuth.js';
 import { AuthTemplates } from './templates/index.js';
+import { getUserAgent } from '../../utils/userAgent.js';
 
 
 
@@ -289,7 +290,7 @@ export class AuthServer {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'User-Agent': 'DeepCode-CLI/1.0.0'
+            'User-Agent': getUserAgent()
           }
         });
       } catch (fetchError: any) {
@@ -531,7 +532,7 @@ export class AuthServer {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'User-Agent': 'DeepCode-CLI/1.0.0'
+                'User-Agent': getUserAgent()
               },
               body: JSON.stringify({
                 email: email,
@@ -540,7 +541,7 @@ export class AuthServer {
                   platform: process.platform,
                   version: process.version,
                   timestamp: Date.now(),
-                  userAgent: 'DeepCode-CLI/1.0.0'
+                  userAgent: getUserAgent()
                 }
               })
             });
@@ -819,7 +820,7 @@ export class AuthServer {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'DeepCode-CLI/1.0.0'
+          'User-Agent': getUserAgent()
         },
         body: JSON.stringify({ code })
       });
@@ -846,7 +847,7 @@ export class AuthServer {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'DeepCode-CLI/1.0.0'
+          'User-Agent': getUserAgent()
         },
         body: JSON.stringify({ code })
       });
@@ -1042,7 +1043,7 @@ export class AuthServer {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'User-Agent': 'DeepCode-CLI/1.0.0'
+            'User-Agent': getUserAgent()
           },
           body: JSON.stringify({
             plat: 'deepvlab',
@@ -1052,7 +1053,7 @@ export class AuthServer {
               platform: process.platform,
               version: process.version,
               timestamp: Date.now(),
-              userAgent: 'DeepCode-CLI/1.0.0'
+              userAgent: getUserAgent()
             }
           })
         });
@@ -1162,7 +1163,7 @@ export class AuthServer {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'User-Agent': 'DeepCode-CLI/1.0.0'
+            'User-Agent': getUserAgent()
           },
           body: JSON.stringify({
             code: code,
@@ -1204,7 +1205,7 @@ export class AuthServer {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'User-Agent': 'DeepCode-CLI/1.0.0'
+            'User-Agent': getUserAgent()
           },
           body: JSON.stringify({
             feishuAccessToken: accessToken,
@@ -1212,7 +1213,7 @@ export class AuthServer {
               platform: process.platform,
               version: process.version,
               timestamp: Date.now(),
-              userAgent: 'DeepCode-CLI/1.0.0'
+              userAgent: getUserAgent()
             }
           })
         });

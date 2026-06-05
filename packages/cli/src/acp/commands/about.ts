@@ -28,7 +28,7 @@ export class AboutCommand implements Command {
         ?.selectedAuthType ?? 'proxy-auth';
 
     const lines = [
-      'DeepV Code Info:',
+      'Easy Code Info:',
       `- Version: ${cliVersion}`,
       `- OS: ${process.platform}`,
       `- Node: ${process.version}`,

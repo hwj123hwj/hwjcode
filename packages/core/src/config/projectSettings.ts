@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,7 +40,7 @@ export interface ProjectSettings {
 }
 
 
-export const PROJECT_CONFIG_DIR_NAME = '.deepvcode';
+export const PROJECT_CONFIG_DIR_NAME = '.easycode';
 /**
  * 项目级配置管理器
  * 负责读写项目根目录下的 ./deepvcode/settings.json 文件

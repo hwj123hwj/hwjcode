@@ -3,7 +3,7 @@
  * 香蕉图标组件，用于生图功能入口
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React from 'react';

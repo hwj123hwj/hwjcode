@@ -5,7 +5,7 @@
  * 提供任务列表、终止任务等功能。
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { useState, useEffect, useCallback } from 'react';

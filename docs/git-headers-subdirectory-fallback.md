@@ -2,17 +2,17 @@
 
 ## 背景
 
-DeepV Code 当前会为内部员工（猎豹域名邮箱）在 API 请求中附带 git 仓库信息，用于服务端的使用管理。相关 headers：
+Easy Code 当前会为内部员工（猎豹域名邮箱）在 API 请求中附带 git 仓库信息，用于服务端的使用管理。相关 headers：
 
 - `X-Git-Remotes` — git 远程仓库地址
 - `X-Git-Branch` — 当前分支名
 
 ## 问题
 
-部分员工的使用习惯是：把多个项目放在同一个父文件夹下，然后在**父文件夹**中启动 DeepV Code 进行跨项目的综合分析和修改。例如：
+部分员工的使用习惯是：把多个项目放在同一个父文件夹下，然后在**父文件夹**中启动 Easy Code 进行跨项目的综合分析和修改。例如：
 
 ```
-D:\work\                  ← 员工在这里启动 DeepV Code（不是 git 仓库）
+D:\work\                  ← 员工在这里启动 Easy Code（不是 git 仓库）
 ├── project-a\            ← git 仓库
 ├── project-b\            ← git 仓库
 └── project-c\            ← git 仓库

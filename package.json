@@ -1,6 +1,6 @@
 {
-  "name": "deepv-code",
-  "version": "1.0.319",
+  "name": "easycode-ai",
+  "version": "1.1.0",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -87,7 +87,7 @@
     "env:test": "./scripts/switch-env.sh test"
   },
   "bin": {
-    "dvcode": "bundle/dvcode.js"
+    "easycode": "bundle/easycode.js"
   },
   "preferGlobal": true,
   "files": [

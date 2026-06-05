@@ -79,12 +79,10 @@ export async function createContentGenerator(
   gcConfig: Config,
   sessionId?: string,
 ): Promise<ContentGenerator> {
-  const version = process.env.CLI_VERSION || process.version;
-  const httpOptions = {
-    headers: {
-      'User-Agent': `GeminiCLI/${version} (${process.platform}; ${process.arch})`,
-    },
-  };
+  // NOTE: The DeepV server path below (the only active path) builds its request
+  // headers — including the User-Agent — via proxyAuthManager.getUserHeaders(),
+  // which uses the unified getUserAgent() from utils/userAgent.ts. No local
+  // httpOptions/User-Agent is needed here.
 
   // 🎯 统一DeepV Server处理：所有模型都使用DeepVServerAdapter，但路由逻辑会自动选择正确的API端点
   const isDeepVServer = true; // 现在所有模型都通过DeepV Server，适配器内部会根据模型类型选择正确路径
@@ -102,13 +100,13 @@ export async function createContentGenerator(
       // 确保有可用的代理服务器
       if (!hasAvailableProxyServer()) {
         throw new Error(
-          'DeepV Code server is required for all models but is not available. ' +
-          'Please start the DeepV Code server or use proxy authentication.'
+          'Easy Code server is required for all models but is not available. ' +
+          'Please start the Easy Code server or use proxy authentication.'
         );
       }
 
       proxyServerUrl = getActiveProxyServerUrl();
-      console.log(`[DeepX] Connecting to DeepV Code server: ${proxyServerUrl}`);
+      console.log(`[DeepX] Connecting to Easy Code server: ${proxyServerUrl}`);
     }
 
     // 🔧 Linus式修复：统一使用DeepVServerAdapter，内部会根据模型类型自动路由

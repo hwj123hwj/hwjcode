@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,7 +10,7 @@ import { homedir } from 'os';
 import { CustomModelConfig, validateCustomModelConfig, generateCustomModelId } from 'deepv-code-core';
 import stripJsonComments from 'strip-json-comments';
 
-const SETTINGS_DIRECTORY_NAME = '.deepv';
+const SETTINGS_DIRECTORY_NAME = '.easycode-user';
 const CUSTOM_MODELS_FILE = 'custom-models.json';
 
 /**

@@ -135,7 +135,7 @@ export class ExtensionManager {
       if (installMetadata.type === 'git') {
         const extensionsDir = path.join(
           os.homedir(),
-          '.deepv',
+          '.easycode-user',
           'extensions',
         );
         if (!fs.existsSync(extensionsDir)) {
@@ -270,7 +270,7 @@ export class ExtensionManager {
   }
 
   private async loadExtensionsFromDir(dir: string): Promise<DVCodeExtension[]> {
-    const extensionsDir = path.join(dir, '.deepv', 'extensions');
+    const extensionsDir = path.join(dir, '.easycode-user', 'extensions');
     if (!fs.existsSync(extensionsDir)) {
       return [];
     }
@@ -355,7 +355,7 @@ export class ExtensionManager {
   }
 
   private findExtensionDir(name: string): string | undefined {
-    const homeExtDir = path.join(os.homedir(), '.deepv', 'extensions', name);
+    const homeExtDir = path.join(os.homedir(), '.easycode-user', 'extensions', name);
     if (fs.existsSync(homeExtDir)) {
       return homeExtDir;
     }

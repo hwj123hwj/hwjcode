@@ -3,7 +3,7 @@
  * 图像生成对话框 - 支持多轮会话的生图界面
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';

@@ -2,7 +2,7 @@
 
 ## 概述
 
-`/mcp add` 命令允许您轻松地添加和配置MCP (Model Context Protocol) 服务器，扩展DeepV Code的功能。
+`/mcp add` 命令允许您轻松地添加和配置MCP (Model Context Protocol) 服务器，扩展Easy Code的功能。
 
 ## 基本用法
 
@@ -287,4 +287,4 @@ echo "MCP服务器配置完成！"
 - ✅ **安全性**: 环境变量保护和权限控制
 - ✅ **可扩展性**: 支持第三方和自定义服务器
 
-通过合理使用这些功能，您可以大大扩展DeepV Code的能力，提高开发效率。
+通过合理使用这些功能，您可以大大扩展Easy Code的能力，提高开发效率。

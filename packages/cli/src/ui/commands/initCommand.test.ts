@@ -75,7 +75,7 @@ describe('initCommand', () => {
     expect(result).toEqual(
       expect.objectContaining({
         type: 'submit_prompt',
-        content: expect.stringContaining('You are a DeepV Code AI assistant'),
+        content: expect.stringContaining('You are a Easy Code AI assistant'),
       }),
     );
   });
@@ -103,7 +103,7 @@ describe('initCommand', () => {
     expect(result).toEqual(
       expect.objectContaining({
         type: 'submit_prompt',
-        content: expect.stringContaining('You are a DeepV Code AI assistant'),
+        content: expect.stringContaining('You are a Easy Code AI assistant'),
       }),
     );
   });

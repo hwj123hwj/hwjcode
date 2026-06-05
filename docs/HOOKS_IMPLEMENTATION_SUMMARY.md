@@ -1,8 +1,8 @@
-# DeepVCode Hooks System Implementation Summary
+# EasyCode Hooks System Implementation Summary
 
 ## ✅ Implementation Complete
 
-DeepVCode项目已成功实现完整的Hooks系统，基于Gemini CLI 0.20.2的生产级架构。
+EasyCode项目已成功实现完整的Hooks系统，基于Gemini CLI 0.20.2的生产级架构。
 
 ## 📦 What Was Implemented
 
@@ -273,7 +273,7 @@ if (result.finalOutput?.isBlockingDecision()) {
 
 ## 📝 Summary
 
-DeepVCode现在拥有**企业级的Hooks系统**，提供：
+EasyCode现在拥有**企业级的Hooks系统**，提供：
 
 ✅ 完整的架构和实现
 ✅ 所有核心组件和类型

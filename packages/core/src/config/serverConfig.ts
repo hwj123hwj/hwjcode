@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,6 +10,8 @@
  * 服务端配置获取模块
  * 从DeepX_Code_server获取客户端所需的配置信息
  */
+
+import { getUserAgent } from '../utils/userAgent.js';
 
 export interface FeishuTenantInfo {
   appId: string;
@@ -82,7 +84,7 @@ export class ServerConfigFetcher {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'DeepCode-CLI/1.0.0',
+          'User-Agent': getUserAgent(),
         },
         // 超时设置
         signal: AbortSignal.timeout(10000), // 10秒超时

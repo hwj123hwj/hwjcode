@@ -1,4 +1,4 @@
-# DeepVCode Hooks Examples
+# EasyCode Hooks Examples
 
 本文档提供实际可用的Hook脚本示例，可直接集成到项目中。
 

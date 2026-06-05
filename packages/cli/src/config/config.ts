@@ -89,7 +89,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .scriptName('dvcode')
     .usage(
       '$0 [options]',
-      'DeepV Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode',
+      'Easy Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode',
     )
     .option('model', {
       alias: 'm',
@@ -222,7 +222,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
     .option('proxy', {
       type: 'string',
       description:
-        'Proxy for DeepV Code client, like schema://user:password@host:port',
+        'Proxy for Easy Code client, like schema://user:password@host:port',
     })
     .option('update', {
       alias: 'u',

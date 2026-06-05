@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -52,8 +52,8 @@ import * as os from 'os';
  * @param kind  'stream' | 'unified'  区分流式 / 非流式路径
  * @param body  即将作为 JSON.stringify 出站的请求体对象
  */
-const REQUEST_DUMP_DIR = path.join(os.homedir(), '.deepv', 'last-requests');
-const REQUEST_DUMP_LATEST = path.join(os.homedir(), '.deepv', 'last-stream-request.json');
+const REQUEST_DUMP_DIR = path.join(os.homedir(), '.easycode-user', 'last-requests');
+const REQUEST_DUMP_LATEST = path.join(os.homedir(), '.easycode-user', 'last-stream-request.json');
 const REQUEST_DUMP_RING_SIZE = 5;
 function dumpOutboundRequest(kind: 'stream' | 'unified', body: unknown): void {
   // 同步部分尽量短；真正落盘走 promise 异步
@@ -539,12 +539,20 @@ export class DeepVServerAdapter implements ContentGenerator {
       return hasValidPart;
     });
 
+    // 🛡️ 协议安全网：删除"真孤儿 functionResponse"（找不到任何可配对 functionCall）
+    // 修复用户实拍 easyrouter 400：
+    //   "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+    // 上下文压缩/历史截断可能切掉 functionCall 却保留其 functionResponse，
+    // 该孤儿转 OpenAI 格式后变成无前驱 tool_calls 的 role:'tool' → 严格网关 400。
+    // 此清理对 Gemini / Claude / OpenAI 三家均无害：合法配对全部保留，仅删真孤儿。
+    const orphanCleaned = this.removeOrphanedToolResponses(cleaned);
+
     // 🔧 安全保障：确保清理后 contents 不以 model/assistant 结尾
     // 某些模型（如 AWS Bedrock Claude）不支持 assistant prefill，
     // 要求对话必须以 user 消息结尾。过滤空消息后末尾可能变成 model。
-    if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === MESSAGE_ROLES.MODEL) {
+    if (orphanCleaned.length > 0 && orphanCleaned[orphanCleaned.length - 1].role === MESSAGE_ROLES.MODEL) {
       logger.warn('[cleanContents] Contents ends with model message after cleanup — appending user placeholder');
-      cleaned.push({
+      orphanCleaned.push({
         role: MESSAGE_ROLES.USER,
         parts: [{ text: '[Conversation continues]' }],
       });
@@ -552,8 +560,8 @@ export class DeepVServerAdapter implements ContentGenerator {
 
     // 🆕 调试日志：输出整理后的历史结构，帮助诊断多轮对话中的思维块合并情况
     if (process.env.DEBUG || process.env.NODE_ENV === 'development' || true) { // 🌟 暂时强制开启以便在用户的终端中显示，极其利于排除故障
-      console.log(`[cleanContents] 整理后的历史记录列表 (共 ${cleaned.length} 条):`);
-      cleaned.forEach((c, idx) => {
+      console.log(`[cleanContents] 整理后的历史记录列表 (共 ${orphanCleaned.length} 条):`);
+      orphanCleaned.forEach((c, idx) => {
         const partTypes = (c.parts || []).map((p: any) => {
           if (p.text !== undefined) return `text(${p.text.length})`;
           if (p.functionCall) return `functionCall(${p.functionCall.name})`;
@@ -565,7 +573,107 @@ export class DeepVServerAdapter implements ContentGenerator {
       });
     }
 
-    return cleaned;
+    return orphanCleaned;
+  }
+
+  /**
+   * 🛡️ 删除"真孤儿 functionResponse"——在整个 contents 里找不到任何可配对
+   * functionCall 的 functionResponse。
+   *
+   * 修复生产 bug（用户实拍 easyrouter 400）：
+   *   "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"
+   *
+   * 根因：上下文压缩/历史截断会把 functionCall 切掉、却保留其 functionResponse，
+   * 形成孤儿。它被上游 sanitizeRequestContents 的"全局 name 兜底"误判存活，
+   * 转 OpenAI 格式后变成无前驱 tool_calls 的 role:'tool' → 严格网关报 400。
+   *
+   * 配对算法（模拟服务端真实配对，以 fc 为单位按"配对槽消耗"避免误删）：
+   *   1) 先扫描所有 functionCall，每个 fc 建一个配对槽 {id?, name, consumed:false}。
+   *   2) 按出现顺序遍历每个 functionResponse，为其寻找一个未消耗的槽：
+   *        - 优先匹配 id 相同的未消耗槽 → 命中则消耗
+   *        - 否则匹配 name 相同的未消耗槽 → 命中则消耗
+   *        - 都没有 → 真孤儿，删除
+   *      （以 fc 为单位建槽，保证一个 fc 只配 1 个 fr，id 与 name 不会各放行一个。）
+   *
+   * 无害性保证（对 Gemini / Claude / OpenAI 三家均成立）：
+   *   - 合法会话里 fr 数 ≤ 同名 fc 数，计数永远够 → 不删任何合法配对。
+   *   - 并行同名 N 对：nameCount=N，N 个 fr 各消耗 1，全部保留 → 不误删。
+   *   - 仅当 fr 数 > 可配对 fc 数（真出现孤儿）才删多出来的那些。
+   *   - 孤儿 functionResponse 本就是三家协议的共同禁忌，删除只会让请求更合法。
+   */
+  private removeOrphanedToolResponses(contents: any[]): any[] {
+    if (!Array.isArray(contents) || contents.length === 0) return contents;
+
+    // 快速通道：没有任何 functionResponse 时直接返回，零开销、零改动
+    const hasAnyFunctionResponse = contents.some(
+      (c) => Array.isArray(c?.parts) && c.parts.some((p: any) => p?.functionResponse),
+    );
+    if (!hasAnyFunctionResponse) return contents;
+
+    // 1) 扫描所有 functionCall，每个 fc 建一个"配对槽"（含 id?/name，初始未消耗）。
+    //    以 fc 为单位建槽是关键：一个 fc 同时有 id 和 name 时只能配 1 个 fr，
+    //    绝不能让 id 和 name 各放行一个 fr（否则一个 fc 被算成 2 份配对额度）。
+    const slots: Array<{ id?: string; name?: string; consumed: boolean }> = [];
+    for (const content of contents) {
+      if (!Array.isArray(content?.parts)) continue;
+      for (const part of content.parts) {
+        const fc = part?.functionCall;
+        if (!fc) continue;
+        slots.push({ id: fc.id, name: fc.name, consumed: false });
+      }
+    }
+
+    // 2) 遍历每条消息，为每个 functionResponse 寻找一个未消耗的配对槽
+    let removedCount = 0;
+    const result: any[] = [];
+    for (const content of contents) {
+      if (!Array.isArray(content?.parts)) {
+        result.push(content);
+        continue;
+      }
+
+      const keptParts = content.parts.filter((part: any) => {
+        const fr = part?.functionResponse;
+        if (!fr) return true; // 非 functionResponse 一律保留
+
+        // 优先 id 精确配对：找一个未消耗、id 相同的槽
+        if (fr.id) {
+          const slot = slots.find((s) => !s.consumed && s.id === fr.id);
+          if (slot) {
+            slot.consumed = true;
+            return true;
+          }
+        }
+        // 回退 name 配对：找一个未消耗、name 相同的槽（覆盖 Gemini 无 id 及并行同名）
+        if (fr.name) {
+          const slot = slots.find((s) => !s.consumed && s.name === fr.name);
+          if (slot) {
+            slot.consumed = true;
+            return true;
+          }
+        }
+        // 真孤儿：没有任何可配对的 functionCall 槽
+        removedCount++;
+        logger.warn(
+          `[removeOrphanedToolResponses] ❌ Removing orphaned functionResponse: ` +
+          `${fr.name} (id: ${fr.id ?? 'n/a'}) — no matching functionCall found.`,
+        );
+        return false;
+      });
+
+      // 若该消息所有 part 都被删空，则整条丢弃；否则保留（可能含其他 part）
+      if (keptParts.length > 0) {
+        result.push(keptParts.length === content.parts.length ? content : { ...content, parts: keptParts });
+      }
+    }
+
+    if (removedCount > 0) {
+      logger.warn(
+        `[removeOrphanedToolResponses] Removed ${removedCount} orphaned functionResponse(s) before sending to cloud.`,
+      );
+    }
+
+    return result;
   }
 
   /**

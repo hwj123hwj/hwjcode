@@ -5,7 +5,7 @@
  * 🎯 增强版：支持最近文件、文件夹、终端选择、代码符号
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { MenuTextMatch, MenuOption } from '@lexical/react/LexicalTypeaheadMenuPlugin';

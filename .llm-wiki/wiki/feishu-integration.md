@@ -7,11 +7,11 @@ sources: [packages/cli/src/services/feishu/gateway.ts, packages/cli/src/ui/comma
 
 # Feishu / Lark Bot Integration
 
-DeepV Code features a robust Feishu (Lark) Workspace Bot integration, turning the CLI agent into a conversational workspace assistant that can interact with the Feishu Open Platform.
+Easy Code features a robust Feishu (Lark) Workspace Bot integration, turning the CLI agent into a conversational workspace assistant that can interact with the Feishu Open Platform.
 
 ## Architecture & Communication
 
-Traditional webhooks require public endpoints and SSL certificates, which is highly impractical for local development or CLI execution behind corporate NATs. DeepV Code solves this using a **WebSocket Long-Connection (WS) Gateway**:
+Traditional webhooks require public endpoints and SSL certificates, which is highly impractical for local development or CLI execution behind corporate NATs. Easy Code solves this using a **WebSocket Long-Connection (WS) Gateway**:
 
 ```
 Feishu Platform ←(WebSocket / Protobuf)→ WSClient (via @larksuiteoapi/node-sdk)

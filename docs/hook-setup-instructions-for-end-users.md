@@ -1,4 +1,4 @@
-# DeepV Code Hooks 安装与配置指南（跨平台）
+# Easy Code Hooks 安装与配置指南（跨平台）
 
 ## 创建 hooks 目录
 
@@ -18,12 +18,12 @@ mkdir -p "$HOME/.deepv/hooks"
 
 **Windows：**
 ```cmd
-copy "D:\Projects\dvcode\DeepVCode\.deepvcode\hooks\hook-template.bat" "%USERPROFILE%\.deepv\hooks\test-hook-logger.bat"
+copy "D:\Projects\dvcode\EasyCode\.deepvcode\hooks\hook-template.bat" "%USERPROFILE%\.deepv\hooks\test-hook-logger.bat"
 ```
 
 **macOS/Linux：**
 ```bash
-cp "/Users/yourname/Projects/dvcode/DeepVCode/.deepvcode/hooks/hook-template.sh" "$HOME/.deepv/hooks/test-hook-logger.sh"
+cp "/Users/yourname/Projects/dvcode/EasyCode/.deepvcode/hooks/hook-template.sh" "$HOME/.deepv/hooks/test-hook-logger.sh"
 chmod +x "$HOME/.deepv/hooks/test-hook-logger.sh"
 ```
 
@@ -96,7 +96,7 @@ cat "$HOME/.deepv/hooks/hook_log.txt"
 
 ## 支持的钩子事件类型
 
-DeepV Code 支持在系统的关键生命周期节点触发钩子。以下是所有支持的事件类型：
+Easy Code 支持在系统的关键生命周期节点触发钩子。以下是所有支持的事件类型：
 
 ### 1. 会话生命周期
 - **`SessionStart`**: 会话初始化完成时触发。
@@ -162,7 +162,7 @@ DeepV Code 支持在系统的关键生命周期节点触发钩子。以下是所
 
 ## 高级用法：修改系统行为
 
-某些钩子允许脚本通过输出特定的 JSON 来修改 DeepV Code 的行为。
+某些钩子允许脚本通过输出特定的 JSON 来修改 Easy Code 的行为。
 
 ### 1. 修改 LLM 请求 (`BeforeModel`)
 脚本输出 JSON：

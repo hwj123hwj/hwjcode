@@ -1,6 +1,6 @@
 # 服务端修复说明：Claude adaptive thinking 缺失 effort 参数
 
-> **致后端同事**：客户端 (DeepV Code CLI) 已经按 Anthropic 官方协议把 `effort`
+> **致后端同事**：客户端 (Easy Code CLI) 已经按 Anthropic 官方协议把 `effort`
 > 写入了请求体，但服务端 `claude.ts` 策略只透传了 `thinking` 字段，没透传
 > `output_config`，导致现代 Claude（Opus 4.7 等）走 adaptive 模式时拿不到
 > effort 上限，行为不稳定。本文档给出最小修复 patch 与验证方法。

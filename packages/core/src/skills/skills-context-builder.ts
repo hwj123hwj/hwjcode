@@ -47,9 +47,9 @@ export class SkillsContextBuilder {
 
   constructor(projectRoot?: string) {
     const homeDir = os.homedir();
-    this.skillsDir = path.join(homeDir, '.deepv', 'skills');
-    this.marketplaceDir = path.join(homeDir, '.deepv', 'marketplace');
-    this.userGlobalSkillsDir = path.join(homeDir, '.deepv', 'skills');
+    this.skillsDir = path.join(homeDir, '.easycode-user', 'skills');
+    this.marketplaceDir = path.join(homeDir, '.easycode-user', 'marketplace');
+    this.userGlobalSkillsDir = path.join(homeDir, '.easycode-user', 'skills');
     this.projectSkillsDir = getProjectSkillsDir(projectRoot || process.cwd());
   }
 

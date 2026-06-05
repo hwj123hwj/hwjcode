@@ -3,7 +3,7 @@
  * 支持多Session的消息服务
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { SessionInfo } from '../../../src/types/sessionTypes';

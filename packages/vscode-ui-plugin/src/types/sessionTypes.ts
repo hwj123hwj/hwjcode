@@ -3,7 +3,7 @@
  * 会话管理类型定义
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { SessionStatus, SessionType, SessionAction } from '../constants/sessionConstants';

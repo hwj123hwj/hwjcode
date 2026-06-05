@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -86,7 +86,7 @@ export const useLoginCommand = (
           console.log(
             `
 ----------------------------------------------------------------
-Logging in with Google... Please restart DeepV Code CLI to continue.
+Logging in with Google... Please restart Easy Code CLI to continue.
 ----------------------------------------------------------------
             `,
           );

@@ -1,5 +1,5 @@
 /**
- * DeepV Code Skills Command
+ * Easy Code Skills Command
  *
  * Manages AI Skills: Marketplace → Plugin → Skill
  */

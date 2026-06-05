@@ -11,13 +11,13 @@ export const pixelRobotLogo = `
   ▘▘ ▝▝
 `;
 
-// 立体V字符logo
+// 立体V字符logo (大括号折角 + 星芒 ✦)
 export const cuteVLogo = `
-██╗   ██╗
-▀██╗ ██▀
- ▀████▀
-  ▀██▀
-   ▀▀
+    ╭───────────╮
+  ╭─╯
+ ╭╯        ✦
+ ╰─╮
+   ╰───────────╮
 `;
 
 export const shortAsciiLogo = `

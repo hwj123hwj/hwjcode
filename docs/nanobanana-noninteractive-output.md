@@ -6,7 +6,7 @@
 
 ## 输出流
 
-- **stdout**：标准的 DeepV Code JSON 消息（`type: "message"`, `type: "result"` 等）
+- **stdout**：标准的 Easy Code JSON 消息（`type: "message"`, `type: "result"` 等）
 - **stderr**：NanoBanana 特定的详细进度事件（JSON 格式）
 
 ## 事件类型

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -44,7 +44,7 @@ let credsDir: string;
 
 beforeEach(async () => {
   fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'dvcode-feishu-creds-'));
-  credsDir = path.join(fakeHome, '.deepv');
+  credsDir = path.join(fakeHome, '.easycode-user');
 });
 
 afterEach(async () => {

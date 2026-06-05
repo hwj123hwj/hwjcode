@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,7 +28,7 @@ vi.mock('os', async (importOriginal) => {
 describe('user_account', () => {
   let tempHomeDir: string;
   const accountsFile = () =>
-    path.join(tempHomeDir, '.deepv', 'google_accounts.json');
+    path.join(tempHomeDir, '.easycode-user', 'google_accounts.json');
   beforeEach(() => {
     tempHomeDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'gemini-cli-test-home-'),

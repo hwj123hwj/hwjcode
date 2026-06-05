@@ -26,7 +26,7 @@ const isWatch = args.includes('--watch');
 const isProduction = args.includes('--production') || process.env.NODE_ENV === 'production';
 const shouldMinify = args.includes('--minify') || process.env.MINIMIZE === 'true';
 
-console.log(`\n🚀 DeepV Code VSCode Extension - esbuild`);
+console.log(`\n🚀 Easy Code VSCode Extension - esbuild`);
 console.log(`   Mode: ${isProduction ? 'production' : 'development'}`);
 console.log(`   Minify: ${shouldMinify}`);
 console.log(`   Watch: ${isWatch}\n`);

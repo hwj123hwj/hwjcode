@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,7 +17,7 @@ export const CLIPBOARD_DIR = 'clipboard';
  * Checks if a given path is within the clipboard directory
  * @param pathName The path to check (can be relative or absolute)
  * @param targetDir The target directory (workspace root)
- * @param configDirName The configuration directory name (default: '.deepvcode')
+ * @param configDirName The configuration directory name (default: '.easycode')
  * @returns true if the path is within the clipboard directory
  */
 export function isClipboardPath(pathName: string, targetDir: string, configDirName: string): boolean {

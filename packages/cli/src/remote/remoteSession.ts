@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -144,7 +144,7 @@ export class RemoteSession {
       this.geminiChat = await this.geminiClient.getChat();
 
       remoteLogger.info('RemoteSession', `会话初始化完成: ${this.sessionId}`);
-      this.sendMessage(MessageFactory.createStatus('idle', 'DeepV Code 远程会话已就绪'));
+      this.sendMessage(MessageFactory.createStatus('idle', 'Easy Code 远程会话已就绪'));
     } catch (error) {
       remoteLogger.error('RemoteSession', `会话初始化失败: ${this.sessionId}`, error);
       this.sendError(`会话初始化失败: ${error instanceof Error ? error.message : String(error)}`);

@@ -176,7 +176,7 @@ Tests  31 passed (31)
 ## 📚 相关文档
 
 - [Anthropic Extended Thinking 官方文档](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
-- [DeepV Code 自定义模型文档](../docs/custom-models-guide.md)
+- [Easy Code 自定义模型文档](../docs/custom-models-guide.md)
 - [自定义模型快速开始](../docs/custom-models-quickstart.md)
 
 ## 🎉 总结

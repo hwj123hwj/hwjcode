@@ -3,7 +3,7 @@
 ## 📊 项目概览
 
 ```
-项目名称: DeepV Code CLI - /new 隐藏快捷命令
+项目名称: Easy Code CLI - /new 隐藏快捷命令
 项目类型: 功能实现 + 文档编写
 完成日期: 2026-04-02
 最终状态: ✅ COMPLETE & PRODUCTION READY
@@ -385,7 +385,7 @@ A: 按照 newCommand.ts 的模式创建新文件，然后在
 ## 🎉 项目完成宣言
 
 ```
-项目名称: DeepV Code CLI - /new 快捷命令
+项目名称: Easy Code CLI - /new 快捷命令
 完成日期: 2026-04-02 23:48:56 +0800
 最后提交: cb74bfcd - docs: add final delivery checklist
 开发者: AI Code Assistant

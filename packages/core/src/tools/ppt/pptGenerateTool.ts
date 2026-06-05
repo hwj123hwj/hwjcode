@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,6 +14,7 @@ import { ProxyAuthManager } from '../../core/proxyAuth.js';
 import open from 'open';
 import { logger } from '../../utils/enhancedLogger.js';
 import { t } from '../../utils/simpleI18n.js';
+import { getUserAgent } from '../../utils/userAgent.js';
 
 export interface PptGenerateToolParams {
   /** 确认提交（默认true） */
@@ -258,7 +259,7 @@ PPT模式已退出。`,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'DeepCode CLI',
+        'User-Agent': getUserAgent(),
       },
       body: JSON.stringify({
         topic: state.topic,
@@ -287,7 +288,7 @@ PPT模式已退出。`,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'DeepCode CLI',
+        'User-Agent': getUserAgent(),
       },
       signal,
     });
@@ -309,7 +310,7 @@ PPT模式已退出。`,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'DeepCode CLI',
+        'User-Agent': getUserAgent(),
       },
       body: JSON.stringify({
         expiresIn: 600, // 10分钟有效期
