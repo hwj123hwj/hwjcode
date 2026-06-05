@@ -120,14 +120,14 @@ docs/
 
 ```
 > npm run typecheck
-✅ deepv-code-cli typecheck PASSED
-✅ deepv-code-core typecheck PASSED
-✅ deepv-code-vscode-ui-plugin typecheck PASSED
+✅ easycode-cli typecheck PASSED
+✅ easycode-core typecheck PASSED
+✅ easycode-ai-vscode-ui-plugin typecheck PASSED
 
 > npm run build
-✅ deepv-code-core build completed
-✅ deepv-code-cli build completed
-✅ DeepV Webview build completed
+✅ easycode-core build completed
+✅ easycode-cli build completed
+✅ EasyCode Webview build completed
 ✅ Build completed successfully
 ```
 
@@ -253,7 +253,7 @@ export const listSessionsShortcut: SlashCommand = {
 
 4. **配置选项**
    ```
-   # 支持在 .deepv 配置中设置快捷命令别名
+   # 支持在 .easycode-user 配置中设置快捷命令别名
    [shortcuts]
    new_session = "ns"  # 使用 /ns 代替 /new
    ```

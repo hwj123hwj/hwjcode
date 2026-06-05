@@ -34,7 +34,7 @@
 原始响应: 500KB read-many-files 工具结果
          ↓
    保存为临时文件
-     .deepvcode/mcp-tmp/mcp-response-read-many-files-1234567890.json
+     .easycode/mcp-tmp/mcp-response-read-many-files-1234567890.json
          ↓
 指导消息，告诉AI应该使用 search_file_content 工具来查询
 ```
@@ -116,7 +116,7 @@ const responseParts = convertToFunctionResponse(..., guardedLlmContent);
   // 上下文严重不足阈值（百分比，0-1），默认0.1（10%）
   contextCriticalThreshold?: number;
 
-  // 临时文件目录，默认项目的.deepvcode/mcp-tmp
+  // 临时文件目录，默认项目的.easycode/mcp-tmp
   tempDir?: string;
 
   // 是否启用临时文件存储，默认true
@@ -148,8 +148,8 @@ const responseParts = convertToFunctionResponse(..., guardedLlmContent);
 ```
 [MCPResponseGuard] Processing response from tool 'read_many_files': 512.80KB, context usage: 88.0%
 [MCPResponseGuard] Response exceeds max size. Using file storage.
-[MCPResponseGuard] Stored response as file: .deepvcode/mcp-tmp/mcp-response-read-many-files-1699564800000.json
-[ToolExecutionEngine] [GUARD] Response stored as file | 原始: 512.80KB -> 2.15KB | 已存储为: .deepvcode/mcp-tmp/...
+[MCPResponseGuard] Stored response as file: .easycode/mcp-tmp/mcp-response-read-many-files-1699564800000.json
+[ToolExecutionEngine] [GUARD] Response stored as file | 原始: 512.80KB -> 2.15KB | 已存储为: .easycode/mcp-tmp/...
 ```
 
 ## 用户体验
@@ -166,7 +166,7 @@ const responseParts = convertToFunctionResponse(..., guardedLlmContent);
 ```
 📋 **Large response from read_many_files stored as temporary file**
 
-**File location:** `.deepvcode/mcp-tmp/mcp-response-read-many-files-1234567890.json`
+**File location:** `.easycode/mcp-tmp/mcp-response-read-many-files-1234567890.json`
 **Original size:** 512.80KB
 
 ---
@@ -236,17 +236,17 @@ packages/core/src/services/mcpResponseGuard.ts (测试应添加)
 
 **优先级顺序**：
 
-1. **项目 .deepvcode/mcp-tmp** (首选)
-   - 位置：`<project-root>/.deepvcode/mcp-tmp/`
+1. **项目 .easycode/mcp-tmp** (首选)
+   - 位置：`<project-root>/.easycode/mcp-tmp/`
    - 优点：与项目相关，容易管理，备份时包含
 
 2. **用户主目录** (备选)
-   - 位置：`~/.deepvcode/mcp-tmp/`
+   - 位置：`~/.easycode/mcp-tmp/`
    - 适用于：找不到项目根目录时
 
 3. **系统临时目录** (最后备选)
-   - Windows: `%TEMP%\deepvcode-mcp\`
-   - Linux/Mac: `/tmp/deepvcode-mcp/`
+   - Windows: `%TEMP%\easycodecode-mcp\`
+   - Linux/Mac: `/tmp/easycodecode-mcp/`
 
 ## 相关文件
 
@@ -255,7 +255,7 @@ packages/core/src/services/mcpResponseGuard.ts (测试应添加)
 | `packages/core/src/services/mcpResponseGuard.ts` | 核心保护服务 |
 | `packages/core/src/core/toolExecutionEngine.ts` | 集成点（工具执行） |
 | `packages/core/src/index.ts` | 导出MCPResponseGuard |
-| `.deepvcode/mcp-tmp/` | 临时文件存储目录 |
+| `.easycode/mcp-tmp/` | 临时文件存储目录 |
 
 ## 参考
 

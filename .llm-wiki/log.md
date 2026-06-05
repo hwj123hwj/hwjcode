@@ -2,6 +2,13 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-05] update | feishu-integration.md & goal-driven-mode.md — 安全防护与飞书目标路由更新
+
+更新 `.llm-wiki/wiki/feishu-integration.md` 与 `.llm-wiki/wiki/goal-driven-mode.md`：
+- **安全日志截断**：新增 `safeTruncateForLog` 机制文档，说明如何通过换行符过滤和 150 字符字符限制来保证 TUI 显示整洁并防止敏感系统提示词/契约泄露。
+- **飞书卡片宽度防护**：新增 `clampCodeBlock` 机制说明，说明大容量输出的双重约束（行数与字数限制）如何防止卡片渲染超限。
+- **目标模式路由细节**：新增飞书信道中 `/goal` 卡片式交互流程、独立会话中延迟启动（Watchdog 和 YOLO）的核心路由原理。
+
 ## [2026-06-03] update | workflow-system.md — 魔法词门控机制文档
 
 更新 `.llm-wiki/wiki/workflow-system.md`，新增「触发方式与魔法词门控」章节：
@@ -176,7 +183,7 @@
   - wiki/core-module.md, wiki/cli-module.md, wiki/tools-system.md
   - wiki/hooks-system.md, wiki/mcp-system.md, wiki/build-system.md, wiki/skills-system.md
 - Created 10 class/component entity pages:
-  - wiki/GeminiClient.md, wiki/ContentGenerator.md, wiki/DeepVServerAdapter.md
+  - wiki/GeminiClient.md, wiki/ContentGenerator.md, wiki/EasyCodeServerAdapter.md
   - wiki/SceneManager.md, wiki/Turn.md, wiki/SubAgent.md
   - wiki/ToolRegistry.md, wiki/BaseTool.md, wiki/ToolExecutionEngine.md
   - wiki/DiscoveredMCPTool.md, wiki/mcp-client.md

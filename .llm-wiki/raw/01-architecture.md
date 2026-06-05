@@ -1,16 +1,16 @@
-# DeepV Code — Architecture Facts
+# Easy Code — Architecture Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 
 ## Project Identity
 
-- **Name**: deepv-code
+- **Name**: easycode-ai
 - **Version**: 1.0.316
 - **License**: Apache-2.0
 - **Runtime**: Node.js >= 20.0.0
 - **Language**: TypeScript 5.0+, ESM modules
-- **Repository**: github.com/OrionStarAI/DeepVCode
-- **Author**: DeepV Code Team
+- **Repository**: github.com/OrionStarAI/EasyCodeCode
+- **Author**: Easy Code Team
 - **Origin**: Forked from Google Gemini CLI (google-gemini/gemini-cli)
 
 ## Monorepo Structure
@@ -19,8 +19,8 @@ npm workspaces, 4 packages:
 
 | Package | NPM Name | Role |
 |---------|-----------|------|
-| `packages/core` | `deepv-code-core` | Backend — API communication, tool orchestration, session management, auth |
-| `packages/cli` | `deepv-code-cli` | Frontend — terminal UI (Ink/React), slash commands, themes |
+| `packages/core` | `easycode-core` | Backend — API communication, tool orchestration, session management, auth |
+| `packages/cli` | `easycode-cli` | Frontend — terminal UI (Ink/React), slash commands, themes |
 | `packages/vscode-ide-companion` | — | VS Code IDE companion extension |
 | `packages/vscode-ui-plugin` | — | VS Code UI plugin |
 
@@ -28,7 +28,7 @@ npm workspaces, 4 packages:
 
 1. User Input → CLI captures via Ink/React terminal
 2. CLI → Core → passes prompt to `GeminiClient`
-3. Core → API → constructs prompt, sends to AI backend (Gemini, Claude, or custom models via `DeepVServerAdapter`)
+3. Core → API → constructs prompt, sends to AI backend (Gemini, Claude, or custom models via `EasyCodeServerAdapter`)
 4. API → Core → receives response; if tool call requested, executes tool
 5. Tool Execution → Core runs tool (with user confirmation for destructive ops)
 6. Core → CLI → returns final response
@@ -38,7 +38,7 @@ npm workspaces, 4 packages:
 
 - **Frontend/backend separation**: Core is UI-independent, can support multiple frontends
 - **Scene-based model routing**: `SceneManager` routes task types to optimal AI models (9 scene types)
-- **Proxy-first auth**: Uses `ProxyAuthManager` with JWT via DeepV Lab servers
+- **Proxy-first auth**: Uses `ProxyAuthManager` with JWT via EasyCode Lab servers
 - **Extensibility**: Extensions, hooks, skills marketplace, MCP protocol, custom models
 - **Resilient**: Loop detection, history compression, model fallback, error recovery, graceful shutdown
 
@@ -53,7 +53,7 @@ packages/vscode-ide-companion  (standalone, esbuild-bundled)
 ## Design Patterns Observed
 
 - **Registry Pattern**: `ToolRegistry` for tools, `HookRegistry` for hooks, `ResourceRegistry` for MCP resources
-- **Adapter Pattern**: `DeepVServerAdapter` adapts proxy API to `ContentGenerator` interface
+- **Adapter Pattern**: `EasyCodeServerAdapter` adapts proxy API to `ContentGenerator` interface
 - **Strategy Pattern**: `SceneManager` selects model per scene type; `ContentGenerator` abstraction
 - **Observer Pattern**: Event managers for token usage, real-time tokens, app events
 - **Singleton Pattern**: `ProxyAuthManager`, `themeManager`, `terminalSizeManager`, `settingsManager`, `marketplaceManager`

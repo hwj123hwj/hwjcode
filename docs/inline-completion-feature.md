@@ -21,7 +21,7 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 ┌─────────────────────────────────────────────────────────┐
 │                VSCode Extension Layer                   │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │  DeepVInlineCompletionProvider                   │  │
+│  │  EasyCodeInlineCompletionProvider                   │  │
 │  │  - Implements InlineCompletionItemProvider       │  │
 │  │  - Handles VSCode completion events              │  │
 │  │  - Debounce & cancellation control               │  │
@@ -55,17 +55,17 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 
 ### 状态栏快捷开关 ⭐
 
-在 VSCode 状态栏右下角，您可以看到 **DeepV 代码补全开关图标**，方便快速启用/禁用补全功能：
+在 VSCode 状态栏右下角，您可以看到 **EasyCode 代码补全开关图标**，方便快速启用/禁用补全功能：
 
 #### 启用状态
-- **图标**：`D✓` （DeepV + 对勾）
+- **图标**：`D✓` （EasyCode + 对勾）
 - **颜色**：默认前景色
-- **提示**：DeepV 代码补全：已启用（点击关闭）
+- **提示**：EasyCode 代码补全：已启用（点击关闭）
 
 #### 禁用状态
-- **图标**：`D✗` （DeepV + 叉号）
+- **图标**：`D✗` （EasyCode + 叉号）
 - **颜色**：警告前景色（橙黄色）
-- **提示**：DeepV 代码补全：已禁用（点击启用）
+- **提示**：EasyCode 代码补全：已禁用（点击启用）
 
 #### 交互方式
 - **点击切换**：点击状态栏图标即可切换代码补全的启用/禁用状态
@@ -86,7 +86,7 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 
 在 VSCode 设置中搜索 "Easy Code" 以访问以下配置：
 
-### `deepv.enableInlineCompletion`
+### `easycode.enableInlineCompletion`
 
 - **类型**：`boolean`
 - **默认值**：`true`
@@ -94,7 +94,7 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 
 ```json
 {
-  "deepv.enableInlineCompletion": true
+  "easycode.enableInlineCompletion": true
 }
 ```
 
@@ -102,10 +102,10 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 
 1. **状态栏按钮**（推荐）：点击右下角的 `D✓` 或 `D✗` 图标
 2. **命令面板**：`Easy Code: Toggle Inline Completion`
-3. **设置界面**：搜索 `deepv.enableInlineCompletion` 勾选/取消勾选
+3. **设置界面**：搜索 `easycode.enableInlineCompletion` 勾选/取消勾选
 4. **settings.json**：直接修改配置文件
 
-### `deepv.inlineCompletionDelay`
+### `easycode.inlineCompletionDelay`
 
 - **类型**：`number`
 - **默认值**：`300`
@@ -113,7 +113,7 @@ Easy Code 现已支持 **AI 驱动的行内代码补全**功能，类似于 GitH
 
 ```json
 {
-  "deepv.inlineCompletionDelay": 300
+  "easycode.inlineCompletionDelay": 300
 }
 ```
 
@@ -220,14 +220,14 @@ Provider 内部维护以下统计数据（开发者模式）：
 ### 补全不显示
 
 1. **检查状态栏图标**：确认状态栏右下角显示 `D✓`（启用状态）
-2. **检查配置**：`deepv.enableInlineCompletion = true`
+2. **检查配置**：`easycode.enableInlineCompletion = true`
 3. **确认已登录**：Easy Code 已完成认证
 4. **检查网络**：确保网络连接正常
 5. **查看日志**：输出面板（Output > Easy Code AI Assistant）
 
 ### 补全速度慢
 
-1. **减少延迟**：降低 `deepv.inlineCompletionDelay` 值（注意可能增加请求频率）
+1. **减少延迟**：降低 `easycode.inlineCompletionDelay` 值（注意可能增加请求频率）
 2. **切换模型**：尝试使用 `gemini-2.5-flash` 模型（更快）
 3. **检查网络**：确认网络延迟正常
 4. **清除缓存**：重启 VSCode
@@ -317,7 +317,7 @@ Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 
 ```json
 {
-  "deepv.inlineCompletionModel": "gemini-2.5-flash"
+  "easycode.inlineCompletionModel": "gemini-2.5-flash"
 }
 ```
 
@@ -337,8 +337,8 @@ Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 
 ```json
 {
-  "deepv.inlineCompletionModel": "auto",
-  "deepv.inlineCompletionDelay": 300
+  "easycode.inlineCompletionModel": "auto",
+  "easycode.inlineCompletionDelay": 300
 }
 ```
 
@@ -351,8 +351,8 @@ Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 
 ```json
 {
-  "deepv.inlineCompletionModel": "gemini-2.5-flash",
-  "deepv.inlineCompletionDelay": 200
+  "easycode.inlineCompletionModel": "gemini-2.5-flash",
+  "easycode.inlineCompletionDelay": 200
 }
 ```
 
@@ -365,8 +365,8 @@ Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 
 ```json
 {
-  "deepv.inlineCompletionModel": "gemini-2.5-pro",
-  "deepv.inlineCompletionDelay": 500
+  "easycode.inlineCompletionModel": "gemini-2.5-pro",
+  "easycode.inlineCompletionDelay": 500
 }
 ```
 
@@ -399,8 +399,8 @@ Cmd+Shift+P → "Easy Code: Select Inline Completion Model"
 如遇到问题或有功能建议，请：
 
 1. 查看日志：`Easy Code > Open Log File`
-2. 提交 Issue：[GitHub Issues](https://github.com/OrionStarAI/DeepVCode/issues)
-3. 社区讨论：[GitHub Discussions](https://github.com/OrionStarAI/DeepVCode/discussions)
+2. 提交 Issue：[GitHub Issues](https://github.com/OrionStarAI/EasyCodeCode/issues)
+3. 社区讨论：[GitHub Discussions](https://github.com/OrionStarAI/EasyCodeCode/discussions)
 
 ---
 

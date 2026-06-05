@@ -113,7 +113,7 @@ if (debugMode) {
 import {
   addMCPStatusChangeListener,
   removeMCPStatusChangeListener,
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 // MCP服务器状态变化时强制重新渲染
 const [mcpStatusUpdateTrigger, setMcpStatusUpdateTrigger] = useState(0);
@@ -135,7 +135,7 @@ import {
   MCPServerStatus,
   getMCPDiscoveryState,
   MCPDiscoveryState,
-} from 'deepv-code-core';
+} from 'easycode-core';
 
 // 获取实际连接状态
 const allStatuses = getAllMCPServerStatuses();
@@ -188,7 +188,7 @@ if (discoveryState === MCPDiscoveryState.IN_PROGRESS || connectingMcpServerCount
 
 ### 使用的API
 
-从 `deepv-code-core` 导出：
+从 `easycode-core` 导出：
 
 - `getAllMCPServerStatuses()` - 获取所有MCP服务器状态Map
 - `getMCPServerStatus(name)` - 获取单个服务器状态

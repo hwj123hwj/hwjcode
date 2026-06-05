@@ -1,5 +1,5 @@
 # Name
-### deepv-webview
+### easycode-webview
 
 # Synopsis
 
@@ -9,7 +9,7 @@
 # Example
 
 # Install:
-`npm install deepv-webview`
+`npm install easycode-webview`
 
 # Test:
 `npm test`

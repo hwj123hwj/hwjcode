@@ -25,14 +25,14 @@ CLI 会自动检测以下环境并启用兼容模式：
 
 ```bash
 # 方法1：设置环境变量
-export DEEPV_SSH_MODE=1
-deepv
+export EASYCODE_SSH_MODE=1
+easycode
 
 # 方法2：单次使用
-DEEPV_SSH_MODE=1 deepv
+EASYCODE_SSH_MODE=1 easycode
 
 # Windows WSL中
-set DEEPV_SSH_MODE=1 && deepv
+set EASYCODE_SSH_MODE=1 && easycode
 ```
 
 ### 兼容模式的优化措施
@@ -63,7 +63,7 @@ set DEEPV_SSH_MODE=1 && deepv
 export TERM=xterm-256color
 
 # 手动启用兼容模式
-export DEEPV_SSH_MODE=1
+export EASYCODE_SSH_MODE=1
 ```
 
 ### 2. 输入延迟或响应缓慢
@@ -101,15 +101,15 @@ export LC_ALL=en_US.UTF-8
 **传统 CMD/PowerShell**：
 ```powershell
 # 在 PowerShell 中设置
-$env:DEEPV_SSH_MODE = "1"
-deepv
+$env:EASYCODE_SSH_MODE = "1"
+easycode
 ```
 
 ## 环境变量参考
 
 | 环境变量 | 值 | 说明 |
 |---------|-----|------|
-| `DEEPV_SSH_MODE` | `1` 或 `true` | 强制启用SSH/WSL兼容模式 |
+| `EASYCODE_SSH_MODE` | `1` 或 `true` | 强制启用SSH/WSL兼容模式 |
 | `PASTE_WORKAROUND` | `1` 或 `true` | 启用粘贴处理兼容模式 |
 | `TERM` | `xterm-256color`<br>`screen-256color`<br>`linux` | 设置终端类型 |
 
@@ -119,16 +119,16 @@ deepv
 
 ```bash
 # 测试方向键
-deepv --help  # 然后按方向键测试
+easycode --help  # 然后按方向键测试
 
 # 测试主题选择
-deepv theme  # 使用方向键导航
+easycode theme  # 使用方向键导航
 
 # 查看环境信息
 echo "SSH: $SSH_CLIENT"
 echo "WSL: $WSL_DISTRO_NAME"
 echo "TERM: $TERM"
-echo "DEEPV_SSH_MODE: $DEEPV_SSH_MODE"
+echo "EASYCODE_SSH_MODE: $EASYCODE_SSH_MODE"
 ```
 
 ## 已知限制

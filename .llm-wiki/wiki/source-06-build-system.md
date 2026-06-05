@@ -12,12 +12,12 @@ source: raw/06-build-and-scripts.md
 ## Two Build Pipelines
 
 1. **NPM Publication**: `tsc` transpiles packages individually → `dist/` directories
-2. **Bundle Path** (GitHub npx): `esbuild` → single `bundle/dvcode.js`
+2. **Bundle Path** (GitHub npx): `esbuild` → single `bundle/easycode.js`
 
 ## Bundle Flow (`npm run bundle:prod`)
 
 1. `npm run build` → `scripts/build.js` (tsc: core → cli → vscode)
-2. `node esbuild.config.js` → esbuild → `bundle/dvcode.js`
+2. `node esbuild.config.js` → esbuild → `bundle/easycode.js`
 3. `node scripts/copy_bundle_assets.js` → .sb, .vsix, help, ripgrep binaries
 
 ## esbuild Configuration
@@ -25,11 +25,11 @@ source: raw/06-build-and-scripts.md
 | Setting | Value |
 |---------|-------|
 | Entry | `packages/cli/index.ts` |
-| Output | `bundle/dvcode.js` |
+| Output | `bundle/easycode.js` |
 | Platform | `node`, Format `esm`, Minify in production |
 | Externals | `@vscode/ripgrep`, `sharp` |
 | Banner | CJS compatibility shim (creates `require`, `__filename`, `__dirname` in ESM) |
-| Define | `CLI_VERSION`, `DEEPX_SERVER_URL` (default: `https://api-code.deepvlab.ai`), `NODE_ENV`, `DEV` |
+| Define | `CLI_VERSION`, `DEEPX_SERVER_URL` (default: `https://api-code.easycode-userlab.ai`), `NODE_ENV`, `DEV` |
 
 ## CI/CD: GitLab CI
 
@@ -40,7 +40,7 @@ Tag-based triggers:
 
 Stages: `test-build` → `release` → `release-vscode`
 
-Runner: `deepvcode-docker-runner`, `node:20` image
+Runner: `easycodecode-docker-runner`, `node:20` image
 
 ## CI/CD: GitHub Actions
 
@@ -50,7 +50,7 @@ Steps: Checkout → Node.js 20.19.3 → npm install → Build webview → Sync v
 
 ## NPM Package
 
-- **Name**: `deepv-code`, Binary: `dvcode` → `bundle/dvcode.js`
+- **Name**: `easycode-ai`, Binary: `easycode` → `bundle/easycode.js`
 - **Published files**: `bundle/`, `README.md`, `LICENSE`
 
 ## TypeScript Configuration
