@@ -86,7 +86,7 @@ export const useLoginCommand = (
           console.log(
             `
 ----------------------------------------------------------------
-Logging in with Google... Please restart DeepV Code CLI to continue.
+Logging in with Google... Please restart Easy Code CLI to continue.
 ----------------------------------------------------------------
             `,
           );

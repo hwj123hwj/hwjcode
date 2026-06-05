@@ -19,7 +19,7 @@ import { t } from '../utils/i18n.js';
 
 // 强制恢复终端标题（MCP 启动时 npx 会覆盖标题）
 function forceRestoreTerminalTitle() {
-  const title = process.env.CLI_TITLE || '🚀 DeepV Code';
+  const title = process.env.CLI_TITLE || '🚀 Easy Code';
   process.stdout.write(`\x1b]2;${title}\x07`);
 }
 

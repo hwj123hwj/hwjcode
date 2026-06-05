@@ -1477,7 +1477,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     if (!isFeishuBotRunning) {
       updateWindowTitleIcon(currentTitleIcon);
     } else {
-      process.stdout.write(`\x1b]2;Feishu Gateway Mode |  DeepV Code\x07`);
+      process.stdout.write(`\x1b]2;Feishu Gateway Mode |  Easy Code\x07`);
     }
   }, [currentTitleIcon, isFeishuBotRunning]);
 
@@ -1506,7 +1506,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       );
 
       // 🎯 构建通知消息（包含完整的任务信息，供 AI 理解）
-      const notificationText = `[DeepV Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${task.id}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
+      const notificationText = `[Easy Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${task.id}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
 
       // 🎯 如果 AI 当前空闲，自动触发 AI 继续处理（静默模式，不显示用户消息）
       if (streamingState === StreamingState.Idle) {
@@ -1609,7 +1609,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         setPendingBackgroundNotifications([]);
 
         // 自动触发 AI 继续处理（静默模式，不显示用户消息）
-        submitQuery('[DeepV Code - SYSTEM NOTIFICATION] Background tasks have completed while you were busy. Please review the results above if necessary, and continue.', { silent: true });
+        submitQuery('[Easy Code - SYSTEM NOTIFICATION] Background tasks have completed while you were busy. Please review the results above if necessary, and continue.', { silent: true });
       } catch (e) {
         console.error('[App] Failed to process pending background notifications:', e);
       }
@@ -1954,7 +1954,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       lastUserInteractionRef.current = Date.now();
 
       const goalContinuePrompt =
-        '[DeepV Code ⏰ GOAL WATCHDOG]\n\n' +
+        '[Easy Code ⏰ GOAL WATCHDOG]\n\n' +
         '⚠️ 系统检测到你在 /goal 模式下已经超过 1 分钟没有进行任何操作（没有调用工具也没有输出），' +
         '但目标尚未完成，你也未调用 goal_achieved 工具。\n\n' +
         '请立即执行以下检查：\n' +

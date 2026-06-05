@@ -64,7 +64,7 @@ describe('CommandHandler', () => {
     expect(handled).toBe(true);
     expect(ctx.sendMessage).toHaveBeenCalledTimes(1);
     const msg = ctx.sendMessage.mock.calls[0][0] as string;
-    expect(msg).toMatch(/DeepV Code Help/);
+    expect(msg).toMatch(/Easy Code Help/);
     expect(msg).toMatch(/\/help/);
   });
 

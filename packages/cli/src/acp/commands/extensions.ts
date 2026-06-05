@@ -18,7 +18,7 @@ import type {
  */
 export class ExtensionsCommand implements Command {
   readonly name = 'extensions';
-  readonly description = 'Manage DeepV Code extensions';
+  readonly description = 'Manage Easy Code extensions';
 
   async execute(
     _context: CommandContext,
@@ -26,7 +26,7 @@ export class ExtensionsCommand implements Command {
   ): Promise<CommandExecutionResponse> {
     return {
       name: this.name,
-      data: 'Extension management over ACP is not yet available in DeepV Code. Use the interactive TUI for now.',
+      data: 'Extension management over ACP is not yet available in Easy Code. Use the interactive TUI for now.',
     };
   }
 }
