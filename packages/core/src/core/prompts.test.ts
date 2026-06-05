@@ -30,6 +30,14 @@ describe('prompts', () => {
       const prompt = getCoreSystemPrompt(undefined, false);
       expect(prompt).toContain('interactive CLI tool');
     });
+
+    it('should include Feishu-specific instructions when isFeishu is true', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, undefined, undefined, true);
+      expect(prompt).toContain('Feishu/Lark Chat Gateway');
+      expect(prompt).toContain('Mobile-Friendly Layout Guidelines');
+      expect(prompt).toContain('Strict Guidelines for Sending Files & Media');
+      expect(prompt).toContain('Prudence & Spam Prevention');
+    });
   });
 
   describe('getCoreSystemPrompt - Model Differences', () => {

@@ -2413,6 +2413,169 @@ export class FeishuGateway {
   }
 
   /**
+   * 发送「目标驱动模式（/goal）」表单卡片，收集启动 goal 所需的全部字段。
+   *
+   * 字段（对齐 TUI GoalWizard）：
+   *   - task        目标任务（必填，多行）
+   *   - forbidden   禁止事项（可选，多行）
+   *   - criteria    成功判定标准（必填，多行）
+   *   - hours       最少持续小时数（必填，0.5–24）
+   *   - intensity   强度（steady/standard/intense，单选，默认 standard）
+   *
+   * 提交后通过 card.action.trigger 的 form_value 一次性回传。返回原始字段值
+   * （未做业务校验——校验/重填流程由调用方控制）。超时或失败返回 { ok:false }。
+   */
+  async askGoalFormViaCard(
+    chatId: string,
+    timeoutMs: number = 10 * 60 * 1000,
+    replyToMessageId?: string,
+  ): Promise<{
+    ok: boolean;
+    fields?: {
+      task: string;
+      forbidden: string;
+      criteria: string;
+      hours: string;
+      intensity: string;
+    };
+    timedOut?: boolean;
+  }> {
+    const formName = `goal_form_${Date.now()}`;
+
+    const intensityOptions = [
+      { text: { tag: 'plain_text', content: '🐢 稳健 (steady) — 慢而稳，重质量' }, value: 'steady' },
+      { text: { tag: 'plain_text', content: '⚖️ 标准 (standard) — 平衡（默认）' }, value: 'standard' },
+      { text: { tag: 'plain_text', content: '🔥 激进 (intense) — 快而猛，重进度' }, value: 'intense' },
+    ];
+
+    const formElements: Record<string, any>[] = [
+      {
+        tag: 'input',
+        name: 'task',
+        label: { tag: 'plain_text', content: '🎯 目标任务（必填）' },
+        input_type: 'multiline_text',
+        max_length: 1000,
+        placeholder: { tag: 'plain_text', content: '你希望我持续完成的目标，越具体越好' },
+      },
+      {
+        tag: 'input',
+        name: 'criteria',
+        label: { tag: 'plain_text', content: '✅ 成功判定标准（必填）' },
+        input_type: 'multiline_text',
+        max_length: 1000,
+        placeholder: { tag: 'plain_text', content: '满足什么条件才算达成目标（可验证的特征）' },
+      },
+      {
+        tag: 'input',
+        name: 'forbidden',
+        label: { tag: 'plain_text', content: '🚫 禁止事项（可选）' },
+        input_type: 'multiline_text',
+        max_length: 1000,
+        placeholder: { tag: 'plain_text', content: '过程中绝对不能做的事，留空表示无' },
+      },
+      {
+        tag: 'input',
+        name: 'hours',
+        label: { tag: 'plain_text', content: '⏱️ 最少持续小时数（0.5–24，必填）' },
+        input_type: 'text',
+        placeholder: { tag: 'plain_text', content: '例如 2（在达标前至少持续工作的小时数）' },
+      },
+      // ⚠️ select_static 不支持 label 属性（飞书 code=230099 "unknown
+      //    property: label"），整卡 JSON 校验失败导致发送失败。标题改用
+      //    前置 markdown 元素承载（与 input 的 label 视觉对齐）。
+      {
+        tag: 'markdown',
+        content: '**🎚️ 执行强度（默认标准）**',
+      },
+      {
+        tag: 'select_static',
+        name: 'intensity',
+        placeholder: { tag: 'plain_text', content: '不选则默认 标准 (standard)' },
+        options: intensityOptions,
+        width: 'fill',
+      },
+      {
+        tag: 'button',
+        text: { tag: 'plain_text', content: '🚀 启动目标模式' },
+        type: 'primary',
+        width: 'default',
+        name: 'submit_btn',
+        form_action_type: 'submit',
+      },
+    ];
+
+    const card: Record<string, any> = {
+      schema: '2.0',
+      config: { update_multi: true, wide_screen_mode: true },
+      header: {
+        template: 'orange',
+        title: { tag: 'plain_text', content: '🎯 目标驱动模式 — 填写目标契约' },
+      },
+      body: {
+        elements: [
+          {
+            tag: 'markdown',
+            content:
+              '填写后点击「🚀 启动目标模式」，我将开启 **YOLO 自动执行**，' +
+              '在达成目标前持续工作、不轻易停止。\n*（启动后可随时用 `/goal clear` 结束）*',
+          },
+          {
+            tag: 'form',
+            name: formName,
+            elements: formElements,
+          },
+        ],
+      },
+    };
+
+    const messageId = await this.sendRawInteractiveCard(chatId, card, replyToMessageId);
+    if (!messageId) {
+      dwarn('askGoalFormViaCard: failed to send goal form card');
+      return { ok: false };
+    }
+    this.lastCardMessageId = messageId;
+
+    // 等待用户提交
+    const actionData = await new Promise<CardActionData>((resolve) => {
+      const timer = setTimeout(() => {
+        this.cardCallbacks.delete(messageId);
+        resolve({ value: '', openId: '', messageId });
+      }, timeoutMs);
+      this.cardCallbacks.set(messageId, { resolve, timer });
+    });
+
+    // 超时未提交
+    if (!actionData.formValue && !actionData.value) {
+      await this.updateCard(
+        messageId,
+        '⏰ 等待超时',
+        '由于在规定时间内未提交目标表单，已取消本次目标模式启动。',
+        undefined,
+        true,
+      );
+      return { ok: false, timedOut: true };
+    }
+
+    const formValue = actionData.formValue || {};
+    const pick = (k: string): string => {
+      const v = formValue[k];
+      if (Array.isArray(v)) return (v[0] ?? '').trim();
+      return (typeof v === 'string' ? v : '').trim();
+    };
+
+    return {
+      ok: true,
+      fields: {
+        task: pick('task'),
+        forbidden: pick('forbidden'),
+        criteria: pick('criteria'),
+        hours: pick('hours'),
+        intensity: pick('intensity'),
+      },
+    };
+  }
+
+  /**
    * 发送一张原始 interactive 卡片（card JSON 直传），返回 message_id。
    * 与 sendCard 不同，这里直接发送调用方构造好的完整 card 对象（含 schema 2.0）。
    */

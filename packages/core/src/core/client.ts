@@ -444,7 +444,7 @@ export class GeminiClient {
     } else {
       const customModelInfo = this.getCustomModelInfo(modelToUse);
       const userRules = this.config.getUserRules();
-      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo);
+      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode());
     }
 
     const isThinking = isThinkingSupported(modelToUse);
@@ -639,7 +639,7 @@ export class GeminiClient {
     const currentModel = this.config.getModel();
     const customModelInfo = this.getCustomModelInfo(currentModel);
     const userRules = this.config.getUserRules();
-    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo);
+    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode());
 
     if (this.chat) {
       this.chat.setSystemInstruction(updatedSystemPrompt);
@@ -824,7 +824,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
         agentStyle,
         currentModel,
         this.config.getPreferredLanguage(),
-        customModelInfo
+        customModelInfo,
+        this.config.getFeishuMode()
       );
 
       // 🐛 FIX: 同上，不再在这里写死 includeThoughts:false 覆盖下游。
