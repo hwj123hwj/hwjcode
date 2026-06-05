@@ -151,8 +151,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   const fullPath = config.getProjectRoot();
   const welcomeMessage = userName ? `Welcome back, ${userName}!` : 'Welcome back!';
 
-  // 处理 Logo 字符串
-  const trimmedLogo = cuteVLogo.trim();
+  // 处理 Logo 字符串：仅剥除首尾空行，保留行内前导空格以维持图形对齐
+  // （不能用 .trim()，否则会吃掉首行前导空格导致 logo 顶部错位）
+  const trimmedLogo = cuteVLogo.replace(/^\n+/, '').replace(/\s+$/, '');
 
   // 🎯 极致紧凑宽度
   const COMPACT_WIDTH = 68;

@@ -166,9 +166,9 @@ describe('getGitProjectPath', () => {
 
   it('parses SSH remote URL with multi-level subgroup path', () => {
     mockGitRemoteOutput(
-      'origin\tgit@gitlab.liebaopay.com:ai_native/DeepVCode/DeepVcodeClient.git (fetch)\n',
+      'origin\tgit@gitlab.example.com:group/DeepVCode/DeepVcodeClient.git (fetch)\n',
     );
-    expect(getGitProjectPath('/some/repo')).toBe('ai_native/DeepVCode/DeepVcodeClient');
+    expect(getGitProjectPath('/some/repo')).toBe('group/DeepVCode/DeepVcodeClient');
   });
 
   it('falls back to first remote when origin is absent', () => {

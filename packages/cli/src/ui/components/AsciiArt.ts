@@ -11,13 +11,17 @@ export const pixelRobotLogo = `
   ▘▘ ▝▝
 `;
 
-// 立体V字符logo (大括号折角 + 星芒 ✦)
+// Easy Code 品牌图标 logo（由 assets/icon.svg 高精度栅格化转译为 ASCII 轮廓，
+// 还原其双螺旋花瓣 + 中心星芒的造型）
 export const cuteVLogo = `
-    ╭───────────╮
-  ╭─╯
- ╭╯        ✦
- ╰─╮
-   ╰───────────╮
+     .-+*-
+   :+oo*=.
+ :=ooo=:
+:oo*:  .+*:
+:oo*: ✦ :+*-.
+ :=ooo=. . :+*=
+    -+++=+*oo=.
+       =**+:
 `;
 
 export const shortAsciiLogo = `
