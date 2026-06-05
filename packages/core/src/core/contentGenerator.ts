@@ -100,13 +100,13 @@ export async function createContentGenerator(
       // 确保有可用的代理服务器
       if (!hasAvailableProxyServer()) {
         throw new Error(
-          'DeepV Code server is required for all models but is not available. ' +
-          'Please start the DeepV Code server or use proxy authentication.'
+          'Easy Code server is required for all models but is not available. ' +
+          'Please start the Easy Code server or use proxy authentication.'
         );
       }
 
       proxyServerUrl = getActiveProxyServerUrl();
-      console.log(`[DeepX] Connecting to DeepV Code server: ${proxyServerUrl}`);
+      console.log(`[DeepX] Connecting to Easy Code server: ${proxyServerUrl}`);
     }
 
     // 🔧 Linus式修复：统一使用DeepVServerAdapter，内部会根据模型类型自动路由

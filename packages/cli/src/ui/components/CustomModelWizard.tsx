@@ -101,7 +101,7 @@ const PROVIDER_OPTIONS: Array<{
     value: EASY_ROUTER_PROVIDER_VALUE,
     label: 'EasyRouter (Recommended)',
     description:
-      'DeepV Code\'s own router. Just paste your API key and pick which models to add — base URL and protocol are auto-detected. Website: https://ezr.sh/',
+      'Easy Code\'s own router. Just paste your API key and pick which models to add — base URL and protocol are auto-detected. Website: https://ezr.sh/',
   },
   {
     value: 'openai',

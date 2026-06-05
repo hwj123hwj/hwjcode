@@ -41,18 +41,18 @@ const getRateLimitErrorMessageGoogleGenericQuotaFree = () =>
 const getRateLimitErrorMessageGooglePaid = (
   fallbackModel: string = DEFAULT_GEMINI_FLASH_MODEL,
 ) =>
-  `\nPossible quota limitations in place or slow response times detected. Switching to the ${fallbackModel} model for the rest of this session. We appreciate you for choosing Gemini Code Assist and the DeepV Code CLI.`;
+  `\nPossible quota limitations in place or slow response times detected. Switching to the ${fallbackModel} model for the rest of this session. We appreciate you for choosing Gemini Code Assist and the Easy Code CLI.`;
 
 const getRateLimitErrorMessageGoogleProQuotaPaid = (
   currentModel: string = DEFAULT_GEMINI_MODEL,
   fallbackModel: string = DEFAULT_GEMINI_FLASH_MODEL,
 ) =>
-  `\nYou have reached your daily ${currentModel} quota limit. You will be switched to the ${fallbackModel} model for the rest of this session. We appreciate you for choosing Gemini Code Assist and the DeepV Code CLI. To continue accessing the ${currentModel} model today, consider using /auth to switch to using a paid API key from AI Studio at https://aistudio.google.com/apikey`;
+  `\nYou have reached your daily ${currentModel} quota limit. You will be switched to the ${fallbackModel} model for the rest of this session. We appreciate you for choosing Gemini Code Assist and the Easy Code CLI. To continue accessing the ${currentModel} model today, consider using /auth to switch to using a paid API key from AI Studio at https://aistudio.google.com/apikey`;
 
 const getRateLimitErrorMessageGoogleGenericQuotaPaid = (
   currentModel: string = DEFAULT_GEMINI_MODEL,
 ) =>
-  `\nYou have reached your daily quota limit. We appreciate you for choosing Gemini Code Assist and the DeepV Code CLI. To continue accessing the ${currentModel} model today, consider using /auth to switch to using a paid API key from AI Studio at https://aistudio.google.com/apikey`;
+  `\nYou have reached your daily quota limit. We appreciate you for choosing Gemini Code Assist and the Easy Code CLI. To continue accessing the ${currentModel} model today, consider using /auth to switch to using a paid API key from AI Studio at https://aistudio.google.com/apikey`;
 const RATE_LIMIT_ERROR_MESSAGE_USE_GEMINI =
   '\nPlease wait and try again later. To increase your limits, request a quota increase through AI Studio, or switch to another /auth method';
 const RATE_LIMIT_ERROR_MESSAGE_VERTEX =
@@ -181,7 +181,7 @@ function getRegionBlockedFriendlyMessage(error: unknown): string {
     return `─────────────────────────────────────────────────────
 🌍 地区访问受限 (451)
 
-${serverMessage || '当前网络（中国大陆）暂不支持访问 DeepV Code 服务。'}
+${serverMessage || '当前网络（中国大陆）暂不支持访问 Easy Code 服务。'}
 
 我们正在努力扩大服务覆盖范围，感谢您的支持！
 
@@ -195,7 +195,7 @@ ${serverMessage || '当前网络（中国大陆）暂不支持访问 DeepV Code 
     return `─────────────────────────────────────────────────────
 🌍 Region Access Restricted (451)
 
-${serverMessage || 'DeepV Code service is not available in your current region.'}
+${serverMessage || 'Easy Code service is not available in your current region.'}
 
 We are expanding service coverage. Thank you for your support!
 

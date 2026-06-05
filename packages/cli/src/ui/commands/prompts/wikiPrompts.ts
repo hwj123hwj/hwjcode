@@ -34,7 +34,7 @@ You are a knowledge base maintainer following the LLM Wiki pattern. Your task is
 \`\`\`markdown
 # LLM Wiki Index
 
-> Auto-maintained by DeepV Code. Do not edit manually.
+> Auto-maintained by Easy Code. Do not edit manually.
 
 ## Sources
 <!-- Source summaries will be listed here -->

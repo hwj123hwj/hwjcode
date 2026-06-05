@@ -293,7 +293,7 @@ export class MCPOAuthProvider {
               <body>
                 <div class="container">
                   <h1 class="success">✅ Authentication Successful!</h1>
-                  <p>You can close this window and return to DeepV Code.</p>
+                  <p>You can close this window and return to Easy Code.</p>
                   <p>Page will close automatically in <span id="countdown">2</span> seconds.</p>
                   <div class="countdown">If the page doesn't close automatically, please close it manually.</div>
                 </div>
