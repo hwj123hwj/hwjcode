@@ -1,8 +1,11 @@
 <div align="center">
 
-# 🚀 DeepV Code
+# 🚀 Easy Code
 
 **AI-Powered Intelligent Software Engineering Assistant**
+
+> ℹ️ **Rebranding notice**: This project was previously known as **DeepV Code** and has been renamed to **Easy Code**.
+> Package names, command names, and config directories (`deepv-code` / `dvcode` / `.deepvcode/` etc.) are kept in the transition period for backward compatibility; new docs and UI use the new brand name.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
@@ -11,7 +14,7 @@
 
 English | [简体中文](./README.md)
 
-<img src="docs/assets/demo.gif" alt="DeepV Code Demo" width="800">
+<img src="docs/assets/demo.gif" alt="Easy Code Demo" width="800">
 
 </div>
 
@@ -19,9 +22,9 @@ English | [简体中文](./README.md)
 
 ## ✨ Introduction
 
-**DeepV Code** is a revolutionary AI-powered intelligent software engineering assistant that deeply integrates artificial intelligence technology to comprehensively enhance software development efficiency, quality, and innovation.
+**Easy Code** is a revolutionary AI-powered intelligent software engineering assistant that deeply integrates artificial intelligence technology to comprehensively enhance software development efficiency, quality, and innovation.
 
-Unlike traditional code completion tools, DeepV Code is an intelligent agent capable of **understanding the entire project context** and **autonomously orchestrating tools to complete complex tasks**, freeing developers from tedious, repetitive work to focus on higher-level innovation and problem-solving.
+Unlike traditional code completion tools, Easy Code is an intelligent agent capable of **understanding the entire project context** and **autonomously orchestrating tools to complete complex tasks**, freeing developers from tedious, repetitive work to focus on higher-level innovation and problem-solving.
 
 ### 🎯 Key Features
 
@@ -58,7 +61,7 @@ pnpm add -g deepv-code
 ```bash
 # Clone repository
 git clone https://github.com/OrionStarAI/DeepVCode.git
-cd DeepVCode
+cd EasyCode
 
 # Install dependencies
 npm install
@@ -71,9 +74,9 @@ npm run dev
 
 ### 🌐 Using Open Source Server (Self-hosted)
 
-If you want to deploy the DeepV Code server locally or in a private environment, you can use our open-source version:
+If you want to deploy the Easy Code server locally or in a private environment, you can use our open-source version:
 
-**Open Source Server:** [DeepVCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
+**Open Source Server:** [EasyCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
 
 To start the CLI and connect to your local server:
 
@@ -135,7 +138,7 @@ Use slash commands in interactive mode for quick common tasks:
 ## 🏗️ Project Architecture
 
 ```
-DeepVCode/
+EasyCode/
 ├── packages/
 │   ├── cli/                    # Command Line Interface
 │   │   ├── src/
@@ -182,7 +185,7 @@ DeepVCode/
 
 ## 🔌 VS Code Extensions
 
-DeepV Code provides two VS Code extensions for enhanced IDE integration:
+Easy Code provides two VS Code extensions for enhanced IDE integration:
 
 ### IDE Companion
 
@@ -215,7 +218,7 @@ npm run package  # Generate .vsix file
 
 ## 🛠️ Built-in Tools
 
-DeepV Code's AI interacts with the external environment through an extensible tool system:
+Easy Code's AI interacts with the external environment through an extensible tool system:
 
 | Tool | Description |
 |:---:|:---|
@@ -235,7 +238,7 @@ DeepV Code's AI interacts with the external environment through an extensible to
 
 ## 🔗 MCP Protocol Support
 
-**Model Context Protocol (MCP)** is the core protocol for DeepV Code's deep context understanding.
+**Model Context Protocol (MCP)** is the core protocol for Easy Code's deep context understanding.
 
 ### What is MCP?
 
@@ -340,7 +343,7 @@ For remote MCP servers that support HTTP, no local process needed.
 
 ## 🤖 Custom Model Support
 
-DeepV Code supports configuring custom models with OpenAI-compatible and Anthropic Claude API formats, allowing you to use any compatible AI service.
+Easy Code supports configuring custom models with OpenAI-compatible and Anthropic Claude API formats, allowing you to use any compatible AI service.
 
 ### Why Use Custom Models?
 
@@ -525,7 +528,7 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 - Streaming and non-streaming responses
 - Tool calling (Function Calling)
 - Multimodal input (text, images)
-- Full integration with all DeepV Code features
+- Full integration with all Easy Code features
 
 ⚠️ **Notes:**
 - Custom models don't consume DeepV credits
@@ -608,7 +611,7 @@ This project is open-sourced under the [Apache License 2.0](LICENSE).
 
 - 🌐 **Official Website**: [https://dvcode.deepvlab.ai](https://dvcode.deepvlab.ai)
 - 📦 **npm Package**: [deepv-code](https://www.npmjs.com/package/deepv-code)
-- 🖥️ **Open Source Server**: [DeepVCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
+- 🖥️ **Open Source Server**: [EasyCode-Server-mini](https://github.com/OrionStarAI/DeepVCode-Server-mini)
 - 🐦 **Issue Tracker**: [GitHub Issues](https://github.com/OrionStarAI/DeepVCode/issues)
 
 ---
@@ -617,6 +620,6 @@ This project is open-sourced under the [Apache License 2.0](LICENSE).
 
 **💬 "AI is not just a tool, it's every developer's partner."**
 
-🪄 **Happy Coding with DeepV Code!** 💻✨
+🪄 **Happy Coding with Easy Code!** 💻✨
 
 </div>

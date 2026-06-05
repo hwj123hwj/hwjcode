@@ -3,7 +3,7 @@
  * YOLO模式设置管理Hook
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -61,7 +61,7 @@ const ENCRYPTION_KEY_FILE = 'feishu-key';
  * 飞书 Bot 凭证不区分项目，固定走全局，因此不接受 projectRoot 形参。
  */
 function credDir(): string {
-  return path.join(os.homedir(), '.deepv');
+  return path.join(os.homedir(), '.easycode-user');
 }
 
 function credPath(): string {

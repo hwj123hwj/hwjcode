@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -34,7 +34,7 @@ You are a knowledge base maintainer following the LLM Wiki pattern. Your task is
 \`\`\`markdown
 # LLM Wiki Index
 
-> Auto-maintained by DeepV Code. Do not edit manually.
+> Auto-maintained by Easy Code. Do not edit manually.
 
 ## Sources
 <!-- Source summaries will be listed here -->

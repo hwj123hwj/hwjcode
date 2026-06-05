@@ -24,7 +24,7 @@ export function performInit(doesMemoryFileExist: boolean): CommandActionReturn {
   return {
     type: 'submit_prompt',
     content: `
-You are an AI agent that brings the power of DeepV Code directly into the terminal. Your task is to analyze the current directory and generate a comprehensive DEEPV.md file to be used as instructional context for future interactions.
+You are an AI agent that brings the power of Easy Code directly into the terminal. Your task is to analyze the current directory and generate a comprehensive DEEPV.md file to be used as instructional context for future interactions.
 
 **Analysis Process:**
 

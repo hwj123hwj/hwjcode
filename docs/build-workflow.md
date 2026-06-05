@@ -1,14 +1,14 @@
-# DeepV Code 构建工作流程 / Build Workflow
+# Easy Code 构建工作流程 / Build Workflow
 
-本文档介绍 DeepV Code 项目的构建和开发工作流程，包含中英双语说明。
+本文档介绍 Easy Code 项目的构建和开发工作流程，包含中英双语说明。
 
-This document describes the build and development workflow for the DeepV Code project, with bilingual instructions.
+This document describes the build and development workflow for the Easy Code project, with bilingual instructions.
 
 ## 📋 项目结构 / Project Structure
 
-DeepV Code 采用 npm workspaces 的 monorepo 架构：
+Easy Code 采用 npm workspaces 的 monorepo 架构：
 
-DeepV Code uses a monorepo architecture with npm workspaces:
+Easy Code uses a monorepo architecture with npm workspaces:
 
 ```
 DeepCode/

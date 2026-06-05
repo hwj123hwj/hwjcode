@@ -2,7 +2,7 @@
 
 ## 🎯 What Was Built
 
-A complete **Ctrl+B background task system** for shell commands in DeepV Code.
+A complete **Ctrl+B background task system** for shell commands in Easy Code.
 
 **Status: ✅ COMPLETE & COMPILED**
 
@@ -300,4 +300,4 @@ See `background-tasks-integration-guide.md` Phase 2-3 for detailed steps.
 
 **Status: ✅ READY FOR INTEGRATION**
 
-You have everything you need to integrate background tasks into DeepV Code!
+You have everything you need to integrate background tasks into Easy Code!

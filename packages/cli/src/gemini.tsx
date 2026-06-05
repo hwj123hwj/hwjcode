@@ -40,6 +40,7 @@ import {
   logUserPrompt,
   AuthType,
   SessionManager,
+  migrateLegacyDirectories,
 } from 'deepv-code-core';
 import { validateAuthMethod } from './config/auth.js';
 import { loadEnvironment } from './config/settings.js';
@@ -259,6 +260,26 @@ function processWorkdirParameter(workdirPath: string | undefined): string | null
 }
 
 export async function main() {
+  // 品牌升级：执行历史配置文件夹平滑迁移 (.deepvcode -> .easycode 等)
+  try {
+    migrateLegacyDirectories(process.cwd(), () => {
+      const isZh = process.env.LANG?.startsWith('zh') || false;
+      if (isZh) {
+        console.log('\n\x1b[36m🔄 正在为您平滑迁移历史 DeepV Code 数据与配置，请稍候（请勿关闭终端）...\x1b[0m');
+        console.log('   • 项目级配置：.deepvcode ──> .easycode');
+        console.log('   • 用户级配置：~/.deepv    ──> ~/.easycode-user');
+        console.log('\x1b[32m💡 提示：下次启动可以使用 easycode 命令启动。\x1b[0m\n');
+      } else {
+        console.log('\n\x1b[36m🔄 Migrating legacy DeepV Code data and configurations, please wait (do not close the terminal)...\x1b[0m');
+        console.log('   • Project-level: .deepvcode ──> .easycode');
+        console.log('   • User-level:    ~/.deepv    ──> ~/.easycode-user');
+        console.log('\x1b[32m💡 Tip: You can use the "easycode" command to launch next time.\x1b[0m\n');
+      }
+    });
+  } catch (err) {
+    // 降级静默忽略
+  }
+
   // 🔬 Startup timing analysis - enable with STARTUP_TIMING=1
   const TIMING_ENABLED = process.env.STARTUP_TIMING === '1';
   const startupStart = Date.now();
@@ -1006,7 +1027,7 @@ let titleRestoreInterval: NodeJS.Timeout | null = null;
 
 function setWindowTitle(title: string, settings: LoadedSettings) {
   if (!settings.merged.hideWindowTitle) {
-    const windowTitle = (process.env.CLI_TITLE || `🚀 DeepV Code - ${title}`).replace(
+    const windowTitle = (process.env.CLI_TITLE || `🚀 Easy Code - ${title}`).replace(
       // eslint-disable-next-line no-control-regex
       /[\x00-\x1F\x7F]/g,
       '',
@@ -1049,13 +1070,13 @@ function setWindowTitle(title: string, settings: LoadedSettings) {
 // 手动恢复标题的函数
 function restoreWindowTitle() {
   // 强制恢复标题
-  const title = currentWindowTitle || '🚀 DeepV Code';
+  const title = currentWindowTitle || '🚀 Easy Code';
   process.stdout.write(`\x1b]2;${title}\x07`);
 }
 
 /**
  * 🎯 使用 Checkpoint Summary 更新窗口标题
- * 格式：🚀 <summary> - DeepV Code - <工作目录名>
+ * 格式：🚀 <summary> - Easy Code - <工作目录名>
  * @param summary 生成的摘要（10字以内）
  * @param settings 用户配置
  * @param workspaceName 工作目录名（可选，默认使用当前工作目录）
@@ -1079,9 +1100,9 @@ export function updateWindowTitleWithSummary(
   // 3. 获取工作目录名
   const workspace = workspaceName || basename(process.cwd());
 
-  // 4. 构造新标题：🚀 <summary> | DeepV Code - <工作目录名>
+  // 4. 构造新标题：🚀 <summary> | Easy Code - <工作目录名>
   const cleanSummary = summary.trim();
-  const newTitle = `🚀 ${cleanSummary} | DeepV Code - ${workspace}`;
+  const newTitle = `🚀 ${cleanSummary} | Easy Code - ${workspace}`;
 
   // 5. 更新全局变量（标题保护机制会自动使用这个值）
   currentWindowTitle = newTitle;
@@ -1104,8 +1125,8 @@ export function updateWindowTitleIcon(icon: string): void {
   }
 
   // Split the title to replace the first character (icon)
-  // Format: 🚀 summary - DeepV Code - workspace
-  // or:     🚀 DeepV Code - workspace
+  // Format: 🚀 summary - Easy Code - workspace
+  // or:     🚀 Easy Code - workspace
   const titleParts = currentWindowTitle.split(' ');
 
   if (titleParts.length > 0) {

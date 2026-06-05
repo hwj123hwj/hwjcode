@@ -1,4 +1,4 @@
-# DeepV Code Hooks 系统 - 完整文档索引
+# Easy Code Hooks 系统 - 完整文档索引
 
 > 所有 Hooks 相关文档的完整索引。根据你的需要快速定位文档。
 
@@ -300,7 +300,7 @@
 ## 📋 文件位置快速查找
 
 ```
-DeepVCode/
+EasyCode/
 │
 ├── 🔴 核心理解（从这里开始）
 │   ├── HOOKS_START_HERE.md ⭐
@@ -346,4 +346,4 @@ DeepVCode/
 **版本**：1.0
 **最后更新**：2025-01-15
 **目的**：帮助用户快速找到需要的 Hooks 文档
-**维护者**：DeepV Code 团队
+**维护者**：Easy Code 团队

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -203,7 +203,7 @@ export function LoginDialog({
       width="100%"
     >
       <Box marginBottom={1}>
-        <Text bold color={Colors.AccentCyan}>DeepV Code 登录</Text>
+        <Text bold color={Colors.AccentCyan}>Easy Code 登录</Text>
       </Box>
       <Box marginTop={1}>
         <Text>请选择您的登录方式：</Text>

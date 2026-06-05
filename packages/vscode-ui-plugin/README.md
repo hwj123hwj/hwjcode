@@ -1,6 +1,6 @@
-# DeepV Code - Your AI Programming Partner 🚀
+# Easy Code - Your AI Programming Partner 🚀
 
-DeepV Code is a powerful AI-powered programming assistant that brings intelligent code assistance directly into your VS Code workspace. Built on cutting-edge AI technology, it helps you write better code faster with natural language interactions.
+Easy Code is a powerful AI-powered programming assistant that brings intelligent code assistance directly into your VS Code workspace. Built on cutting-edge AI technology, it helps you write better code faster with natural language interactions.
 
 ## ✨ Key Features
 
@@ -40,13 +40,13 @@ DeepV Code is a powerful AI-powered programming assistant that brings intelligen
 
 ### Installation
 1. Install the extension from the VS Code Marketplace
-2. Click on the DeepV Code icon in the activity bar (left sidebar)
+2. Click on the Easy Code icon in the activity bar (left sidebar)
 3. Follow the authentication prompts to get started
 
 ### Quick Actions
 
 **Using the Chat Interface:**
-1. Open the DeepV Code panel from the sidebar
+1. Open the Easy Code panel from the sidebar
 2. Type your question or request in natural language
 3. Review AI suggestions and approve tool operations
 4. See changes applied in real-time
@@ -55,13 +55,13 @@ DeepV Code is a powerful AI-powered programming assistant that brings intelligen
 1. Select any code in your editor
 2. Right-click to open the context menu
 3. Choose from:
-   - `DeepV Code: Explain Selected Code`
-   - `DeepV Code: Optimize Code`
-   - `DeepV Code: Generate Tests`
+   - `Easy Code: Explain Selected Code`
+   - `Easy Code: Optimize Code`
+   - `Easy Code: Generate Tests`
 
 **Using Command Palette:**
 - Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (macOS)
-- Type "DeepV Code" to see all available commands
+- Type "Easy Code" to see all available commands
 
 ## 💡 Usage Examples
 
@@ -69,7 +69,7 @@ DeepV Code is a powerful AI-powered programming assistant that brings intelligen
 ```
 You: "Explain what this function does and how it works"
 ```
-Select a complex function, and DeepV Code will provide a clear, detailed explanation.
+Select a complex function, and Easy Code will provide a clear, detailed explanation.
 
 ### Example 2: Code Optimization
 ```
@@ -97,7 +97,7 @@ Get suggestions to modernize and improve code structure.
 
 ## ⚙️ Configuration
 
-Access settings via `File > Preferences > Settings` and search for "DeepV Code":
+Access settings via `File > Preferences > Settings` and search for "Easy Code":
 
 - **Auto Analysis** - Enable/disable automatic code analysis
 - **Confirmation Dialogs** - Toggle confirmations for operations
@@ -122,7 +122,7 @@ Access settings via `File > Preferences > Settings` and search for "DeepV Code":
 
 Apache-2.0 License - see the [LICENSE](https://github.com/OrionStarAI/DeepVCode/blob/main/LICENSE) file for details.
 
-## 🌟 Why Choose DeepV Code?
+## 🌟 Why Choose Easy Code?
 
 - **Enterprise-Grade AI** - Powered by advanced AI models for accurate assistance
 - **Developer-Friendly** - Built by developers, for developers
@@ -132,4 +132,4 @@ Apache-2.0 License - see the [LICENSE](https://github.com/OrionStarAI/DeepVCode/
 
 ---
 
-**Transform your coding experience with AI assistance. Install DeepV Code today and code smarter, not harder!** 🚀
+**Transform your coding experience with AI assistance. Install Easy Code today and code smarter, not harder!** 🚀

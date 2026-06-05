@@ -7,11 +7,11 @@ sources: [raw/04-tools-system.md, raw/02-core-module.md]
 
 # Tools System
 
-> The extensible tool framework powering DeepV Code's AI agent capabilities.
+> The extensible tool framework powering Easy Code's AI agent capabilities.
 
 ## Overview
 
-工具系统是 DeepV Code 的核心能力层。AI 模型通过 FunctionCall 请求工具执行，[[ToolExecutionEngine]] 管理执行状态机，[[ToolRegistry]] 管理工具注册与发现。
+工具系统是 Easy Code 的核心能力层。AI 模型通过 FunctionCall 请求工具执行，[[ToolExecutionEngine]] 管理执行状态机，[[ToolRegistry]] 管理工具注册与发现。
 
 ## Architecture
 

@@ -199,6 +199,9 @@ class DeepVWebviewViewProvider implements vscode.WebviewViewProvider {
     const mainUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'build', 'main.js')
     );
+    const iconUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'assets', 'icon.png')
+    );
 
     const nonce = this.generateNonce();
 
@@ -261,47 +264,55 @@ class DeepVWebviewViewProvider implements vscode.WebviewViewProvider {
         padding: 2rem;
       }
 
-      .initial-loading__logo {
-        width: 60px;
-        height: 60px;
-        margin: 0 auto 1.5rem;
-        background: linear-gradient(135deg,
-          var(--vscode-button-background, #0e639c) 0%,
-          var(--vscode-button-hoverBackground, #1177bb) 50%,
-          var(--vscode-textLink-foreground, #3794ff) 100%
-        );
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: logoSpin 2s linear infinite;
-        box-shadow: 0 0 20px rgba(55, 148, 255, 0.3);
+      .initial-loading__logo-image {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto;
+        display: block;
+        animation: logoPulse 2s ease-in-out infinite;
+        border-radius: 12px;
       }
 
-      .initial-loading__logo-text {
-        color: var(--vscode-editor-background, #1e1e1e);
-        font-weight: bold;
-        font-size: 14px;
-        letter-spacing: 1px;
+      .initial-loading__progress-bar {
+        width: 120px;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.08);
+        margin: 1.5rem auto 1.2rem;
+        border-radius: 1px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .initial-loading__progress-indicator {
+        width: 40px;
+        height: 100%;
+        background: var(--vscode-button-background, #0e639c);
+        position: absolute;
+        top: 0;
+        left: -40px;
+        animation: loadingBar 1.5s infinite ease-in-out;
+        border-radius: 1px;
       }
 
       .initial-loading__title {
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin: 0 0 0.5rem;
+        font-size: 1.2rem;
+        font-weight: 500;
+        margin: 0 0 0.3rem;
         color: var(--vscode-foreground, #cccccc);
+        letter-spacing: 0.5px;
       }
 
       .initial-loading__subtitle {
-        font-size: 0.9rem;
-        margin: 0 0 1.5rem;
+        font-size: 0.8rem;
+        margin: 0 0 1.2rem;
         color: var(--vscode-descriptionForeground, #cccccc99);
+        opacity: 0.8;
       }
 
       .initial-loading__status {
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         color: var(--vscode-descriptionForeground, #cccccc99);
-        opacity: 0.8;
+        opacity: 0.7;
       }
 
       .initial-loading__dots {
@@ -314,9 +325,15 @@ class DeepVWebviewViewProvider implements vscode.WebviewViewProvider {
         to { opacity: 1; }
       }
 
-      @keyframes logoSpin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+      @keyframes loadingBar {
+        0% { left: -40px; }
+        50% { left: 120px; width: 60px; }
+        100% { left: 160px; width: 40px; }
+      }
+
+      @keyframes logoPulse {
+        0%, 100% { opacity: 0.8; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.03); }
       }
 
       @keyframes dotPulse {
@@ -329,10 +346,11 @@ class DeepVWebviewViewProvider implements vscode.WebviewViewProvider {
     <!-- 🎯 初始加载屏幕 - 在React加载前显示 -->
     <div id="initial-loading" class="initial-loading">
       <div class="initial-loading__container">
-        <div class="initial-loading__logo">
-          <div class="initial-loading__logo-text">DV</div>
+        <img class="initial-loading__logo-image" src="${iconUri}" alt="Logo" />
+        <div class="initial-loading__progress-bar">
+          <div class="initial-loading__progress-indicator"></div>
         </div>
-        <div class="initial-loading__title">DeepV Code</div>
+        <div class="initial-loading__title">Easy Code</div>
         <div class="initial-loading__subtitle">AI Assistant</div>
         <div class="initial-loading__status">
           正在加载界面<span class="initial-loading__dots">...</span>

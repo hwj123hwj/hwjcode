@@ -11,7 +11,7 @@
 | 端 | 触发方式 |
 |---|---|
 | **CLI** | 在交互模式输入 `/goal` |
-| **VSCode UI 插件** | ① 聊天工具栏的 🎯 按钮 ② 命令面板：`DeepV Code: Goal-Driven Mode` |
+| **VSCode UI 插件** | ① 聊天工具栏的 🎯 按钮 ② 命令面板：`Easy Code: Goal-Driven Mode` |
 
 ## 6 步交互
 

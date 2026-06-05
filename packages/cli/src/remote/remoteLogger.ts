@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +21,7 @@ export class RemoteLogger {
 
   private constructor() {
     // 创建日志目录
-    const logDir = path.join(os.homedir(), '.deepv', 'logs');
+    const logDir = path.join(os.homedir(), '.easycode-user', 'logs');
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
     }

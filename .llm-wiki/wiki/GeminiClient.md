@@ -11,7 +11,7 @@ sources: [raw/02-core-module.md, raw/01-architecture.md]
 
 ## Overview
 
-`GeminiClient` 是 DeepV Code 的核心编排器，管理聊天会话、上下文压缩、循环检测和 token 限制。每个会话最多 100 轮对话。
+`GeminiClient` 是 Easy Code 的核心编排器，管理聊天会话、上下文压缩、循环检测和 token 限制。每个会话最多 100 轮对话。
 
 ## Key Responsibilities
 

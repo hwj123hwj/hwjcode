@@ -3,7 +3,7 @@
  * 多Session状态管理Hook
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';

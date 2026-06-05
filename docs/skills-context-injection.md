@@ -2,7 +2,7 @@
 
 **文档版本：** 1.0
 **最后更新：** 2026-02-05
-**维护者：** DeepV Code Team
+**维护者：** Easy Code Team
 
 ---
 
@@ -604,5 +604,5 @@ AI 应该自动调用 `use_skill(skillName="superpowers:superpowers:brainstormin
 
 ---
 
-**维护联系：** DeepV Code Team
-**问题反馈：** https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient/-/issues
+**维护联系：** Easy Code Team
+**问题反馈：** https://gitlab.liebaopay.com/ai_native/EasyCode/DeepVcodeClient/-/issues

@@ -42,7 +42,7 @@ const COLORS = {
 };
 
 const LOGO = `
-${COLORS.cyan}${COLORS.bright}DeepV Code Build System${COLORS.reset}
+${COLORS.cyan}${COLORS.bright}Easy Code Build System${COLORS.reset}
 `;
 
 function printHeader(title) {

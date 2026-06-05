@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  *
  * PreviewBox — bordered monospace box for a single option's markdown preview.

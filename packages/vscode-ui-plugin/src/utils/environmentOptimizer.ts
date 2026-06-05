@@ -4,7 +4,7 @@
  * 针对VSCode插件环境优化终端检测，避免不必要的进程树遍历
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import * as vscode from 'vscode';

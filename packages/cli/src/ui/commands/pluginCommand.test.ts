@@ -21,7 +21,7 @@ vi.mock('deepv-code-core', () => ({
   SkillLoadLevel: { METADATA: 0, FULL: 1, RESOURCES: 2 },
   SkillsPaths: { SKILLS_ROOT: '/mock/skills' },
   clearSkillsContextCache: vi.fn(),
-  PROJECT_DIR_PREFIX: '.deepvcode',
+  PROJECT_DIR_PREFIX: '.easycode',
 }));
 
 // Mock i18n

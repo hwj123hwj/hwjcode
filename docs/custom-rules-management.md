@@ -2,7 +2,7 @@
 
 ## 📋 Overview (概述)
 
-DeepV Code 支持自定义规则管理，允许您为项目定义特定的编码约定、风格指南和最佳实践。这些规则会自动注入到 AI 助手的上下文中，确保生成的代码符合您的项目标准。
+Easy Code 支持自定义规则管理，允许您为项目定义特定的编码约定、风格指南和最佳实践。这些规则会自动注入到 AI 助手的上下文中，确保生成的代码符合您的项目标准。
 
 ### 快速了解：哪些文件会被加载为规则？
 
@@ -333,7 +333,7 @@ class RuleService {
 1. 检查规则是否启用 (`enabled: true`)
 2. 检查规则类型是否正确
 3. 对于 `context_aware` 规则，检查触发条件是否匹配
-4. 查看 DeepV Code 日志 (`Ctrl+Shift+P` -> "DeepV: Open Log File")
+4. 查看 Easy Code 日志 (`Ctrl+Shift+P` -> "DeepV: Open Log File")
 
 ### 规则冲突
 
@@ -359,5 +359,5 @@ class RuleService {
 
 ---
 
-**版权所有 © 2025 DeepV Code**
+**版权所有 © 2025 Easy Code**
 根据 Apache-2.0 许可证授权

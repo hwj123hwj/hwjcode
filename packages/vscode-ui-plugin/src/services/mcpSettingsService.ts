@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,8 +23,8 @@ import stripJsonComments from 'strip-json-comments';
  * 与 CLI 完全兼容，用户可以在 CLI 中配置 MCP 服务器，插件自动读取。
  */
 export class MCPSettingsService {
-  private static readonly SETTINGS_DIRECTORY_NAME = '.deepv';
-  private static readonly WORKSPACE_SETTINGS_DIRECTORY_NAME = '.deepvcode'; // 工作区使用不同目录名
+  private static readonly SETTINGS_DIRECTORY_NAME = '.easycode-user';
+  private static readonly WORKSPACE_SETTINGS_DIRECTORY_NAME = '.easycode'; // 工作区使用不同目录名
   private static readonly SETTINGS_FILE_NAME = 'settings.json';
 
   /**

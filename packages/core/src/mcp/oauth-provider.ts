@@ -249,7 +249,7 @@ export class MCPOAuthProvider {
                 <div class="container">
                   <div class="success-badge">✓</div>
                   <h1>Authentication Successful</h1>
-                  <p>You can now close this window and return to DeepV Code.</p>
+                  <p>You can now close this window and return to Easy Code.</p>
                 </div>
               </body>
             </html>

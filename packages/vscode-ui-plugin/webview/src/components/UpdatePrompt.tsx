@@ -3,7 +3,7 @@
  * Modern dark-themed update dialog with Apple/VS Code style
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React from 'react';
@@ -85,7 +85,7 @@ export const UpdatePrompt: React.FC<UpdatePromptProps> = ({
         <div className="update-prompt__message">
           {forceUpdate ? (
             <p className="update-prompt__support-text">
-              Your current version is outdated and no longer supported. Please update to continue using DeepV Code.
+              Your current version is outdated and no longer supported. Please update to continue using Easy Code.
             </p>
           ) : (
             <p className="update-prompt__support-text">
@@ -125,7 +125,7 @@ export const UpdatePrompt: React.FC<UpdatePromptProps> = ({
         {/* Additional instructions */}
         <div className="update-prompt__footer">
           <p className="update-prompt__instructions">
-            Option 1: Search "DeepV Code" in VS Code Extensions marketplace
+            Option 1: Search "Easy Code" in VS Code Extensions marketplace
             <br />
             Option 2: Download VSIX file and install via "Install from VSIX" in VS Code
           </p>

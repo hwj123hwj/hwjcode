@@ -3,7 +3,7 @@
  * 计划模式开关 - 支持只讨论不改代码的纯规划模式
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React from 'react';

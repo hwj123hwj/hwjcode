@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -175,7 +175,7 @@ export const translations = {
     'update.found.new.version': '🎉 New version found: {current} → {latest}',
     'update.current.latest': '✅ You are on the latest version',
     'update.current.latest.full': '✅ You are on the latest version, no update needed',
-    'update.force.message.header': 'DeepV Code must be updated to continue!',
+    'update.force.message.header': 'Easy Code must be updated to continue!',
     'update.available.message.header': 'A new version is available!',
     'update.version.line': 'Current: {current} → Latest: {latest}',
     'update.command.line': '📋 Command: {command}',
@@ -190,12 +190,12 @@ export const translations = {
     'update.prompt.now': '🤔 Update now? (y/n): ',
     'update.forced.title': '🚨 Forced update required',
     'update.available.title': '📢 Update available',
-    'update.success.restart': '🎉 Update complete! The program will exit. Please rerun dvcode',
-    'update.manual.then.rerun': '💡 Please run the update command manually, then rerun dvcode',
+    'update.success.restart': '🎉 Update complete! The program will exit. Please rerun easycode',
+    'update.manual.then.rerun': '💡 Please run the update command manually, then rerun easycode',
     'update.continue.current': '✨ Continuing with current version...',
     'update.force.checking': '🔄 Forcing update check...',
     // Session Summary
-    'agent.powering.down': 'Thanks for using DeepV Code! Run dvcode -c to continue.',
+    'agent.powering.down': 'Thanks for using Easy Code! Run easycode -c to continue.',
 
     // Input Prompt
     'input.placeholder.base': 'Type your message or @filepath',
@@ -435,7 +435,7 @@ export const translations = {
     'tool.confirmation.type.always': 'Yes, always allow this type of tool',
     'tool.confirmation.project.always': 'Yes, always allow all tools in this project',
     'tool.confirmation.modify.editor': 'Modify with external editor',
-    'tool.confirmation.cancel': 'No ({cancelKey}), tell DeepV Code your thoughts',
+    'tool.confirmation.cancel': 'No ({cancelKey}), tell Easy Code your thoughts',
     'tool.confirmation.execute': 'Allow execution: \'{command}\'?',
     'tool.confirmation.type.always.exec': 'Yes, always allow this type',
     'tool.confirmation.continue': 'Do you want to continue?',
@@ -500,16 +500,16 @@ export const translations = {
     'diff.test.completed': 'Test completed ✅',
 
     // Startup Warnings
-    'startup.warning.home.directory': 'You are running DeepV Code CLI in your home directory. It is recommended to run in a project-specific directory.',
-    'startup.warning.root.directory': 'Warning: You are running DeepV Code CLI in the root directory. Your entire folder structure will be used for context. It is strongly recommended to run in a project-specific directory.',
+    'startup.warning.home.directory': 'You are running Easy Code CLI in your home directory. It is recommended to run in a project-specific directory.',
+    'startup.warning.root.directory': 'Warning: You are running Easy Code CLI in the root directory. Your entire folder structure will be used for context. It is strongly recommended to run in a project-specific directory.',
     'startup.warning.filesystem.error': 'Could not verify the current directory due to a file system error.',
     'startup.warning.custom.proxy.server': '🔗 Custom server: {url}\n   Please verify trustworthiness and monitor your API usage.',
     'startup.warning.low.credits': '⚠️  Your remaining credits are running low ({percentage}% left). Please consider purchasing more credits to continue using the service.',
 
     // DeepX Quota Error Messages
-    'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 Your account\'s available Credits are insufficient to continue using this service\n💡 Please consider subscribing to a higher quota plan. Details: https://dvcode.deepvlab.ai/\n\n\x1b[33m🎁 For free trial opportunities, contact our Boss: https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
-    'deepx.quota.exceeded.with.upgrade': '🚫 Daily {limitType} limit reached for {model}\n💡 Please upgrade your plan at: https://dvcode.deepvlab.ai/',
-    'deepx.quota.exceeded.default': '🚫 Service quota exceeded\n💡 Please upgrade your plan at: https://dvcode.deepvlab.ai/',
+    'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 Your account\'s available Credits are insufficient to continue using this service\n💡 Please consider subscribing to a higher quota plan. Details: https://easycode.deepvlab.ai/\n\n\x1b[33m🎁 For free trial opportunities, contact our Boss: https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
+    'deepx.quota.exceeded.with.upgrade': '🚫 Daily {limitType} limit reached for {model}\n💡 Please upgrade your plan at: https://easycode.deepvlab.ai/',
+    'deepx.quota.exceeded.default': '🚫 Service quota exceeded\n💡 Please upgrade your plan at: https://easycode.deepvlab.ai/',
     'deepx.quota.limit.token': 'token limit',
     'deepx.quota.limit.request': 'request limit',
     'deepx.quota.limit.cost': 'cost limit',
@@ -579,7 +579,7 @@ export const translations = {
     'tips.guide.step2': '2. The more specific your description, the better the results.',
     'tips.guide.step3': '3. Create',
     'tips.guide.deepv.file': 'DEEPV.md',
-    'tips.guide.step3.suffix': 'file to customize your interaction with DeepV Code.',
+    'tips.guide.step3.suffix': 'file to customize your interaction with Easy Code.',
     'tips.guide.help': '/help',
     'tips.guide.help.suffix': 'for more information.',
 
@@ -607,11 +607,12 @@ export const translations = {
     'auth.deepvlab.browser.url': 'If the browser doesn\'t open automatically, please visit: {url}',
     'auth.deepvlab.cancel.hint': 'Press ESC to cancel authentication',
     'auth.deepvlab.cancelled': 'Authentication cancelled',
-    'auth.option.deepvlab': 'Press Enter to sign in to DeepV Code',
+    'auth.option.deepvlab': 'Press Enter to sign in to Easy Code',
     'auth.option.custom.model': 'Use Custom Model (no login required)',
 
     // Welcome and Dialog Messages
-    'welcome.title': '🎉 Welcome to DeepV Code! ✨',
+    'welcome.title': '🎉 Welcome to Easy Code! ✨',
+    'welcome.brand.upgrade': '💡 Announcement: DeepV Code has been upgraded to Easy Code',
     'welcome.subtitle': '🚀 Start your intelligent coding journey 💻',
     'welcome.daily.tip.title': 'Daily Tip',
     'welcome.daily.tip.more': 'Type /help for traditional help, /help-ask for AI-guided help',
@@ -656,7 +657,7 @@ export const translations = {
     'cloud.auth.complete.title': '🌐 Cloud Mode Authentication Complete',
     'cloud.auth.complete.ready': '✅ Authentication successful! Your cloud environment is ready.',
     'cloud.auth.complete.url': '🌍 Remote Access URL: {url}',
-    'cloud.auth.complete.share': '📱 Share this URL to access DeepV Code remotely from any device',
+    'cloud.auth.complete.share': '📱 Share this URL to access Easy Code remotely from any device',
     'cloud.auth.instruction': '💡 Please authenticate using the auth dialog that will open...',
 
     // Cloud mode connection and health
@@ -720,7 +721,7 @@ export const translations = {
     // Stream interruption recovery
     'stream.interrupted': 'Connection hiccup detected',
     'stream.interrupted.prefix': '⚠️ Oops, connection hiccup!',
-    'stream.interrupted.suffix': 'DeepV Code will resume in {seconds}s...',
+    'stream.interrupted.suffix': 'Easy Code will resume in {seconds}s...',
     'stream.continue.prompt': '[System] The previous response was interrupted due to a network issue. Please continue from where you left off.',
     'stream.autoRetry': 'Resuming',
 
@@ -817,7 +818,7 @@ export const translations = {
     'help.shortcut.exit': '- Exit application',
 
     // About Box
-    'about.title': 'About DeepV Code',
+    'about.title': 'About Easy Code',
 
     // Slash command descriptions
     'command.help.description': 'Get deepv-code help',
@@ -971,7 +972,7 @@ export const translations = {
     'command.restore.complete': 'Checkpoint restore complete. Project files have been reverted to the state when the checkpoint was created.',
     'command.restore.context.message': '[SYSTEM CONTEXT] The user has manually restored the project files to a previous checkpoint{messageInfo}. All file modifications made after this checkpoint have been intentionally reverted by the user. This is a deliberate action, not an error. Please acknowledge this state and continue assisting based on the restored file state.',
     'command.mcp.description': 'List configured MCP servers and tools, or authenticate with OAuth servers',
-    'command.docs.description': 'Open full DeepV Code documentation in browser',
+    'command.docs.description': 'Open full Easy Code documentation in browser',
     'command.extensions.description': 'List active extensions',
     'command.extensions.info.title': 'Extension System',
     'command.extensions.info.intro': 'DVCode supports Gemini CLI extensions. To manage extensions, use:',
@@ -981,7 +982,7 @@ export const translations = {
     'command.extensions.info.uninstall': 'Remove extension',
     'command.extensions.info.example': 'Example:',
     'command.extensions.info.learnmore': 'For more information, visit:',
-    'command.extensions.info.url': 'https://dvcode.deepvlab.ai/extensions',
+    'command.extensions.info.url': 'https://easycode.deepvlab.ai/extensions',
     'command.login.description': 'Start login server',
     'command.privacy.description': 'Display privacy statement',
     'command.corgi.description': 'Toggle corgi mode',
@@ -1200,7 +1201,7 @@ export const translations = {
     'mcp.related.links': '📚 Related links:',
 
     'mcp.status.no.servers.title': '🔧 No MCP Servers Configured',
-    'mcp.status.no.servers.description': 'MCP (Model Context Protocol) allows you to connect external tools and services, extending DeepV Code functionality.',
+    'mcp.status.no.servers.description': 'MCP (Model Context Protocol) allows you to connect external tools and services, extending Easy Code functionality.',
     'mcp.status.quick.start': '🚀 Quick Start:',
     'mcp.status.predefined.templates': '1️⃣ Use Predefined Templates (Recommended)',
     'mcp.status.interactive.wizard': '2️⃣ Interactive Configuration Wizard',
@@ -1239,13 +1240,13 @@ export const translations = {
     'command.mcp.unload.usage': 'Usage: /mcp unload <server-name>',
 
     'mcp.help.system.title': '🔧 MCP (Model Context Protocol) Help System',
-    'mcp.help.system.description': 'MCP allows you to connect external tools and services, extending DeepV Code functionality.',
+    'mcp.help.system.description': 'MCP allows you to connect external tools and services, extending Easy Code functionality.',
     'mcp.help.commands.title': '📋 Available Commands:',
     'mcp.help.description': 'MCP Help System - Get detailed usage guides and configuration help',
 
     // Main help content
     'mcp.help.main.title': '🔧 MCP (Model Context Protocol) Help System',
-    'mcp.help.main.description': 'MCP allows you to connect external tools and services, extending DeepV Code functionality.',
+    'mcp.help.main.description': 'MCP allows you to connect external tools and services, extending Easy Code functionality.',
     'mcp.help.main.commands.title': '📋 Available Commands:',
     'mcp.help.main.command.status': '- View configured MCP server status',
     'mcp.help.main.command.add': '- Add new MCP server',
@@ -1445,7 +1446,7 @@ export const translations = {
     'thinking.effort.auto': 'Auto',
 
     // Feishu Bot Integration
-    'feishu.command.description': 'Integrate Feishu Bot, let dvcode answer code questions in Feishu',
+    'feishu.command.description': 'Integrate Feishu Bot, let easycode answer code questions in Feishu',
     'feishu.subcmd.setup.description': 'Configure Feishu app credentials (QR scan or manual)',
     'feishu.subcmd.start.description': 'Start the Feishu Bot (WebSocket long connection)',
     'feishu.subcmd.stop.description': 'Stop the Feishu Bot',
@@ -1456,7 +1457,7 @@ export const translations = {
     'feishu.subcmd.allowlist.description': 'List the current Bot Owner and authorization allowlist',
     'feishu.subcmd.help.description': 'Show Feishu help',
 
-    'feishu.help.text': 'Feishu Bot Integration — let dvcode answer questions inside Feishu\n\nUsage:\n  /feishu                Interactive setup and start\n  /feishu setup          Mode 1: scan QR code to auto-create app (recommended)\n  /feishu setup --manual <appId> <appSecret>  Mode 3: manual credentials\n  /feishu start          Start the Feishu Bot (credentials required)\n  /feishu stop           Stop the Feishu Bot\n  /feishu status         Show current status\n  /feishu logout         Clear credentials and disconnect\n\nAuthorization (important):\n  /feishu allow <openId> Allow a specific Feishu user to invoke the Bot\n  /feishu deny  <openId> Remove from the authorization allowlist\n  /feishu allowlist      Show current Owner and allowlist\n\nFirst-time use:\n  1. /feishu setup              # Scan QR (the scanner becomes the Owner)\n  2. /feishu start              # Start the Bot\n  3. Send a message to the Bot in Feishu — dvcode answers in the background\n\n⚠️  By default the Bot only responds to the Owner / allowlisted users; unauthorized senders are rejected.',
+    'feishu.help.text': 'Feishu Bot Integration — let easycode answer questions inside Feishu\n\nUsage:\n  /feishu                Interactive setup and start\n  /feishu setup          Mode 1: scan QR code to auto-create app (recommended)\n  /feishu setup --manual <appId> <appSecret>  Mode 3: manual credentials\n  /feishu start          Start the Feishu Bot (credentials required)\n  /feishu stop           Stop the Feishu Bot\n  /feishu status         Show current status\n  /feishu logout         Clear credentials and disconnect\n\nAuthorization (important):\n  /feishu allow <openId> Allow a specific Feishu user to invoke the Bot\n  /feishu deny  <openId> Remove from the authorization allowlist\n  /feishu allowlist      Show current Owner and allowlist\n\nFirst-time use:\n  1. /feishu setup              # Scan QR (the scanner becomes the Owner)\n  2. /feishu start              # Start the Bot\n  3. Send a message to the Bot in Feishu — easycode answers in the background\n\n⚠️  By default the Bot only responds to the Owner / allowlisted users; unauthorized senders are rejected.',
 
     // QR setup flow (Mode 1)
     'feishu.setup.qr.title': '📱 Mode 1: Scan QR to auto-create app',
@@ -1496,7 +1497,7 @@ export const translations = {
 
     // Slash commands inside Feishu chat (help text shown to remote user — KEEP CHINESE)
     // We do NOT translate the bot's outgoing replies; the in-Feishu help is rendered
-    // by the bot itself, not by the dvcode TUI. See feishu.handlers below for TUI side.
+    // by the bot itself, not by the easycode TUI. See feishu.handlers below for TUI side.
 
     // Start handler
     'feishu.start.creds_load_failed': '❌ Failed to read Feishu credentials: {error}\n\nTo reconfigure: /feishu logout then /feishu setup',
@@ -1585,7 +1586,7 @@ export const translations = {
     'feishu.allowlist.list_empty': '  Allowlist:   (empty)',
     'feishu.allowlist.manage_hint': 'Manage: /feishu allow <openId>  /  /feishu deny <openId>',
 
-    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    // TUI-side runtime info items (shown only in easycode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[Feishu] {text}',
     'feishu.tui.context_compressed': '📦 Context auto-compressed',
     'feishu.tui.agent_working': '🤖 Agent is working...',
@@ -1598,8 +1599,8 @@ export const translations = {
     'feishu.tui.unauthorized_log': '🛡️ Rejected unauthorized message: openId={openId} text="{text}"',
 
     // Lifecycle commands intercepted on the Feishu side (start/stop must run in the local CLI)
-    'feishu.lifecycle.start_blocked': '⚠️ **The Bot is already running** — that\'s exactly how this message reached me.\n\n`/feishu start` manages the Bot\'s lifecycle and must be run from the **local dvcode terminal**, not here in Feishu.\n\n💡 If you want to work, just talk to me directly, or use `/feishu status` to view connection and bound projects.',
-    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` cannot be run from Feishu.**\n\nThis command stops the very gateway that is relaying your message — running it here would disconnect the Bot and you could not restart it from Feishu.\n\n💡 To stop the Bot, run `/feishu stop` in the **local dvcode terminal**.\n🛑 To abort the current running task instead, use `/stop`.',
+    'feishu.lifecycle.start_blocked': '⚠️ **The Bot is already running** — that\'s exactly how this message reached me.\n\n`/feishu start` manages the Bot\'s lifecycle and must be run from the **local easycode terminal**, not here in Feishu.\n\n💡 If you want to work, just talk to me directly, or use `/feishu status` to view connection and bound projects.',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` cannot be run from Feishu.**\n\nThis command stops the very gateway that is relaying your message — running it here would disconnect the Bot and you could not restart it from Feishu.\n\n💡 To stop the Bot, run `/feishu stop` in the **local easycode terminal**.\n🛑 To abort the current running task instead, use `/stop`.',
 
     // Feishu Dashboard
     'feishu.dashboard.connected': 'Connected',
@@ -1648,14 +1649,14 @@ export const translations = {
     'tip.shell.command': '!<command> - Execute shell command',
     'tip.shell.mode': '! - Enter/exit shell mode',
     'tip.ctrl.j': 'Ctrl+J - Multiline input',
-    'tip.cli.update': 'dvcode -u - Check for updates',
-    'tip.cli.cloud': 'dvcode --cloud-mode - Enable cloud remote control',
+    'tip.cli.update': 'easycode -u - Check for updates',
+    'tip.cli.cloud': 'easycode --cloud-mode - Enable cloud remote control',
 
     // Skills System
     'skill.command.description': 'Manage AI Skills (Marketplace → Plugin → Skill)',
-    'skill.help.text': 'DeepV Code Skills System\n\nManage AI Skills with a three-tier architecture:\n  Marketplace → Plugin → Skill\n\nCommands:\n  /skill marketplace list              - List all marketplaces\n  /skill marketplace add <url> [alias] - Add a marketplace\n  /skill marketplace update <name>     - Update marketplace\n  /skill marketplace remove <name>     - Remove marketplace\n  /skill marketplace browse <name>     - Browse plugins\n\n  /skill plugin list [marketplace]     - List plugins\n  /skill install <name>                - Install a plugin (auto-finds marketplace)\n  /skill install <name@mp>             - Install from specific marketplace\n  /skill plugin install <name>         - Alias for /skill install\n  /skill plugin uninstall <id>         - Uninstall a plugin\n  /skill plugin enable <id>            - Enable a plugin\n  /skill plugin disable <id>           - Disable a plugin\n  /skill plugin info <id>              - Show plugin info\n\n  /skill list                          - List all skills\n  /skill info <id>                     - Show skill details\n  /skill stats                         - Show statistics\n\nQuick Start:\n  1. Add official marketplace:\n     /skill marketplace add https://github.com/anthropics/skills.git\n\n  2. Browse plugins:\n     /skill marketplace browse skills\n\n  3. Install a plugin (no marketplace needed if unique):\n     /skill install example-skills\n\n  4. View skills:\n     /skill list',
+    'skill.help.text': 'Easy Code Skills System\n\nManage AI Skills with a three-tier architecture:\n  Marketplace → Plugin → Skill\n\nCommands:\n  /skill marketplace list              - List all marketplaces\n  /skill marketplace add <url> [alias] - Add a marketplace\n  /skill marketplace update <name>     - Update marketplace\n  /skill marketplace remove <name>     - Remove marketplace\n  /skill marketplace browse <name>     - Browse plugins\n\n  /skill plugin list [marketplace]     - List plugins\n  /skill install <name>                - Install a plugin (auto-finds marketplace)\n  /skill install <name@mp>             - Install from specific marketplace\n  /skill plugin install <name>         - Alias for /skill install\n  /skill plugin uninstall <id>         - Uninstall a plugin\n  /skill plugin enable <id>            - Enable a plugin\n  /skill plugin disable <id>           - Disable a plugin\n  /skill plugin info <id>              - Show plugin info\n\n  /skill list                          - List all skills\n  /skill info <id>                     - Show skill details\n  /skill stats                         - Show statistics\n\nQuick Start:\n  1. Add official marketplace:\n     /skill marketplace add https://github.com/anthropics/skills.git\n\n  2. Browse plugins:\n     /skill marketplace browse skills\n\n  3. Install a plugin (no marketplace needed if unique):\n     /skill install example-skills\n\n  4. View skills:\n     /skill list',
     'plugin.command.description': 'Manage Plugins (Marketplace → Plugin)',
-    'plugin.help.text': 'DeepV Code Plugin System\n\nManage Plugins and Marketplaces:\n  /plugin marketplace add <url> [alias] - Add a marketplace\n  /plugin install <name>                - Install a plugin\n  /plugin list                          - List installed plugins\n\nThis is an alias for the /skill command system.',
+    'plugin.help.text': 'Easy Code Plugin System\n\nManage Plugins and Marketplaces:\n  /plugin marketplace add <url> [alias] - Add a marketplace\n  /plugin install <name>                - Install a plugin\n  /plugin list                          - List installed plugins\n\nThis is an alias for the /skill command system.',
     'skill.marketplace.description': 'Manage Skills marketplaces',
     'skill.marketplace.usage': 'Usage: /skill marketplace <list|add|update|remove|browse>',
     'skill.marketplace.list.description': 'List all marketplaces',
@@ -1834,7 +1835,7 @@ export const translations = {
     'update.found.new.version': '🎉 发现新版本：{current} → {latest}',
     'update.current.latest': '✅ 当前版本已是最新',
     'update.current.latest.full': '✅ 当前版本已是最新，无需更新',
-    'update.force.message.header': 'DeepV Code 必须更新才能继续使用！',
+    'update.force.message.header': 'Easy Code 必须更新才能继续使用！',
     'update.available.message.header': '发现新版本可用！',
     'update.version.line': '当前版本：{current} → 最新版本：{latest}',
     'update.command.line': '📋 执行命令：{command}',
@@ -1849,12 +1850,12 @@ export const translations = {
     'update.prompt.now': '🤔 是否现在更新？ (y/n): ',
     'update.forced.title': '🚨 检测到强制更新',
     'update.available.title': '📢 发现新版本',
-    'update.success.restart': '🎉 更新完成！程序将退出，请重新运行 dvcode',
-    'update.manual.then.rerun': '💡 请手动执行更新命令，然后重新运行 dvcode',
+    'update.success.restart': '🎉 更新完成！程序将退出，请重新运行 easycode',
+    'update.manual.then.rerun': '💡 请手动执行更新命令，然后重新运行 easycode',
     'update.continue.current': '✨ 继续使用当前版本...',
     'update.force.checking': '🔄 强制检查更新...',
     // Session Summary
-    'agent.powering.down': '感谢使用DeepV Code！ 如要继续上次对话 可执行dvcode -c',
+    'agent.powering.down': '感谢使用Easy Code！ 如要继续上次对话 可执行easycode -c',
 
     // Input Prompt
     'input.placeholder.base': '输入您的消息或 @文件路径',
@@ -2094,7 +2095,7 @@ export const translations = {
     'tool.confirmation.type.always': '是，此类型工具始终允许',
     'tool.confirmation.project.always': '是，本项目所有工具始终允许',
     'tool.confirmation.modify.editor': '使用外部编辑器修改',
-    'tool.confirmation.cancel': '否 ({cancelKey})，告诉DeepV Code你的想法',
+    'tool.confirmation.cancel': '否 ({cancelKey})，告诉Easy Code你的想法',
     'tool.confirmation.execute': '允许执行：\'{command}\'？',
     'tool.confirmation.type.always.exec': '是，本类型始终允许...',
     'tool.confirmation.continue': '您要继续吗？',
@@ -2160,16 +2161,16 @@ export const translations = {
     'diff.test.completed': '测试完成 ✅',
 
     // Startup Warnings
-    'startup.warning.home.directory': '您正在主目录中运行 DeepV Code CLI。建议在项目特定目录中运行。',
-    'startup.warning.root.directory': '警告：您正在根目录中运行 DeepV Code CLI。将使用整个文件夹结构作为上下文。强烈建议在项目特定目录中运行。',
+    'startup.warning.home.directory': '您正在主目录中运行 Easy Code CLI。建议在项目特定目录中运行。',
+    'startup.warning.root.directory': '警告：您正在根目录中运行 Easy Code CLI。将使用整个文件夹结构作为上下文。强烈建议在项目特定目录中运行。',
     'startup.warning.filesystem.error': '由于文件系统错误，无法验证当前目录。',
     'startup.warning.custom.proxy.server': '🔗 检测到自定义代理服务器地址：{url}\n   您正在使用企业级服务器地址。',
     'startup.warning.low.credits': '⚠️  您的剩余积分不多了（剩余 {percentage}%）。请考虑充值以继续使用服务。',
 
     // DeepX Quota Error Messages
-    'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 当前账户可用的 Credit（积分）不足以继续使用本服务\n💡 请考虑订阅更多额度的套餐。详情请访问官网：https://dvcode.deepvlab.ai/\n\n\x1b[33m🎁 如果希望获得免费体验机会，请联系我们的Boss：https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
-    'deepx.quota.exceeded.with.upgrade': '🚫 {model} 的日{limitType}已达上限\n💡 请升级套餐：https://dvcode.deepvlab.ai/',
-    'deepx.quota.exceeded.default': '🚫 服务配额已达上限\n💡 请升级套餐：https://dvcode.deepvlab.ai/',
+    'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 当前账户可用的 Credit（积分）不足以继续使用本服务\n💡 请考虑订阅更多额度的套餐。详情请访问官网：https://easycode.deepvlab.ai/\n\n\x1b[33m🎁 如果希望获得免费体验机会，请联系我们的Boss：https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
+    'deepx.quota.exceeded.with.upgrade': '🚫 {model} 的日{limitType}已达上限\n💡 请升级套餐：https://easycode.deepvlab.ai/',
+    'deepx.quota.exceeded.default': '🚫 服务配额已达上限\n💡 请升级套餐：https://easycode.deepvlab.ai/',
     'deepx.quota.limit.token': 'Token限额',
     'deepx.quota.limit.request': '请求次数限额',
     'deepx.quota.limit.cost': '费用限额',
@@ -2239,7 +2240,7 @@ export const translations = {
     'tips.guide.step2': '2. 描述越具体，效果越好。',
     'tips.guide.step3': '3. 创建',
     'tips.guide.deepv.file': 'DEEPV.md',
-    'tips.guide.step3.suffix': '文件来自定义与 DeepV Code 的交互。',
+    'tips.guide.step3.suffix': '文件来自定义与 Easy Code 的交互。',
     'tips.guide.help': '/help',
     'tips.guide.help.suffix': '获取更多信息。',
 
@@ -2267,9 +2268,10 @@ export const translations = {
     'auth.deepvlab.server.error': '❌ DeepVlab认证启动失败：{error}',
     'auth.deepvlab.page.title': 'DeepVlab认证成功',
     'auth.deepvlab.page.success': '✅ DeepVlab认证成功！',
-    'auth.option.deepvlab': '按回车键，以便登录DeepV Code',
+    'auth.option.deepvlab': '按回车键，以便登录Easy Code',
     'auth.option.custom.model': '使用自定义模型（无需登录）',
-    'welcome.title': '🎉 欢迎使用 DeepV Code！✨',
+    'welcome.title': '🎉 欢迎使用 Easy Code！✨',
+    'welcome.brand.upgrade': '💡 升级公告：DeepV Code已全面升级为Easy Code',
     'welcome.subtitle': '🚀 开启您的智能编程之旅 💻',
     'welcome.daily.tip.title': '每日技巧',
     'welcome.daily.tip.more': '输入 /help 查看传统帮助，输入 /help-ask 进入智能问答式帮助',
@@ -2314,7 +2316,7 @@ export const translations = {
     'cloud.auth.complete.title': '🌐 云端模式认证完成',
     'cloud.auth.complete.ready': '✅ 认证成功！您的云端环境已就绪。',
     'cloud.auth.complete.url': '🌍 远程访问链接：{url}',
-    'cloud.auth.complete.share': '📱 分享此链接即可从任何设备远程访问 DeepV Code',
+    'cloud.auth.complete.share': '📱 分享此链接即可从任何设备远程访问 Easy Code',
     'cloud.auth.instruction': '💡 请在即将打开的认证对话框中完成身份验证...',
 
     // Cloud mode connection and health
@@ -2378,7 +2380,7 @@ export const translations = {
     // Stream interruption recovery
     'stream.interrupted': '传输过程遇到抖动',
     'stream.interrupted.prefix': '⚠️ 哎呀，传输遇到小抖动！',
-    'stream.interrupted.suffix': 'DeepV Code 将在 {seconds} 秒后恢复...',
+    'stream.interrupted.suffix': 'Easy Code 将在 {seconds} 秒后恢复...',
     'stream.continue.prompt': '[系统] 上次回复因网络问题中断了，请从中断处继续。',
     'stream.autoRetry': '恢复中',
 
@@ -2475,7 +2477,7 @@ export const translations = {
     'help.shortcut.exit': '- 退出应用程序',
 
     // About Box
-    'about.title': '关于 DeepV Code',
+    'about.title': '关于 Easy Code',
 
     // Slash command descriptions
     'command.help.description': '获取 deepv-code 帮助',
@@ -2629,7 +2631,7 @@ export const translations = {
     'command.restore.complete': 'Checkpoint恢复完成。项目文件已回滚到checkpoint创建时的状态。',
     'command.restore.context.message': '[系统上下文] 用户已主动将项目文件恢复到之前的检查点{messageInfo}状态。此检查点之后的所有文件修改均已被用户有意回滚。这是用户的主动操作，不是错误。请确认此状态，并基于恢复后的文件状态继续提供协助。',
     'command.mcp.description': '列出已配置的 MCP 服务器和工具，或使用 OAuth 服务器进行身份验证',
-    'command.docs.description': '在浏览器中打开完整的 DeepV Code 文档',
+    'command.docs.description': '在浏览器中打开完整的 Easy Code 文档',
     'command.extensions.description': '列出活跃的扩展',
     'command.extensions.info.title': '扩展系统',
     'command.extensions.info.intro': 'DVCode 支持 Gemini CLI 扩展。要管理扩展，请使用：',
@@ -2639,7 +2641,7 @@ export const translations = {
     'command.extensions.info.uninstall': '卸载扩展',
     'command.extensions.info.example': '示例：',
     'command.extensions.info.learnmore': '更多信息，请访问：',
-    'command.extensions.info.url': 'https://dvcode.deepvlab.ai/extensions',
+    'command.extensions.info.url': 'https://easycode.deepvlab.ai/extensions',
     'command.login.description': '启动登录服务器',
     'command.privacy.description': '显示隐私声明',
     'command.corgi.description': '开启/关闭柯基模式',
@@ -2858,7 +2860,7 @@ export const translations = {
     'mcp.related.links': '📚 相关链接:',
 
     'mcp.status.no.servers.title': '🔧 未配置 MCP 服务器',
-    'mcp.status.no.servers.description': 'MCP (Model Context Protocol) 允许您连接外部工具和服务，扩展DeepV Code的功能。',
+    'mcp.status.no.servers.description': 'MCP (Model Context Protocol) 允许您连接外部工具和服务，扩展Easy Code的功能。',
     'mcp.status.quick.start': '🚀 快速开始:',
     'mcp.status.predefined.templates': '1️⃣ 使用预定义模板 (推荐)',
     'mcp.status.interactive.wizard': '2️⃣ 交互式配置向导',
@@ -2898,13 +2900,13 @@ export const translations = {
     'command.mcp.unload.usage': '用法: /mcp unload <server-name>',
 
     'mcp.help.system.title': '🔧 MCP (Model Context Protocol) 帮助系统',
-    'mcp.help.system.description': 'MCP允许您连接外部工具和服务，扩展DeepV Code的功能。',
+    'mcp.help.system.description': 'MCP允许您连接外部工具和服务，扩展Easy Code的功能。',
     'mcp.help.commands.title': '📋 可用命令:',
     'mcp.help.description': 'MCP帮助系统 - 获取详细的使用指南和配置帮助',
 
     // Main help content
     'mcp.help.main.title': '🔧 MCP (Model Context Protocol) 帮助系统',
-    'mcp.help.main.description': 'MCP允许您连接外部工具和服务，扩展DeepV Code的功能。',
+    'mcp.help.main.description': 'MCP允许您连接外部工具和服务，扩展Easy Code的功能。',
     'mcp.help.main.commands.title': '📋 可用命令:',
     'mcp.help.main.command.status': '- 查看已配置的MCP服务器状态',
     'mcp.help.main.command.add': '- 添加新的MCP服务器',
@@ -3104,7 +3106,7 @@ export const translations = {
     'thinking.effort.auto': '自动',
 
     // Feishu Bot Integration
-    'feishu.command.description': '接入飞书 Bot，让 dvcode 在飞书里回答代码问题',
+    'feishu.command.description': '接入飞书 Bot，让 easycode 在飞书里回答代码问题',
     'feishu.subcmd.setup.description': '配置飞书应用凭证（扫码或手动输入）',
     'feishu.subcmd.start.description': '启动飞书 Bot（WS 长连接）',
     'feishu.subcmd.stop.description': '停止飞书 Bot',
@@ -3115,7 +3117,7 @@ export const translations = {
     'feishu.subcmd.allowlist.description': '列出当前 Bot 的 Owner 与授权白名单',
     'feishu.subcmd.help.description': '显示飞书帮助',
 
-    'feishu.help.text': '飞书 Bot 接入 — 让 dvcode 在飞书里回答你的问题\n\n用法:\n  /feishu                交互式配置并启动\n  /feishu setup          档 1 扫码自动建应用（推荐）\n  /feishu setup --manual <appId> <appSecret>  档 3 手动输入凭证\n  /feishu start          启动飞书 Bot（需先配置凭证）\n  /feishu stop           停止飞书 Bot\n  /feishu status         查看当前状态\n  /feishu logout         清除凭证并断开\n\n授权管理（重要）:\n  /feishu allow <openId> 允许指定飞书用户调用 Bot\n  /feishu deny  <openId> 移出授权白名单\n  /feishu allowlist      查看当前 Owner 与白名单\n\n首次使用:\n  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）\n  2. /feishu start              # 启动 Bot\n  3. 去飞书给 Bot 发消息        # dvcode 将在后台回答\n\n⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
+    'feishu.help.text': '飞书 Bot 接入 — 让 easycode 在飞书里回答你的问题\n\n用法:\n  /feishu                交互式配置并启动\n  /feishu setup          档 1 扫码自动建应用（推荐）\n  /feishu setup --manual <appId> <appSecret>  档 3 手动输入凭证\n  /feishu start          启动飞书 Bot（需先配置凭证）\n  /feishu stop           停止飞书 Bot\n  /feishu status         查看当前状态\n  /feishu logout         清除凭证并断开\n\n授权管理（重要）:\n  /feishu allow <openId> 允许指定飞书用户调用 Bot\n  /feishu deny  <openId> 移出授权白名单\n  /feishu allowlist      查看当前 Owner 与白名单\n\n首次使用:\n  1. /feishu setup              # 扫码（扫码用户自动成为 Owner）\n  2. /feishu start              # 启动 Bot\n  3. 去飞书给 Bot 发消息        # easycode 将在后台回答\n\n⚠️  Bot 默认仅响应 Owner / 白名单中的用户，未授权用户会被拒绝。',
 
     // QR setup flow (Mode 1)
     'feishu.setup.qr.title': '📱 档 1: 扫码自动建应用',
@@ -3240,7 +3242,7 @@ export const translations = {
     'feishu.allowlist.list_empty': '  白名单:      (空)',
     'feishu.allowlist.manage_hint': '管理: /feishu allow <openId>  /  /feishu deny <openId>',
 
-    // TUI-side runtime info items (shown only in dvcode terminal, not sent to Feishu)
+    // TUI-side runtime info items (shown only in easycode terminal, not sent to Feishu)
     'feishu.tui.incoming_prefix': '[飞书] {text}',
     'feishu.tui.context_compressed': '📦 上下文已自动压缩',
     'feishu.tui.agent_working': '🤖 有Agent工作中...',
@@ -3253,8 +3255,8 @@ export const translations = {
     'feishu.tui.unauthorized_log': '🛡️ 拒绝未授权消息: openId={openId} text="{text}"',
 
     // 飞书侧拦截的生命周期命令（start/stop 必须在本地 CLI 执行）
-    'feishu.lifecycle.start_blocked': '⚠️ **Bot 已经在运行中** —— 您这条消息正是通过它转发给我的。\n\n`/feishu start` 用于管理 Bot 的生命周期，只能在 **本地 dvcode 终端** 执行，无法在飞书里运行。\n\n💡 想干活直接跟我说就行；或用 `/feishu status` 查看连接状态和绑定项目。',
-    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` 不能在飞书里执行。**\n\n这个命令会停掉正在转发您消息的网关本身——在这里执行会导致 Bot 直接断连，而且您无法再从飞书侧重新启动它。\n\n💡 要停止 Bot，请在 **本地 dvcode 终端** 执行 `/feishu stop`。\n🛑 若只是想中止当前正在运行的任务，请使用 `/stop`。',
+    'feishu.lifecycle.start_blocked': '⚠️ **Bot 已经在运行中** —— 您这条消息正是通过它转发给我的。\n\n`/feishu start` 用于管理 Bot 的生命周期，只能在 **本地 easycode 终端** 执行，无法在飞书里运行。\n\n💡 想干活直接跟我说就行；或用 `/feishu status` 查看连接状态和绑定项目。',
+    'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` 不能在飞书里执行。**\n\n这个命令会停掉正在转发您消息的网关本身——在这里执行会导致 Bot 直接断连，而且您无法再从飞书侧重新启动它。\n\n💡 要停止 Bot，请在 **本地 easycode 终端** 执行 `/feishu stop`。\n🛑 若只是想中止当前正在运行的任务，请使用 `/stop`。',
 
     // Feishu Dashboard（飞书仪表板）
     'feishu.dashboard.connected': '已连接',
@@ -3303,14 +3305,14 @@ export const translations = {
     'tip.shell.command': '!<command> - 执行 Shell 命令',
     'tip.shell.mode': '! - 进入/退出 Shell 模式',
     'tip.ctrl.j': 'Ctrl+J - 输入多行内容',
-    'tip.cli.update': 'dvcode -u - 检查更新',
-    'tip.cli.cloud': 'dvcode --cloud-mode - 启用云端远程控制模式',
+    'tip.cli.update': 'easycode -u - 检查更新',
+    'tip.cli.cloud': 'easycode --cloud-mode - 启用云端远程控制模式',
 
     // Skills System
     'skill.command.description': '管理 AI Skills (Marketplace → Plugin → Skill)',
-    'skill.help.text': 'DeepV Code Skills 系统\n\n使用三层架构管理 AI Skills：\n  Marketplace → Plugin → Skill\n\n命令：\n  /skill marketplace list              - 列出所有 Marketplace\n  /skill marketplace add <url> [alias] - 添加 Marketplace\n  /skill marketplace update <name>     - 更新 Marketplace\n  /skill marketplace remove <name>     - 删除 Marketplace\n  /skill marketplace browse <name>     - 浏览 Plugins\n\n  /skill plugin list [marketplace]     - 列出 Plugins\n  /skill install <name>                - 安装 Plugin (自动查找市场)\n  /skill install <name@mp>             - 从指定市场安装\n  /skill plugin install <name>         - /skill install 的别名\n  /skill plugin uninstall <id>         - 卸载 Plugin\n  /skill plugin enable <id>            - 启用 Plugin\n  /skill plugin disable <id>           - 禁用 Plugin\n  /skill plugin info <id>              - 显示 Plugin 信息\n\n  /skill list                          - 列出所有 Skills\n  /skill info <id>                     - 显示 Skill 详情\n  /skill stats                         - 显示统计信息\n\n快速开始：\n  1. 添加官方 Marketplace：\n     /skill marketplace add https://github.com/anthropics/skills.git\n\n  2. 浏览 Plugins：\n     /skill marketplace browse skills\n\n  3. 安装 Plugin (如果唯一则无需指定市场)：\n     /skill install example-skills\n\n  4. 查看 Skills：\n     /skill list',
+    'skill.help.text': 'Easy Code Skills 系统\n\n使用三层架构管理 AI Skills：\n  Marketplace → Plugin → Skill\n\n命令：\n  /skill marketplace list              - 列出所有 Marketplace\n  /skill marketplace add <url> [alias] - 添加 Marketplace\n  /skill marketplace update <name>     - 更新 Marketplace\n  /skill marketplace remove <name>     - 删除 Marketplace\n  /skill marketplace browse <name>     - 浏览 Plugins\n\n  /skill plugin list [marketplace]     - 列出 Plugins\n  /skill install <name>                - 安装 Plugin (自动查找市场)\n  /skill install <name@mp>             - 从指定市场安装\n  /skill plugin install <name>         - /skill install 的别名\n  /skill plugin uninstall <id>         - 卸载 Plugin\n  /skill plugin enable <id>            - 启用 Plugin\n  /skill plugin disable <id>           - 禁用 Plugin\n  /skill plugin info <id>              - 显示 Plugin 信息\n\n  /skill list                          - 列出所有 Skills\n  /skill info <id>                     - 显示 Skill 详情\n  /skill stats                         - 显示统计信息\n\n快速开始：\n  1. 添加官方 Marketplace：\n     /skill marketplace add https://github.com/anthropics/skills.git\n\n  2. 浏览 Plugins：\n     /skill marketplace browse skills\n\n  3. 安装 Plugin (如果唯一则无需指定市场)：\n     /skill install example-skills\n\n  4. 查看 Skills：\n     /skill list',
     'plugin.command.description': '管理插件 (Marketplace → Plugin)',
-    'plugin.help.text': 'DeepV Code 插件系统\n\n管理插件和市场：\n  /plugin marketplace add <url> [alias] - 添加 Marketplace\n  /plugin install <name>                - 安装 Plugin\n  /plugin list                          - 列出已安装的 Plugins\n\n这是 /skill 命令系统的别名。',
+    'plugin.help.text': 'Easy Code 插件系统\n\n管理插件和市场：\n  /plugin marketplace add <url> [alias] - 添加 Marketplace\n  /plugin install <name>                - 安装 Plugin\n  /plugin list                          - 列出已安装的 Plugins\n\n这是 /skill 命令系统的别名。',
     'skill.marketplace.description': '管理 Skills Marketplaces',
     'skill.marketplace.usage': '用法：/skill marketplace <list|add|update|remove|browse>',
     'skill.marketplace.list.description': '列出所有 Marketplaces',

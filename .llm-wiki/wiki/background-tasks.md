@@ -7,11 +7,11 @@ sources: [packages/core/src/services/backgroundTaskManager.ts, packages/cli/src/
 
 # Background Task Management
 
-The Background Task system allows DeepV Code to run persistent, long-running shell commands (such as local servers or compilation watchers) in the background while keeping the primary terminal chat interactive and responsive.
+The Background Task system allows Easy Code to run persistent, long-running shell commands (such as local servers or compilation watchers) in the background while keeping the primary terminal chat interactive and responsive.
 
 ## Why Background Tasks Exist
 
-In traditional AI CLI architectures, running a command like `npm run dev` blocks the CLI thread indefinitely. DeepV Code introduced background tasks to:
+In traditional AI CLI architectures, running a command like `npm run dev` blocks the CLI thread indefinitely. Easy Code introduced background tasks to:
 1. **Prevent Blocking**: Launch persistent server commands and allow the AI and user to continue chatting instantly.
 2. **Resource Observability**: Track output streams, exit codes, and process IDs (PIDs) directly from the terminal UI.
 3. **Control**: Empower the AI agent to list active background tasks and terminate them as needed without requiring the user to exit.

@@ -52,6 +52,7 @@ export * from './code_assist/inlineCompletion.js';
 
 // Export utilities
 export * from './utils/paths.js';
+export * from './utils/userAgent.js';
 export * from './utils/schemaValidator.js';
 export * from './utils/errors.js';
 export * from './utils/httpErrorFallback.js';

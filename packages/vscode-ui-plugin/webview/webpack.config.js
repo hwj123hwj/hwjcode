@@ -108,20 +108,20 @@ module.exports = (env = {}) => ({
     {
       apply: (compiler) => {
         compiler.hooks.beforeRun.tap('BuildStart', () => {
-          console.log(chalk.bold.cyan('\nDeepV Webview: Initializing build process...'));
+          console.log(chalk.bold.cyan('\nEasy Webview: Initializing build process...'));
         });
 
         compiler.hooks.done.tap('BuildEnd', (stats) => {
           if (stats.hasErrors()) {
-            console.log(chalk.red('\n❌ DeepV Webview: Build process failed with errors'));
+            console.log(chalk.red('\n❌ Easy Webview: Build process failed with errors'));
           } else {
             const buildTime = stats.endTime - stats.startTime;
-            console.log(chalk.green(`\n✅ DeepV Webview: Build completed successfully (${buildTime}ms)`));
+            console.log(chalk.green(`\n✅ Easy Webview: Build completed successfully (${buildTime}ms)`));
           }
         });
 
         compiler.hooks.failed.tap('BuildFailed', (error) => {
-          console.log(chalk.red('\n[!] DeepV Webview: Critical build failure'));
+          console.log(chalk.red('\n[!] Easy Webview: Critical build failure'));
         });
       }
     }

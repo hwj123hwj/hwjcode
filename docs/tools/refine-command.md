@@ -2,7 +2,7 @@
 
 ## 概述
 
-`/refine` 命令是 DeepV Code 的文本润色功能，支持对文本进行智能优化和改写。可以调整语气、风格、强度等参数，并提供多种输出格式。
+`/refine` 命令是 Easy Code 的文本润色功能，支持对文本进行智能优化和改写。可以调整语气、风格、强度等参数，并提供多种输出格式。
 
 ## 基础用法
 
@@ -119,7 +119,7 @@ pbpaste | dv refine --stdin
 **术语表格式（`terms.json`）：**
 ```json
 {
-  "DeepV Code": "DeepV Code",
+  "Easy Code": "Easy Code",
   "AI": "人工智能",
   "refine": "润色"
 }

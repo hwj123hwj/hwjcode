@@ -3,7 +3,7 @@
  * 设置对话框组件（包含 YOLO 模式和 MCP 管理）
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';

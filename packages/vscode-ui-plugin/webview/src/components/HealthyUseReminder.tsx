@@ -2,7 +2,7 @@
  * HealthyUseReminder Component
  *
  * @license Apache-2.0
- * Copyright 2025 DeepV Code
+ * Copyright 2025 Easy Code
  */
 
 import React, { useEffect, useState } from 'react';
