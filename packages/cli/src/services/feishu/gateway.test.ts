@@ -523,6 +523,62 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.text).toContain('[图片_1]');
     expect(receivedMsg.text).toContain('[图片_2]');
   });
+
+  it('correctly reports error when fetching merged_forward fails', async () => {
+    await gateway.connect();
+
+    const mockFetchError = (body: any) => ({
+      ok: true,
+      json: async () => body,
+    });
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/merged_forward')) {
+        return mockFetchError({
+          code: 99991403,
+          msg: 'No permission for merged_forward API',
+        });
+      }
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchError({
+          tenant_access_token: 't-mock-token',
+          expire: 7200,
+        });
+      }
+      return mockFetchError({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_merge_error',
+          message_type: 'merge_forward',
+          content: 'Merged with error',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: {
+          sender_id: {
+            open_id: 'ou_789',
+          },
+        },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+    expect(receivedMsg.text).toContain('原因: 飞书接口返回错误 (code: 99991403): No permission for merged_forward API');
+  });
 });
 
 // ---------------------------------------------------------------------------
