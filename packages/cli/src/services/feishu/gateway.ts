@@ -485,6 +485,171 @@ export class FeishuGateway {
   }
 
   /**
+   * 解析单条消息的 content 负载为文本并收集附件
+   */
+  private parseSingleMessageContent(
+    messageId: string,
+    msgType: string,
+    contentStr: string,
+    pendingImages: Array<{ imageKey: string; placeholder: string }>,
+    pendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }>
+  ): string {
+    let text = '';
+    if (msgType === 'text') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        text = typeof content.text === 'string' ? content.text : String(content.text || '');
+      } catch {
+        text = typeof contentStr === 'string' ? contentStr : String(contentStr || '');
+      }
+    } else if (msgType === 'image') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        const imageKey = content.image_key;
+        if (imageKey) {
+          text = '[图片消息]';
+          pendingImages.push({ imageKey, placeholder: '[图片消息]' });
+        } else {
+          text = '[图片消息]';
+        }
+      } catch {
+        text = '[图片消息]';
+      }
+    } else if (msgType === 'file') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        const fileKey = content.file_key;
+        const fileName = content.file_name || 'unnamed_file';
+        if (fileKey) {
+          const placeholder = `[文件消息: ${fileName}]`;
+          text = placeholder;
+          pendingFiles.push({ fileKey, fileName, placeholder });
+        } else {
+          text = `[文件消息: ${fileName}]`;
+        }
+      } catch {
+        text = '[文件消息]';
+      }
+    } else if (msgType === 'audio') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        const fileKey = content.file_key;
+        if (fileKey) {
+          const fileName = `audio_${messageId || 'unnamed'}.opus`;
+          const placeholder = `[音频消息: ${fileName}]`;
+          text = placeholder;
+          pendingFiles.push({ fileKey, fileName, placeholder });
+        } else {
+          text = '[音频消息]';
+        }
+      } catch {
+        text = '[音频消息]';
+      }
+    } else if (msgType === 'media') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        const fileKey = content.file_key;
+        if (fileKey) {
+          const fileName = `video_${messageId || 'unnamed'}.mp4`;
+          const placeholder = `[视频消息: ${fileName}]`;
+          text = placeholder;
+          pendingFiles.push({ fileKey, fileName, placeholder });
+        } else {
+          text = '[视频消息]';
+        }
+      } catch {
+        text = '[视频消息]';
+      }
+    } else if (msgType === 'post') {
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        let postContent: any[][] = [];
+        let title = '';
+
+        const locales = Object.keys(content);
+        const firstLocale = locales[0];
+        if (firstLocale && content[firstLocale] && Array.isArray(content[firstLocale].content)) {
+          postContent = content[firstLocale].content;
+          title = content[firstLocale].title || '';
+        } else if (Array.isArray(content.content)) {
+          postContent = content.content;
+          title = content.title || '';
+        } else if (Array.isArray(content)) {
+          postContent = content;
+        }
+
+        let parts: string[] = [];
+        if (title) {
+          parts.push(`**${title}**`);
+        }
+
+        for (const paragraph of postContent) {
+          if (!Array.isArray(paragraph)) continue;
+          let paragraphText = '';
+          for (const element of paragraph) {
+            if (!element || typeof element !== 'object') continue;
+
+            if (element.tag === 'text') {
+              paragraphText += element.text || '';
+            } else if (element.tag === 'a') {
+              paragraphText += `[${element.text || ''}](${element.href || ''})`;
+            } else if (element.tag === 'at') {
+              paragraphText += element.text || '';
+            } else if (element.tag === 'img') {
+              const imageKey = element.image_key;
+              if (imageKey) {
+                const placeholder = `[图片_${pendingImages.length + 1}]`;
+                pendingImages.push({ imageKey, placeholder });
+                paragraphText += placeholder;
+              }
+            }
+          }
+          if (paragraphText.trim()) {
+            parts.push(paragraphText);
+          }
+        }
+        text = parts.join('\n');
+      } catch (e: any) {
+        derror('Parse feishu post message failed in sub-parser:', e);
+        text = `[解析富文本消息失败]`;
+      }
+    } else {
+      text = `[不支持的消息类型: ${msgType}]`;
+    }
+    return text;
+  }
+
+  /**
+   * 获取合并转发消息的子消息列表
+   */
+  async getMergedForwardMessages(messageId: string): Promise<any[]> {
+    try {
+      const token = await this.getTenantToken();
+      if (!token) return [];
+
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/merged_forward`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data: any = await res.json();
+
+      if (data.code !== 0) {
+        dlog(`[Feishu] getMergedForwardMessages(${messageId}) failed: ${JSON.stringify(data)}`);
+        return [];
+      }
+
+      const items = data.data?.items || data.data?.messages || (Array.isArray(data.data) ? data.data : []);
+      return items;
+    } catch (e: any) {
+      dlog(`[Feishu] getMergedForwardMessages(${messageId}) threw: ${e?.message || e}`);
+      return [];
+    }
+  }
+
+  /**
    * 解析飞书群（或会话）的名称。
    *
    * 调用 `GET /open-apis/im/v1/chats/:chat_id`，返回 `data.name` 作为群名。
@@ -697,126 +862,54 @@ export class FeishuGateway {
         // 收集待下载的文件元数据（延迟到 feishuCommand 确定 projectRoot 后统一下载）
         const pendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }> = [];
 
-        if (msgType === 'text') {
+        if (msgType === 'merge_forward') {
           try {
-            const content = JSON.parse(message.content || '{}');
-            text = typeof content.text === 'string' ? content.text : String(content.text || '');
-          } catch {
-            text = typeof message.content === 'string' ? message.content : String(message.content || '');
-          }
-        } else if (msgType === 'image') {
-          try {
-            const content = JSON.parse(message.content || '{}');
-            const imageKey = content.image_key;
-            if (imageKey) {
-              text = '[图片消息]';
-              pendingImages.push({ imageKey, placeholder: '[图片消息]' });
-            } else {
-              text = '[图片消息]';
-            }
-          } catch {
-            text = '[图片消息]';
-          }
-        } else if (msgType === 'file') {
-          try {
-            const content = JSON.parse(message.content || '{}');
-            const fileKey = content.file_key;
-            const fileName = content.file_name || 'unnamed_file';
-            if (fileKey) {
-              const placeholder = `[文件消息: ${fileName}]`;
-              text = placeholder;
-              pendingFiles.push({ fileKey, fileName, placeholder });
-            } else {
-              text = `[文件消息: ${fileName}]`;
-            }
-          } catch {
-            text = '[文件消息]';
-          }
-        } else if (msgType === 'audio') {
-          try {
-            const content = JSON.parse(message.content || '{}');
-            const fileKey = content.file_key;
-            if (fileKey) {
-              const fileName = `audio_${message.message_id || 'unnamed'}.opus`;
-              const placeholder = `[音频消息: ${fileName}]`;
-              text = placeholder;
-              pendingFiles.push({ fileKey, fileName, placeholder });
-            } else {
-              text = '[音频消息]';
-            }
-          } catch {
-            text = '[音频消息]';
-          }
-        } else if (msgType === 'media') {
-          try {
-            const content = JSON.parse(message.content || '{}');
-            const fileKey = content.file_key;
-            if (fileKey) {
-              const fileName = `video_${message.message_id || 'unnamed'}.mp4`;
-              const placeholder = `[视频消息: ${fileName}]`;
-              text = placeholder;
-              pendingFiles.push({ fileKey, fileName, placeholder });
-            } else {
-              text = '[视频消息]';
-            }
-          } catch {
-            text = '[视频消息]';
-          }
-        } else if (msgType === 'post') {
-          try {
-            const content = JSON.parse(message.content || '{}');
-            let postContent: any[][] = [];
-            let title = '';
+            dlog(`Received merge_forward message, fetching sub-messages for ${message.message_id}...`);
+            const subMessages = await this.getMergedForwardMessages(message.message_id);
+            if (subMessages && subMessages.length > 0) {
+              const parts: string[] = [];
+              parts.push(`📢 **[合并转发的消息记录]**`);
+              parts.push(`---`);
+              for (const subMsg of subMessages) {
+                const subPendingImages: Array<{ imageKey: string; placeholder: string }> = [];
+                const subPendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }> = [];
+                const subMsgType = subMsg.message_type || 'text';
+                const subText = this.parseSingleMessageContent(
+                  subMsg.message_id,
+                  subMsgType,
+                  subMsg.content,
+                  subPendingImages,
+                  subPendingFiles
+                );
 
-            const locales = Object.keys(content);
-            const firstLocale = locales[0];
-            if (firstLocale && content[firstLocale] && Array.isArray(content[firstLocale].content)) {
-              postContent = content[firstLocale].content;
-              title = content[firstLocale].title || '';
-            } else if (Array.isArray(content.content)) {
-              postContent = content.content;
-              title = content.title || '';
-            } else if (Array.isArray(content)) {
-              postContent = content;
-            }
+                // 收集子消息的所有图片和文件
+                pendingImages.push(...subPendingImages);
+                pendingFiles.push(...subPendingFiles);
 
-            let parts: string[] = [];
-            if (title) {
-              parts.push(`**${title}**`);
-            }
-
-            for (const paragraph of postContent) {
-              if (!Array.isArray(paragraph)) continue;
-              let paragraphText = '';
-              for (const element of paragraph) {
-                if (!element || typeof element !== 'object') continue;
-
-                if (element.tag === 'text') {
-                  paragraphText += element.text || '';
-                } else if (element.tag === 'a') {
-                  paragraphText += `[${element.text || ''}](${element.href || ''})`;
-                } else if (element.tag === 'at') {
-                  paragraphText += element.text || '';
-                } else if (element.tag === 'img') {
-                  const imageKey = element.image_key;
-                  if (imageKey) {
-                    const placeholder = `[图片_${pendingImages.length + 1}]`;
-                    pendingImages.push({ imageKey, placeholder });
-                    paragraphText += placeholder;
-                  }
-                }
+                // 获取子消息发送者的名字或信息
+                const senderName = subMsg.sender?.id || '匿名';
+                const timestampStr = subMsg.create_time ? new Date(Number(subMsg.create_time)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '';
+                const timeHeader = timestampStr ? ` [${timestampStr}]` : '';
+                parts.push(`**${senderName}**${timeHeader}:`);
+                parts.push(subText);
+                parts.push(`---`);
               }
-              if (paragraphText.trim()) {
-                parts.push(paragraphText);
-              }
+              text = parts.join('\n');
+            } else {
+              text = `[合并转发消息，但未获取到任何子消息内容]`;
             }
-            text = parts.join('\n');
-          } catch (e: any) {
-            derror('Parse feishu post message failed:', e);
-            text = `[解析富文本消息失败]`;
+          } catch (err: any) {
+            derror(`Failed to parse merge_forward message:`, err);
+            text = `[解析合并转发消息失败: ${err?.message || err}]`;
           }
         } else {
-          text = `[不支持的消息类型: ${msgType}]`;
+          text = this.parseSingleMessageContent(
+            message.message_id,
+            msgType,
+            message.content,
+            pendingImages,
+            pendingFiles
+          );
         }
 
         // 去掉 @bot 占位符
