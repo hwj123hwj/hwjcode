@@ -75,9 +75,9 @@ export const newCommand: SlashCommand = {
 ✅ TypeScript 类型检查：通过
 ✅ 项目构建：成功
 ✅ 所有包编译：完成
-  • deepv-code-core
-  • deepv-code-cli
-  • deepv-code-vscode-ui-plugin
+  • easycode-core
+  • easycode-cli
+  • easycode-ai-vscode-ui-plugin
 ```
 
 ### 💡 设计决策说明

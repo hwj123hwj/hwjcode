@@ -8,7 +8,7 @@
 2. ZIP/TAR压缩时无法保留Unix执行权限
 3. 在macOS/Linux上解压后，ripgrep二进制文件没有执行权限，导致错误：
    ```
-   Error: Failed to execute ripgrep: spawn /usr/local/lib/node_modules/deepv-code/bundle/node_modules/@vscode/ripgrep/bin/darwin-x64-rg EACCES
+   Error: Failed to execute ripgrep: spawn /usr/local/lib/node_modules/easycode-ai/bundle/node_modules/@vscode/ripgrep/bin/darwin-x64-rg EACCES
    ```
 
 ## 解决方案
@@ -64,7 +64,7 @@ node scripts/fix-binary-permissions.js --all --dir /path/to/bundle
 
 ```bash
 # 进入安装目录
-cd /usr/local/lib/node_modules/deepv-code
+cd /usr/local/lib/node_modules/easycode-ai
 
 # 修复所有ripgrep二进制文件权限
 find . -name "*rg" -type f ! -name "*.exe" -exec chmod +x {} \;
@@ -136,7 +136,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: deepv-code-unix
+          name: easycode-ai-unix
           path: "*.tgz"
 ```
 

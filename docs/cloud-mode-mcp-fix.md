@@ -9,7 +9,7 @@
 
 ```
 ❌ 启动云端模式失败: TypeError: Cannot read properties of undefined (reading 'OPEN')
-    at Pz.isConnected (file:///opt/homebrew/lib/node_modules/deepv-code/bundle/dvcode.js:3049:7362)
+    at Pz.isConnected (file:///opt/homebrew/lib/node_modules/easycode-ai/bundle/easycode.js:3049:7362)
 ```
 
 错误发生在MCP服务器（特别是chrome-devtools）尝试连接时，导致云端模式完全无法启动。
@@ -198,7 +198,7 @@ npm run build
 
 #### 场景1: 所有MCP服务器成功连接
 ```
-dvcode --cloud-mode
+easycode --cloud-mode
 🔄 Authentication attempt 1/3...
 ✅ Authentication successful!
 ✅ [Cloud Mode] 已认证用户: xxx
@@ -212,7 +212,7 @@ dvcode --cloud-mode
 
 #### 场景2: MCP服务器连接失败（但不中断）
 ```
-dvcode --cloud-mode
+easycode --cloud-mode
 🔄 Authentication attempt 1/3...
 ✅ Authentication successful!
 🔄 [RemoteSession] 等待MCP discovery完成，已配置 1 个服务器: chrome-devtools
@@ -225,7 +225,7 @@ Error connecting to MCP server 'chrome-devtools': Connection failed
 
 #### 场景3: MCP discovery超时
 ```
-dvcode --cloud-mode
+easycode --cloud-mode
 ✅ Authentication successful!
 🔄 [RemoteSession] 等待MCP discovery完成...
 ⚠️  [RemoteSession] MCP discovery超时（15000ms），继续启动会话（MCP工具可能不可用）
@@ -275,7 +275,7 @@ dvcode --cloud-mode
 
 ```bash
 # 1. 测试云端模式启动
-dvcode --cloud-mode
+easycode --cloud-mode
 
 # 2. 观察日志输出
 # 应该看到 "✅ [RemoteSession] MCP discovery完成" 而不是crash

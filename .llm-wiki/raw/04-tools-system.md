@@ -1,4 +1,4 @@
-# DeepV Code — Tools System Facts
+# Easy Code — Tools System Facts
 
 > Auto-generated from codebase analysis on 2026-04-09. Immutable source document.
 
@@ -65,7 +65,7 @@ User Prompt → Gemini API (FunctionDeclaration schemas) → FunctionCall respon
 
 | Tool API Name | Class | Display | Confirmation | Description |
 |---------------|-------|---------|-------------|-------------|
-| `save_memory` | `MemoryTool` | Memory | No | Saves facts to `~/.deepv/DEEPV.md` |
+| `save_memory` | `MemoryTool` | Memory | No | Saves facts to `~/.easycode-user/EASYCODE.md` |
 | `todo_write` | `TodoWriteTool` | TodoWrite | No | In-memory todo list management |
 
 ### Code Intelligence Tools (4)

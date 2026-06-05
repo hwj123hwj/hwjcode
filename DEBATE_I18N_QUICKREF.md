@@ -9,7 +9,7 @@
 ✨ 语言选择步骤（首次配置时，后续跳过）
 ✨ 双语提示词（开场白 + 推进提示）
 ✨ 自定义语言支持（如 "日语"、"法语"）
-✨ preferredLanguage 持久化（.deepv/settings.json）
+✨ preferredLanguage 持久化（.easycode-user/settings.json）
 ```
 
 ## 流程对比
@@ -41,7 +41,7 @@
 
 ### 首次使用（新用户）
 ```
-$ dvcode
+$ easycode
 > /debate
   🎭 辩论模式配置
 
@@ -57,7 +57,7 @@ $ dvcode
 
 ### 后续使用（已设置 preferredLanguage）
 ```
-$ dvcode
+$ easycode
 > /debate
   🎭 辩论模式配置
 
@@ -105,7 +105,7 @@ pickFollowup(debateLanguage);
 
 ### 3. 语言持久化位置
 ```json
-// 存储在 .deepv/settings.json（用户级）或 .deepvcode/settings.json（工作区级）
+// 存储在 .easycode-user/settings.json（用户级）或 .easycode/settings.json（工作区级）
 {
   "preferredLanguage": "zh"
 }
@@ -127,7 +127,7 @@ pickFollowup(debateLanguage);
 ## 常见问题
 
 ### Q1: 如何修改已保存的语言？
-**A:** 编辑 `.deepv/settings.json`：
+**A:** 编辑 `.easycode-user/settings.json`：
 ```json
 {
   "preferredLanguage": "en"  // 改为 "zh" 或任意自定义值

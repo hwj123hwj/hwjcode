@@ -4,7 +4,7 @@ Easy Code supports custom model configurations, allowing you to use any OpenAI-c
 
 ## Configuration
 
-Add custom models to your `custom-models.json` file (located at `~/.deepv/custom-models.json`):
+Add custom models to your `custom-models.json` file (located at `~/.easycode-user/custom-models.json`):
 
 **💡 Why a separate file?**
 - Prevents conflicts with `settings.json` being updated by cloud models
@@ -54,7 +54,7 @@ Add custom models to your `custom-models.json` file (located at `~/.deepv/custom
 
 - **id**: Unique identifier (must start with `custom-`)
 - **displayName**: Display name in the model selection dialog
-- **provider**: Provider type (`openai`, `anthropic`, or `deepv`)
+- **provider**: Provider type (`openai`, `anthropic`, or `easycode`)
 - **baseUrl**: API base URL
 - **apiKey**: API key (supports environment variables like `${OPENAI_API_KEY}`)
 - **modelId**: Actual model ID passed to the API
@@ -127,14 +127,14 @@ Supported models for extended thinking:
 - Claude Haiku 4.5 / 4.x series
 - Claude 3.7 Sonnet
 
-### DeepV Custom (`deepv`)
+### EasyCode Custom (`easycode`)
 
-For custom DeepV-compatible endpoints (uses OpenAI format):
+For custom EasyCode-compatible endpoints (uses OpenAI format):
 
 Example:
 ```json
 {
-  "provider": "deepv",
+  "provider": "easycode",
   "baseUrl": "https://your-custom-endpoint.com/v1",
   "apiKey": "${CUSTOM_API_KEY}",
   "modelId": "custom-model-id"
@@ -171,7 +171,7 @@ Custom models are automatically available in all contexts where model selection 
 
 - Custom models are displayed with a **cyan color** in the UI
 - `[Custom]` tag in the display name
-- No credits consumption displayed (custom models don't use DeepV credits)
+- No credits consumption displayed (custom models don't use EasyCode credits)
 
 ### Coexistence with Cloud Models
 

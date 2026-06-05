@@ -108,13 +108,13 @@ use_skill                → SkillLoader.loadSkill()
 /skill list
 
 # 测试2：list user global skills
-mkdir -p ~/.deepv/skills/test-skill
-echo "---\nname: test-skill\ndescription: Test\n---\n# Test" > ~/.deepv/skills/test-skill/SKILL.md
+mkdir -p ~/.easycode-user/skills/test-skill
+echo "---\nname: test-skill\ndescription: Test\n---\n# Test" > ~/.easycode-user/skills/test-skill/SKILL.md
 /skill list
 
 # 测试3：list project skills
-mkdir -p .deepvcode/skills/project-test
-echo "---\nname: project-test\ndescription: Project\n---\n# Test" > .deepvcode/skills/project-test/SKILL.md
+mkdir -p .easycode/skills/project-test
+echo "---\nname: project-test\ndescription: Project\n---\n# Test" > .easycode/skills/project-test/SKILL.md
 /skill list
 
 # 测试4：use_skill 与 list 一致性

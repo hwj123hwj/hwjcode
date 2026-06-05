@@ -11,10 +11,10 @@ source: raw/01-architecture.md
 
 ## Key Facts
 
-- **Project**: deepv-code v1.0.316, Apache-2.0, TypeScript 5.0+ / ESM
+- **Project**: easycode-ai v1.0.316, Apache-2.0, TypeScript 5.0+ / ESM
 - **Origin**: Forked from Google Gemini CLI (`google-gemini/gemini-cli`)
 - **Runtime**: Node.js >= 20.0.0
-- **Repository**: github.com/OrionStarAI/DeepVCode
+- **Repository**: github.com/OrionStarAI/EasyCodeCode
 
 ## Monorepo Structure
 
@@ -22,8 +22,8 @@ source: raw/01-architecture.md
 
 | Package | NPM Name | Role |
 |---------|-----------|------|
-| `packages/core` | `deepv-code-core` | Backend — API, tools, sessions, auth |
-| `packages/cli` | `deepv-code-cli` | Frontend — terminal UI (Ink/React) |
+| `packages/core` | `easycode-core` | Backend — API, tools, sessions, auth |
+| `packages/cli` | `easycode-cli` | Frontend — terminal UI (Ink/React) |
 | `packages/vscode-ide-companion` | — | VS Code IDE companion |
 | `packages/vscode-ui-plugin` | — | VS Code UI plugin |
 
@@ -37,7 +37,7 @@ User Input → [[cli-module]] → [[core-module]] → [[GeminiClient]] → AI Ba
 
 - **Frontend/backend separation**: [[core-module]] is UI-independent
 - **Scene-based model routing**: [[SceneManager]] routes tasks to optimal models (9 scene types)
-- **Proxy-first auth**: [[ProxyAuthManager]] with JWT via DeepV Lab servers
+- **Proxy-first auth**: [[ProxyAuthManager]] with JWT via EasyCode Lab servers
 - **Extensibility**: Extensions, [[hooks-system]], [[skills-system]], [[mcp-system]], custom models
 - **Resilient**: Loop detection, history compression, model fallback, error recovery
 
@@ -46,7 +46,7 @@ User Input → [[cli-module]] → [[core-module]] → [[GeminiClient]] → AI Ba
 | Pattern | Implementation |
 |---------|---------------|
 | Registry | [[ToolRegistry]], [[HookRegistry]], ResourceRegistry |
-| Adapter | [[DeepVServerAdapter]] → [[ContentGenerator]] |
+| Adapter | [[EasyCodeServerAdapter]] → [[ContentGenerator]] |
 | Strategy | [[SceneManager]], [[ContentGenerator]] |
 | Observer | Event managers (token usage, real-time tokens) |
 | Singleton | [[ProxyAuthManager]], themeManager, settingsManager |

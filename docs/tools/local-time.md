@@ -58,7 +58,7 @@ The recommended pattern (used by `/goal`):
 
 - File: `packages/core/src/tools/local-time.ts`
 - Registered in: `packages/core/src/config/config.ts`
-- Shared between CLI and VSCode UI plugin via `deepv-code-core` — adding it to core
+- Shared between CLI and VSCode UI plugin via `easycode-core` — adding it to core
   means both surfaces get the tool automatically with no extra wiring.
 
 The tool delegates timezone formatting to `Intl.DateTimeFormat`, so it accepts any IANA

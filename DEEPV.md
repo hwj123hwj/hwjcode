@@ -1,10 +1,10 @@
 ## Easy Code Added Memories
 ### 项目概述
 Easy Code 是一个 AI 驱动的智能编程助手，采用 monorepo 架构，包含 4 个主要包：
-- **cli** (deepv-code-cli): 命令行界面 (binary: "dvcode")
-- **core** (deepv-code-core): 核心功能库，被其他包依赖
-- **vscode-ui-plugin** (deepv-code-vscode-ui-plugin): 完整的 VS Code 扩展，提供可视化 AI 编码辅助
-- **vscode-ide-companion** (deepv-code-vscode-companion): 轻量级 IDE 集成伙伴（不常更新）
+- **cli** (easycode-cli): 命令行界面 (binary: "easycode")
+- **core** (easycode-core): 核心功能库，被其他包依赖
+- **vscode-ui-plugin** (easycode-ai-vscode-ui-plugin): 完整的 VS Code 扩展，提供可视化 AI 编码辅助
+- **vscode-ide-companion** (easycode-ai-vscode-companion): 轻量级 IDE 集成伙伴（不常更新）
 
 **技术栈**: Node.js 20+, TypeScript 5.9+, React 19, Ink 6.4.7, esbuild 0.25, Vitest 3.2
 
@@ -101,14 +101,14 @@ Easy Code (Monorepo)
 - ❌ 尽量不使用 sequentialthinking 工具
 
 ### 项目关键文件
-- `DeepV_Code_Whitepaper.md` - 项目白皮书
-- `DEEPV.md` - 本文件（AI记忆文件）
+- `EasyCode_Code_Whitepaper.md` - 项目白皮书
+- `EASYCODE.md` - 本文件（AI记忆文件）
 - `docs/index.md` - 文档总索引
 - ls-dev 是用户的常驻开发分支，提 MR 时绝对不要加 --remove-source-branch。
 - EasyCode 项目发布规则（CI）：package.json 里的版本号无所谓（CI 发布时会自动注入真实版本号），但 **package.json 的版本号必须严格低于 release tag 的版本号**，否则 CI 会失败。例如 release tag 为 cli-release-v1.0.334 时，package.json 版本必须 < 1.0.334（例如 1.0.319 就满足）。打 tag 前务必确认版本号关系。
-- Easy Code 项目目录命名约定（极易搞错，务必记住）：全局配置目录是 `~/.deepv/`（用户家目录下），项目级配置目录是 `<projectRoot>/.deepvcode/`（项目根目录下）。两个目录名前缀不同是为了规避命名冲突，绝不能混用：项目里出现 `.deepv` 是错误，全局出现 `.deepvcode` 也是错误。`PROJECT_DIR_PREFIX = '.deepvcode'` 定义在 `packages/core/src/utils/paths.ts`。例如飞书凭证只走全局，固定写入 `~/.deepv/feishu-credentials.json`，不接受 projectRoot 参数。
+- Easy Code 项目目录命名约定（极易搞错，务必记住）：全局配置目录是 `~/.easycode-user/`（用户家目录下），项目级配置目录是 `<projectRoot>/.easycode/`（项目根目录下）。两个目录名前缀不同是为了规避命名冲突，绝不能混用：项目里出现 `.easycode-user` 是错误，全局出现 `.easycode` 也是错误。`PROJECT_DIR_PREFIX = '.easycode'` 定义在 `packages/core/src/utils/paths.ts`。例如飞书凭证只走全局，固定写入 `~/.easycode-user/feishu-credentials.json`，不接受 projectRoot 参数。
 - 用户要求交流时：1) 不使用浮夸的赞美和认同；2) 保持独立思辨能力，对用户的说法进行批判性判断，不盲从（用户说的不一定都对）；3) 用词严谨专业，不使用网络用语。
 - 始终使用中文进行交流。
 
-## DeepV Code Added Memories
-- DeepV Code/Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。
+## Easy Code Added Memories
+- Easy Code/Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。

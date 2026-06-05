@@ -8,8 +8,8 @@
 
 | 客户端 | 享受 Hooks | 配置文件 | 说明 |
 |--------|-----------|--------|------|
-| **CLI** | ✅ 是 | `.deepvcode/settings.json` | 命令行自动享受 Hooks 能力 |
-| **VS Code UI 插件** | ✅ 是 | `.deepvcode/settings.json` | 插件自动享受 Hooks 能力 |
+| **CLI** | ✅ 是 | `.easycode/settings.json` | 命令行自动享受 Hooks 能力 |
+| **VS Code UI 插件** | ✅ 是 | `.easycode/settings.json` | 插件自动享受 Hooks 能力 |
 
 **这意味着：**
 - 🎯 **一份配置** - 配置一次 Hooks，CLI 和 VSCode 都生效
@@ -97,18 +97,18 @@ sudo apt-get install jq
 ### 全局配置（所有项目）
 
 ```
-~/.deepv/settings.json
+~/.easycode-user/settings.json
 ```
 
 ### 项目级配置（仅当前项目）
 
 ```
-<项目根目录>/.deepvcode/settings.json
+<项目根目录>/.easycode/settings.json
 ```
 
 **优先级**（高到低）：
-1. 项目配置 (`.deepvcode/settings.json`)
-2. 全局配置 (`~/.deepv/settings.json`)
+1. 项目配置 (`.easycode/settings.json`)
+2. 全局配置 (`~/.easycode-user/settings.json`)
 3. 扩展配置 (`gemini-extension.json`)
 
 ---
@@ -119,8 +119,8 @@ sudo apt-get install jq
 
 ```bash
 # 在项目根目录执行
-mkdir -p .deepvcode/hooks
-cd .deepvcode/hooks
+mkdir -p .easycode/hooks
+cd .easycode/hooks
 ```
 
 ### 第 2 步：创建第一个 Hook 脚本
@@ -157,12 +157,12 @@ exit 0
 ### 第 3 步：设置脚本权限
 
 ```bash
-chmod +x .deepvcode/hooks/security-gate.sh
+chmod +x .easycode/hooks/security-gate.sh
 ```
 
 ### 第 4 步：配置 Settings.json
 
-编辑 `.deepvcode/settings.json`：
+编辑 `.easycode/settings.json`：
 
 ```json
 {
@@ -172,7 +172,7 @@ chmod +x .deepvcode/hooks/security-gate.sh
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/security-gate.sh",
+            "command": "bash .easycode/hooks/security-gate.sh",
             "timeout": 5000
           }
         ]
@@ -200,7 +200,7 @@ chmod +x .deepvcode/hooks/security-gate.sh
 运行测试：
 
 ```bash
-cat test-input.json | bash .deepvcode/hooks/security-gate.sh
+cat test-input.json | bash .easycode/hooks/security-gate.sh
 ```
 
 预期输出：
@@ -220,7 +220,7 @@ cat test-input.json | bash .deepvcode/hooks/security-gate.sh
 
 #### 🐧 Linux/macOS 版本（Bash）
 
-**脚本位置**：`.deepvcode/hooks/security-gate.sh`
+**脚本位置**：`.easycode/hooks/security-gate.sh`
 
 ```bash
 #!/bin/bash
@@ -269,7 +269,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/security-gate.sh",
+            "command": "bash .easycode/hooks/security-gate.sh",
             "timeout": 5000
           }
         ]
@@ -281,7 +281,7 @@ exit 0
 
 #### 🪟 Windows 版本（Python）
 
-**脚本位置**：`.deepvcode/hooks/security-gate.py`
+**脚本位置**：`.easycode/hooks/security-gate.py`
 
 ```python
 #!/usr/bin/env python3
@@ -305,7 +305,7 @@ forbidden_patterns = [
 
 **目标**：记录所有工具调用
 
-**脚本位置**：`.deepvcode/hooks/audit-logger.sh`
+**脚本位置**：`.easycode/hooks/audit-logger.sh`
 
 ```bash
 #!/bin/bash
@@ -340,7 +340,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/audit-logger.sh"
+            "command": "bash .easycode/hooks/audit-logger.sh"
           }
         ]
       }
@@ -363,7 +363,7 @@ cat logs/audit-20250115.log
 
 **目标**：根据用户角色限制工具权限
 
-**脚本位置**：`.deepvcode/hooks/rbac.sh`
+**脚本位置**：`.easycode/hooks/rbac.sh`
 
 ```bash
 #!/bin/bash
@@ -409,13 +409,13 @@ exit 0
 **使用方法**：
 ```bash
 # 管理员模式
-USER_ROLE=admin deepv-cli
+USER_ROLE=admin easycode-cli
 
 # 开发者模式
-USER_ROLE=developer deepv-cli
+USER_ROLE=developer easycode-cli
 
 # 查看者模式
-USER_ROLE=viewer deepv-cli
+USER_ROLE=viewer easycode-cli
 ```
 
 ---
@@ -424,7 +424,7 @@ USER_ROLE=viewer deepv-cli
 
 **目标**：为所有提示添加安全指导
 
-**脚本位置**：`.deepvcode/hooks/enhance-prompt.sh`
+**脚本位置**：`.easycode/hooks/enhance-prompt.sh`
 
 ```bash
 #!/bin/bash
@@ -459,7 +459,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/enhance-prompt.sh",
+            "command": "bash .easycode/hooks/enhance-prompt.sh",
             "timeout": 2000
           }
         ]
@@ -475,7 +475,7 @@ exit 0
 
 **目标**：根据提示长度自动调整参数
 
-**脚本位置**：`.deepvcode/hooks/optimize-llm.sh`
+**脚本位置**：`.easycode/hooks/optimize-llm.sh`
 
 ```bash
 #!/bin/bash
@@ -528,7 +528,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/optimize-llm.sh",
+            "command": "bash .easycode/hooks/optimize-llm.sh",
             "timeout": 2000
           }
         ]
@@ -544,7 +544,7 @@ exit 0
 
 ### 测试 Hook 脚本
 
-创建测试脚本 `.deepvcode/hooks/test.sh`：
+创建测试脚本 `.easycode/hooks/test.sh`：
 
 ```bash
 #!/bin/bash
@@ -582,7 +582,7 @@ TEST_DELETE='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
 
 # 测试允许操作
 TEST_READ='{
@@ -594,12 +594,12 @@ TEST_READ='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_READ" "allow"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_READ" "allow"
 ```
 
 运行测试：
 ```bash
-bash .deepvcode/hooks/test.sh
+bash .easycode/hooks/test.sh
 ```
 
 ### 启用调试输出
@@ -622,7 +622,7 @@ fi
 
 运行带调试：
 ```bash
-DEBUG=1 cat test-input.json | bash .deepvcode/hooks/security-gate.sh
+DEBUG=1 cat test-input.json | bash .easycode/hooks/security-gate.sh
 ```
 
 ### 常见错误
@@ -637,7 +637,7 @@ sudo apt-get install jq  # Linux
 **错误 2：Permission denied**
 ```bash
 # 添加执行权限
-chmod +x .deepvcode/hooks/*.sh
+chmod +x .easycode/hooks/*.sh
 ```
 
 **错误 3：Invalid JSON output**
@@ -945,7 +945,7 @@ sys.exit(0)
         "hooks": [
           {
             "type": "command",
-            "command": "python .deepvcode/hooks/security-gate.py",
+            "command": "python .easycode/hooks/security-gate.py",
             "timeout": 5000
           }
         ]
@@ -957,7 +957,7 @@ sys.exit(0)
 
 #### 🪟 Windows 版本（PowerShell）
 
-**脚本位置**：`.deepvcode/hooks/security-gate.ps1`
+**脚本位置**：`.easycode/hooks/security-gate.ps1`
 
 ```powershell
 #!/usr/bin/env pwsh
@@ -978,7 +978,7 @@ $forbidden_patterns = @(
 
 **目标**：记录所有工具调用
 
-**脚本位置**：`.deepvcode/hooks/audit-logger.sh`
+**脚本位置**：`.easycode/hooks/audit-logger.sh`
 
 ```bash
 #!/bin/bash
@@ -1013,7 +1013,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/audit-logger.sh"
+            "command": "bash .easycode/hooks/audit-logger.sh"
           }
         ]
       }
@@ -1036,7 +1036,7 @@ cat logs/audit-20250115.log
 
 **目标**：根据用户角色限制工具权限
 
-**脚本位置**：`.deepvcode/hooks/rbac.sh`
+**脚本位置**：`.easycode/hooks/rbac.sh`
 
 ```bash
 #!/bin/bash
@@ -1082,13 +1082,13 @@ exit 0
 **使用方法**：
 ```bash
 # 管理员模式
-USER_ROLE=admin deepv-cli
+USER_ROLE=admin easycode-cli
 
 # 开发者模式
-USER_ROLE=developer deepv-cli
+USER_ROLE=developer easycode-cli
 
 # 查看者模式
-USER_ROLE=viewer deepv-cli
+USER_ROLE=viewer easycode-cli
 ```
 
 ---
@@ -1097,7 +1097,7 @@ USER_ROLE=viewer deepv-cli
 
 **目标**：为所有提示添加安全指导
 
-**脚本位置**：`.deepvcode/hooks/enhance-prompt.sh`
+**脚本位置**：`.easycode/hooks/enhance-prompt.sh`
 
 ```bash
 #!/bin/bash
@@ -1132,7 +1132,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/enhance-prompt.sh",
+            "command": "bash .easycode/hooks/enhance-prompt.sh",
             "timeout": 2000
           }
         ]
@@ -1148,7 +1148,7 @@ exit 0
 
 **目标**：根据提示长度自动调整参数
 
-**脚本位置**：`.deepvcode/hooks/optimize-llm.sh`
+**脚本位置**：`.easycode/hooks/optimize-llm.sh`
 
 ```bash
 #!/bin/bash
@@ -1201,7 +1201,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/optimize-llm.sh",
+            "command": "bash .easycode/hooks/optimize-llm.sh",
             "timeout": 2000
           }
         ]
@@ -1217,7 +1217,7 @@ exit 0
 
 ### 测试 Hook 脚本
 
-创建测试脚本 `.deepvcode/hooks/test.sh`：
+创建测试脚本 `.easycode/hooks/test.sh`：
 
 ```bash
 #!/bin/bash
@@ -1255,7 +1255,7 @@ TEST_DELETE='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
 
 # 测试允许操作
 TEST_READ='{
@@ -1267,12 +1267,12 @@ TEST_READ='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_READ" "allow"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_READ" "allow"
 ```
 
 运行测试：
 ```bash
-bash .deepvcode/hooks/test.sh
+bash .easycode/hooks/test.sh
 ```
 
 ### 启用调试输出
@@ -1295,7 +1295,7 @@ fi
 
 运行带调试：
 ```bash
-DEBUG=1 cat test-input.json | bash .deepvcode/hooks/security-gate.sh
+DEBUG=1 cat test-input.json | bash .easycode/hooks/security-gate.sh
 ```
 
 ### 常见错误
@@ -1310,7 +1310,7 @@ sudo apt-get install jq  # Linux
 **错误 2：Permission denied**
 ```bash
 # 添加执行权限
-chmod +x .deepvcode/hooks/*.sh
+chmod +x .easycode/hooks/*.sh
 ```
 
 **错误 3：Invalid JSON output**
@@ -1621,7 +1621,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -ExecutionPolicy Bypass .deepvcode/hooks/security-gate.ps1",
+            "command": "powershell -ExecutionPolicy Bypass .easycode/hooks/security-gate.ps1",
             "timeout": 5000
           }
         ]
@@ -1637,7 +1637,7 @@ exit 0
 
 **目标**：记录所有工具调用
 
-**脚本位置**：`.deepvcode/hooks/audit-logger.sh`
+**脚本位置**：`.easycode/hooks/audit-logger.sh`
 
 ```bash
 #!/bin/bash
@@ -1672,7 +1672,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/audit-logger.sh"
+            "command": "bash .easycode/hooks/audit-logger.sh"
           }
         ]
       }
@@ -1695,7 +1695,7 @@ cat logs/audit-20250115.log
 
 **目标**：根据用户角色限制工具权限
 
-**脚本位置**：`.deepvcode/hooks/rbac.sh`
+**脚本位置**：`.easycode/hooks/rbac.sh`
 
 ```bash
 #!/bin/bash
@@ -1741,13 +1741,13 @@ exit 0
 **使用方法**：
 ```bash
 # 管理员模式
-USER_ROLE=admin deepv-cli
+USER_ROLE=admin easycode-cli
 
 # 开发者模式
-USER_ROLE=developer deepv-cli
+USER_ROLE=developer easycode-cli
 
 # 查看者模式
-USER_ROLE=viewer deepv-cli
+USER_ROLE=viewer easycode-cli
 ```
 
 ---
@@ -1756,7 +1756,7 @@ USER_ROLE=viewer deepv-cli
 
 **目标**：为所有提示添加安全指导
 
-**脚本位置**：`.deepvcode/hooks/enhance-prompt.sh`
+**脚本位置**：`.easycode/hooks/enhance-prompt.sh`
 
 ```bash
 #!/bin/bash
@@ -1791,7 +1791,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/enhance-prompt.sh",
+            "command": "bash .easycode/hooks/enhance-prompt.sh",
             "timeout": 2000
           }
         ]
@@ -1807,7 +1807,7 @@ exit 0
 
 **目标**：根据提示长度自动调整参数
 
-**脚本位置**：`.deepvcode/hooks/optimize-llm.sh`
+**脚本位置**：`.easycode/hooks/optimize-llm.sh`
 
 ```bash
 #!/bin/bash
@@ -1860,7 +1860,7 @@ exit 0
         "hooks": [
           {
             "type": "command",
-            "command": "bash .deepvcode/hooks/optimize-llm.sh",
+            "command": "bash .easycode/hooks/optimize-llm.sh",
             "timeout": 2000
           }
         ]
@@ -1876,7 +1876,7 @@ exit 0
 
 ### 测试 Hook 脚本
 
-创建测试脚本 `.deepvcode/hooks/test.sh`：
+创建测试脚本 `.easycode/hooks/test.sh`：
 
 ```bash
 #!/bin/bash
@@ -1914,7 +1914,7 @@ TEST_DELETE='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_DELETE" "deny"
 
 # 测试允许操作
 TEST_READ='{
@@ -1926,12 +1926,12 @@ TEST_READ='{
   "tool_input": {"path": "/tmp/test"}
 }'
 
-test_hook ".deepvcode/hooks/security-gate.sh" "$TEST_READ" "allow"
+test_hook ".easycode/hooks/security-gate.sh" "$TEST_READ" "allow"
 ```
 
 运行测试：
 ```bash
-bash .deepvcode/hooks/test.sh
+bash .easycode/hooks/test.sh
 ```
 
 ### 启用调试输出
@@ -1954,7 +1954,7 @@ fi
 
 运行带调试：
 ```bash
-DEBUG=1 cat test-input.json | bash .deepvcode/hooks/security-gate.sh
+DEBUG=1 cat test-input.json | bash .easycode/hooks/security-gate.sh
 ```
 
 ### 常见错误
@@ -1969,7 +1969,7 @@ sudo apt-get install jq  # Linux
 **错误 2：Permission denied**
 ```bash
 # 添加执行权限
-chmod +x .deepvcode/hooks/*.sh
+chmod +x .easycode/hooks/*.sh
 ```
 
 **错误 3：Invalid JSON output**

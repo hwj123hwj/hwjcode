@@ -15,16 +15,16 @@
 
 1. 在项目根目录创建规则目录：
    ```bash
-   mkdir -p .deepvcode/rules
+   mkdir -p .easycode/rules
    ```
 
 2. 复制示例文件：
    ```bash
    # TypeScript 规范
-   cp docs/examples/rules/typescript-coding-standards.md .deepvcode/rules/
+   cp docs/examples/rules/typescript-coding-standards.md .easycode/rules/
 
    # React 规范
-   cp docs/examples/rules/react-component-guidelines.md .deepvcode/rules/
+   cp docs/examples/rules/react-component-guidelines.md .easycode/rules/
    ```
 
 3. 根据项目需求编辑规则内容
@@ -34,13 +34,13 @@
 ### 方法 2: 使用 VSCode 命令
 
 1. 打开命令面板 (`Ctrl+Shift+P` 或 `Cmd+Shift+P`)
-2. 输入并选择 "DeepV: Manage Custom Rules"
+2. 输入并选择 "EasyCode: Manage Custom Rules"
 3. 点击 "New Rule" 创建新规则
 4. 参考示例文件填写规则内容
 
 ### 方法 3: 创建全局规则文件
 
-在项目根目录创建 `DEEPV.md` 文件：
+在项目根目录创建 `EASYCODE.md` 文件：
 
 ```markdown
 ---
@@ -214,7 +214,7 @@ triggers:
 为不同的代码区域创建不同的规则：
 
 ```bash
-.deepvcode/rules/
+.easycode/rules/
 ├── general/
 │   ├── coding-style.md      # 通用编码风格
 │   └── git-commits.md       # Git 提交规范

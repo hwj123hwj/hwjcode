@@ -14,12 +14,12 @@ Easy Code 是一款 AI 驱动的智能编程助手，通过深度整合人工智
 
 ## Key Facts
 
-- **Package name:** `deepv-code`
+- **Package name:** `easycode-ai`
 - **Version:** 1.0.316
 - **License:** Apache-2.0
 - **Runtime:** Node.js >= 20.0.0
 - **Language:** TypeScript 5.0+
-- **Repository:** github.com/OrionStarAI/DeepVCode
+- **Repository:** github.com/OrionStarAI/EasyCodeCode
 - **Author:** Easy Code Team
 
 ## Monorepo Structure
@@ -57,7 +57,7 @@ An additional companion extension lives at `packages/vscode-ide-companion`.
 - `scripts/` — build, packaging, and utility scripts
 - `docs/` — extensive documentation on features, architecture, tools
 - `bundle/` — output for bundled artifacts
-- `.deepvcode/` — project-level configuration and wiki
+- `.easycode/` — project-level configuration and wiki
 
 ## Related Pages
 

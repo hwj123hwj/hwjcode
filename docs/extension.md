@@ -6,14 +6,14 @@ Gemini CLI supports extensions that can be used to configure and extend its func
 
 On startup, Gemini CLI looks for extensions in two locations:
 
-1.  `<workspace>/.deepv/extensions`
-2.  `<home>/.deepv/extensions`
+1.  `<workspace>/.easycode-user/extensions`
+2.  `<home>/.easycode-user/extensions`
 
 Gemini CLI loads all extensions from both locations. If an extension with the same name exists in both locations, the extension in the workspace directory takes precedence.
 
 Within each location, individual extensions exist as a directory that contains a `gemini-extension.json` file. For example:
 
-`<workspace>/.deepv/extensions/my-extension/gemini-extension.json`
+`<workspace>/.easycode-user/extensions/my-extension/gemini-extension.json`
 
 ### `gemini-extension.json`
 
