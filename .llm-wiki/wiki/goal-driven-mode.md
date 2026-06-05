@@ -7,7 +7,7 @@ sources: [packages/cli/src/ui/commands/goalCommand.ts, packages/cli/src/ui/hooks
 
 # Goal-Driven Mode (`/goal`)
 
-Goal-Driven Mode is a specialized running state in DeepV Code that commits the AI agent to a strict, multi-step "goal contract". The agent is tasked with systematically working on a specified problem until its objective completion criteria are fully met.
+Goal-Driven Mode is a specialized running state in Easy Code that commits the AI agent to a strict, multi-step "goal contract". The agent is tasked with systematically working on a specified problem until its objective completion criteria are fully met.
 
 ## Purpose & Core Philosophy
 
@@ -28,7 +28,7 @@ Launched via `/goal` or `/goal new`. Collects:
 ### 2. The Idle Watchdog (`packages/cli/src/ui/hooks/useGoalActive.ts`)
 To prevent the agent from getting stuck in infinite loops, silent errors, or idling without calling tools, the system runs an active watchdog:
 - Monitor turns and idle durations.
-- If the AI pauses or stalls without progress, the watchdog injects a system alert: `[DeepV Code ⏰ GOAL WATCHDOG]` to prompt the AI to analyze its obstacle, change its route, or declare progress.
+- If the AI pauses or stalls without progress, the watchdog injects a system alert: `[Easy Code ⏰ GOAL WATCHDOG]` to prompt the AI to analyze its obstacle, change its route, or declare progress.
 - VS Code plugin counterpart: `vscode-webview` includes a matching webview-side idle watchdog to synchronize this protection across IDEs.
 
 ### 3. Goal Achieved & Auto-Clear

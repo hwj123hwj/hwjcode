@@ -1,6 +1,6 @@
-# DeepV Code Hooks 用户实践指南
+# Easy Code Hooks 用户实践指南
 
-> 本指南为 DeepV Code 用户提供实践操作的完整说明。通过本指南，你将学会如何设置、配置和使用 Hooks 系统来增强安全性、自动化任务和定制行为。
+> 本指南为 Easy Code 用户提供实践操作的完整说明。通过本指南，你将学会如何设置、配置和使用 Hooks 系统来增强安全性、自动化任务和定制行为。
 
 ## 🎯 重要：一份配置，两种客户端
 
@@ -33,7 +33,7 @@
 
 ### 前置要求
 
-- DeepV Code CLI 已安装
+- Easy Code CLI 已安装
 - 项目目录已初始化（或新建）
 
 ### 选择你的平台和脚本语言
@@ -70,7 +70,7 @@ sudo apt-get install jq
 
 ### 基本概念
 
-**Hooks** 是在 DeepV Code 的关键事件触发时执行的自定义脚本。每个 Hook：
+**Hooks** 是在 Easy Code 的关键事件触发时执行的自定义脚本。每个 Hook：
 
 - 接收 JSON 格式的输入（via stdin）
 - 执行业务逻辑
@@ -899,13 +899,13 @@ fi
 - 📖 详细文档：`docs/hooks-implementation.md`
 - 📚 完整示例：`docs/hooks-examples.md`
 - 🐛 报告问题：GitHub Issues
-- 💬 社区讨论：DeepV Code 论坛
+- 💬 社区讨论：Easy Code 论坛
 
 ---
 
 **版本**：1.0
 **最后更新**：2025-01-15
-**维护者**：DeepV Code 团队
+**维护者**：Easy Code 团队
 ,
     r'node_modules'
 ]
@@ -1572,13 +1572,13 @@ fi
 - 📖 详细文档：`docs/hooks-implementation.md`
 - 📚 完整示例：`docs/hooks-examples.md`
 - 🐛 报告问题：GitHub Issues
-- 💬 社区讨论：DeepV Code 论坛
+- 💬 社区讨论：Easy Code 论坛
 
 ---
 
 **版本**：1.0
 **最后更新**：2025-01-15
-**维护者**：DeepV Code 团队
+**维护者**：Easy Code 团队
 ,
     'node_modules'
 )
@@ -2231,10 +2231,10 @@ fi
 - 📖 详细文档：`docs/hooks-implementation.md`
 - 📚 完整示例：`docs/hooks-examples.md`
 - 🐛 报告问题：GitHub Issues
-- 💬 社区讨论：DeepV Code 论坛
+- 💬 社区讨论：Easy Code 论坛
 
 ---
 
 **版本**：1.0
 **最后更新**：2025-01-15
-**维护者**：DeepV Code 团队
+**维护者**：Easy Code 团队

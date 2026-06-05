@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -113,6 +113,19 @@ export const CARDKIT_FOOTER_ELEMENT_ID = 'footer_content';
 
 /** CardKit 2.0 流式卡片中 loading 图标的固定 element_id（终态由整卡覆盖移除） */
 export const CARDKIT_LOADING_ELEMENT_ID = 'loading_icon';
+
+/**
+ * 全局开关：是否启用 CardKit 2.0 流式卡片。
+ *
+ * 当前 CardKit 2.0 在生产环境表现不稳定（创建/推送偶发 5xx、卡片渲染不一致），
+ * 默认短路到老版交互卡片（buildAdaptiveCard + sendCard）。
+ * 设置环境变量 EASYCODE_FEISHU_CARDKIT_V2=1 可临时启用（仅供测试 / 开发）。
+ *
+ * 等 CardKit 2.0 稳定后改为默认 true，或抽成 settings 控制。
+ */
+export function isCardKitV2Enabled(): boolean {
+  return process.env['EASYCODE_FEISHU_CARDKIT_V2'] === '1';
+}
 
 /**
  * 飞书内置 loading 动画 img_key（与 openclaw-lark 插件一致）。
@@ -1886,6 +1899,12 @@ export class FeishuGateway {
       pushFooter: async () => false,
       finalize: async () => false,
     };
+
+    // 短路开关：CardKit 2.0 暂时禁用，统一走老版卡片兜底路径。
+    if (!isCardKitV2Enabled()) {
+      dlog('[CardKit] V2 disabled by feature flag, fallback to legacy card');
+      return noopHandle;
+    }
 
     // Step 1: cardkit.v1.card.create — 拿到 card_id
     const initialFooterText = initialFooterMetrics ? renderFooterMarkdown(initialFooterMetrics) : '';

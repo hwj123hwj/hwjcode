@@ -81,7 +81,7 @@ function updateAllPackageVersions(newVersion) {
 }
 
 async function main() {
-  console.log(chalk.bold.magenta('\n🚀 DeepV Code CLI Packaging Process'));
+  console.log(chalk.bold.magenta('\n🚀 Easy Code CLI Packaging Process'));
   console.log(chalk.gray('═══════════════════════════════════════════════════════════════'));
   console.log(chalk.blue('📋 Process Overview:'));
   console.log(chalk.white('   1. Check current version'));

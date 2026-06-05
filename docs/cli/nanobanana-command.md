@@ -1,6 +1,6 @@
 # NanoBanana 图像生成命令
 
-`nanobanana` 命令允许用户直接在 DeepV Code CLI 中通过文本提示词生成图像，并支持使用本地图片作为参考（图生图）。
+`nanobanana` 命令允许用户直接在 Easy Code CLI 中通过文本提示词生成图像，并支持使用本地图片作为参考（图生图）。
 
 ## 语法
 

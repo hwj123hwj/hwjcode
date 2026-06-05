@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -573,6 +573,13 @@ describe('FeishuGateway.sendStreamingCardWithFooter (CardKit 2.0)', () => {
     gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
     // 跳过真正的 token 申请
     vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+    // 启用 CardKit 2.0 feature flag（默认禁用 → 短路到 legacy；
+    // 这组测试是验证 v2 流程契约本身，需显式开启）
+    process.env['EASYCODE_FEISHU_CARDKIT_V2'] = '1';
+  });
+
+  afterEach(() => {
+    delete process.env['EASYCODE_FEISHU_CARDKIT_V2'];
   });
 
   it('happy path: create card → send IM message → push content → push footer → finalize', async () => {
@@ -693,6 +700,72 @@ describe('FeishuGateway.sendStreamingCardWithFooter (CardKit 2.0)', () => {
     const handle = await gateway.sendStreamingCardWithFooter('oc_chat_y', 'a');
     const ok = await handle.pushContent('b');
     expect(ok).toBe(false); // 速率限制返回 false 但不抛异常
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CardKit 2.0 feature flag（短路）
+//   生产环境 CardKit 2.0 不稳，默认 (无环境变量) sendStreamingCardWithFooter
+//   必须立即返回 noop handle，不发起任何 cardkit.card.create 请求，
+//   让调用方走 sendCard legacy 兜底。
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway.sendStreamingCardWithFooter - feature flag short-circuit', () => {
+  let gateway: FeishuGateway;
+
+  beforeEach(() => {
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+    delete process.env['EASYCODE_FEISHU_CARDKIT_V2'];
+  });
+
+  afterEach(() => {
+    delete process.env['EASYCODE_FEISHU_CARDKIT_V2'];
+    vi.unstubAllGlobals();
+  });
+
+  it('returns a noop handle without calling cardkit.card.create when flag is off', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handle = await gateway.sendStreamingCardWithFooter(
+      'oc_chat_off',
+      'hello',
+    );
+
+    expect(handle.messageId).toBeNull();
+    expect(handle.cardId).toBeNull();
+    // 关键断言：fetch 一次都不应被调用（短路必须发生在 createCardKitCard 之前）
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // noop pushContent / pushFooter / finalize 都返回 false（不再触发任何 RPC）
+    expect(await handle.pushContent('updated')).toBe(false);
+    expect(await handle.pushFooter({ status: 'done' } as any)).toBe(false);
+    expect(await handle.finalize('end')).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with cardkit.card.create when flag is explicitly enabled', async () => {
+    process.env['EASYCODE_FEISHU_CARDKIT_V2'] = '1';
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: 0, data: { card_id: 'cardkit_flag_on' } }),
+    } as unknown as Response);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: 0, data: { message_id: 'om_flag_on' } }),
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handle = await gateway.sendStreamingCardWithFooter(
+      'oc_chat_on',
+      'hello',
+    );
+
+    expect(handle.cardId).toBe('cardkit_flag_on');
+    expect(handle.messageId).toBe('om_flag_on');
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
 

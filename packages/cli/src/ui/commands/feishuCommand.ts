@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 DeepV Code team
+ * Copyright 2025 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -53,6 +53,7 @@ import {
   GeminiEventType,
   ToolCallRequestInfo,
   SessionManager,
+  getProjectTempDir,
   isWithinRoot,
   getVersion,
   tokenLimit,
@@ -518,6 +519,163 @@ let activeSenderOpenId: string | null = null;
 
 /** 隔离的运行时环境缓存 (chatId -> { config, geminiClient }) */
 const isolatedSessions = new Map<string, { config: Config; geminiClient: GeminiClient }>();
+
+/**
+ * 把 GeminiClient 的 clientHistory（Content[]）派生成"UI 视角"的 history。
+ *
+ * 仅用于让 SessionManager.getLastActiveSession(true) 的"含 user 消息"判断成立
+ * （它检查 history.json 里 type==='user' 的条目）。AI 真正消费的是 context.json
+ * 里的 clientHistory，与本派生数据无关。
+ *
+ * 派生规则：role==='user' 且 parts 中含 text 的条目转成 {type:'user', text}。
+ * 其它（model 回复、functionCall/Response、空文本）一律跳过。
+ */
+export function deriveUiHistoryFromClientHistory(
+  clientHistory: any[],
+): Array<{ type: string; text: string }> {
+  const out: Array<{ type: string; text: string }> = [];
+  if (!Array.isArray(clientHistory)) return out;
+  for (const entry of clientHistory) {
+    if (!entry || entry.role !== 'user' || !Array.isArray(entry.parts)) continue;
+    const text = entry.parts
+      .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (!text) continue;
+    out.push({ type: 'user', text });
+  }
+  return out;
+}
+
+/**
+ * 确保飞书自定义 sessionId 在 SessionManager 索引体系中已注册。
+ *
+ * 飞书侧使用稳定的 `feishu-${chatId}-${ts}` 格式 sessionId，绕过了
+ * SessionManager.createNewSession()，所以 metadata.json / index.json 都不会被
+ * 自动创建。本函数补这个缺口：若 metadata.json 不存在则写入一份，使后续
+ * saveSessionHistory → updateSessionMetadata → updateSessionIndex 链路能把该
+ * session 注册进 index.json，让 getLastActiveSession 找得到。
+ *
+ * 已存在则直接跳过，避免覆盖业务字段（messageCount、lastActiveAt 等）。
+ */
+async function ensureFeishuSessionMetadata(
+  projectRoot: string,
+  sessionId: string,
+): Promise<void> {
+  const fsp = await import('node:fs/promises');
+  const sessionDir = path.join(
+    getProjectTempDir(projectRoot),
+    'sessions',
+    sessionId,
+  );
+  const metadataPath = path.join(sessionDir, 'metadata.json');
+  try {
+    await fsp.access(metadataPath);
+    return; // 已存在，不覆盖
+  } catch {
+    // fall through
+  }
+  await fsp.mkdir(sessionDir, { recursive: true });
+  const now = new Date().toISOString();
+  const metadata = {
+    sessionId,
+    title: `Feishu ${sessionId}`,
+    createdAt: now,
+    lastActiveAt: now,
+    messageCount: 0,
+    totalTokens: 0,
+    hasCheckpoint: false,
+  };
+  await fsp.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+}
+
+/**
+ * 解析某项目"最后一个有内容的会话"，用于 /feishu start 续接上次对话。
+ *
+ * getLastActiveSession(true) 会跳过没有用户消息的空壳 session；
+ * 找到后用 loadSession 读取其 AI 客户端历史（context.json → clientHistory）。
+ *
+ * @returns sessionId 为可续接的会话 id（无可续接时为 undefined）；
+ *          clientHistory 为该会话的 AI 客户端历史（用于 setHistory）。
+ */
+export async function resolveResumableSessionId(
+  workspaceRoot: string,
+): Promise<{ sessionId?: string; clientHistory?: any[]; lastActiveAt?: string }> {
+  try {
+    const sessionManager = new SessionManager(workspaceRoot);
+    const lastSessionId = await sessionManager.getLastActiveSession(true);
+    if (!lastSessionId) return {};
+
+    const sessionData = await sessionManager.loadSession(lastSessionId);
+    if (!sessionData) return {};
+
+    const clientHistory = sessionData.clientHistory;
+    const hasContent =
+      Array.isArray(clientHistory) && clientHistory.length > 0;
+    if (!hasContent) {
+      // 有 session 记录但无 AI 客户端历史可注入：不作为可续接（避免恢复空壳）。
+      return {};
+    }
+
+    return {
+      sessionId: lastSessionId,
+      clientHistory,
+      lastActiveAt: sessionData.metadata?.lastActiveAt,
+    };
+  } catch (e) {
+    dwarn(
+      `[Router] resolveResumableSessionId failed for '${workspaceRoot}': ${(e as Error).message}`,
+    );
+    return {};
+  }
+}
+
+/**
+ * 持久化某个飞书隔离会话的 AI 客户端历史到该项目的 SessionManager。
+ *
+ * 对齐 CLI useSessionAutoSave 的保存路径：用 config 的 sessionId + projectRoot
+ * 定位，把 geminiClient.getHistory() 存为 clientHistory，使下次能续接。
+ *
+ * 关键点（修复 /feishu start 无法恢复会话）：
+ *   1. 主动确保 metadata.json 存在 —— 否则 SessionManager 静默跳过 index 更新，
+ *      导致 getLastActiveSession 永远看不到飞书 session。
+ *   2. 把 clientHistory 派生成 UI history 一并写入 —— 让 getLastActiveSession(true)
+ *      的"含 user 消息"判断成立。
+ *
+ * 容错：参数缺失、历史为空、保存失败均静默跳过/告警，绝不抛出（fire-and-forget）。
+ */
+export async function saveFeishuSessionHistory(
+  sessionConfig?: Config,
+  sessionClient?: GeminiClient,
+): Promise<void> {
+  try {
+    if (!sessionConfig || !sessionClient) return;
+    const projectRoot = sessionConfig.getProjectRoot?.();
+    const sessionId = sessionConfig.getSessionId?.();
+    if (!projectRoot || !sessionId) return;
+
+    const clientHistory = await sessionClient.getHistory?.();
+    if (!Array.isArray(clientHistory) || clientHistory.length === 0) {
+      // 空历史不保存：避免把刚初始化的空 session 落盘成"可续接"。
+      return;
+    }
+
+    // 修复 1：先确保 metadata.json 存在，这样 updateSessionIndex 才会被触发。
+    await ensureFeishuSessionMetadata(projectRoot, sessionId);
+
+    // 修复 2：派生 UI history，让 getLastActiveSession(true) 找得到该 session。
+    const uiHistory = deriveUiHistoryFromClientHistory(clientHistory);
+
+    const sessionManager = new SessionManager(projectRoot);
+    await sessionManager.saveSessionHistory(sessionId, uiHistory, clientHistory);
+    dlog(
+      `[Router] Saved ${clientHistory.length} client-history items (${uiHistory.length} UI items) for session '${sessionId}'`,
+    );
+  } catch (e) {
+    dwarn(`[Router] saveFeishuSessionHistory failed: ${(e as Error).message}`);
+  }
+}
 
 interface QueuedMessage {
   msg: FeishuMessage;
@@ -1358,7 +1516,7 @@ async function formatStatusMessage(config: any, geminiClient: any, chatId?: stri
   const contextPct = maxTokens > 0 ? ((input / maxTokens) * 100).toFixed(0) + '%' : '0%';
 
   return [
-    `Ⓥ **DeepV Code** v${cliVersion}`,
+    `Ⓥ **Easy Code** v${cliVersion}`,
     `🧠 **Model**: ${modelName}`,
     `⚙️ **Auth**: ${userName}`,
     `🧮 **Token Usage**`,
@@ -2064,9 +2222,19 @@ async function handleStart(context?: CommandContext): Promise<string> {
       // 🚀 加载独立会话的项目级/全局指令记忆 (DEEPV.md / AGENTS.md)，确保 AI 在独立会话中继承完整的行为规范约束
       const sessionMemory = await loadFeishuSessionMemory(workspaceRoot, settings);
 
+      // 🎯 会话续接（对齐标准 CLI 的 /session 恢复机制）：优先复用该项目"最后一个有
+      //    内容的 session"，使飞书重启 / 再次聊天时能接续上次对话。找不到（从没聊过）
+      //    才用稳定的新 sessionId。getLastActiveSession(true) 会跳过没有用户消息的空壳。
+      const resumed = await resolveResumableSessionId(workspaceRoot);
+      const effectiveSessionId =
+        resumed.sessionId || `feishu-${msg.chatId}-${Date.now()}`;
+      if (resumed.sessionId) {
+        dlog(`[Router] Resuming last session '${resumed.sessionId}' for chatId '${msg.chatId}' on '${workspaceRoot}'`);
+      }
+
       dlog(`[Router] Instantiating isolated environment for chatId '${msg.chatId}' on root '${workspaceRoot}' with ${sessionMemory.geminiMdFileCount} memory file(s)`);
       const isolatedConfig = new Config({
-        sessionId: `feishu-${msg.chatId}-${Date.now()}`,
+        sessionId: effectiveSessionId,
         cwd: workspaceRoot,
         debugMode: config?.getDebugMode() || false,
         targetDir: workspaceRoot,
@@ -2131,6 +2299,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
         await isolatedClient.setTools();
         dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
 
+        // 🎯 注入续接会话的 AI 客户端历史（对齐 CLI useSessionRestore 的 setHistory）。
+        //    仅当成功解析到上次有内容的 session 时才注入，空 session 不会有 clientHistory。
+        if (resumed.sessionId && resumed.clientHistory && resumed.clientHistory.length > 0) {
+          try {
+            isolatedClient.setHistory(resumed.clientHistory);
+            dlog(`[Router] Restored ${resumed.clientHistory.length} client-history items for chatId '${msg.chatId}'`);
+          } catch (histErr: any) {
+            dwarn(`[Router] Failed to restore client history for '${msg.chatId}': ${histErr?.message || String(histErr)}`);
+          }
+        }
+
         session = { config: isolatedConfig, geminiClient: isolatedClient };
         isolatedSessions.set(msg.chatId, session);
         debugTrail.push(`isolatedReady`);
@@ -2165,7 +2344,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
           // 🚀 斜杠命令统一使用 CardKit 2.0 终态卡片规格发送，保证视觉完美统一
           const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
-          const card = buildCardKitFinalCard(cmdResult, metrics, 'DeepV Code');
+          const card = buildCardKitFinalCard(cmdResult, metrics, 'Easy Code');
           const cardId = await gateway.createCardKitCard(card);
           if (cardId) {
             await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
@@ -2212,7 +2391,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           tuiContext?.addItem({ type: 'info', text: responseText }, Date.now());
 
           const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
-          const card = buildCardKitFinalCard(responseText, metrics, 'DeepV Code');
+          const card = buildCardKitFinalCard(responseText, metrics, 'Easy Code');
           const cardId = await gateway.createCardKitCard(card);
           if (cardId) {
             await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
@@ -2227,7 +2406,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         tuiContext?.addItem({ type: 'info', text: hint }, Date.now());
 
         const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
-        const card = buildCardKitFinalCard(hint, metrics, 'DeepV Code');
+        const card = buildCardKitFinalCard(hint, metrics, 'Easy Code');
         const cardId = await gateway.createCardKitCard(card);
         if (cardId) {
           await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
@@ -2240,7 +2419,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         tuiContext?.addItem({ type: 'info', text: errMsg }, Date.now());
 
         const metrics = await getFeishuStatusMetrics(currentConfig, currentClient, chatLastTokenUsage.get(msg.chatId));
-        const card = buildCardKitFinalCard(errMsg, metrics, 'DeepV Code (Error)');
+        const card = buildCardKitFinalCard(errMsg, metrics, 'Easy Code (Error)');
         const cardId = await gateway.createCardKitCard(card);
         if (cardId) {
           await gateway.sendCardKitMessage(msg.chatId, cardId, msg.messageId);
@@ -2529,7 +2708,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     // CardKit 创建失败，回退到老路径：发普通卡片
                     activeCardId = await gateway.sendCard(
                       msg.chatId,
-                      'DeepV Code',
+                      'Easy Code',
                       trimmed,
                       [],
                       initialFooterMetrics,
@@ -2570,7 +2749,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     } else {
                       const intermediateFooter = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                       intermediateFooter.status = '分段输出中';
-                      await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', oldCardContent, intermediateFooter);
+                      await safeUpdateCardWithRetry(gateway, activeCardId, 'Easy Code', oldCardContent, intermediateFooter);
                     }
 
                     // 2. 状态重置：清空历史 blocks，将 responseText 设置为多出的 right，并将 activeCardId 置为 null，
@@ -2586,7 +2765,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     // 老路径回退（CardKit 创建失败时）：im.message.patch 整卡更新
                     const metrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                     metrics.status = '思考中';
-                    await gateway.updateCard(activeCardId, 'DeepV Code', trimmed, metrics);
+                    await gateway.updateCard(activeCardId, 'Easy Code', trimmed, metrics);
                     lastUpdateTime = now;
                   }
                 }
@@ -2625,12 +2804,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
           // 老路径回退：整卡 patch
           const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           finalFooterMetrics.status = '已完成';
-          const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', currentFinalMarkdown || '（无回复）', finalFooterMetrics);
+          const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'Easy Code', currentFinalMarkdown || '（无回复）', finalFooterMetrics);
           if (!success) {
             dwarn('[Feishu Stream] Failed to update final card with retry. Fallback to sending new card.');
             activeCardId = await gateway.sendCard(
               msg.chatId,
-              'DeepV Code',
+              'Easy Code',
               currentFinalMarkdown || '（无回复）',
               [],
               finalFooterMetrics,
@@ -2652,7 +2831,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             // 兜底分支文本量不大，直接发个静态卡即可（不必再走 CardKit）
             activeCardId = await gateway.sendCard(
               msg.chatId,
-              'DeepV Code',
+              'Easy Code',
               currentFinalMarkdown || '（无回复）',
               [],
               finalFooterMetrics,
@@ -2696,12 +2875,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
           const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
           const toolRunningFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           toolRunningFooterMetrics.status = `运行工具中: ${toolNames}`;
-          await gateway.updateCard(activeCardId, 'DeepV Code (运行工具中)', renderCurrentDisplay(blocks, '', toolRunningText), toolRunningFooterMetrics);
+          await gateway.updateCard(activeCardId, 'Easy Code (运行工具中)', renderCurrentDisplay(blocks, '', toolRunningText), toolRunningFooterMetrics);
         } else if (!activeCardId) {
           const toolRunningText = `\n\n*(🔧 正在运行工具: ${toolNames}...)*`;
           activeCardId = await gateway.sendCard(
             msg.chatId,
-            'DeepV Code (运行工具中)',
+            'Easy Code (运行工具中)',
             toolRunningText,
             [],
             await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage),
@@ -2782,7 +2961,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                         await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
                         await streaming.pushFooter(taskFooterMetrics);
                       } else {
-                        await gateway.updateCard(activeCardId, 'DeepV Code (子代理执行中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), taskFooterMetrics);
+                        await gateway.updateCard(activeCardId, 'Easy Code (子代理执行中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), taskFooterMetrics);
                       }
                       lastCardUpdateTime = now;
                     }
@@ -2839,7 +3018,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                         await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
                         await streaming.pushFooter(shellFooterMetrics);
                       } else {
-                        await gateway.updateCard(activeCardId, 'DeepV Code (执行命令中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), shellFooterMetrics);
+                        await gateway.updateCard(activeCardId, 'Easy Code (执行命令中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), shellFooterMetrics);
                       }
                       lastCardUpdateTime = now;
                     }
@@ -2899,7 +3078,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                   toolInProgressFooterMetrics.status = toolName === 'image_reader'
                     ? '正在识别并分析图像内容(请稍候)...'
                     : `执行工具中: ${toolName}`;
-                  await gateway.updateCard(activeCardId, `DeepV Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
+                  await gateway.updateCard(activeCardId, `Easy Code (执行工具中)`, renderCurrentDisplay(blocks, '', liveToolProgress), toolInProgressFooterMetrics);
                 }
                 lastToolCardUpdateTime = nowToolStart;
               }
@@ -2959,7 +3138,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 toolDoneFooterMetrics.status = toolName === 'image_reader'
                   ? '已完成图像内容读取，正在构思回复...'
                   : `工具已完成: ${toolName}`;
-                await safeUpdateCardWithRetry(gateway, activeCardId, 'DeepV Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
+                await safeUpdateCardWithRetry(gateway, activeCardId, 'Easy Code', renderCurrentDisplay(blocks), toolDoneFooterMetrics);
                 lastToolCardUpdateTime = Date.now();
               }
             }
@@ -2972,7 +3151,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             if (activeCardId) {
               const failedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
               failedFooterMetrics.status = '执行失败';
-              await gateway.updateCard(activeCardId, 'DeepV Code (执行失败)', renderCurrentDisplay(blocks), failedFooterMetrics);
+              await gateway.updateCard(activeCardId, 'Easy Code (执行失败)', renderCurrentDisplay(blocks), failedFooterMetrics);
             }
 
             emitFeishuMessageLog(msg.chatId, `❌ ${toolName}: ${toolErr.message}`, 'tool');
@@ -2989,7 +3168,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           // 老路径回退：没有 loading 动画，把提示加在正文里
           const thinkingFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           thinkingFooterMetrics.status = '思考中';
-          await gateway.updateCard(activeCardId, 'DeepV Code (思考中)', renderCurrentDisplay(blocks) + `\n\n*(🤖 Agent is still working... / Agent 正在结合工具结果继续工作...)*`, thinkingFooterMetrics);
+          await gateway.updateCard(activeCardId, 'Easy Code (思考中)', renderCurrentDisplay(blocks) + `\n\n*(🤖 Agent is still working... / Agent 正在结合工具结果继续工作...)*`, thinkingFooterMetrics);
         }
 
         // 将工具结果作为下一轮输入
@@ -3017,7 +3196,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       } else if (activeCardId && !streaming) {
         const interruptedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         interruptedFooterMetrics.status = '已中断';
-        await gateway.updateCard(activeCardId, 'DeepV Code (已中断)', renderCurrentDisplay(blocks) + '\n\n*（工具调用次数已达到上限）*', interruptedFooterMetrics);
+        await gateway.updateCard(activeCardId, 'Easy Code (已中断)', renderCurrentDisplay(blocks) + '\n\n*（工具调用次数已达到上限）*', interruptedFooterMetrics);
       } else {
         await gateway.sendMessage(msg.chatId, '（工具调用次数已达到上限）', msg.messageId);
       }
@@ -3032,7 +3211,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         } else if (activeCardId && !streaming) {
           const abortedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           abortedFooterMetrics.status = '已中止';
-          await gateway.updateCard(activeCardId, 'DeepV Code (已中止)', renderCurrentDisplay(blocks) + '\n\n*🛑 任务已被用户中止。*', abortedFooterMetrics);
+          await gateway.updateCard(activeCardId, 'Easy Code (已中止)', renderCurrentDisplay(blocks) + '\n\n*🛑 任务已被用户中止。*', abortedFooterMetrics);
         }
         return null;
       }
@@ -3046,7 +3225,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       } else if (activeCardId && !streaming) {
         const errorFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         errorFooterMetrics.status = '出错';
-        await gateway.updateCard(activeCardId, 'DeepV Code (出错)', renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
+        await gateway.updateCard(activeCardId, 'Easy Code (出错)', renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
       }
       // 注：错误信息改由飞书仪表板 message log 展示，不再回显主 TUI。
       emitFeishuMessageLog(msg.chatId, `❌ ${err.message}`, 'tool');
@@ -3054,6 +3233,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
     } finally {
       activeAbortControllers.delete(msg.chatId);
       decrementProcessingCount(msg.chatId);
+
+      // 💾 持久化本会话的 AI 客户端历史（对齐 CLI useSessionAutoSave）。飞书无 React
+      //    状态，turn 完成后在此统一保存，使下次 /feishu start 能续接。从 isolatedSessions
+      //    取该 chat 的权威隔离会话；fire-and-forget，不阻塞返回。
+      const persisted = isolatedSessions.get(msg.chatId);
+      void saveFeishuSessionHistory(persisted?.config, persisted?.geminiClient);
     }
   }
 

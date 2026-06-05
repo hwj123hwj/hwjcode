@@ -1,6 +1,6 @@
 # Custom Models Configuration Guide
 
-DeepV Code supports custom model configurations, allowing you to use any OpenAI-compatible API or Claude API endpoint.
+Easy Code supports custom model configurations, allowing you to use any OpenAI-compatible API or Claude API endpoint.
 
 ## Configuration
 
@@ -8,7 +8,7 @@ Add custom models to your `custom-models.json` file (located at `~/.deepv/custom
 
 **💡 Why a separate file?**
 - Prevents conflicts with `settings.json` being updated by cloud models
-- Avoids race conditions when multiple DeepV Code instances are running
+- Avoids race conditions when multiple Easy Code instances are running
 - Your custom models won't be overwritten by cloud updates
 
 ```json
@@ -239,7 +239,7 @@ Custom models and cloud models work together seamlessly:
 
 1. Check that `id` starts with `custom-`
 2. Verify `enabled` is not set to `false`
-3. Restart DeepV Code after configuration changes
+3. Restart Easy Code after configuration changes
 
 ### API Errors
 
@@ -252,7 +252,7 @@ Custom models and cloud models work together seamlessly:
 
 1. Ensure variables are set in your shell environment
 2. Use the format `${VAR_NAME}` (with curly braces)
-3. Restart DeepV Code after setting environment variables
+3. Restart Easy Code after setting environment variables
 
 ## Limitations
 

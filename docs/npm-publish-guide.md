@@ -1,4 +1,4 @@
-# 📦 DeepV Code npm 发布指南
+# 📦 Easy Code npm 发布指南
 
 ## 🎯 发布前准备
 

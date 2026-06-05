@@ -52,7 +52,7 @@ Why this breaks:
 
 ```ts
 const DESC =
-  'Returns the current wall-clock local time of the machine running DeepV Code.\n\n' +
+  'Returns the current wall-clock local time of the machine running Easy Code.\n\n' +
   'Use this tool to:\n' +
   '- Determine the current real-world time.\n' +
   '- Record a "start time" at the beginning of a long task.';
