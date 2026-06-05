@@ -68,6 +68,10 @@ jobs:
           else
             VERSION=$(node -p "require('./package.json').version")
           fi
+
+          # 去除可能存在的首字母 v (例如 inputs.version 输入了 v1.1.4 或 package.json 中带有 v)
+          VERSION="${VERSION#v}"
+
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Final target version: $VERSION"
 
@@ -121,7 +125,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.get_version.outputs.VERSION }}
-          name: DeepV Code v${{ steps.get_version.outputs.VERSION }}
+          name: Easy Code v${{ steps.get_version.outputs.VERSION }}
           draft: ${{ inputs.draft || false }}
           prerelease: ${{ inputs.prerelease || false }}
           files: ${{ steps.find_artifacts.outputs.TGZ_FILE }}
