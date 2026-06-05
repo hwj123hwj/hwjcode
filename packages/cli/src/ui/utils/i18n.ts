@@ -1603,6 +1603,8 @@ export const translations = {
     'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` cannot be run from Feishu.**\n\nThis command stops the very gateway that is relaying your message — running it here would disconnect the Bot and you could not restart it from Feishu.\n\n💡 To stop the Bot, run `/feishu stop` in the **local easycode terminal**.\n🛑 To abort the current running task instead, use `/stop`.',
 
     // Feishu Dashboard
+    'feishu.dashboard.mode_lark': '🧩 Easy Code Lark Gateway Mode',
+    'feishu.dashboard.mode_feishu': '🧩 Easy Code Feishu Gateway Mode',
     'feishu.dashboard.connected': 'Connected',
     'feishu.dashboard.disconnected': 'Disconnected',
     'feishu.dashboard.bot_name': 'Bot',
@@ -3259,6 +3261,8 @@ export const translations = {
     'feishu.lifecycle.stop_blocked': '⚠️ **`/feishu stop` 不能在飞书里执行。**\n\n这个命令会停掉正在转发您消息的网关本身——在这里执行会导致 Bot 直接断连，而且您无法再从飞书侧重新启动它。\n\n💡 要停止 Bot，请在 **本地 easycode 终端** 执行 `/feishu stop`。\n🛑 若只是想中止当前正在运行的任务，请使用 `/stop`。',
 
     // Feishu Dashboard（飞书仪表板）
+    'feishu.dashboard.mode_lark': '🧩 Easy Code Lark 网关模式',
+    'feishu.dashboard.mode_feishu': '🧩 Easy Code 飞书网关模式',
     'feishu.dashboard.connected': '已连接',
     'feishu.dashboard.disconnected': '已断开',
     'feishu.dashboard.bot_name': 'Bot',
