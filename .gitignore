@@ -84,3 +84,8 @@ packages/cli/clipboard/
 # Debug exports (local diagnostics)
 debug_export_*.md
 probe-output.jsonl
+
+# Local runtime config & artifacts (per-project, never commit)
+.easycode/
+.easycode-bak/
+.easycode-user/
