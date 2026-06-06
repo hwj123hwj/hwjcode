@@ -1556,14 +1556,16 @@ async function handleAskUserQuestionViaCard(
 
 /** 飞书支持的斜杠命令列表（用于 /help 展示） */
 const FEISHU_SLASH_COMMANDS: Record<string, string> = {
-  '/new':      '新建会话（重置对话历史，保留工具能力）',
-  '/compress': '压缩对话历史（释放上下文窗口）',
-  '/compact':  '同 /compress',
-  '/stop':     '中止当前正在运行的 AI 任务',
-  '/status':   '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
-  '/thinking': '切换/配置 AI 思考模式与深度',
-  '/model':    '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
-  '/help':     '显示此帮助',
+  '/new':              '新建会话（重置对话历史，保留工具能力）',
+  '/compress':         '压缩对话历史（释放上下文窗口）',
+  '/stop':             '中止当前正在运行的 AI 任务',
+  '/status':           '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
+  '/thinking':         '切换/配置 AI 思考模式与深度',
+  '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
+  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`',
+  '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
+  '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
+  '/help':             '显示此帮助',
 };
 
 /**
@@ -1883,9 +1885,10 @@ async function handleFeishuCommand(
     case '/help': {
       const lines = ['📖 飞书可用命令:', ''];
       for (const [name, desc] of Object.entries(FEISHU_SLASH_COMMANDS)) {
-        lines.push(`  ${name.padEnd(12)} ${desc}`);
+        lines.push(`  ${name.padEnd(20)} ${desc}`);
       }
       lines.push('');
+      lines.push('💡 此外还支持 CLI 内置斜杠命令（如 /ask、/wiki 等）');
       lines.push('💡 其他任何消息都会发送给 AI Agent 处理（支持工具调用）');
       return lines.join('\n');
     }
