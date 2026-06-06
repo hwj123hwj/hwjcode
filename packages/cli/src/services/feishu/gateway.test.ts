@@ -332,16 +332,32 @@ describe('FeishuGateway - Message Parsing', () => {
     });
 
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/merged_forward')) {
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({
+          tenant_access_token: 't-mock-token',
+          expire: 7200,
+        });
+      }
+      if (url.includes('/im/v1/messages/')) {
+        // 飞书「获取指定消息内容」对 merge_forward 返回扁平化消息树：
+        // 第一条是父消息（无 upper_message_id），其后子消息带 upper_message_id。
         return mockFetchOk({
           code: 0,
           msg: 'success',
           data: {
             items: [
               {
+                message_id: 'om_merge_123',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367850000',
+                sender: { id: 'ou_root', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
                 message_id: 'om_sub_1',
-                message_type: 'text',
-                content: JSON.stringify({ text: 'hello from sub1' }),
+                upper_message_id: 'om_merge_123',
+                msg_type: 'text',
+                body: { content: JSON.stringify({ text: 'hello from sub1' }) },
                 create_time: '1615367851000',
                 sender: {
                   id: 'ou_user_1',
@@ -351,8 +367,9 @@ describe('FeishuGateway - Message Parsing', () => {
               },
               {
                 message_id: 'om_sub_2',
-                message_type: 'file',
-                content: JSON.stringify({ file_key: 'file_sub_2', file_name: 'nested.zip' }),
+                upper_message_id: 'om_merge_123',
+                msg_type: 'file',
+                body: { content: JSON.stringify({ file_key: 'file_sub_2', file_name: 'nested.zip' }) },
                 create_time: '1615367852000',
                 sender: {
                   id: 'ou_user_2',
@@ -362,12 +379,6 @@ describe('FeishuGateway - Message Parsing', () => {
               },
             ],
           },
-        });
-      }
-      if (url.includes('/tenant_access_token')) {
-        return mockFetchOk({
-          tenant_access_token: 't-mock-token',
-          expire: 7200,
         });
       }
       return mockFetchOk({ code: 0 });
@@ -422,26 +433,42 @@ describe('FeishuGateway - Message Parsing', () => {
     });
 
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/merged_forward')) {
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({
+          tenant_access_token: 't-mock-token',
+          expire: 7200,
+        });
+      }
+      if (url.includes('/im/v1/messages/')) {
         return mockFetchOk({
           code: 0,
           msg: 'success',
           data: {
             items: [
               {
+                message_id: 'om_merge_125',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367850000',
+                sender: { id: 'ou_root', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
                 message_id: 'om_sub_post_1',
-                message_type: 'post',
-                content: JSON.stringify({
-                  zh_cn: {
-                    title: 'First post',
-                    content: [
-                      [
-                        { tag: 'text', text: 'Check first: ' },
-                        { tag: 'img', image_key: 'img_key_1' },
+                upper_message_id: 'om_merge_125',
+                msg_type: 'post',
+                body: {
+                  content: JSON.stringify({
+                    zh_cn: {
+                      title: 'First post',
+                      content: [
+                        [
+                          { tag: 'text', text: 'Check first: ' },
+                          { tag: 'img', image_key: 'img_key_1' },
+                        ],
                       ],
-                    ],
-                  },
-                }),
+                    },
+                  }),
+                },
                 create_time: '1615367851000',
                 sender: {
                   id: 'ou_user_1',
@@ -451,18 +478,21 @@ describe('FeishuGateway - Message Parsing', () => {
               },
               {
                 message_id: 'om_sub_post_2',
-                message_type: 'post',
-                content: JSON.stringify({
-                  zh_cn: {
-                    title: 'Second post',
-                    content: [
-                      [
-                        { tag: 'text', text: 'Check second: ' },
-                        { tag: 'img', image_key: 'img_key_2' },
+                upper_message_id: 'om_merge_125',
+                msg_type: 'post',
+                body: {
+                  content: JSON.stringify({
+                    zh_cn: {
+                      title: 'Second post',
+                      content: [
+                        [
+                          { tag: 'text', text: 'Check second: ' },
+                          { tag: 'img', image_key: 'img_key_2' },
+                        ],
                       ],
-                    ],
-                  },
-                }),
+                    },
+                  }),
+                },
                 create_time: '1615367852000',
                 sender: {
                   id: 'ou_user_2',
@@ -472,12 +502,6 @@ describe('FeishuGateway - Message Parsing', () => {
               },
             ],
           },
-        });
-      }
-      if (url.includes('/tenant_access_token')) {
-        return mockFetchOk({
-          tenant_access_token: 't-mock-token',
-          expire: 7200,
         });
       }
       return mockFetchOk({ code: 0 });
@@ -524,7 +548,7 @@ describe('FeishuGateway - Message Parsing', () => {
     expect(receivedMsg.text).toContain('[图片_2]');
   });
 
-  it('correctly reports error when fetching merged_forward fails', async () => {
+  it('correctly reports error when fetching merge_forward sub-messages fails', async () => {
     await gateway.connect();
 
     const mockFetchError = (body: any) => ({
@@ -533,16 +557,16 @@ describe('FeishuGateway - Message Parsing', () => {
     });
 
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/merged_forward')) {
-        return mockFetchError({
-          code: 99991403,
-          msg: 'No permission for merged_forward API',
-        });
-      }
       if (url.includes('/tenant_access_token')) {
         return mockFetchError({
           tenant_access_token: 't-mock-token',
           expire: 7200,
+        });
+      }
+      if (url.includes('/im/v1/messages/')) {
+        return mockFetchError({
+          code: 230002,
+          msg: 'Bot has no permission to access the message',
         });
       }
       return mockFetchError({ code: 0 });
@@ -577,7 +601,98 @@ describe('FeishuGateway - Message Parsing', () => {
 
     expect(receivedMsg).not.toBeNull();
     expect(receivedMsg.messageType).toBe('merge_forward');
-    expect(receivedMsg.text).toContain('原因: 飞书接口返回错误 (code: 99991403): No permission for merged_forward API');
+    expect(receivedMsg.text).toContain('原因: 飞书接口返回错误 (code: 230002): Bot has no permission to access the message');
+  });
+
+  it('recursively expands nested merge_forward sub-messages using upper_message_id tree', async () => {
+    await gateway.connect();
+
+    const mockFetchOk = (body: any) => ({
+      ok: true,
+      json: async () => body,
+    });
+
+    // 扁平树：root -> (text A) 和 (nested merge_forward) -> (text B 挂在 nested 下)
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({ tenant_access_token: 't-mock-token', expire: 7200 });
+      }
+      if (url.includes('/im/v1/messages/')) {
+        return mockFetchOk({
+          code: 0,
+          msg: 'success',
+          data: {
+            items: [
+              {
+                message_id: 'om_root',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367850000',
+                sender: { id: 'ou_root', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
+                message_id: 'om_textA',
+                upper_message_id: 'om_root',
+                msg_type: 'text',
+                body: { content: JSON.stringify({ text: 'top level A' }) },
+                create_time: '1615367851000',
+                sender: { id: 'ou_a', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
+                message_id: 'om_nested',
+                upper_message_id: 'om_root',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367852000',
+                sender: { id: 'ou_nest', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
+                message_id: 'om_textB',
+                upper_message_id: 'om_nested',
+                msg_type: 'text',
+                body: { content: JSON.stringify({ text: 'deep nested B' }) },
+                create_time: '1615367853000',
+                sender: { id: 'ou_b', id_type: 'open_id', sender_type: 'user' },
+              },
+            ],
+          },
+        });
+      }
+      return mockFetchOk({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_root',
+          message_type: 'merge_forward',
+          content: 'Nested merged',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_789' } },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+    // 顶层文本与深层嵌套文本都应被展开
+    expect(receivedMsg.text).toContain('top level A');
+    expect(receivedMsg.text).toContain('deep nested B');
+    // 深层文本应有更深的缩进（嵌套渲染）
+    const lines = receivedMsg.text.split('\n');
+    const deepLine = lines.find((l: string) => l.includes('deep nested B'));
+    expect(deepLine.startsWith('  ')).toBe(true);
   });
 });
 
