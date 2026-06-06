@@ -694,6 +694,192 @@ describe('FeishuGateway - Message Parsing', () => {
     const deepLine = lines.find((l: string) => l.includes('deep nested B'));
     expect(deepLine.startsWith('  ')).toBe(true);
   });
+
+  // -------------------------------------------------------------------------
+  // interactive（卡片）消息解析
+  // -------------------------------------------------------------------------
+  it('parses an interactive card: extracts header title and body text, tagged as card', () => {
+    const cardContent = JSON.stringify({
+      config: { wide_screen_mode: true },
+      header: { template: 'blue', title: { tag: 'plain_text', content: '部署通知' } },
+      elements: [
+        { tag: 'markdown', content: '服务 **order-api** 已发布到生产环境' },
+        { tag: 'hr' },
+        { tag: 'div', text: { tag: 'lark_md', content: '版本: v2.3.1' } },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_1',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    // 标注来源为卡片
+    expect(text).toContain('[卡片]');
+    // 标题
+    expect(text).toContain('部署通知');
+    // 各 element 的正文文本
+    expect(text).toContain('服务 **order-api** 已发布到生产环境');
+    expect(text).toContain('版本: v2.3.1');
+  });
+
+  it('recursively extracts text from nested card structures (column_set / div.fields)', () => {
+    const cardContent = JSON.stringify({
+      header: { title: { tag: 'plain_text', content: '工单 #1024' } },
+      elements: [
+        {
+          tag: 'div',
+          fields: [
+            { is_short: true, text: { tag: 'lark_md', content: '**状态**: 处理中' } },
+            { is_short: true, text: { tag: 'lark_md', content: '**负责人**: 张三' } },
+          ],
+        },
+        {
+          tag: 'column_set',
+          columns: [
+            {
+              tag: 'column',
+              elements: [{ tag: 'markdown', content: '优先级: 高' }],
+            },
+            {
+              tag: 'column',
+              elements: [{ tag: 'markdown', content: '截止: 2026-06-10' }],
+            },
+          ],
+        },
+        { tag: 'note', elements: [{ tag: 'plain_text', content: '来自监控系统' }] },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_2',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('工单 #1024');
+    expect(text).toContain('**状态**: 处理中');
+    expect(text).toContain('**负责人**: 张三');
+    expect(text).toContain('优先级: 高');
+    expect(text).toContain('截止: 2026-06-10');
+    expect(text).toContain('来自监控系统');
+  });
+
+  it('handles interactive card with the new schema (card.body.elements) and i18n header', () => {
+    // 部分 bot 使用 card 2.0：外层包一层 card，标题在 i18n 结构里
+    const cardContent = JSON.stringify({
+      type: 'template',
+      data: {
+        card: {
+          header: { title: { tag: 'plain_text', content: 'Alert' } },
+          body: {
+            elements: [{ tag: 'markdown', content: 'CPU usage exceeded 90%' }],
+          },
+        },
+      },
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_3',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    expect(text).toContain('Alert');
+    expect(text).toContain('CPU usage exceeded 90%');
+  });
+
+  it('falls back gracefully when interactive content is not valid JSON', () => {
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_bad',
+      'interactive',
+      'not-a-json',
+      [],
+      [],
+    );
+    // 不抛异常，至少标注为卡片消息
+    expect(text).toContain('[卡片');
+  });
+
+  it('expands an interactive card forwarded inside a merge_forward message', async () => {
+    await gateway.connect();
+
+    const mockFetchOk = (body: any) => ({ ok: true, json: async () => body });
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({ tenant_access_token: 't-mock-token', expire: 7200 });
+      }
+      if (url.includes('/im/v1/messages/')) {
+        return mockFetchOk({
+          code: 0,
+          msg: 'success',
+          data: {
+            items: [
+              {
+                message_id: 'om_root_card',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367850000',
+                sender: { id: 'ou_root', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
+                message_id: 'om_sub_card',
+                upper_message_id: 'om_root_card',
+                msg_type: 'interactive',
+                body: {
+                  content: JSON.stringify({
+                    header: { title: { tag: 'plain_text', content: '审批请求' } },
+                    elements: [{ tag: 'markdown', content: '请假 2 天，请审批' }],
+                  }),
+                },
+                create_time: '1615367851000',
+                sender: { id: 'ou_bot_1', id_type: 'open_id', sender_type: 'app' },
+              },
+            ],
+          },
+        });
+      }
+      return mockFetchOk({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_root_card',
+          message_type: 'merge_forward',
+          content: 'Forwarded card',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_789' } },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+    expect(receivedMsg.text).toContain('[卡片]');
+    expect(receivedMsg.text).toContain('审批请求');
+    expect(receivedMsg.text).toContain('请假 2 天，请审批');
+  });
 });
 
 // ---------------------------------------------------------------------------
