@@ -620,7 +620,101 @@ export class FeishuGateway {
   }
 
   /**
-   * 获取合并转发消息的子消息列表
+   * 将「获取指定消息内容」接口返回的扁平 `items[]` 渲染为合并转发的可读文本。
+   *
+   * items 是一棵扁平化的消息树：父消息（rootId，无 `upper_message_id`）在前，
+   * 其后每条子孙消息通过 `upper_message_id` 指向其直接父级。本方法据此重建
+   * 父→子映射，再从 rootId 出发递归渲染；嵌套的 merge_forward 子消息会就地
+   * 递归展开（无需额外 API 调用，因为飞书已把整棵树平铺在同一个 items 里）。
+   *
+   * 关键字段（与飞书返回结构对齐）：
+   *  - 子消息内容在 `item.body.content`（JSON 字符串），类型在 `item.msg_type`；
+   *  - 时间在 `item.create_time`（毫秒时间戳字符串），发送者在 `item.sender.id`。
+   *
+   * pendingImages / pendingFiles 由调用方传入并在整棵树范围内共享，从而保证
+   * 图片/文件占位符（如 `[图片_1]`、`[图片_2]`）全局唯一、不重号。
+   */
+  private renderMergedForwardItems(
+    rootId: string,
+    items: any[],
+    pendingImages: Array<{ imageKey: string; placeholder: string }>,
+    pendingFiles: Array<{ fileKey: string; fileName: string; placeholder: string }>
+  ): string {
+    // 按 upper_message_id 构建 父id -> 子消息[] 映射（根消息本身不计入）
+    const childrenMap = new Map<string, any[]>();
+    for (const item of items) {
+      if (item.message_id === rootId && !item.upper_message_id) continue;
+      const parentId = item.upper_message_id || rootId;
+      const arr = childrenMap.get(parentId) || [];
+      arr.push(item);
+      childrenMap.set(parentId, arr);
+    }
+    // 同一父级下的子消息按创建时间升序排列
+    for (const arr of childrenMap.values()) {
+      arr.sort(
+        (a, b) =>
+          parseInt(String(a.create_time || '0'), 10) -
+          parseInt(String(b.create_time || '0'), 10)
+      );
+    }
+
+    const renderSubtree = (parentId: string, depth: number): string => {
+      const children = childrenMap.get(parentId);
+      if (!children || children.length === 0) return '';
+
+      const parts: string[] = [];
+      for (const item of children) {
+        const subMsgType = item.msg_type || 'text';
+        const senderName = item.sender?.id || '匿名';
+        const timestampStr = item.create_time
+          ? new Date(Number(item.create_time)).toLocaleString('zh-CN', {
+              timeZone: 'Asia/Shanghai',
+            })
+          : '';
+        const timeHeader = timestampStr ? ` [${timestampStr}]` : '';
+
+        let subText: string;
+        if (subMsgType === 'merge_forward') {
+          // 嵌套合并转发：就地递归展开（子孙节点已在同一 items 中）
+          const nested = renderSubtree(item.message_id, depth + 1);
+          subText = nested || '[空的合并转发消息]';
+        } else {
+          subText = this.parseSingleMessageContent(
+            item.message_id,
+            subMsgType,
+            item.body?.content,
+            pendingImages,
+            pendingFiles
+          );
+        }
+
+        const indent = '  '.repeat(depth);
+        parts.push(`${indent}**${senderName}**${timeHeader}:`);
+        parts.push(
+          subText
+            .split('\n')
+            .map((line) => `${indent}${line}`)
+            .join('\n')
+        );
+        parts.push(`${indent}---`);
+      }
+      return parts.join('\n');
+    };
+
+    return renderSubtree(rootId, 0);
+  }
+
+  /**
+   * 获取合并转发消息的子消息列表。
+   *
+   * 飞书并没有专门的「合并转发」读取端点（早期实现误用了不存在的
+   * `/messages/:id/merged_forward`，飞书直接返回 HTTP 404）。正确做法是
+   * 直接调用「获取指定消息内容」接口 `GET /open-apis/im/v1/messages/:message_id`：
+   * 当目标是一条 merge_forward 消息时，飞书会在 `data.items[]` 中返回**扁平化**
+   * 的消息树——第一条是父消息本身（无 `upper_message_id`），其后每条子孙消息
+   * 都带有 `upper_message_id` 指向其直接父级。
+   *
+   * 这里只负责取回原始 `items`，树形拼装与渲染交由调用方处理。
    */
   async getMergedForwardMessages(messageId: string): Promise<{ items: any[]; error?: string }> {
     try {
@@ -630,7 +724,7 @@ export class FeishuGateway {
       }
 
       const res = await fetch(
-        `${this.apiBaseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/merged_forward`,
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`,
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${token}` },
@@ -643,7 +737,7 @@ export class FeishuGateway {
         return { items: [], error: `飞书接口返回错误 (code: ${data.code}): ${data.msg || '未知错误'}` };
       }
 
-      const items = data.data?.items || data.data?.messages || (Array.isArray(data.data) ? data.data : []);
+      const items = data.data?.items || [];
       return { items };
     } catch (e: any) {
       dlog(`[Feishu] getMergedForwardMessages(${messageId}) threw: ${e?.message || e}`);
@@ -869,28 +963,15 @@ export class FeishuGateway {
             dlog(`Received merge_forward message, fetching sub-messages for ${message.message_id}...`);
             const { items: subMessages, error } = await this.getMergedForwardMessages(message.message_id);
             if (subMessages && subMessages.length > 0) {
-              const parts: string[] = [];
-              parts.push(`📢 **[合并转发的消息记录]**`);
-              parts.push(`---`);
-              for (const subMsg of subMessages) {
-                const subMsgType = subMsg.message_type || 'text';
-                const subText = this.parseSingleMessageContent(
-                  subMsg.message_id,
-                  subMsgType,
-                  subMsg.content,
-                  pendingImages,
-                  pendingFiles
-                );
-
-                // 获取子消息发送者的名字或信息
-                const senderName = subMsg.sender?.id || '匿名';
-                const timestampStr = subMsg.create_time ? new Date(Number(subMsg.create_time)).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '';
-                const timeHeader = timestampStr ? ` [${timestampStr}]` : '';
-                parts.push(`**${senderName}**${timeHeader}:`);
-                parts.push(subText);
-                parts.push(`---`);
-              }
-              text = parts.join('\n');
+              const body = this.renderMergedForwardItems(
+                message.message_id,
+                subMessages,
+                pendingImages,
+                pendingFiles
+              );
+              text = body
+                ? `📢 **[合并转发的消息记录]**\n---\n${body}`
+                : `[合并转发消息，但未能解析出任何子消息内容]`;
             } else {
               text = `[合并转发消息，但未获取到任何子消息内容${error ? `。原因: ${error}` : ''}]`;
             }
