@@ -694,6 +694,523 @@ describe('FeishuGateway - Message Parsing', () => {
     const deepLine = lines.find((l: string) => l.includes('deep nested B'));
     expect(deepLine.startsWith('  ')).toBe(true);
   });
+
+  // -------------------------------------------------------------------------
+  // interactive（卡片）消息解析
+  // -------------------------------------------------------------------------
+  it('parses an interactive card: extracts header title and body text, tagged as card', () => {
+    const cardContent = JSON.stringify({
+      config: { wide_screen_mode: true },
+      header: { template: 'blue', title: { tag: 'plain_text', content: '部署通知' } },
+      elements: [
+        { tag: 'markdown', content: '服务 **order-api** 已发布到生产环境' },
+        { tag: 'hr' },
+        { tag: 'div', text: { tag: 'lark_md', content: '版本: v2.3.1' } },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_1',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    // 标注来源为卡片
+    expect(text).toContain('[卡片]');
+    // 标题
+    expect(text).toContain('部署通知');
+    // 各 element 的正文文本
+    expect(text).toContain('服务 **order-api** 已发布到生产环境');
+    expect(text).toContain('版本: v2.3.1');
+  });
+
+  it('recursively extracts text from nested card structures (column_set / div.fields)', () => {
+    const cardContent = JSON.stringify({
+      header: { title: { tag: 'plain_text', content: '工单 #1024' } },
+      elements: [
+        {
+          tag: 'div',
+          fields: [
+            { is_short: true, text: { tag: 'lark_md', content: '**状态**: 处理中' } },
+            { is_short: true, text: { tag: 'lark_md', content: '**负责人**: 张三' } },
+          ],
+        },
+        {
+          tag: 'column_set',
+          columns: [
+            {
+              tag: 'column',
+              elements: [{ tag: 'markdown', content: '优先级: 高' }],
+            },
+            {
+              tag: 'column',
+              elements: [{ tag: 'markdown', content: '截止: 2026-06-10' }],
+            },
+          ],
+        },
+        { tag: 'note', elements: [{ tag: 'plain_text', content: '来自监控系统' }] },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_2',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('工单 #1024');
+    expect(text).toContain('**状态**: 处理中');
+    expect(text).toContain('**负责人**: 张三');
+    expect(text).toContain('优先级: 高');
+    expect(text).toContain('截止: 2026-06-10');
+    expect(text).toContain('来自监控系统');
+  });
+
+  it('handles interactive card with the new schema (card.body.elements) and i18n header', () => {
+    // 部分 bot 使用 card 2.0：外层包一层 card，标题在 i18n 结构里
+    const cardContent = JSON.stringify({
+      type: 'template',
+      data: {
+        card: {
+          header: { title: { tag: 'plain_text', content: 'Alert' } },
+          body: {
+            elements: [{ tag: 'markdown', content: 'CPU usage exceeded 90%' }],
+          },
+        },
+      },
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_3',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    expect(text).toContain('Alert');
+    expect(text).toContain('CPU usage exceeded 90%');
+  });
+
+  it('falls back gracefully when interactive content is not valid JSON', () => {
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_bad',
+      'interactive',
+      'not-a-json',
+      [],
+      [],
+    );
+    // 不抛异常，至少标注为卡片消息
+    expect(text).toContain('[卡片');
+  });
+
+  it('renders a card table component as a markdown table preserving row/column alignment', () => {
+    const cardContent = JSON.stringify({
+      header: { title: { tag: 'plain_text', content: '考勤日报' } },
+      elements: [
+        {
+          tag: 'table',
+          columns: [
+            { name: 'dept', display_name: '部门', data_type: 'text' },
+            { name: 'today', display_name: '今天', data_type: 'text' },
+            { name: 'last', display_name: '上个工作日', data_type: 'text' },
+          ],
+          rows: [
+            { dept: 'AI Native生产力中心', today: '14/20', last: '18/20' },
+            { dept: '平台研发部', today: '9/10', last: '10/10' },
+          ],
+        },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_table',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    expect(text).toContain('考勤日报');
+    // markdown 表头与分隔线
+    expect(text).toContain('| 部门 | 今天 | 上个工作日 |');
+    expect(text).toContain('| --- | --- | --- |');
+    // 行数据保持列对应
+    expect(text).toContain('| AI Native生产力中心 | 14/20 | 18/20 |');
+    expect(text).toContain('| 平台研发部 | 9/10 | 10/10 |');
+  });
+
+  it('formats non-string table cell values (options / persons / number / date)', () => {
+    const cardContent = JSON.stringify({
+      elements: [
+        {
+          tag: 'table',
+          columns: [
+            { name: 'name', display_name: '客户', data_type: 'text' },
+            { name: 'scale', display_name: '规模', data_type: 'options' },
+            { name: 'arr', display_name: 'ARR', data_type: 'number' },
+            { name: 'poc', display_name: '跟进人', data_type: 'persons' },
+          ],
+          rows: [
+            {
+              name: '飞书科技',
+              scale: [{ text: 'S2', color: 'blue' }],
+              arr: 168,
+              poc: ['ou_abc', 'ou_def'],
+            },
+          ],
+        },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_table2',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('| 客户 | 规模 | ARR | 跟进人 |');
+    // options 取 text，number 原样，persons 数组合并
+    expect(text).toContain('飞书科技');
+    expect(text).toContain('S2');
+    expect(text).toContain('168');
+  });
+
+  it('extracts text from markdown-type table cells with nested property.elements structure', () => {
+    // 飞书 table 单元格 data_type 为 markdown 时，值是嵌套对象而非简单字符串：
+    //   { tag: "markdown", property: { elements: [{ tag: "plain_text", property: { content: "2.24亿" } }] } }
+    const cardContent = JSON.stringify({
+      elements: [
+        {
+          tag: 'table',
+          columns: [
+            { name: 'name', display_name: '姓名', data_type: 'text' },
+            { name: 'tokens', display_name: 'Token消耗', data_type: 'markdown' },
+            { name: 'total_cost', display_name: '总费用', data_type: 'text' },
+          ],
+          rows: [
+            {
+              name: '黄威健',
+              tokens: {
+                id: '_5',
+                tag: 'markdown',
+                property: {
+                  elements: [
+                    {
+                      id: '0_1__5_0',
+                      tag: 'plain_text',
+                      property: { content: '2.24亿', textAlign: 'left' },
+                    },
+                  ],
+                  markdownElements: [],
+                  originTag: 'markdown',
+                  textAlign: 'left',
+                },
+              },
+              total_cost: '$18.54',
+            },
+            {
+              name: '魏辉',
+              tokens: {
+                id: '_6',
+                tag: 'markdown',
+                property: {
+                  elements: [
+                    {
+                      id: '1_1__6_0',
+                      tag: 'plain_text',
+                      property: { content: '7487.78万', textAlign: 'left' },
+                    },
+                  ],
+                  markdownElements: [],
+                  originTag: 'markdown',
+                  textAlign: 'left',
+                },
+              },
+              total_cost: '$6.66',
+            },
+          ],
+        },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_table_markdown',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('| 姓名 | Token消耗 | 总费用 |');
+    expect(text).toContain('| 黄威健 | 2.24亿 | $18.54 |');
+    expect(text).toContain('| 魏辉 | 7487.78万 | $6.66 |');
+  });
+
+  it('falls back to column display names when a table has no rows', () => {
+    const cardContent = JSON.stringify({
+      elements: [
+        {
+          tag: 'table',
+          columns: [
+            { name: 'a', display_name: '列A', data_type: 'text' },
+            { name: 'b', display_name: '列B', data_type: 'text' },
+          ],
+          rows: [],
+        },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_table3',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('| 列A | 列B |');
+  });
+
+  // -------------------------------------------------------------------------
+  // 真实落盘格式：飞书「获取消息内容」接口对转发的 interactive 卡片返回
+  // {title, elements:[[...]], user_dsl} 结构。其中 user_dsl 是卡片的完整 DSL，
+  // 对 card 2.0 卡片（schema:"2.0"）尤其关键——此时 content.elements 简化视图
+  // 只会返回 [<img>, "请升级至最新版本客户端，以查看内容"] 占位，真实内容只在 user_dsl。
+  // -------------------------------------------------------------------------
+  it('parses card 2.0 (schema 2.0) from user_dsl when content.elements is only an upgrade placeholder', () => {
+    const userDsl = JSON.stringify({
+      schema: '2.0',
+      config: {},
+      header: {
+        template: 'blue',
+        title: { tag: 'plain_text', content: '2026年第22周代码贡献排行榜' },
+        subtitle: { tag: 'plain_text', content: '共 45 条提交（仅部门成员）' },
+      },
+      body: {
+        direction: 'vertical',
+        elements: [
+          {
+            tag: 'table',
+            columns: [
+              { name: 'name', display_name: '开发者', data_type: 'text' },
+              { name: 'additions', display_name: '增行', data_type: 'text' },
+              { name: 'commits', display_name: '提交', data_type: 'text' },
+            ],
+            rows: [
+              { name: '🥇 凉水', additions: '3万', commits: '32' },
+              { name: '🥈 孔海峰', additions: '1万', commits: '5' },
+              { name: '🥉 黄威健', additions: '674', commits: '8' },
+            ],
+          },
+        ],
+      },
+    });
+    // content 顶层是飞书简化视图：elements 只有图片占位 + 升级提示
+    const cardContent = JSON.stringify({
+      title: null,
+      elements: [[{ tag: 'img' }, { tag: 'text', text: '请升级至最新版本客户端，以查看内容' }]],
+      user_dsl: userDsl,
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_v2_table',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    // 标题与副标题来自 user_dsl.header
+    expect(text).toContain('2026年第22周代码贡献排行榜');
+    expect(text).toContain('共 45 条提交（仅部门成员）');
+    // user_dsl.body 里的 table 被重建为 markdown 表格
+    expect(text).toContain('| 开发者 | 增行 | 提交 |');
+    expect(text).toContain('| --- | --- | --- |');
+    expect(text).toContain('| 🥇 凉水 | 3万 | 32 |');
+    expect(text).toContain('| 🥉 黄威健 | 674 | 8 |');
+    // 绝不应出现降级占位文本
+    expect(text).not.toContain('请升级至最新版本客户端');
+  });
+
+  it('parses card 1.0 from user_dsl (header + nested column_set/markdown) ignoring the simplified elements view', () => {
+    const userDsl = JSON.stringify({
+      config: {},
+      header: { template: 'green', title: { tag: 'plain_text', content: 'Easy Code' } },
+      elements: [
+        { tag: 'markdown', content: 'Easy Code v1.1.6 发布', text_align: 'left' },
+        { tag: 'hr' },
+        { tag: 'markdown', content: '✨ 新功能：支持飞书「合并转发」消息解析' },
+      ],
+    });
+    const cardContent = JSON.stringify({
+      title: 'Easy Code',
+      elements: [[{ tag: 'text', text: 'Easy Code v1.1.6 发布' }]],
+      user_dsl: userDsl,
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_v1_dsl',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    expect(text).toContain('Easy Code');
+    expect(text).toContain('Easy Code v1.1.6 发布');
+    expect(text).toContain('✨ 新功能：支持飞书「合并转发」消息解析');
+  });
+
+  it('renders the 2D content.elements view as a table when user_dsl is absent', () => {
+    // 没有 user_dsl 时，回退到 content.elements 二维数组（行→单元格）
+    const cardContent = JSON.stringify({
+      title: null,
+      elements: [
+        [{ tag: 'text', text: '您的团队考勤日报' }],
+        [{ tag: 'hr' }],
+        [
+          { tag: 'text', text: '部门' },
+          { tag: 'text', text: '今天' },
+          { tag: 'text', text: '上个工作日' },
+        ],
+        [
+          { tag: 'text', text: 'AI Native生产力中心' },
+          { tag: 'text', text: '14/20' },
+          { tag: 'text', text: '18/20' },
+        ],
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_2d_fallback',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    expect(text).toContain('[卡片]');
+    expect(text).toContain('您的团队考勤日报');
+    // 数据行各单元格都应保留
+    expect(text).toContain('AI Native生产力中心');
+    expect(text).toContain('14/20');
+    expect(text).toContain('18/20');
+  });
+
+  it('strips lark_md <font> color tags but keeps inner text and markdown bold', () => {
+    const cardContent = JSON.stringify({
+      header: { title: { tag: 'plain_text', content: '考勤日报' } },
+      elements: [
+        {
+          tag: 'markdown',
+          content: "**<font color='orange-400'>今天</font>**<font color='orange-400'>10:30</font>",
+        },
+        { tag: 'markdown', content: "<font color='orange-400'>14/20</font>" },
+      ],
+    });
+
+    const text = (gateway as any).parseSingleMessageContent(
+      'om_card_font',
+      'interactive',
+      cardContent,
+      [],
+      [],
+    );
+
+    // <font ...> 与 </font> 标签应被清除
+    expect(text).not.toContain('<font');
+    expect(text).not.toContain('</font>');
+    expect(text).not.toContain('color=');
+    // 内部文字保留
+    expect(text).toContain('今天');
+    expect(text).toContain('10:30');
+    expect(text).toContain('14/20');
+    // 合法的 markdown 加粗符号保留
+    expect(text).toContain('**今天**');
+  });
+
+  it('expands an interactive card forwarded inside a merge_forward message', async () => {
+    await gateway.connect();
+
+    const mockFetchOk = (body: any) => ({ ok: true, json: async () => body });
+
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/tenant_access_token')) {
+        return mockFetchOk({ tenant_access_token: 't-mock-token', expire: 7200 });
+      }
+      if (url.includes('/im/v1/messages/')) {
+        return mockFetchOk({
+          code: 0,
+          msg: 'success',
+          data: {
+            items: [
+              {
+                message_id: 'om_root_card',
+                msg_type: 'merge_forward',
+                body: { content: '{}' },
+                create_time: '1615367850000',
+                sender: { id: 'ou_root', id_type: 'open_id', sender_type: 'user' },
+              },
+              {
+                message_id: 'om_sub_card',
+                upper_message_id: 'om_root_card',
+                msg_type: 'interactive',
+                body: {
+                  content: JSON.stringify({
+                    header: { title: { tag: 'plain_text', content: '审批请求' } },
+                    elements: [{ tag: 'markdown', content: '请假 2 天，请审批' }],
+                  }),
+                },
+                create_time: '1615367851000',
+                sender: { id: 'ou_bot_1', id_type: 'open_id', sender_type: 'app' },
+              },
+            ],
+          },
+        });
+      }
+      return mockFetchOk({ code: 0 });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mockEvent = {
+      event: {
+        message: {
+          message_id: 'om_root_card',
+          message_type: 'merge_forward',
+          content: 'Forwarded card',
+          chat_id: 'oc_456',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_789' } },
+      },
+    };
+
+    let receivedMsg: any = null;
+    gateway.onMessage = async (msg) => {
+      receivedMsg = msg;
+      return null;
+    };
+
+    await messageCallback(mockEvent);
+
+    expect(receivedMsg).not.toBeNull();
+    expect(receivedMsg.messageType).toBe('merge_forward');
+    expect(receivedMsg.text).toContain('[卡片]');
+    expect(receivedMsg.text).toContain('审批请求');
+    expect(receivedMsg.text).toContain('请假 2 天，请审批');
+  });
 });
 
 // ---------------------------------------------------------------------------
