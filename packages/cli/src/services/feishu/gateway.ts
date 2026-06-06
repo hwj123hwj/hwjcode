@@ -613,10 +613,95 @@ export class FeishuGateway {
         derror('Parse feishu post message failed in sub-parser:', e);
         text = `[解析富文本消息失败]`;
       }
+    } else if (msgType === 'interactive') {
+      // 交互式卡片（其他 bot 发出的卡片转发过来时即为此类型）。
+      // 卡片结构多变（div/markdown/column_set/note/action 等任意嵌套），
+      // 且存在「直接结构」与 card 2.0「{type:'template',data:{card:{...}}}」两种外层，
+      // 因此采用递归遍历收集所有文本字段的通用策略，对任意 bot 的任意卡片都健壮。
+      try {
+        const content = JSON.parse(contentStr || '{}');
+        // 兼容 card 2.0：真正的卡片体可能被包在 data.card 里
+        const card = content?.data?.card || content;
+
+        // 1) 标题：header.title.content（plain_text）或 i18n 结构
+        const titleNode = card?.header?.title;
+        const title =
+          (typeof titleNode?.content === 'string' && titleNode.content) ||
+          (typeof titleNode?.i18n_content === 'object'
+            ? Object.values(titleNode.i18n_content)[0]
+            : '') ||
+          '';
+
+        // 2) 正文：递归收集 elements / body.elements 下的全部文本
+        const bodyTexts: string[] = [];
+        const seen = new Set<string>();
+        // 标题先入 seen，避免兜底遍历整个 card 时把标题作为正文重复收集
+        const trimmedTitle = title ? String(title).trim() : '';
+        if (trimmedTitle) seen.add(trimmedTitle);
+        this.extractCardText(card?.elements ?? card?.body?.elements ?? card, bodyTexts, seen);
+
+        const parts: string[] = ['[卡片]'];
+        if (trimmedTitle) {
+          parts.push(`**${trimmedTitle}**`);
+        }
+        for (const t of bodyTexts) {
+          if (t && t.trim()) parts.push(t.trim());
+        }
+        // 只有标注、没有任何可读文本时，给出更明确的兜底
+        text = parts.length > 1 ? parts.join('\n') : '[卡片消息]';
+      } catch (e: any) {
+        derror('Parse feishu interactive card failed in sub-parser:', e);
+        text = '[卡片消息]';
+      }
     } else {
       text = `[不支持的消息类型: ${msgType}]`;
     }
     return text;
+  }
+
+  /**
+   * 递归遍历飞书卡片结构，收集所有可读文本。
+   *
+   * 卡片元素种类繁多（div/markdown/text/note/column_set/column/action/button…）且可任意嵌套，
+   * 与其穷举每种 tag，不如统一规则：凡是 `content` 或 `text`（字符串）字段即视为可读文本收集，
+   * 并对数组/对象继续向下递归。对 `tag:'img'`、按钮等无正文文本的节点天然跳过（它们没有
+   * content/text 字符串，或只有 image_key）。借助 `seen` 去重，避免同一段文本因结构重复被多次收集。
+   *
+   * 注意：这里有意 **不** 处理图片占位符与按钮文案——按产品决策，转发卡片仅提取正文文本并标注 [卡片]。
+   */
+  private extractCardText(node: any, out: string[], seen: Set<string>): void {
+    if (node == null) return;
+
+    if (typeof node === 'string') {
+      const s = node.trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push(s);
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) this.extractCardText(item, out, seen);
+      return;
+    }
+
+    if (typeof node === 'object') {
+      // 直接文本承载字段：content / text（text 可能是字符串，也可能是 {content} 对象）
+      if (typeof node.content === 'string') {
+        this.extractCardText(node.content, out, seen);
+      }
+      if (typeof node.text === 'string') {
+        this.extractCardText(node.text, out, seen);
+      }
+      // 递归常见的容器/子节点字段
+      for (const key of ['text', 'elements', 'columns', 'fields', 'actions', 'options']) {
+        const child = (node as any)[key];
+        if (child && typeof child === 'object') {
+          this.extractCardText(child, out, seen);
+        }
+      }
+    }
   }
 
   /**
