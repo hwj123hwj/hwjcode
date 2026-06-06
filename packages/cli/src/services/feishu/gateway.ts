@@ -615,15 +615,31 @@ export class FeishuGateway {
       }
     } else if (msgType === 'interactive') {
       // 交互式卡片（其他 bot 发出的卡片转发过来时即为此类型）。
-      // 卡片结构多变（div/markdown/column_set/note/action 等任意嵌套），
-      // 且存在「直接结构」与 card 2.0「{type:'template',data:{card:{...}}}」两种外层，
-      // 因此采用递归遍历收集所有文本字段的通用策略，对任意 bot 的任意卡片都健壮。
+      // 飞书「获取消息内容」接口返回 {title, elements:[[...]], user_dsl} 结构：
+      //   - user_dsl 是卡片完整 DSL（JSON 字符串），对 card 2.0（schema:"2.0"）卡片
+      //     是【唯一】完整数据源——此时 content.elements 简化视图只有图片占位 +
+      //     「请升级至最新版本客户端」降级提示，真实内容（含 table 组件）全在 user_dsl.body；
+      //   - 同时兼容历史「直接结构」与 card 2.0「{data:{card}}」外层。
+      // 故优先解析 user_dsl，再递归收集文本（table 组件重建为 markdown 表格），
+      // user_dsl 缺失/解析失败时回退到 content 顶层结构（含二维简化视图）。
       try {
         const content = JSON.parse(contentStr || '{}');
-        // 兼容 card 2.0：真正的卡片体可能被包在 data.card 里
-        const card = content?.data?.card || content;
+        // 落盘原始卡片 content，便于收集多种卡片结构样本后统一适配解析
+        this.dumpCardContentForDebug(messageId, contentStr);
 
-        // 1) 标题：header.title.content（plain_text）或 i18n 结构
+        // 解析 user_dsl —— 卡片的完整 DSL，优先级最高
+        let dsl: any = null;
+        if (typeof content?.user_dsl === 'string') {
+          try {
+            dsl = JSON.parse(content.user_dsl);
+          } catch {
+            // user_dsl 解析失败则忽略，回退到 content
+          }
+        }
+        // 卡片主体：user_dsl 优先 → card 2.0 的 data.card → content 本身
+        const card = dsl ?? content?.data?.card ?? content;
+
+        // 1) 标题 + 副标题：header.title / header.subtitle（兼容 plain_text 与 i18n_content）
         const titleNode = card?.header?.title;
         const title =
           (typeof titleNode?.content === 'string' && titleNode.content) ||
@@ -631,19 +647,31 @@ export class FeishuGateway {
             ? Object.values(titleNode.i18n_content)[0]
             : '') ||
           '';
+        const subtitleNode = card?.header?.subtitle;
+        const subtitle =
+          (typeof subtitleNode?.content === 'string' && subtitleNode.content) || '';
 
-        // 2) 正文：递归收集 elements / body.elements 下的全部文本
+        // 2) 正文：card 2.0 走 body.elements，card 1.0 走 elements；
+        //    user_dsl 提取不到内容时，兜底用 content.elements（飞书二维简化视图）。
         const bodyTexts: string[] = [];
         const seen = new Set<string>();
-        // 标题先入 seen，避免兜底遍历整个 card 时把标题作为正文重复收集
         const trimmedTitle = title ? String(title).trim() : '';
+        const trimmedSubtitle = subtitle ? String(subtitle).trim() : '';
+        // 标题/副标题先入 seen，避免递归正文时重复收集
         if (trimmedTitle) seen.add(trimmedTitle);
-        this.extractCardText(card?.elements ?? card?.body?.elements ?? card, bodyTexts, seen);
+        if (trimmedSubtitle) seen.add(trimmedSubtitle);
+
+        const bodySource =
+          card?.body?.elements ?? card?.elements ?? content?.elements ?? card;
+        this.extractCardText(bodySource, bodyTexts, seen);
+        // user_dsl 正文为空时，回退到 content 简化视图（二维数组）
+        if (bodyTexts.length === 0 && content?.elements) {
+          this.extractCardText(content.elements, bodyTexts, seen);
+        }
 
         const parts: string[] = ['[卡片]'];
-        if (trimmedTitle) {
-          parts.push(`**${trimmedTitle}**`);
-        }
+        if (trimmedTitle) parts.push(`**${trimmedTitle}**`);
+        if (trimmedSubtitle) parts.push(trimmedSubtitle);
         for (const t of bodyTexts) {
           if (t && t.trim()) parts.push(t.trim());
         }
@@ -673,7 +701,8 @@ export class FeishuGateway {
     if (node == null) return;
 
     if (typeof node === 'string') {
-      const s = node.trim();
+      // 清除飞书 lark_md 的 <font color='...'>...</font> 着色标签，保留内部文字
+      const s = node.trim().replace(/<\/?font[^>]*>/gi, '');
       if (s && !seen.has(s)) {
         seen.add(s);
         out.push(s);
@@ -687,6 +716,17 @@ export class FeishuGateway {
     }
 
     if (typeof node === 'object') {
+      // table 组件需保留行列对应关系，单独渲染为 markdown 表格后即停止下钻，
+      // 否则通用递归会把列定义与行数据平铺、丢失结构。
+      if (node.tag === 'table' && Array.isArray(node.columns)) {
+        const tableMd = this.renderCardTable(node);
+        if (tableMd && !seen.has(tableMd)) {
+          seen.add(tableMd);
+          out.push(tableMd);
+        }
+        return;
+      }
+
       // 直接文本承载字段：content / text（text 可能是字符串，也可能是 {content} 对象）
       if (typeof node.content === 'string') {
         this.extractCardText(node.content, out, seen);
@@ -701,6 +741,105 @@ export class FeishuGateway {
           this.extractCardText(child, out, seen);
         }
       }
+    }
+  }
+
+  /**
+   * 将飞书卡片 table 组件渲染为 Markdown 表格，保留行列对应关系。
+   *
+   * 结构（与飞书官方对齐）：
+   *  - `columns[]`：列定义，`name` 为单元格取值的 key，`display_name` 为表头展示名；
+   *  - `rows[]`：每行是对象，按列的 `name` 取单元格值。
+   *
+   * 单元格值类型多样，统一格式化为可读文本：
+   *  - 字符串/数字：原样；
+   *  - options：`[{text,color}]` → 取各 text 以逗号连接；
+   *  - persons：id 字符串或 id 数组 → 以逗号连接；
+   *  - 其它对象/数组：尽量取 text/content，再兜底 JSON 化。
+   *
+   * 无 rows 时仅输出表头（仍是合法 markdown 表格）。
+   */
+  private renderCardTable(node: any): string {
+    const columns: any[] = Array.isArray(node.columns) ? node.columns : [];
+    if (columns.length === 0) return '';
+
+    const headers = columns.map(
+      (c, i) => String(c?.display_name ?? c?.name ?? `列${i + 1}`).trim() || `列${i + 1}`,
+    );
+
+    const formatCell = (val: any): string => {
+      if (val == null) return '';
+      if (typeof val === 'string') return val.replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+      if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+      if (Array.isArray(val)) {
+        return val
+          .map((item) => {
+            if (item == null) return '';
+            if (typeof item === 'string' || typeof item === 'number') return String(item);
+            // options: {text,color}；其它对象尽量取 text/content
+            return String(item.text ?? item.content ?? '').trim();
+          })
+          .filter((s) => s)
+          .join(', ');
+      }
+      if (typeof val === 'object') {
+        // 飞书 table 单元格 data_type 为 markdown 时，值是嵌套对象：
+        //   { tag: "markdown", property: { elements: [{ tag: "plain_text", property: { content: "2.24亿" } }] } }
+        // 需要递归提取 property.elements 中的 content
+        const prop = val.property;
+        if (prop && Array.isArray(prop.elements)) {
+          const texts = prop.elements
+            .map((el: any) => el?.property?.content ?? el?.content ?? el?.text ?? '')
+            .filter((s: string) => s);
+          if (texts.length > 0) return texts.join(', ');
+        }
+        // markdownElements 二级兜底
+        if (prop && Array.isArray(prop.markdownElements) && prop.markdownElements.length > 0) {
+          const texts = prop.markdownElements
+            .map((el: any) => el?.property?.content ?? el?.content ?? el?.text ?? '')
+            .filter((s: string) => s);
+          if (texts.length > 0) return texts.join(', ');
+        }
+        return String(val.text ?? val.content ?? '').trim();
+      }
+      return '';
+    };
+
+    const rows: any[] = Array.isArray(node.rows) ? node.rows : [];
+    const lines: string[] = [];
+    lines.push(`| ${headers.join(' | ')} |`);
+    lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
+    for (const row of rows) {
+      const cells = columns.map((c) => formatCell(row?.[c?.name]));
+      lines.push(`| ${cells.join(' | ')} |`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * 将卡片原始 content JSON 追加落盘到 `~/.easycode-user/feishu-card-dumps.jsonl`，
+   * 便于收集多种卡片结构样本后统一适配解析。每行一条记录（JSONL），含时间戳、
+   * 消息 ID 与格式化后的原始 content。失败时静默吞掉，绝不影响主流程。
+   */
+  private dumpCardContentForDebug(messageId: string, contentStr: string): void {
+    try {
+      const dir = path.join(os.homedir(), '.easycode-user');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, 'feishu-card-dumps.jsonl');
+      let pretty: any = contentStr;
+      try {
+        pretty = JSON.parse(contentStr || '{}');
+      } catch {
+        // 保留原始字符串
+      }
+      const record = {
+        ts: new Date().toISOString(),
+        messageId: messageId || '(unknown)',
+        content: pretty,
+      };
+      fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf8');
+    } catch {
+      // 调试落盘失败不影响主流程
     }
   }
 
