@@ -12,23 +12,23 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OrionStarAI/DeepVCode.git"
+    "url": "git+https://github.com/OrionStarAI/EasyCode.git"
   },
   "keywords": [
     "ai",
     "coding-assistant",
-    "deepv-code",
+    "easycode",
     "cli",
     "gemini",
     "code-generation",
     "ai-assistant",
     "developer-tools"
   ],
-  "author": "DeepV Code Team",
+  "author": "Easy Code Team",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/OrionStarAI/DeepVCode#readme",
+  "homepage": "https://github.com/OrionStarAI/EasyCode#readme",
   "bugs": {
-    "url": "https://github.com/OrionStarAI/DeepVCode/issues"
+    "url": "https://github.com/OrionStarAI/EasyCode/issues"
   },
   "config": {
     "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.1.13"
