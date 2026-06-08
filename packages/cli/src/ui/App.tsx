@@ -21,6 +21,8 @@ import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
 import { computeMidTurnDrain } from './state/midTurnDrain.js';
+import { runSideQuestion } from 'deepv-code-core';
+import { SideQuestionPanel, type SideQuestionState } from './components/SideQuestionPanel.js';
 import { useAnimatedTitleIcon } from './hooks/useAnimatedTitleIcon.js';
 import { t, tp } from './utils/i18n.js';
 import { useLoadingIndicator } from './hooks/useLoadingIndicator.js';
@@ -1718,10 +1720,137 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     }
   }, [addItem, tp]);
 
+  // 🎯 /btw side-question state. Lives outside the chat transcript: the
+  // forked agent runs in parallel with the main turn, and its answer
+  // appears in a bordered box below the input prompt. Closing it (Esc)
+  // wipes the state without touching chat history.
+  const [sideQuestion, setSideQuestion] = useState<SideQuestionState | null>(null);
+  const sideQuestionAbortRef = useRef<AbortController | null>(null);
+
+  const closeSideQuestion = useCallback(() => {
+    // Abort any in-flight fork; safe to call when already done.
+    sideQuestionAbortRef.current?.abort();
+    sideQuestionAbortRef.current = null;
+    setSideQuestion(null);
+  }, []);
+
+  const startSideQuestion = useCallback(
+    (question: string) => {
+      const trimmed = question.trim();
+      if (!trimmed) return;
+
+      // If a previous /btw is still streaming or shown, cancel & replace.
+      sideQuestionAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      sideQuestionAbortRef.current = ctrl;
+
+      setSideQuestion({
+        question: trimmed,
+        answer: '',
+        status: 'pending',
+      });
+
+      const geminiClient = config?.getGeminiClient();
+      if (!geminiClient) {
+        setSideQuestion({
+          question: trimmed,
+          answer: '',
+          status: 'failed',
+          error: 'GeminiClient not initialized yet.',
+        });
+        return;
+      }
+
+      let contentGenerator;
+      try {
+        contentGenerator = geminiClient.getContentGenerator();
+      } catch (e: unknown) {
+        setSideQuestion({
+          question: trimmed,
+          answer: '',
+          status: 'failed',
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return;
+      }
+
+      // Cache-safe snapshot is best-effort; fall back to null (cold start).
+      let snapshot = null;
+      try {
+        snapshot = geminiClient.getChat().cacheSafeParams.get();
+      } catch {
+        // No chat yet — that's fine, cold start will work too.
+      }
+
+      const model = config.getModel();
+      const cacheNote = snapshot
+        ? `↻ Reusing main chat's prompt cache prefix (${snapshot.contents.length} messages).`
+        : 'ℹ️ Cold start (no main turn completed yet) — no cache hit possible.';
+
+      // Promote pending → streaming on first chunk; accumulate text.
+      void (async () => {
+        const result = await runSideQuestion({
+          contentGenerator,
+          model,
+          question: trimmed,
+          cacheSafeSnapshot: snapshot,
+          signal: ctrl.signal,
+          onChunk: (delta) => {
+            setSideQuestion((prev) => {
+              if (!prev) return prev;
+              if (prev.status === 'pending' || prev.status === 'streaming') {
+                return {
+                  ...prev,
+                  status: 'streaming',
+                  answer: prev.answer + delta,
+                  cacheNote,
+                };
+              }
+              return prev;
+            });
+          },
+        });
+
+        setSideQuestion((prev) => {
+          if (!prev) return prev;
+          // Don't clobber a state that was already cleared by a newer /btw.
+          if (sideQuestionAbortRef.current !== ctrl) return prev;
+          return {
+            ...prev,
+            answer: result.text || prev.answer,
+            status:
+              result.status === 'success'
+                ? 'done'
+                : result.status === 'cancelled'
+                ? 'cancelled'
+                : 'failed',
+            error: result.error,
+            cacheNote,
+          };
+        });
+      })();
+    },
+    [config],
+  );
+
   const handlePromptOrQueue = useCallback(
     (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
       const sanitizedPrompt = promptText.trim();
       if (!sanitizedPrompt) {
+        return;
+      }
+
+      // 🎯 /btw side-question bypass: runs immediately (even mid-turn),
+      // does NOT go into the prompt queue, does NOT write to transcript.
+      // Matches the SlashCommand `immediate: true` flag on btwCommand.
+      if (/^\/btw(\s|$)/i.test(sanitizedPrompt)) {
+        const question = sanitizedPrompt.replace(/^\/btw\s*/i, '');
+        if (!question) {
+          // Empty /btw — show usage hint via the standard slash-command path.
+          sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
+          return;
+        }
+        startSideQuestion(question);
         return;
       }
 
@@ -1733,7 +1862,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
       sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
     },
-    [addItem, queuePrompt, queuedPrompts.length, sendPromptImmediately, streamingState],
+    [addItem, queuePrompt, queuedPrompts.length, sendPromptImmediately, streamingState, startSideQuestion],
   );
 
   // Session自动保存 - 监听streaming状态变化
@@ -2103,6 +2232,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     const isCancelKey = key.escape ||
                        (isIDEATerminal && key.ctrl && input === 'q') ||
                        (process.platform === 'darwin' && key.meta && input === 'q');
+
+    // 🎯 /btw side-question panel takes top priority for Esc — while it's
+    // visible, Esc closes it (and aborts an in-flight fork). Main agent's
+    // streaming is unaffected either way.
+    if (sideQuestion && isCancelKey) {
+      closeSideQuestion();
+      return;
+    }
 
     // 处理队列编辑模式
     if (queueEditMode) {
@@ -3231,6 +3368,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
               {/* 🎯 后台任务提示 - 显示在输入框下方 */}
               <BackgroundTaskHint />
+
+              {/* 🎯 /btw 旁路问答面板 - 显示在输入框下方，最高占终端 40% */}
+              <SideQuestionPanel
+                state={sideQuestion}
+                terminalHeight={terminalHeight}
+                terminalWidth={terminalWidth}
+              />
             </>
           )}
 

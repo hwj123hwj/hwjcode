@@ -49,6 +49,7 @@ import { planCommand } from '../ui/commands/planCommand.js';
 import { accountCommand } from '../ui/commands/accountCommand.js';
 import { refineCommand } from '../ui/commands/refineCommand.js';
 import { queueCommand } from '../ui/commands/queueCommand.js';
+import { btwCommand } from '../ui/commands/btwCommand.js';
 import { nanoBananaCommand } from '../ui/commands/nanoBananaCommand.js';
 import { skillCommand } from '../ui/commands/skillCommand.js';
 import { pluginCommand } from '../ui/commands/pluginCommand.js';
@@ -108,6 +109,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       newCommand, // 隐藏快捷命令：/new 直接创建新会话
       planCommand,
       queueCommand,
+      btwCommand,
       quitCommand,
       refineCommand,
       restoreCommand(this.config),

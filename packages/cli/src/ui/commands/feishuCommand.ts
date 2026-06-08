@@ -87,6 +87,7 @@ import {
   SelfUpdateTool,
   launchRelaunchHelper,
   type RelaunchInstallMode,
+  runSideQuestion,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -770,10 +771,30 @@ const messageQueues = new Map<string, QueuedMessage[]>();
 const isProcessingQueues = new Map<string, boolean>();
 
 /**
+ * Per-chat AbortController for in-flight `/btw` side questions. A new
+ * `/btw` in the same chat cancels the previous one. Cleared on resolve.
+ */
+const sideQuestionControllers = new Map<string, AbortController>();
+
+/**
  * Export-only-for-tests: 把 messageQueues map 暴露出来供 mid-turn 注入单测
  * 直接装填初始队列。生产代码不应使用这个出口。
  */
 export const __testing_messageQueues = messageQueues;
+
+/**
+ * Detect a `/btw` side-question command in raw Feishu message text.
+ * Returns the trimmed question (without the `/btw` prefix) if matched,
+ * otherwise null. Exported so unit tests can lock the matcher behavior
+ * independently from the running Feishu loop.
+ */
+export function parseBtwCommand(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/^\/btw(?:\s+([\s\S]+))?$/i);
+  if (!m) return null;
+  const question = (m[1] ?? '').trim();
+  return question.length > 0 ? question : '';
+}
 
 /**
  * 🎯 Mid-turn injection drain (Feishu 端的对应实现，对称 App.tsx 里同名 callback)。
@@ -2785,6 +2806,71 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
       }
+    }
+
+    // 🎯 /btw side-question bypass: runs immediately even when the main
+    // turn is busy, does NOT enter the queue, does NOT pollute the
+    // running turn's card/transcript. Answer is sent back as a single
+    // standalone message reply to the asker.
+    const btwQuestion = parseBtwCommand(messageText);
+    if (btwQuestion !== null) {
+      if (!btwQuestion) {
+        await gateway.sendMessage(
+          msg.chatId,
+          '💡 用法: `/btw <你的问题>` — 派一个轻量旁路 agent 回答这个问题，主任务不受影响。',
+          msg.messageId,
+        );
+        return null;
+      }
+
+      // Cancel any previous in-flight /btw for this chat — only the latest matters.
+      sideQuestionControllers.get(msg.chatId)?.abort();
+      const ctrl = new AbortController();
+      sideQuestionControllers.set(msg.chatId, ctrl);
+
+      void (async () => {
+        try {
+          const contentGenerator = currentClient.getContentGenerator();
+          // Best-effort snapshot read — cold-start fallback is fine.
+          let snapshot = null;
+          try {
+            snapshot = currentClient.getChat().cacheSafeParams.get();
+          } catch {
+            // No chat yet — cold start is acceptable.
+          }
+          const model = currentConfig?.getModel() ?? 'auto';
+
+          const result = await runSideQuestion({
+            contentGenerator,
+            model,
+            question: btwQuestion,
+            cacheSafeSnapshot: snapshot,
+            signal: ctrl.signal,
+          });
+
+          if (sideQuestionControllers.get(msg.chatId) === ctrl) {
+            sideQuestionControllers.delete(msg.chatId);
+          }
+
+          const header = '🅱️ **旁路问答（/btw，主任务不受影响）**\n\n';
+          let body: string;
+          if (result.status === 'success') {
+            body = result.text.trim() || '（fork agent 未返回任何内容）';
+          } else if (result.status === 'cancelled') {
+            body = '⏹️ 已取消。' + (result.text ? `\n\n（已生成部分内容）\n${result.text}` : '');
+          } else {
+            body = `❌ 旁路问答失败：${result.error ?? '未知错误'}`;
+          }
+          await gateway.sendMessage(msg.chatId, header + body, msg.messageId);
+        } catch (err: any) {
+          dwarn(`[Feishu] /btw failed: ${err?.message ?? err}`);
+          await gateway
+            .sendMessage(msg.chatId, `❌ 旁路问答失败：${err?.message ?? err}`, msg.messageId)
+            .catch(() => {/* best effort */});
+        }
+      })();
+
+      return null; // Do not enter the message queue.
     }
 
     // 2. 获取或创建 Chat 专属队列并排队
