@@ -1913,6 +1913,22 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
         // 首先检查是否是slash命令
         if (trimmedValue.startsWith('/')) {
+          // 🎯 /btw 旁路 — MUST come BEFORE handleSlashCommand below.
+          // Otherwise the registered btwCommand action fires first and
+          // only returns the "Usage:" hint, swallowing the actual question.
+          // The bypass forks a side-question agent and renders the answer
+          // in the SideQuestionPanel below the input, never entering the
+          // chat transcript or the prompt queue.
+          if (/^\/btw(\s|$)/i.test(trimmedValue)) {
+            const question = trimmedValue.replace(/^\/btw\s*/i, '').trim();
+            if (question) {
+              startSideQuestion(question);
+              return;
+            }
+            // Empty `/btw` — fall through so the standard processor shows
+            // the usage hint via btwCommand.action.
+          }
+
           // 特殊处理：/queue clear 命令
           if (trimmedValue === '/queue clear') {
             if (queuedPrompts.length > 0) {
