@@ -3673,8 +3673,22 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 // CardKit V2 增量推送轻量，可更低节流；旧版整卡 PATCH 仍需保守节流。
                 const CARD_UPDATE_THROTTLE_MS = streaming ? 500 : 1500;
 
+                // 🎯 强制注入 resumeSessionId：AI 可能不带此参数，但专属群里必须续接，
+                //    否则外部 agent 每次都从头开始。从路由读取 lastSessionId，
+                //    仅当 AI 未显式指定时才注入（显式指定优先级更高）。
+                const delegateArgs = { ...req.args };
+                if (!delegateArgs.resumeSessionId) {
+                  try {
+                    const route = (await loadProjectRoutes())[msg.chatId];
+                    if (route?.lastSessionId) {
+                      delegateArgs.resumeSessionId = route.lastSessionId;
+                      dlog(`[Feishu] Auto-injecting resumeSessionId=${route.lastSessionId} for delegate_to_agent`);
+                    }
+                  } catch { /* best-effort */ }
+                }
+
                 const toolResult = await delegateTool.execute(
-                  req.args,
+                  delegateArgs,
                   abortController.signal,
                   async (output) => {
                     const now = Date.now();
