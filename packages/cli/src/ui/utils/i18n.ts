@@ -816,6 +816,7 @@ export const translations = {
     'help.shortcut.model.switch': '- Switch model',
     'help.shortcut.cancel': '- Cancel operation',
     'help.shortcut.exit': '- Exit application',
+    'help.more.help': 'More help: https://easycode.bot/help',
 
     // About Box
     'about.title': 'About Easy Code',
@@ -2480,6 +2481,7 @@ export const translations = {
     'help.shortcut.model.switch': '- 切换模型',
     'help.shortcut.cancel': '- 取消操作',
     'help.shortcut.exit': '- 退出应用程序',
+    'help.more.help': '更多帮助: https://easycode.bot/zh/help',
 
     // About Box
     'about.title': '关于 Easy Code',
