@@ -37,41 +37,26 @@ export interface BuildRelaunchScriptOptions {
   parentPid: number;
   /** 安装模式。 */
   install: RelaunchInstallMode;
-  /** 重新拉起的命令（全局 bin 名）。仅在未提供 node 绝对路径时作为回退使用。 */
+  /** 重新拉起的命令（全局 bin 名）。Windows 下通过 cmd.exe 执行，非 Windows 下通过 login shell 执行。 */
   relaunchCommand: string;
   /** 重新拉起的参数。 */
   relaunchArgs: string[];
   /** 外挂脚本自身的绝对路径（用于结束时自删）。 */
   scriptPath: string;
-  /**
-   * node 可执行文件的绝对路径（通常为 process.execPath）。
-   * 提供后将以 `<node> <entryScript> <args...>` 自举重启，彻底绕开 PATH/nvm/homebrew 查找。
-   */
-  relaunchNodePath?: string;
-  /**
-   * CLI 入口脚本的绝对路径（通常为 process.argv[1]）。
-   * 与 relaunchNodePath 配套使用：当前进程正是由这两者启动的，复用它们即可精确复刻启动方式。
-   */
-  relaunchEntryScript?: string;
   /** 重启日志路径。提供后 relaunch 的 stdout/stderr 会重定向到此文件，便于排障。 */
   logPath?: string;
 }
 
 /**
- * 生成跨平台的"重启外挂"脚本内容（纯 JS，无 OS 分支、无需执行权限）。
+ * 生成跨平台的"重启外挂"脚本内容（纯 JS）。
  *
  * 外挂生命周期：
  *   1) 轮询父 PID，直到父进程退出（process.kill(pid, 0) 抛 ESRCH 即已退出）
  *   2) 按 install 模式安装（none 跳过 / npm latest / 本地 tgz）
- *   3) detached + unref 拉起新进程，脱离本外挂生命周期
+ *   3) 拉起新进程：
+ *      - Windows: cmd.exe /c <command>（有 conpty，用户可见 TUI）
+ *      - Linux/macOS: node <entryScript> <args>（绝对路径自举，不依赖 PATH）
  *   4) 删除自身临时脚本
- *
- * 重启目标的两种模式：
- *   - 绝对路径自举（推荐）：提供 relaunchNodePath + relaunchEntryScript 时，
- *     以 `spawn(<node>, [<entryScript>, ...args], { detached })` 启动，**不使用 shell**。
- *     当前进程正是由这两个绝对路径启动的，因此一定有效，彻底免疫 nvm / Homebrew /
- *     非交互 shell 不加载 .bashrc 导致的 PATH 缺失（Ubuntu/macOS 重启失败的根因）。
- *   - 命令回退：未提供绝对路径时，退回 `spawn(<command>, args, { shell:true })`。
  *
  * 同一套脚本被 SelfUpdateTool（更新+重启 / 仅重启）与 /feishu restart 共用。
  * 纯函数，只产字符串，便于单测。
@@ -83,8 +68,6 @@ export function buildRelaunchScript(opts: BuildRelaunchScriptOptions): string {
     relaunchCommand,
     relaunchArgs,
     scriptPath,
-    relaunchNodePath,
-    relaunchEntryScript,
     logPath,
   } = opts;
 
@@ -92,12 +75,9 @@ export function buildRelaunchScript(opts: BuildRelaunchScriptOptions): string {
   const RELAUNCH_CMD = JSON.stringify(relaunchCommand);
   const RELAUNCH_ARGS = JSON.stringify(relaunchArgs);
   const SCRIPT_PATH = JSON.stringify(scriptPath);
-  const NODE_PATH = JSON.stringify(relaunchNodePath ?? null);
-  const ENTRY_SCRIPT = JSON.stringify(relaunchEntryScript ?? null);
   const LOG_PATH = JSON.stringify(logPath ?? null);
 
   // 依据安装模式，生成 npm install 的参数数组（或空表示跳过）。
-  // 用 JSON 内联，自动处理路径中的空格/反斜杠/引号，杜绝注入。
   let INSTALL_ARGS = 'null';
   if (install.type === 'npm') {
     INSTALL_ARGS = JSON.stringify(['install', '-g', `${install.packageName}@latest`]);
@@ -106,7 +86,7 @@ export function buildRelaunchScript(opts: BuildRelaunchScriptOptions): string {
   }
 
   return `'use strict';
-// Easy Code relaunch helper (auto-generated, cross-platform, single code path).
+// Easy Code relaunch helper (auto-generated, cross-platform)
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 
@@ -115,16 +95,26 @@ const INSTALL_ARGS = ${INSTALL_ARGS}; // null = skip install (restart only)
 const RELAUNCH_CMD = ${RELAUNCH_CMD};
 const RELAUNCH_ARGS = ${RELAUNCH_ARGS};
 const SCRIPT_PATH = ${SCRIPT_PATH};
-const NODE_PATH = ${NODE_PATH};       // absolute node path; null = fall back to command lookup
-const ENTRY_SCRIPT = ${ENTRY_SCRIPT}; // absolute CLI entry script; null = fall back to command lookup
-const LOG_PATH = ${LOG_PATH};         // relaunch log file; null = ignore output
+const LOG_PATH = ${LOG_PATH};
+
+function findLoginShell() {
+  // 优先级：bash > zsh > sh（均为 login shell -l，加载 .bashrc/.profile 等）
+  var candidates = ['/bin/bash', '/usr/bin/bash', '/bin/zsh', '/usr/bin/zsh', '/bin/sh'];
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      fs.accessSync(candidates[i], fs.constants.X_OK);
+      return candidates[i];
+    } catch (_) { /* not found or not executable */ }
+  }
+  return '/bin/sh'; // 最终兜底
+}
 
 function isAlive(pid) {
   try {
-    process.kill(pid, 0); // signal 0：只探测存活，不发信号
+    process.kill(pid, 0);
     return true;
   } catch (e) {
-    return e && e.code === 'EPERM'; // 存在但无权限，仍算存活
+    return e && e.code === 'EPERM';
   }
 }
 
@@ -136,101 +126,82 @@ function log(msg) {
   if (!LOG_PATH) return;
   try {
     fs.appendFileSync(LOG_PATH, '[' + new Date().toISOString() + '] ' + msg + '\\n');
-  } catch (_) { /* logging is best-effort */ }
+  } catch (_) { /* best-effort */ }
 }
 
 function cleanupSelf() {
-  try {
-    fs.unlinkSync(SCRIPT_PATH);
-  } catch (_) {
-    // 删除失败无妨，临时目录最终会被系统清理
-  }
+  try { fs.unlinkSync(SCRIPT_PATH); } catch (_) { /* temp dir cleanup */ }
 }
 
 async function main() {
-  log('[Relauncher] Helper script started. Polling parent process PID ' + PARENT_PID + '...');
+  log('[Relauncher] Helper started. Polling parent PID ' + PARENT_PID + '...');
 
-  // 1) 轮询父进程退出（最多 ~30s，超时也继续，避免卡死）
+  // 1) 轮询父进程退出（最多 ~30s）
   const deadline = Date.now() + 30000;
-  let printedAlive = false;
   while (isAlive(PARENT_PID) && Date.now() < deadline) {
-    if (!printedAlive) {
-      log('[Relauncher] Parent process PID ' + PARENT_PID + ' is still alive, sleeping...');
-      printedAlive = true;
-    }
     await sleep(300);
   }
-  log('[Relauncher] Parent process PID ' + PARENT_PID + ' exited or timeout reached.');
+  log('[Relauncher] Parent exited or timeout.');
 
-  // 2) 按需安装（INSTALL_ARGS 为 null 时跳过 = 仅重启）
+  // 2) 按需安装
   if (INSTALL_ARGS) {
-    log('[Relauncher] Installing package: npm ' + INSTALL_ARGS.join(' '));
+    log('[Relauncher] Installing: npm ' + INSTALL_ARGS.join(' '));
     const install = spawnSync('npm', INSTALL_ARGS, { stdio: 'ignore', shell: true });
-    log('[Relauncher] Install step completed with exit status ' + install.status);
+    log('[Relauncher] Install done, status=' + install.status);
     if (install.status !== 0) {
-      // 安装失败：不拉起旧版本，清理后退出，避免误导。
-      log('[Relauncher] ERROR: Install failed with status ' + install.status);
+      log('[Relauncher] ERROR: Install failed.');
       cleanupSelf();
       process.exit(install.status || 1);
     }
   }
 
-  // 3) 准备 stdio：有日志路径则重定向 stdout/stderr 到日志文件，否则 ignore。
+  // 3) 准备 stdio
   let stdio = 'ignore';
   if (LOG_PATH) {
     try {
       const fd = fs.openSync(LOG_PATH, 'a');
       stdio = ['ignore', fd, fd];
-      log('[Relauncher] Stdio will be redirected to: ' + LOG_PATH);
-    } catch (e) {
-      log('[Relauncher] Failed to open LOG_PATH: ' + e.message);
-      stdio = 'ignore';
-    }
+    } catch (_) { stdio = 'ignore'; }
   }
 
-  // 4) detached 拉起新进程，脱离本外挂生命周期。
-  //    优先用 node 绝对路径 + 入口脚本自举（免疫 PATH/nvm/homebrew 问题，不用 shell）；
-  //    否则回退到命令查找（shell:true）。
-  //
-  //    设置 EASYCODE_STARTUP_DELAY_MS 让新进程在初始化飞书网关前 sleep，
-  //    给飞书服务端充足时间完成老进程的 WebSocket 关闭确认和消息投递结算，
-  //    避免老进程尚未完全退出时新进程就接入导致消息重推。
+  // 4) 拉起新进程
+  //    Windows: cmd.exe /c <command>（有 conpty，用户可见 TUI）
+  //    Linux/macOS: login shell -l -c <command>（加载 .bashrc/.profile，
+  //      使 nvm/homebrew 等 PATH 生效，确保 easycode 命令可找到）
   const env = Object.assign({}, process.env, { EASYCODE_STARTUP_DELAY_MS: '2000' });
   let child;
-  if (NODE_PATH && ENTRY_SCRIPT) {
-    log('[Relauncher] Spawning child (absolute): ' + NODE_PATH + ' ' + ENTRY_SCRIPT + ' ' + RELAUNCH_ARGS.join(' '));
-    child = spawn(NODE_PATH, [ENTRY_SCRIPT].concat(RELAUNCH_ARGS), {
+
+  if (process.platform === 'win32') {
+    const fullCmd = [RELAUNCH_CMD].concat(RELAUNCH_ARGS).join(' ');
+    log('[Relauncher] Spawning child (cmd.exe): ' + fullCmd);
+    child = spawn('cmd.exe', ['/c', fullCmd], {
       detached: true,
       stdio: stdio,
       env: env,
     });
   } else {
-    log('[Relauncher] Spawning child (command fallback): ' + RELAUNCH_CMD + ' ' + RELAUNCH_ARGS.join(' '));
-    child = spawn(RELAUNCH_CMD, RELAUNCH_ARGS, {
+    // 非 Windows：用 login shell 确保用户环境（nvm/homebrew 等 PATH）完整加载。
+    // bash -l 优先（最常见），zsh -l 兜底，最终 /bin/sh -l 保底。
+    const shellCmd = findLoginShell();
+    const fullCmd = [RELAUNCH_CMD].concat(RELAUNCH_ARGS).join(' ');
+    log('[Relauncher] Spawning child (login shell): ' + shellCmd + ' -l -c ' + fullCmd);
+    child = spawn(shellCmd, ['-l', '-c', fullCmd], {
       detached: true,
       stdio: stdio,
-      shell: true,
       env: env,
     });
   }
 
-  if (child) {
-    log('[Relauncher] Spawn call returned successfully. Child PID is ' + child.pid);
-  } else {
-    log('[Relauncher] ERROR: Spawn call returned null or undefined child process!');
-  }
-
-  // 关键：监听 spawn 失败事件，避免错误被静默吞掉（Ubuntu/macOS 重启失败时一无所知的根因）。
   child.on('error', (err) => {
-    log('[Relauncher] Spawn child error event fired: ' + (err && err.message ? err.message : String(err)) + '\\n' + (err && err.stack ? err.stack : ''));
+    log('[Relauncher] Spawn error: ' + (err && err.message ? err.message : String(err)));
     cleanupSelf();
     process.exit(1);
   });
 
   child.unref();
-  log('[Relauncher] Child unref-ed successfully. Cleaning up helper and exiting relauncher process.');
+  log('[Relauncher] Child spawned (PID=' + child.pid + '). Cleaning up.');
 
-  // 5) 自清理并退出。
+  // 5) 自清理并退出
   cleanupSelf();
   process.exit(0);
 }
@@ -245,9 +216,10 @@ main();
  * 这是 SelfUpdateTool 与 /feishu restart 共用的底层动作：调用方负责在此之后
  * 安排当前进程退出（外挂会轮询父 PID 消失后接管）。
  *
- * 重启目标采用"绝对路径自举"：用当前进程的 process.execPath（node 绝对路径）
- * 与 process.argv[1]（CLI 入口脚本绝对路径）精确复刻当前启动方式，彻底绕开
- * nvm / Homebrew / 非交互 shell 不加载 .bashrc 导致的 PATH 缺失问题。
+ * 重启方式（双轨）：
+ *   - Windows: cmd.exe /c easycode --feishu（有 conpty，用户能看到界面）
+ *   - Linux/macOS: login shell -l -c easycode --feishu（加载 .bashrc/.profile，
+ *     使 nvm/homebrew 等 PATH 生效，确保 easycode 命令可找到）
  *
  * @returns 写出的脚本路径
  */
@@ -265,13 +237,8 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     mkdirSync(logDir, { recursive: true });
     logPath = join(logDir, 'cli-debug.log');
   } catch {
-    logPath = undefined; // 日志是 best-effort，失败不阻断重启
+    logPath = undefined;
   }
-
-  // 当前进程的绝对启动信息：node 路径 + 入口脚本。
-  // process.argv[1] 在常规启动下一定存在；缺失时回退到命令查找模式。
-  const relaunchNodePath = process.execPath;
-  const relaunchEntryScript = process.argv[1] || undefined;
 
   if (logPath) {
     try {
@@ -280,8 +247,7 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
         `[${new Date().toISOString()}] [Parent] Initiating relaunch helper.\n` +
         `  - Parent PID: ${parentPid}\n` +
         `  - Install Mode: ${JSON.stringify(install)}\n` +
-        `  - relaunchNodePath: ${relaunchNodePath}\n` +
-        `  - relaunchEntryScript: ${relaunchEntryScript}\n` +
+        `  - Platform: ${process.platform}\n` +
         `  - Temp Script Path: ${scriptPath}\n`
       );
     } catch {
@@ -295,8 +261,6 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     relaunchCommand: SELF_UPDATE_RELAUNCH_COMMAND,
     relaunchArgs: SELF_UPDATE_RELAUNCH_ARGS,
     scriptPath,
-    relaunchNodePath,
-    relaunchEntryScript,
     logPath,
   });
 
@@ -313,7 +277,7 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     try {
       appendFileSync(
         logPath,
-        `[${new Date().toISOString()}] [Parent] Spawned helper process (Helper Script PID: ${child.pid || 'unknown'}). Exiting parent soon.\n`
+        `[${new Date().toISOString()}] [Parent] Spawned helper (PID: ${child.pid || 'unknown'}). Exiting parent soon.\n`
       );
     } catch {
       // ignore
@@ -345,13 +309,10 @@ export interface SelfUpdateParams {
 /**
  * SelfUpdateTool — 仅在飞书常驻模式下动态注册。
  *
- * 用法（全暴露给模型，模型拿不准就问用户，由用户用自然语言指示）：
+ * 用法：
  *   - 默认：从 npm 安装 easycode-ai@latest 并重启
  *   - action='restart_only'：不安装，仅重启当前进程（救卡死 / 应用新配置）
  *   - source='local' + sourcePath=<abs .tgz>：安装某个本地 tgz 包并重启
- *
- * 进程不能自杀续命，故 spawn 一个 detached 的纯 JS 外挂接力（见
- * buildRelaunchScript / launchRelaunchHelper）。
  */
 export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
   static readonly Name: string = 'self_update';
@@ -500,12 +461,16 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
           ? `install local package "${install.path}" then restart`
           : `install ${SELF_UPDATE_PACKAGE}@latest then restart`;
 
+    const nonWinHint =
+      process.platform !== 'win32'
+        ? '根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。'
+        : '';
     const displayText =
       install.type === 'none'
-        ? '🔄 正在热重启，稍候我就回来。'
+        ? `🔄 正在热重启，稍候我就回来。${nonWinHint}`
         : install.type === 'tgz'
-          ? `🔄 正在安装本地包并重启：${install.path}，稍候我就回来。`
-          : '🔄 正在安装最新版并重启，稍候我就回来。';
+          ? `🔄 正在安装本地包并重启：${install.path}，稍候我就回来。${nonWinHint}`
+          : `🔄 正在安装最新版并重启，稍候我就回来。${nonWinHint}`;
 
     return {
       llmContent:
