@@ -8,6 +8,7 @@ import {
   ToolCallConfirmationDetails,
   ToolResultDisplay,
 } from 'deepv-code-core';
+import type { SlashCommand } from './commands/types.js';
 
 // Only defining the state enum needed by the UI
 export enum StreamingState {
@@ -169,6 +170,11 @@ export type HistoryItemCompression = HistoryItemBase & {
   compression: CompressionProps;
 };
 
+export type HistoryItemHelp = HistoryItemBase & {
+  type: 'help';
+  commands?: readonly SlashCommand[];
+};
+
 // Using Omit<HistoryItem, 'id'> seems to have some issues with typescript's
 // type inference e.g. historyItem.type === 'tool_group' isn't auto-inferring that
 // 'tools' in historyItem.
@@ -188,7 +194,8 @@ export type HistoryItemWithoutId =
   | HistoryItemTokenBreakdown
   | HistoryItemContextBreakdown
   | HistoryItemQuit
-  | HistoryItemCompression;
+  | HistoryItemCompression
+  | HistoryItemHelp;
 
 export type HistoryItem = HistoryItemWithoutId & { id: number };
 
