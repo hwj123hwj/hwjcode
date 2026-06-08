@@ -108,10 +108,16 @@ export function parseDelegatePrefix(text: string): DelegatePrefixMatch {
 /**
  * Decide whether to delegate, combining the per-message prefix (highest
  * priority) with the chat's default agent route.
+ *
+ * When routing via the chat's default agent, and the user did NOT explicitly
+ * use the `resume <id>` sub-syntax, `lastSessionId` is automatically used
+ * so the external agent retains conversation context across turns.
+ * Explicit `resume <id>` takes precedence over `lastSessionId`.
  */
 export function resolveDelegation(
   text: string,
   defaultAgent?: FeishuAgentTarget,
+  lastSessionId?: string,
 ): DelegationDecision {
   const prefix = parseDelegatePrefix(text);
   if (prefix.matched) {
@@ -131,7 +137,8 @@ export function resolveDelegation(
       agent: defaultAgent,
       task,
       reason: 'route',
-      resumeSessionId,
+      // 显式 resume > 自动续接 lastSessionId
+      resumeSessionId: resumeSessionId || lastSessionId,
     };
   }
   return {
