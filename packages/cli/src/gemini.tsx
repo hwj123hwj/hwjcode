@@ -898,6 +898,7 @@ export async function main() {
 
   const shouldBeInteractive =
     !!argv.promptInteractive ||
+    !!argv.feishu ||
     (process.stdin.isTTY && input?.length === 0 && !isExplicitNonInteractiveMode);
 
   // Render UI, passing necessary config values. Check that there is no command line question.
