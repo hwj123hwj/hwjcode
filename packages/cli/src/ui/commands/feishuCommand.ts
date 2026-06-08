@@ -43,7 +43,13 @@ import {
   resolveDelegation,
   buildDelegateDirective,
   parseBindAgentFlag,
+  agentDisplayLabel,
 } from '../../services/feishu/delegateDirective.js';
+import { CreateProjectGroupTool } from '../../services/feishu/createProjectGroupTool.js';
+import {
+  detectLocalAgents,
+  buildLocalAgentWelcomeHints,
+} from '../../services/feishu/localAgentDetection.js';
 import {
   REQUIRED_APP_SCOPES,
   SENSITIVE_GROUP_MSG_SCOPE,
@@ -432,8 +438,9 @@ interface FeishuProjectRoute {
     effort?: 'auto' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   };
   /**
-   * Default agent for this chat. When 'claude-code', non-slash messages are
-   * forcibly delegated to the local Claude Code. Defaults to 'self' (Easy Code).
+   * Default agent for this chat. When 'claude-code' or 'codex', non-slash
+   * messages are forcibly delegated to that local agent. Defaults to 'self'
+   * (Easy Code).
    */
   agent?: FeishuAgentTarget;
 }
@@ -1573,7 +1580,7 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/status':           '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
   '/thinking':         '切换/配置 AI 思考模式与深度',
   '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
-  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 设默认派发给本机 Claude Code（或在消息前加 `@cc` 单条派发）',
+  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 或 `--agent codex` 设默认派发方（或在消息前加 `@cc` / `@codex` 单条派发）',
   '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
   '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
   '/help':             '显示此帮助',
@@ -2232,7 +2239,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
 
     // 拦截群内自助绑定的 `/bind` 命令
-    // 支持：`/bind <路径>`、`/bind <路径> --agent claude-code`、`/bind --agent self`
+    // 支持：`/bind <路径>`、`/bind <路径> --agent claude-code|codex|self`、`/bind --agent codex`
     if (messageText.startsWith('/bind')) {
       const argString = messageText.slice('/bind'.length).trim();
       const { agent, rest } = parseBindAgentFlag(argString);
@@ -2243,15 +2250,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
         try {
           await saveProjectRoute(msg.chatId, { agent });
           emitFeishuProjectRoutesUpdated();
-          const label = agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己';
-          return `✅ 已将本群的默认执行方切换为 **${label}**。`;
+          return `✅ 已将本群的默认执行方切换为 **${agentDisplayLabel(agent)}**。`;
         } catch (e: any) {
           return `❌ 切换默认执行方失败: ${e.message}`;
         }
       }
 
       if (!targetPath) {
-        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`（可选 `--agent claude-code`）';
+        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`（可选 `--agent claude-code|codex|self`）';
       }
       try {
         const path = await import('node:path');
@@ -2266,7 +2272,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 📡 通知仪表板路由已更新
         emitFeishuProjectRoutesUpdated();
         const agentTip = agent
-          ? `\n🤖 **默认执行方**: ${agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己'}`
+          ? `\n🤖 **默认执行方**: ${agentDisplayLabel(agent)}`
           : '';
         return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`${agentTip}\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
       } catch (e: any) {
@@ -2472,14 +2478,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
         ));
 
         // 注册专属于此 chatId 的建群工具
-        toolRegistry.registerTool(new CreateProjectGroupTool(
+        toolRegistry.registerTool(new CreateProjectGroupTool({
           gateway,
-          () => activeSenderOpenIds.get(msg.chatId),
-          async (newChatId, path) => {
-            await saveProjectRoute(newChatId, { projectRoot: path });
+          getSenderOpenId: () => activeSenderOpenIds.get(msg.chatId),
+          getActiveChatId: () => activeChatId,
+          onProjectCreated: async (newChatId, path, agent) => {
+            const update: Partial<FeishuProjectRoute> = { projectRoot: path };
+            if (agent) update.agent = agent;
+            await saveProjectRoute(newChatId, update);
             emitFeishuProjectRoutesUpdated();
-          }
-        ));
+          },
+        }));
 
         // 注册飞书模式专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
@@ -2880,15 +2889,16 @@ async function handleStart(context?: CommandContext): Promise<string> {
         currentMessage = messageTextForAI;
       }
 
-      // 🤖 显式派发轨：`@cc/`cc` 前缀，或本群默认执行方为 claude-code 时，
-      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_claude_code 工具。
+      // 🤖 显式派发轨：`@cc` / `@codex` 前缀，或本群默认执行方为 claude-code / codex 时，
+      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_claude_code 工具
+      //    （并按 delegation.agent 指定 codex 还是 claude-code）。
       //    工具的流式输出会沿用现有 card 通道回传飞书。多模态图片在派发场景下
-      //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，Claude Code 可直接读盘）。
+      //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，目标 agent 可直接读盘）。
       try {
         const routeAgentForChat = (await loadProjectRoutes())[msg.chatId]?.agent;
         const delegation = resolveDelegation(messageTextForAI, routeAgentForChat);
         if (delegation.delegate && delegation.task) {
-          messageTextForAI = buildDelegateDirective(delegation.task);
+          messageTextForAI = buildDelegateDirective(delegation.task, delegation.agent);
           currentMessage = messageTextForAI;
           dlog(`[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason})`);
         }
@@ -3886,14 +3896,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
         ));
 
         // 🎯 动态注册自动建群及多项目隔离管理工具：create_project_and_group_chat
-        toolRegistry.registerTool(new CreateProjectGroupTool(
+        toolRegistry.registerTool(new CreateProjectGroupTool({
           gateway,
-          () => activeSenderOpenId ?? undefined,
-          async (chatId, path) => {
-            await saveProjectRoute(chatId, { projectRoot: path });
+          getSenderOpenId: () => activeSenderOpenId ?? undefined,
+          getActiveChatId: () => activeChatId,
+          onProjectCreated: async (chatId, path, agent) => {
+            const update: Partial<FeishuProjectRoute> = { projectRoot: path };
+            if (agent) update.agent = agent;
+            await saveProjectRoute(chatId, update);
             emitFeishuProjectRoutesUpdated();
-          }
-        ));
+          },
+        }));
 
         // 🎯 动态注册专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(config));
@@ -3926,9 +3939,20 @@ async function handleStart(context?: CommandContext): Promise<string> {
             ``,
             `💡 如需使用其他工作目录，请发送：**拉个群 + 文件夹路径**`,
             `   例如：拉个群 D:\\projects\\my-app`,
-            ``,
-            `❓ 需要帮助请发送 /help`,
           ];
+
+          // 🤖 本机 agent 检测：发现 claude / codex 时，追加专属群提示
+          try {
+            const availability = await detectLocalAgents();
+            const agentHints = buildLocalAgentWelcomeHints(availability);
+            if (agentHints.length > 0) {
+              welcomeLines.push('', ...agentHints);
+            }
+          } catch (detectErr: any) {
+            dwarn(`[Feishu] detectLocalAgents failed (non-fatal): ${detectErr?.message ?? detectErr}`);
+          }
+
+          welcomeLines.push('', `❓ 需要帮助请发送 /help`);
 
           // 🔍 检查飞书应用权限状态，将缺失权限的快捷申请链接追加到欢迎消息
           try {
@@ -4340,137 +4364,6 @@ async function handleInteractive(): Promise<string> {
   }
 
   return t('feishu.interactive.already_running');
-}
-
-interface CreateProjectGroupParams {
-  project_path: string;
-  group_name: string;
-}
-
-class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResult> {
-  static readonly Name = 'create_project_and_group_chat';
-
-  constructor(
-    private readonly gateway: FeishuGateway,
-    private readonly getSenderOpenId: () => string | undefined,
-    private readonly onProjectCreated: (chatId: string, path: string) => Promise<void>
-  ) {
-    super(
-      CreateProjectGroupTool.Name,
-      'CreateProjectAndGroupChat',
-      'Creates a new local project directory AND a dedicated Feishu group chat in one step: creates the directory, creates the group, invites the current user, binds the workspace route, and sends a welcome message. Use this tool when the user wants to set up a project workspace with a bound Feishu group (e.g. "拉个群", "建个项目群", "create a project group"). For creating a standalone Feishu group chat WITHOUT a local project directory or workspace binding, use lark_cli with command="im +chat-create" instead. Only available in direct/P2P chat.',
-      Icon.Globe,
-      {
-        type: Type.OBJECT,
-        properties: {
-          project_path: {
-            type: Type.STRING,
-            description: 'The absolute local physical path to create or bind, e.g. D:\\my-project'
-          },
-          group_name: {
-            type: Type.STRING,
-            description: 'The name for the newly created group chat'
-          }
-        },
-        required: ['project_path', 'group_name']
-      }
-    );
-  }
-
-  async execute(params: CreateProjectGroupParams, signal: AbortSignal): Promise<ToolResult> {
-    const senderOpenId = this.getSenderOpenId();
-    if (!senderOpenId) {
-      return {
-        llmContent: 'Error: Cannot create group chat because the sender openId is unknown.',
-        returnDisplay: 'Error: Sender unknown'
-      };
-    }
-
-    try {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-
-      // 1. 本地目录安全校检/自建
-      const absPath = path.resolve(params.project_path);
-      if (!fs.existsSync(absPath)) {
-        fs.mkdirSync(absPath, { recursive: true });
-        dlog(`[CreateProjectGroupTool] Created folder: ${absPath}`);
-      }
-
-      // 2. 飞书端调用建群并拉人
-      const newChatId = await this.gateway.createGroupChat(params.group_name, senderOpenId);
-      if (!newChatId) {
-        return {
-          llmContent: `Error: Feishu open platform failed to create group chat '${params.group_name}'.`,
-          returnDisplay: 'Error creating Feishu chat'
-        };
-      }
-
-      // 3. 触发持久化绑定路由
-      await this.onProjectCreated(newChatId, absPath);
-
-      // 4. 主动往新群发首条欢迎及就绪通知消息
-      const welcomeMsg = `👋 您好！本群项目工作目录 \`${absPath}\` 已经成功就绪。现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！`;
-      await this.gateway.sendMessage(newChatId, welcomeMsg);
-
-      // 🎯 5. 异步检测是否缺失 im:message.group_msg 权限，并在当前的私聊会话中进行提醒和卡片推送
-      if (activeChatId) {
-        const privateChatId = activeChatId;
-        void (async () => {
-          try {
-            const probe = await probeCredentials(
-              this.gateway.getAppId(),
-              this.gateway.getAppSecret(),
-              this.gateway.getDomain()
-            );
-            if (probe && (!probe.grantedScopes || !probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE))) {
-              const applyUrl = buildScopeApplyUrl({
-                appId: this.gateway.getAppId(),
-                scopes: [SENSITIVE_GROUP_MSG_SCOPE],
-                brand: this.gateway.getDomain() as any,
-                tokenType: 'tenant',
-              });
-              const eventSubUrl = buildEventSubUrl({
-                appId: this.gateway.getAppId(),
-                brand: this.gateway.getDomain() as any,
-              });
-              const permissionPageUrl = buildPermissionPageUrl({
-                appId: this.gateway.getAppId(),
-                brand: this.gateway.getDomain() as any,
-              });
-
-              const warningMsg = `💬 **【重要体验提示 — 免 @ 权限】**\n\n` +
-                `您刚才成功创建了项目群「${params.group_name}」。\n\n` +
-                `⚠️ **检测到您的 Bot 尚未开通「读取关联群聊内所有消息」敏感权限（\`${SENSITIVE_GROUP_MSG_SCOPE}\`）。**\n` +
-                `由于飞书平台限制，如果您不开通此权限，您在此群里提问时**每次消息都必须强制 @ 机器人**，体验较为繁琐。\n\n` +
-                `💡 **建议您一键申请开通此免 @ 权限（无需中断当前体验）：**\n` +
-                `  1️⃣ **第一步：一键申请权限（自动预选）**\n` +
-                `     👉 ${applyUrl}\n` +
-                `  2️⃣ **第二步：在事件订阅页确认订阅 \`im.message.receive_v1\`**\n` +
-                `     👉 ${eventSubUrl}\n` +
-                `  3️⃣ **第三步：在权限管理页申请发布一个版本**\n` +
-                `     👉 ${permissionPageUrl}\n\n` +
-                `开通后即可在群内直接对话，实现无缝协作！`;
-
-              await this.gateway.sendMessage(privateChatId, warningMsg);
-            }
-          } catch (err: any) {
-            dwarn(`[CreateProjectGroupTool] Check scopes or send warning failed: ${err.message}`);
-          }
-        })();
-      }
-
-      return {
-        llmContent: `Successfully created project directory at '${absPath}', and created dedicated Feishu group chat '${params.group_name}' with ID '${newChatId}'. Invited user and sent setup ready notification into the group successfully.`,
-        returnDisplay: `Successfully created project and group chat ${params.group_name}`
-      };
-    } catch (e: any) {
-      return {
-        llmContent: `Error during project creation and binding: ${e.message}`,
-        returnDisplay: `Error: ${e.message}`
-      };
-    }
-  }
 }
 
 /** 通用 MessageActionReturn 包装 */

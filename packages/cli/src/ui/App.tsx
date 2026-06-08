@@ -41,7 +41,7 @@ import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
 import { useGoalActive } from './hooks/useGoalActive.js';
 import { useConsoleMessages } from './hooks/useConsoleMessages.js';
 import { useBackgroundTaskNotifications, formatBackgroundTaskResult } from './hooks/useBackgroundTaskNotifications.js';
-import { formatClaudeCodeTaskResult } from 'deepv-code-core';
+import { formatClaudeCodeTaskResult, isAcpDelegateTask } from 'deepv-code-core';
 import { BackgroundTaskPanel } from './components/BackgroundTaskPanel.js';
 import { BackgroundTaskHint } from './components/BackgroundTaskHint.js';
 import { Header } from './components/Header.js';
@@ -1488,20 +1488,21 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     onTaskCompleted: useCallback((task: BackgroundTask) => {
       console.log('[App] Background task completed, adding to history:', task.id);
 
-      const isClaudeCode = task.kind === 'claude-code';
+      const isAcpDelegate = isAcpDelegateTask(task);
+      const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
 
       // 🎯 使用 tool_group 格式显示任务输出（仿 Claude Code 风格）
       const shortId = task.id;
       const truncatedOutput = truncateBackgroundTaskOutput(task.output);
       const toolGroupItem: IndividualToolCallDisplay = {
         callId: `bg-${task.id}`,
-        name: isClaudeCode ? 'Claude Code' : t('background.task.output'),
-        toolId: isClaudeCode ? 'claude_code_task_output' : 'background_task_output',
+        name: isAcpDelegate ? agentLabel : t('background.task.output'),
+        toolId: isAcpDelegate ? 'claude_code_task_output' : 'background_task_output',
         description: `${shortId} ${task.command}`,
-        resultDisplay: isClaudeCode
+        resultDisplay: isAcpDelegate
           ? (task.answer || truncatedOutput || 'Task completed')
           : (truncatedOutput || `Exit code: ${task.exitCode ?? 'unknown'}`),
-        status: isClaudeCode ? ToolCallStatus.Success : (task.exitCode === 0 ? ToolCallStatus.Success : ToolCallStatus.Error),
+        status: isAcpDelegate ? ToolCallStatus.Success : (task.exitCode === 0 ? ToolCallStatus.Success : ToolCallStatus.Error),
         confirmationDetails: undefined,
       };
       addItem(
@@ -1510,11 +1511,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       );
 
       // 🎯 构建通知消息（包含完整的任务信息，供 AI 理解）
-      const resultText = isClaudeCode
+      const resultText = isAcpDelegate
         ? formatClaudeCodeTaskResult(task)
         : formatBackgroundTaskResult(task);
-      const notificationText = isClaudeCode
-        ? `[Easy Code - SYSTEM NOTIFICATION] Claude Code task completed (Task ID: ${task.id}).\n\n${resultText}`
+      const notificationText = isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task completed (Task ID: ${task.id}).\n\n${resultText}`
         : `[Easy Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${task.id}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
 
       // 🎯 如果 AI 当前空闲，自动触发 AI 继续处理（静默模式，不显示用户消息）
@@ -1528,13 +1529,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     }, [addItem, streamingState, submitQuery]),
     onTaskFailed: useCallback((task: BackgroundTask) => {
       console.log('[App] Background task failed:', task.id);
-      const isClaudeCode = task.kind === 'claude-code';
+      const isAcpDelegate = isAcpDelegateTask(task);
+      const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
       const shortId = task.id;
       const truncatedOutput = truncateBackgroundTaskOutput(task.error || task.output);
       const toolGroupItem: IndividualToolCallDisplay = {
         callId: `bg-${task.id}`,
-        name: isClaudeCode ? 'Claude Code' : t('background.task.output'),
-        toolId: isClaudeCode ? 'claude_code_task_output' : 'background_task_output',
+        name: isAcpDelegate ? agentLabel : t('background.task.output'),
+        toolId: isAcpDelegate ? 'claude_code_task_output' : 'background_task_output',
         description: `${shortId} ${task.command}`,
         resultDisplay: truncatedOutput || 'Unknown error',
         status: ToolCallStatus.Error,
@@ -1546,8 +1548,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       );
 
       // 🎯 构建通知消息（包含完整的任务信息，供 AI 理解）
-      const notificationText = isClaudeCode
-        ? `[Easy Code - SYSTEM NOTIFICATION] Claude Code task failed (Task ID: ${task.id}).\n\n${formatClaudeCodeTaskResult(task)}`
+      const notificationText = isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task failed (Task ID: ${task.id}).\n\n${formatClaudeCodeTaskResult(task)}`
         : `[System] Background task failed (Task ID: ${task.id}). Command: ${task.command}. Error: ${task.error || 'Unknown error'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
 
       // 🎯 如果 AI 当前空闲，自动触发 AI 继续处理（静默模式，不显示用户消息）

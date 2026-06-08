@@ -10,9 +10,10 @@ import {
   resolveDelegation,
   buildDelegateDirective,
   parseBindAgentFlag,
+  agentDisplayLabel,
 } from './delegateDirective.js';
 
-describe('parseDelegatePrefix', () => {
+describe('parseDelegatePrefix — Claude Code aliases', () => {
   it.each([
     ['@cc fix the bug', 'fix the bug'],
     ['/cc fix the bug', 'fix the bug'],
@@ -21,16 +22,43 @@ describe('parseDelegatePrefix', () => {
     ['@claudecode  do  y', 'do  y'],
     ['@cc: refactor', 'refactor'],
     ['@cc：重构一下', '重构一下'],
-  ])('matches prefix in %j', (input, task) => {
+  ])('matches Claude prefix in %j → agent=claude-code', (input, task) => {
     const r = parseDelegatePrefix(input);
     expect(r.matched).toBe(true);
+    expect(r.agent).toBe('claude-code');
     expect(r.task).toBe(task);
   });
+});
 
+describe('parseDelegatePrefix — Codex aliases', () => {
+  it.each([
+    ['@codex fix the bug', 'fix the bug'],
+    ['/codex fix the bug', 'fix the bug'],
+    ['@CODEX Fix It', 'Fix It'],
+    ['@cdx  do  y', 'do  y'],
+    ['@codex: refactor', 'refactor'],
+    ['@codex：重构一下', '重构一下'],
+  ])('matches Codex prefix in %j → agent=codex', (input, task) => {
+    const r = parseDelegatePrefix(input);
+    expect(r.matched).toBe(true);
+    expect(r.agent).toBe('codex');
+    expect(r.task).toBe(task);
+  });
+});
+
+describe('parseDelegatePrefix — non-matches', () => {
   it('does not match a bare word or unrelated text', () => {
     expect(parseDelegatePrefix('ccc do x').matched).toBe(false);
     expect(parseDelegatePrefix('please fix').matched).toBe(false);
     expect(parseDelegatePrefix('account stuff').matched).toBe(false);
+    expect(parseDelegatePrefix('codexish word').matched).toBe(false);
+  });
+
+  it('does not match codex mentioned in the middle of a sentence', () => {
+    // Mid-message "@codex" or natural "让 codex 帮我" should go through the
+    // LLM's tool-selection path, NOT the deterministic prefix path.
+    expect(parseDelegatePrefix('你好，@codex给我把xx弄了').matched).toBe(false);
+    expect(parseDelegatePrefix('去，让codex帮我把xx弄了').matched).toBe(false);
   });
 
   it('handles empty/undefined input', () => {
@@ -41,14 +69,30 @@ describe('parseDelegatePrefix', () => {
 });
 
 describe('resolveDelegation', () => {
-  it('prefix wins regardless of default agent', () => {
+  it('Claude prefix wins regardless of default agent', () => {
     const r = resolveDelegation('@cc do x', 'self');
     expect(r).toMatchObject({ delegate: true, agent: 'claude-code', task: 'do x', reason: 'prefix' });
   });
 
-  it('delegates when chat default agent is claude-code', () => {
+  it('Codex prefix wins regardless of default agent', () => {
+    const r = resolveDelegation('@codex do x', 'self');
+    expect(r).toMatchObject({ delegate: true, agent: 'codex', task: 'do x', reason: 'prefix' });
+  });
+
+  it('Codex prefix wins even when default agent is claude-code', () => {
+    const r = resolveDelegation('@codex refactor', 'claude-code');
+    expect(r.agent).toBe('codex');
+    expect(r.reason).toBe('prefix');
+  });
+
+  it('delegates to claude-code when chat default agent is claude-code', () => {
     const r = resolveDelegation('do x', 'claude-code');
-    expect(r).toMatchObject({ delegate: true, task: 'do x', reason: 'route' });
+    expect(r).toMatchObject({ delegate: true, agent: 'claude-code', task: 'do x', reason: 'route' });
+  });
+
+  it('delegates to codex when chat default agent is codex', () => {
+    const r = resolveDelegation('do x', 'codex');
+    expect(r).toMatchObject({ delegate: true, agent: 'codex', task: 'do x', reason: 'route' });
   });
 
   it('does not delegate by default', () => {
@@ -63,22 +107,63 @@ describe('resolveDelegation', () => {
 });
 
 describe('buildDelegateDirective', () => {
-  it('embeds the task and names the tool', () => {
+  it('defaults to Claude Code + stream mode and names the tool', () => {
     const d = buildDelegateDirective('add tests');
     expect(d).toContain('delegate_to_claude_code');
     expect(d).toContain('add tests');
+    expect(d).toContain('Claude Code');
+    expect(d).toContain('agent="claude-code"');
+    // Prefix/route triggers default to stream so the user sees live progress.
+    expect(d).toContain('mode="stream"');
+    expect(d).toContain('同步流式');
+  });
+
+  it('builds a Codex directive when agent="codex" (still stream by default)', () => {
+    const d = buildDelegateDirective('write benchmark', 'codex');
+    expect(d).toContain('delegate_to_claude_code');
+    expect(d).toContain('write benchmark');
+    expect(d).toContain('Codex');
+    expect(d).not.toContain('Claude Code');
+    expect(d).toContain('agent="codex"');
+    expect(d).toContain('mode="stream"');
+  });
+
+  it('emits mode="background" when explicitly requested', () => {
+    const d = buildDelegateDirective('big refactor', 'codex', 'background');
+    expect(d).toContain('agent="codex"');
+    expect(d).toContain('mode="background"');
+    expect(d).toContain('后台异步');
+    expect(d).not.toContain('同步流式');
+  });
+
+  it('claude-code + background combination renders correctly', () => {
+    const d = buildDelegateDirective('do x', 'claude-code', 'background');
+    expect(d).toContain('agent="claude-code"');
+    expect(d).toContain('mode="background"');
   });
 });
 
 describe('parseBindAgentFlag', () => {
-  it('extracts --agent and leaves the path', () => {
+  it('extracts --agent claude-code and leaves the path', () => {
     const r = parseBindAgentFlag('D:\\proj --agent claude-code');
     expect(r.agent).toBe('claude-code');
     expect(r.rest).toBe('D:\\proj');
   });
 
-  it('supports --agent=value and cc alias', () => {
+  it('extracts --agent codex and leaves the path', () => {
+    const r = parseBindAgentFlag('D:\\proj --agent codex');
+    expect(r.agent).toBe('codex');
+    expect(r.rest).toBe('D:\\proj');
+  });
+
+  it('accepts the cdx alias for codex', () => {
+    expect(parseBindAgentFlag('--agent cdx').agent).toBe('codex');
+    expect(parseBindAgentFlag('--agent=cdx').agent).toBe('codex');
+  });
+
+  it('supports --agent=value forms for all agents', () => {
     expect(parseBindAgentFlag('--agent=cc').agent).toBe('claude-code');
+    expect(parseBindAgentFlag('--agent=codex').agent).toBe('codex');
     expect(parseBindAgentFlag('/path -a self').agent).toBe('self');
   });
 
@@ -88,9 +173,23 @@ describe('parseBindAgentFlag', () => {
     expect(r.rest).toBe('D:\\proj');
   });
 
-  it('ignores invalid agent value', () => {
+  it('ignores invalid agent value but still consumes the value token', () => {
     const r = parseBindAgentFlag('D:\\proj --agent bogus');
     expect(r.agent).toBeUndefined();
+    // The "bogus" value must NOT leak into the path argument.
     expect(r.rest).toBe('D:\\proj');
+  });
+});
+
+describe('agentDisplayLabel', () => {
+  it('labels claude-code distinctly from codex', () => {
+    expect(agentDisplayLabel('claude-code')).toContain('Claude Code');
+    expect(agentDisplayLabel('codex')).toContain('Codex');
+    expect(agentDisplayLabel('codex')).not.toContain('Claude Code');
+  });
+
+  it('labels self/undefined as Easy Code', () => {
+    expect(agentDisplayLabel('self')).toContain('Easy Code');
+    expect(agentDisplayLabel(undefined)).toContain('Easy Code');
   });
 });
