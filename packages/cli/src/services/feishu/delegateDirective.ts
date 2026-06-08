@@ -56,6 +56,31 @@ export interface DelegationDecision {
   task: string;
   /** Why we decided to delegate ('prefix' | 'route' | 'none'). */
   reason: 'prefix' | 'route' | 'none';
+  /**
+   * Native session id to resume, when the message used the
+   * `resume <sessionId> <task>` sub-syntax (e.g. `@cc:resume abc123 继续`).
+   */
+  resumeSessionId?: string;
+}
+
+/**
+ * Sub-syntax for resuming a session: `resume <sessionId> <rest of task>`.
+ * Applied AFTER the delegation prefix is stripped. The session id is the first
+ * whitespace-delimited token; everything after it is the task.
+ */
+const RESUME_RE = /^resume\s+(\S+)\s*([\s\S]*)$/i;
+
+/**
+ * Split a `resume <id> <task>` task string into its parts. Returns the resume
+ * session id (if present) and the remaining task text.
+ */
+export function parseResumeTask(task: string): {
+  resumeSessionId?: string;
+  task: string;
+} {
+  const m = (task ?? '').match(RESUME_RE);
+  if (!m) return { task: (task ?? '').trim() };
+  return { resumeSessionId: m[1], task: (m[2] ?? '').trim() };
 }
 
 export interface DelegatePrefixMatch {
@@ -90,19 +115,23 @@ export function resolveDelegation(
 ): DelegationDecision {
   const prefix = parseDelegatePrefix(text);
   if (prefix.matched) {
+    const { resumeSessionId, task } = parseResumeTask(prefix.task);
     return {
       delegate: true,
       agent: prefix.agent,
-      task: prefix.task,
+      task,
       reason: 'prefix',
+      resumeSessionId,
     };
   }
   if (defaultAgent === 'claude-code' || defaultAgent === 'codex') {
+    const { resumeSessionId, task } = parseResumeTask((text ?? '').trim());
     return {
       delegate: true,
       agent: defaultAgent,
-      task: (text ?? '').trim(),
+      task,
       reason: 'route',
+      resumeSessionId,
     };
   }
   return {
@@ -131,19 +160,29 @@ export function buildDelegateDirective(
   task: string,
   agent: FeishuDelegateAgent = 'claude-code',
   mode: DelegateDirectiveMode = 'stream',
+  resumeSessionId?: string,
 ): string {
   const label = agent === 'codex' ? 'Codex' : 'Claude Code';
   const modeHint =
     mode === 'stream'
       ? '同步流式执行（用户要看到全过程）'
       : '后台异步执行（完成后通知用户）';
+  const resumeArg = resumeSessionId
+    ? `，resumeSessionId="${resumeSessionId}"（续接已有会话）`
+    : '';
+  const resumeNote = resumeSessionId
+    ? `本次为续接历史会话（sessionId=${resumeSessionId}），${label} 会先恢复该会话的完整上下文再执行。`
+    : '';
   return [
     `【强制派发指令】用户要求将以下任务交给本机的 ${label} 执行（${modeHint}）。`,
-    `你必须立即调用 delegate_to_claude_code 工具，参数：agent="${agent}"，mode="${mode}"，task 填写下面的完整原文。`,
+    resumeNote,
+    `你必须立即调用 delegate_to_claude_code 工具，参数：agent="${agent}"，mode="${mode}"${resumeArg}，task 填写下面的完整原文。`,
     '不要自己动手处理这个任务，也不要追问，直接派发：',
     '',
     task,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
