@@ -486,10 +486,13 @@ interface FeishuProjectRoute {
   agent?: FeishuAgentTarget;
   /**
    * Most recent native sessionId from the external agent's last completed
-   * run in this chat. Used to auto-resume the session on the next message,
-   * so the agent retains conversation context across turns.
+   * run in this chat. Used to auto-resume the session on the next message
+   * (within the time window), so the agent retains conversation context
+   * across turns in a continuous conversation.
    */
   lastSessionId?: string;
+  /** Timestamp (Date.now()) when lastSessionId was saved. */
+  lastSessionAt?: number;
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
@@ -772,6 +775,8 @@ interface QueuedMessage {
   msg: FeishuMessage;
   resolve: (value: any) => void;
   reject: (err: any) => void;
+  /** 排队提示消息的 message_id，用于后续更新/撤回 */
+  queueTipMessageId?: string | null;
 }
 
 // 群聊独立的队列容器
@@ -903,7 +908,7 @@ async function handleFeishuBtwCommand(
  */
 export function drainChatQueueForMidTurnInjection(
   chatId: string,
-  notify?: (msg: FeishuMessage) => Promise<void> | void,
+  notify?: (item: QueuedMessage) => Promise<void> | void,
 ): string[] {
   const queue = messageQueues.get(chatId);
   if (!queue || queue.length === 0) return [];
@@ -930,7 +935,7 @@ export function drainChatQueueForMidTurnInjection(
   // 原子替换队列剩余项
   messageQueues.set(chatId, remaining);
 
-  // resolve 已注入项的 Promise（不再走独立 agent loop），并发"已合并"提示
+  // resolve 已注入项的 Promise（不再走独立 agent loop），并更新排队提示消息
   for (const item of drained) {
     try {
       item.resolve(null);
@@ -938,11 +943,34 @@ export function drainChatQueueForMidTurnInjection(
       // ignore — resolver only ever observed once anyway
     }
     if (notify) {
-      void Promise.resolve(notify(item.msg)).catch(() => {/* best effort */});
+      void Promise.resolve(notify(item)).catch(() => {/* best effort */});
     }
   }
 
   return drained.map((item) => (item.msg.text ?? '').trim()).filter(Boolean);
+}
+
+/**
+ * 更新指定群聊中剩余排队消息的排队位置提示。
+ * 当某条消息出队（被处理或被合并）后，排在其后的消息位置号需要前移。
+ * 此函数遍历剩余队列，对每条有 queueTipMessageId 的消息调用
+ * gateway.updateMessage 更新其排队提示文案。
+ */
+async function refreshQueuePositions(
+  gateway: FeishuGateway,
+  chatId: string,
+): Promise<void> {
+  const queue = messageQueues.get(chatId);
+  if (!queue || queue.length === 0) return;
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    if (item.queueTipMessageId) {
+      const position = i + 1;
+      const updatedTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${position} 位）...*`;
+      await gateway.updateMessage(item.queueTipMessageId, updatedTip).catch(() => {/* best effort */});
+    }
+  }
 }
 
 function clearMessageQueue() {
@@ -2888,14 +2916,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
             const isProcessing = isProcessingQueues.get(msg.chatId) || false;
 
+            let queueTipMessageId: string | null = null;
             if (isProcessing || queue.length > 0) {
               const queuePosition = queue.length + 1;
               const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
-              await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+              queueTipMessageId = await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
             }
 
             return new Promise<string | null>((resolve, reject) => {
-              queue!.push({ msg: fakeMsg, resolve, reject });
+              queue!.push({ msg: fakeMsg, resolve, reject, queueTipMessageId });
               const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
               processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
             });
@@ -2953,14 +2982,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
     const isProcessing = isProcessingQueues.get(msg.chatId) || false;
 
+    let queueTipMessageId: string | null = null;
     if (isProcessing || queue.length > 0) {
       const queuePosition = queue.length + 1;
       const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
-      await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+      queueTipMessageId = await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
     }
 
     return new Promise<string | null>((resolve, reject) => {
-      queue!.push({ msg, resolve, reject });
+      queue!.push({ msg, resolve, reject, queueTipMessageId });
       const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
       processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
     });
@@ -3185,7 +3215,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const routeForChat = (await loadProjectRoutes())[msg.chatId];
         const routeAgentForChat = routeForChat?.agent;
         const lastSessionId = routeForChat?.lastSessionId;
-        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId);
+        const lastSessionAt = routeForChat?.lastSessionAt;
+        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId, lastSessionAt);
         if (delegation.delegate && delegation.task) {
           messageTextForAI = buildDelegateDirective(
             delegation.task,
@@ -3673,19 +3704,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 // CardKit V2 增量推送轻量，可更低节流；旧版整卡 PATCH 仍需保守节流。
                 const CARD_UPDATE_THROTTLE_MS = streaming ? 500 : 1500;
 
-                // 🎯 强制注入 resumeSessionId：AI 可能不带此参数，但专属群里必须续接，
-                //    否则外部 agent 每次都从头开始。从路由读取 lastSessionId，
-                //    仅当 AI 未显式指定时才注入（显式指定优先级更高）。
                 const delegateArgs = { ...req.args };
-                if (!delegateArgs.resumeSessionId) {
-                  try {
-                    const route = (await loadProjectRoutes())[msg.chatId];
-                    if (route?.lastSessionId) {
-                      delegateArgs.resumeSessionId = route.lastSessionId;
-                      dlog(`[Feishu] Auto-injecting resumeSessionId=${route.lastSessionId} for delegate_to_agent`);
-                    }
-                  } catch { /* best-effort */ }
-                }
 
                 const toolResult = await delegateTool.execute(
                   delegateArgs,
@@ -3728,7 +3747,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                   const payload = typeof toolResult.llmContent === 'string'
                     ? JSON.parse(toolResult.llmContent) : toolResult.llmContent;
                   if (payload?.sessionId) {
-                    await saveProjectRoute(msg.chatId, { lastSessionId: payload.sessionId });
+                    await saveProjectRoute(msg.chatId, { lastSessionId: payload.sessionId, lastSessionAt: Date.now() });
                   }
                 } catch { /* best-effort */ }
 
@@ -3863,16 +3882,21 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 就能同时看到 tool 结果 + 用户追加指令，避免要等整轮结束才被处理。
         const injectedTexts = drainChatQueueForMidTurnInjection(
           msg.chatId,
-          async (injectedMsg) => {
-            const preview = (injectedMsg.text ?? '').replace(/\s+/g, ' ').slice(0, 60);
-            const tail = (injectedMsg.text ?? '').length > 60 ? '…' : '';
-            await gateway
-              .sendMessage(
-                msg.chatId,
-                `📥 已合并到当前任务，AI 正在综合处理：「${preview}${tail}」`,
-                injectedMsg.messageId,
-              )
-              .catch(() => {/* best effort, UX-only */});
+          async (injectedItem) => {
+            const preview = (injectedItem.msg.text ?? '').replace(/\s+/g, ' ').slice(0, 60);
+            const tail = (injectedItem.msg.text ?? '').length > 60 ? '…' : '';
+            const mergedTip = `📥 已合并到当前任务，AI 正在综合处理：「${preview}${tail}」`;
+            // 优先更新原排队提示消息，避免发重复消息；更新失败则回退为发送新消息
+            if (injectedItem.queueTipMessageId) {
+              const updated = await gateway.updateMessage(injectedItem.queueTipMessageId, mergedTip).catch(() => false);
+              if (!updated) {
+                await gateway.sendMessage(msg.chatId, mergedTip, injectedItem.msg.messageId).catch(() => {/* best effort */});
+              }
+            } else {
+              await gateway.sendMessage(msg.chatId, mergedTip, injectedItem.msg.messageId).catch(() => {/* best effort */});
+            }
+            // 更新剩余排队消息的位置编号
+            await refreshQueuePositions(gateway, msg.chatId);
           },
         );
         if (injectedTexts.length > 0) {
@@ -4281,6 +4305,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
         if (!item) continue;
 
         const { msg, resolve, reject } = item;
+        // 出队后：更新/清除排队提示消息，并刷新剩余排队位置
+        if (item.queueTipMessageId) {
+          // 排队提示不再需要，撤回该提示消息以保持对话整洁
+          await gateway.recallMessage(item.queueTipMessageId).catch(() => {/* best effort */});
+        }
+        // 刷新剩余排队消息的位置编号
+        await refreshQueuePositions(gateway, chatId);
+
         try {
           const result = await handleSingleFeishuMessage(msg, gateway, config, geminiClient, creds, initErrorMsg);
           resolve(result);
@@ -4387,10 +4419,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
           const welcomeLines: string[] = [
             `👋 你好！我已成功上线，随时为你服务！`,
             ``,
-            `📂 当前私聊工作目录：\`${projectRoot}\``,
+            `📂 当前私聊工作目录："${projectRoot}"`,
             ``,
-            `💡 如需使用其他工作目录，请发送：**拉个群 + 文件夹路径**`,
-            `   例如：拉个群 D:\\projects\\my-app`,
+            `💡 如需使用其他工作目录，请发送：[拉个群 + 文件夹路径]`,
+            `   例如：「拉个群 D:\\projects\\my-app」`,
           ];
 
           // 🤖 本机 agent 检测：发现 claude / codex 时，追加专属群提示
@@ -4417,7 +4449,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (missing.length === 0 && hasGroupMsgScope) {
                 welcomeLines.push('', `✅ 应用权限配置完整，所有功能均可正常使用。`);
               } else {
-                welcomeLines.push('', `⚠️ **以下应用权限尚未开通，部分功能可能受限：**`);
+                welcomeLines.push('', `⚠️ [以下应用权限尚未开通，部分功能可能受限：]`);
 
                 if (missing.length > 0) {
                   const scopeApplyUrl = buildScopeApplyUrl({

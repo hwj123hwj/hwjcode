@@ -140,7 +140,7 @@ describe('drainChatQueueForMidTurnInjection', () => {
     // notify fires fire-and-forget; let the microtask flush
     await new Promise((r) => setTimeout(r, 0));
     expect(notify).toHaveBeenCalledTimes(2);
-    const notifiedIds = notify.mock.calls.map((c) => (c[0] as FeishuMessage).messageId);
+    const notifiedIds = notify.mock.calls.map((c) => (c[0] as any).msg.messageId);
     expect(notifiedIds.sort()).toEqual(['m1', 'm2']);
   });
 
