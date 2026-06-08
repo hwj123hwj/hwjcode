@@ -936,10 +936,12 @@ export async function main() {
     const renderOptions: any = { exitOnCtrlC: false };
     if (!process.stdin.isTTY) {
       // ✅ 避免在后台/无 TTY (detached) 启动时, Ink 尝试对 process.stdin 设置 raw mode 并报错崩溃。
-      // 传入一个拥有空 setRawMode 方法的 Readable 作为输入流，使 Ink 降级为非交互渲染而不抛出不支持 raw mode 异常。
+      // 传入一个拥有空 setRawMode / ref / unref 方法的 Readable 作为输入流，使 Ink 降级为非交互渲染而不抛出不支持 raw mode 异常或 ref 缺失错误。
       const { Readable } = await import('node:stream');
       const dummyStdin = new Readable({ read() {} });
       (dummyStdin as any).setRawMode = () => {};
+      (dummyStdin as any).ref = () => {};
+      (dummyStdin as any).unref = () => {};
       (dummyStdin as any).isTTY = true;
       renderOptions.stdin = dummyStdin;
     }
