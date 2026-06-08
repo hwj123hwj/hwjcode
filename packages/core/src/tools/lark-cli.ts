@@ -412,17 +412,29 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         }
 
         if (updateOutput) {
-          updateOutput(
-            '🔑 Lark CLI requires user login. Starting browser authorization...\n',
-          );
+          if (this.config.getFeishuMode()) {
+            updateOutput(
+              '🔑 Lark CLI 需要用户登录。正在启动浏览器授权，请稍候...\n',
+            );
+          } else {
+            updateOutput(
+              '🔑 Lark CLI requires user login. Starting browser authorization...\n',
+            );
+          }
         }
       } else {
         // App not configured: use config init --new.
         authCmd = `${binary} config init --new`;
         if (updateOutput) {
-          updateOutput(
-            '⚙️  Lark CLI is not configured yet. Starting app setup...\n',
-          );
+          if (this.config.getFeishuMode()) {
+            updateOutput(
+              '⚙️  Lark CLI 尚未配置。正在启动应用配置，请稍候...\n',
+            );
+          } else {
+            updateOutput(
+              '⚙️  Lark CLI is not configured yet. Starting app setup...\n',
+            );
+          }
         }
       }
 
@@ -603,9 +615,14 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         lastUpdateTime = now;
         // When we have already captured an auth URL, keep it pinned at the top
         // so the user always sees the actionable link while the process waits.
-        const banner = authUrl
-          ? `🔑 Authorization required — open this URL to continue:\n${authUrl}\n\n`
-          : '';
+        let banner = '';
+        if (authUrl) {
+          if (this.config.getFeishuMode()) {
+            banner = `🔑 飞书网关模式：请点击以下链接进行授权。打开链接后，选择 “已有应用”，选择本机器人即可：\n🔗 ${authUrl}\n\n`;
+          } else {
+            banner = `🔑 Authorization required — open this URL to continue:\n${authUrl}\n\n`;
+          }
+        }
         updateOutput(banner + combined);
       };
 
@@ -771,11 +788,15 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
     // re-prompt instead of treating it as a hard failure.
     if (authUrl) {
       const data = { status: 'auth_required', authUrl };
+      let returnDisplay = `🔑 Authentication Required: Please authorize via: ${authUrl}`;
+      if (this.config.getFeishuMode()) {
+        returnDisplay = `🔑 飞书网关模式：需要登录认证，请点击以下链接进行授权。打开链接后，选择 “已有应用”，选择本机器人即可：\n🔗 ${authUrl}`;
+      }
       return {
         status: 'auth_required',
         authUrl,
         llmContent: JSON.stringify(data),
-        returnDisplay: `🔑 Authentication Required: Please authorize via: ${authUrl}`,
+        returnDisplay,
         summary: 'Auth Required',
       };
     }
