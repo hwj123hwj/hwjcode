@@ -984,7 +984,15 @@ async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<vo
   // 4) spawn 外挂脚本（等父进程退出后接管重启）
   launchRelaunchHelper(install);
 
-  // 5) 延迟退出：给飞书侧充足时间完成消息投递确认
+  // 5) 非 Windows 提示：飞书模式下新进程在后台静默启动，用户看不到界面
+  if (process.platform !== 'win32') {
+    console.log(
+      '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
+      '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+    );
+  }
+
+  // 6) 延迟退出：给飞书侧充足时间完成消息投递确认
   setTimeout(() => {
     process.exit(0);
   }, 1500).unref?.();
@@ -1819,6 +1827,7 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
   '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 或 `--agent codex` 设默认派发方（或在消息前加 `@cc` / `@codex` 单条派发）',
   '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
+  '/acp-session':      '查看本机外部 Agent（Claude Code / Codex）的运行任务和历史会话',
   '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
   '/help':             '显示此帮助',
 };
@@ -2466,7 +2475,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
       try {
         // 优雅重启：中止 AI → 断开 WS → spawn 外挂 → 延迟退出
         gracefulRestartThenExit({ type: 'none' });
-        return '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。';
+        return process.platform === 'win32'
+          ? '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。'
+          : '🔄 收到重启指令，正在热重启飞书机器人（不更新版本）。根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。';
       } catch (e: any) {
         return `❌ 重启失败：${e?.message || String(e)}`;
       }
@@ -2514,11 +2525,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
     }
 
-    // 📊 拦截 `/sessions`（或 `/会话`）：推送一张多会话 Dashboard 卡片，展示
+    // 📊 拦截 `/acp-session`（或 `/acp会话`）：推送一张多会话 Dashboard 卡片，展示
     //    本机正在运行/最近的委派任务（实时状态：当前工具/计划进度/token%/耗时）
     //    + 各 CLI 可续接的历史会话（含 `@cc:resume <id>` 续接提示）。
     //    直接由网关发卡并异步刷新，不经过 LLM 队列。
-    if (/^\/(sessions|会话)\b/i.test(messageText.trim())) {
+    //    注：不使用 /sessions 是因为 CLI 自带 /session 命令会抢先匹配。
+    if (/^\/acp-(session|会话)\b/i.test(messageText.trim())) {
       try {
         const boundCwd = (await loadProjectRoutes())[msg.chatId]?.projectRoot;
         await handleSessionsCommand({
@@ -3649,7 +3661,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (delegateTool) {
                 const startTime = Date.now();
                 let lastCardUpdateTime = 0;
-                const CARD_UPDATE_THROTTLE_MS = 1500;
+                // CardKit V2 增量推送轻量，可更低节流；旧版整卡 PATCH 仍需保守节流。
+                const CARD_UPDATE_THROTTLE_MS = streaming ? 500 : 1500;
 
                 const toolResult = await delegateTool.execute(
                   req.args,
@@ -4188,6 +4201,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
           contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
         }
       }
+    } else if (toolName === 'delegate_to_claude_code') {
+      // 外部 Agent 的 transcript 可能极长（100K+），必须裁剪以防撑爆飞书卡片。
+      // 实时态（isLive=true）：取尾部内容（最新进展更重要）+ 字符硬截断。
+      // 最终态（isLive=false）：仅显示摘要前100字符。
+      if (isLive && output) {
+        // 先按行取尾（最新进展在尾部），再做字符截断
+        const lines = output.split('\n');
+        const tailLines = lines.length > 30 ? lines.slice(-30) : lines;
+        const clamped = clampCodeBlock(tailLines.join('\n'), { maxLines: 30, maxChars: 4000 });
+        contentBox = `\n\`\`\`\n${clamped.text}\n\`\`\``;
+        const totalLines = lines.length;
+        const omittedHead = totalLines > 30 ? totalLines - 30 : 0;
+        branchLine = (omittedHead > 0 || clamped.truncated)
+          ? `\n └ ( 显示最近 ${Math.min(30, totalLines)} 行，${omittedHead > 0 ? `省略前 ${omittedHead} 行` : ''}${clamped.truncated && omittedHead > 0 ? '，' : ''}${clamped.truncated ? '内容过长已截断' : ''} )`
+          : `\n └ ( 外部 Agent 执行中... )`;
+      } else {
+        const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
+        branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
+      }
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
       branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
@@ -4289,6 +4321,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
           if (activeGateway) {
             try { await activeGateway.disconnect(); } catch { /* ignore */ }
             activeGateway = null;
+          }
+          // 非 Windows 提示：飞书模式下新进程在后台静默启动，用户看不到界面
+          if (process.platform !== 'win32') {
+            console.log(
+              '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
+              '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+            );
           }
         };
         toolRegistry.registerTool(selfUpdateTool);
