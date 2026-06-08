@@ -105,19 +105,24 @@ export function parseDelegatePrefix(text: string): DelegatePrefixMatch {
   return { matched: true, agent, task: raw.slice(m[0].length).trim() };
 }
 
+/** Max age (ms) for an auto-resume: sessions older than this start fresh. */
+export const SESSION_RESUME_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
 /**
  * Decide whether to delegate, combining the per-message prefix (highest
  * priority) with the chat's default agent route.
  *
- * When routing via the chat's default agent, and the user did NOT explicitly
- * use the `resume <id>` sub-syntax, `lastSessionId` is automatically used
- * so the external agent retains conversation context across turns.
- * Explicit `resume <id>` takes precedence over `lastSessionId`.
+ * When routing via the chat's default agent, `lastSessionId` is only
+ * auto-injected when the session is recent (within SESSION_RESUME_WINDOW_MS),
+ * so the external agent retains conversation context in a continuous chat
+ * without getting stuck on stale sessions. Explicit `resume <id>` always
+ * takes precedence over the auto-resume.
  */
 export function resolveDelegation(
   text: string,
   defaultAgent?: FeishuAgentTarget,
   lastSessionId?: string,
+  lastSessionAt?: number,
 ): DelegationDecision {
   const prefix = parseDelegatePrefix(text);
   if (prefix.matched) {
@@ -132,13 +137,18 @@ export function resolveDelegation(
   }
   if (defaultAgent === 'claude-code' || defaultAgent === 'codex') {
     const { resumeSessionId, task } = parseResumeTask((text ?? '').trim());
+    // Only auto-resume if the session is recent (within the time window).
+    // Explicit resume (user typed "resume <id>") always wins.
+    const shouldAutoResume =
+      lastSessionId &&
+      lastSessionAt &&
+      (Date.now() - lastSessionAt < SESSION_RESUME_WINDOW_MS);
     return {
       delegate: true,
       agent: defaultAgent,
       task,
       reason: 'route',
-      // 显式 resume > 自动续接 lastSessionId
-      resumeSessionId: resumeSessionId || lastSessionId,
+      resumeSessionId: resumeSessionId || (shouldAutoResume ? lastSessionId : undefined),
     };
   }
   return {
