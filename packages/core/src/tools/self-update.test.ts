@@ -123,6 +123,58 @@ describe('buildRelaunchScript', () => {
     });
     expect(script).toContain(JSON.stringify(winPath));
   });
+
+  // --- relaunch via absolute node + entry script (immune to PATH/nvm/homebrew) ---
+
+  it('prefers absolute node path + entry script when provided (no shell command lookup)', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: noneMode,
+      relaunchNodePath: '/home/u/.nvm/versions/node/v20.0.0/bin/node',
+      relaunchEntryScript: '/home/u/.nvm/versions/node/v20.0.0/lib/node_modules/easycode-ai/dist/index.js',
+    });
+    // node 绝对路径与入口脚本绝对路径都内联进去
+    expect(script).toContain(JSON.stringify('/home/u/.nvm/versions/node/v20.0.0/bin/node'));
+    expect(script).toContain(JSON.stringify('/home/u/.nvm/versions/node/v20.0.0/lib/node_modules/easycode-ai/dist/index.js'));
+    // 运行时走绝对路径分支（NODE_PATH && ENTRY_SCRIPT 为真），用 spawn(NODE_PATH, [ENTRY_SCRIPT, ...])
+    expect(script).toContain('spawn(NODE_PATH, [ENTRY_SCRIPT]');
+    // 绝对路径分支不依赖 shell（shell:true 仅保留在 NODE_PATH 缺失时的回退分支里）
+    expect(script).toContain('if (NODE_PATH && ENTRY_SCRIPT)');
+  });
+
+  it('listens for spawn error event so failures are observable (not silently swallowed)', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: noneMode,
+      relaunchNodePath: '/usr/bin/node',
+      relaunchEntryScript: '/opt/easycode/index.js',
+    });
+    expect(script).toContain("on('error'");
+  });
+
+  it('redirects relaunch output to a log file when logPath is provided', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: noneMode,
+      relaunchNodePath: '/usr/bin/node',
+      relaunchEntryScript: '/opt/easycode/index.js',
+      logPath: '/home/u/.easycode-user/relaunch.log',
+    });
+    expect(script).toContain(JSON.stringify('/home/u/.easycode-user/relaunch.log'));
+    // 用 openSync 打开日志 fd 供 stdio 重定向
+    expect(script).toContain('openSync');
+  });
+
+  it('produces valid JavaScript when using absolute node + entry script', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: npmMode,
+      relaunchNodePath: '/usr/bin/node',
+      relaunchEntryScript: '/opt/easycode/index.js',
+      logPath: '/tmp/relaunch.log',
+    });
+    expect(() => new Function(script)).not.toThrow();
+  });
 });
 
 describe('SelfUpdateTool', () => {
