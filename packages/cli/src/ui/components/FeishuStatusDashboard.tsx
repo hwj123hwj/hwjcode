@@ -19,6 +19,7 @@ export interface FeishuProjectRoute {
     mode: 'on' | 'off' | 'auto';
     effort?: 'auto' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   };
+  lastSessionId?: string;
 }
 
 export interface FeishuMessageLogEntry {

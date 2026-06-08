@@ -32,6 +32,7 @@ describe('feishuGetToolShortName', () => {
     expect(feishuGetToolShortName('ppt_generate')).toBe('PPTGenerate');
     expect(feishuGetToolShortName('codesearch')).toBe('CodeSearch');
     expect(feishuGetToolShortName('lsp')).toBe('LSP');
+    expect(feishuGetToolShortName('delegate_to_agent')).toBe('DelegateAgent');
   });
 
   it('PascalCases unknown tool names', () => {

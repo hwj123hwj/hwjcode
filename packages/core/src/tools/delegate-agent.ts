@@ -286,6 +286,7 @@ export class DelegateToAgentTool extends BaseTool<
         mode: 'stream',
         durationSeconds: duration,
       };
+      if (result.sessionId) llmPayload.sessionId = result.sessionId;
       if (answer) llmPayload.answer = answer.length > 4000 ? answer.slice(0, 4000) + '…' : answer;
       if (result.stopReason) llmPayload.stopReason = result.stopReason;
       if (result.error) llmPayload.error = result.error;
