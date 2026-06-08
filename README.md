@@ -966,6 +966,31 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 
 ---
 
+## 🤝 派发任务给本机 Claude Code
+
+Easy Code 可以作为 **ACP 编排方**，把编码任务派发给你本机安装并登录的 **Claude Code** 执行——尤其适合飞书网关模式：你在飞书里说一句话，Easy Code 要么自己干，要么转交给 Claude Code 干。
+
+### 前提
+
+- 本机已安装并登录 **Claude Code**（派发会复用其本地登录态，不需要额外配置密钥）。
+- Easy Code 通过 Zed 官方的 `@zed-industries/claude-code-acp` 桥按需拉起（默认 `npx` 运行，不打入安装包）。
+  - 可用环境变量 `EASYCODE_CLAUDE_CODE_ACP_CMD` 覆盖启动命令（例如指向全局安装或本地构建）。
+
+### 两种派发方式
+
+| 方式 | 说明 |
+|:---|:---|
+| **模型自主** | Easy Code 的 AI 会按任务自行判断，必要时调用内置工具 `delegate_to_claude_code` 派发。 |
+| **显式强制（飞书）** | 消息前加 `@cc`（或 `/cc`）前缀单条强制派发，例如：`@cc 给 src/foo.ts 加单元测试`。 |
+| **群默认（飞书）** | `/bind <项目路径> --agent claude-code` 把整个群的默认执行方设为 Claude Code；`/bind --agent self` 改回 Easy Code 自己。 |
+
+派发期间，Claude Code 的执行进度（消息与工具调用）会通过飞书 CardKit 卡片**实时流式**回传，最终结果汇总返回。
+
+> ⚠️ 在飞书无人值守场景下，派发的 Claude Code 默认**自动放行权限并可改文件**，请仅对可信项目使用。
+> ℹ️ 后续将支持把 `codex` 作为另一个可派发的本机 agent（同一套 ACP 客户端）。
+
+---
+
 ## 🪝 Hooks 钩子机制
 
 Hooks 允许你在关键工作流节点注入自定义逻辑。

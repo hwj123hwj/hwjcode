@@ -38,6 +38,8 @@ export interface BackgroundTask {
   id: string;
   command: string;
   directory?: string;
+  /** Discriminator: 'shell' for process-based tasks, 'claude-code' for ACP delegate tasks. */
+  kind?: 'shell' | 'claude-code';
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   pid?: number;
   startTime: number;
@@ -47,6 +49,8 @@ export interface BackgroundTask {
   exitCode?: number;
   signal?: string;
   error?: string;
+  /** For claude-code tasks: the agent's final answer text. */
+  answer?: string;
 }
 
 export type BackgroundTaskEvent =
@@ -63,12 +67,13 @@ export class BackgroundTaskManager extends EventEmitter {
   /**
    * 创建一个新的后台任务
    */
-  createTask(command: string, directory?: string): BackgroundTask {
+  createTask(command: string, directory?: string, kind?: 'shell' | 'claude-code'): BackgroundTask {
     const id = generateTaskId(command, directory);
     const task: BackgroundTask = {
       id,
       command,
       directory,
+      kind,
       status: 'running',
       startTime: Date.now(),
       output: '',
@@ -100,6 +105,9 @@ export class BackgroundTaskManager extends EventEmitter {
     return Array.from(this.tasks.values()).filter(t => t.status === 'running');
   }
 
+  /** Maximum size of task.output in characters. Older content is pruned. */
+  static readonly OUTPUT_CAP = 200_000;
+
   /**
    * 更新任务输出
    */
@@ -107,6 +115,11 @@ export class BackgroundTaskManager extends EventEmitter {
     const task = this.tasks.get(taskId);
     if (task) {
       task.output += output;
+      // Prune if exceeding cap — keep the tail (most recent output).
+      if (task.output.length > BackgroundTaskManager.OUTPUT_CAP) {
+        const pruneTo = Math.floor(BackgroundTaskManager.OUTPUT_CAP * 0.7);
+        task.output = '…[earlier output pruned]…\n' + task.output.slice(task.output.length - pruneTo);
+      }
       this.emit('task-output', { type: 'task-output', taskId, output });
     }
   }
