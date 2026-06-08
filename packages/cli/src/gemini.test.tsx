@@ -60,6 +60,11 @@ vi.mock('update-notifier', () => ({
   })),
 }));
 
+vi.mock('./ui/utils/updateCheck.js', () => ({
+  checkForUpdates: vi.fn().mockResolvedValue(undefined),
+  executeUpdateCommand: vi.fn().mockResolvedValue(true),
+}));
+
 vi.mock('./utils/events.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./utils/events.js')>();
   return {
