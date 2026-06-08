@@ -146,7 +146,7 @@ export class BackgroundTaskManager extends EventEmitter {
   /**
    * Merge a structured progress snapshot from the delegated ACP turn into the
    * task record, persist it, and notify subscribers. Drives the live Feishu
-   * `/sessions` dashboard card.
+   * `/acp-session` dashboard card.
    */
   updateProgress(taskId: string, progress: DelegateProgress): BackgroundTask | undefined {
     const task = this.tasks.get(taskId);
