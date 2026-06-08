@@ -12,6 +12,7 @@ import {
   buildDelegateDirective,
   parseBindAgentFlag,
   agentDisplayLabel,
+  SESSION_RESUME_WINDOW_MS,
 } from './delegateDirective.js';
 
 describe('parseDelegatePrefix — Claude Code aliases', () => {
@@ -201,22 +202,63 @@ describe('resolveDelegation — resume sub-syntax', () => {
     expect(d.task).toBe('write a benchmark');
   });
 
-  it('auto-resumes using lastSessionId when no explicit resume and chat is routed', () => {
-    const d = resolveDelegation('do more stuff', 'claude-code', 'sess-auto-1');
+  it('auto-resumes using lastSessionId when session is recent and chat is routed', () => {
+    const recentTimestamp = Date.now() - 60_000; // 1 minute ago
+    const d = resolveDelegation('do more stuff', 'claude-code', 'sess-auto-1', recentTimestamp);
     expect(d.delegate).toBe(true);
     expect(d.reason).toBe('route');
     expect(d.resumeSessionId).toBe('sess-auto-1');
     expect(d.task).toBe('do more stuff');
   });
 
+  it('does NOT auto-resume when session is older than the time window', () => {
+    const staleTimestamp = Date.now() - SESSION_RESUME_WINDOW_MS - 60_000; // 11 minutes ago
+    const d = resolveDelegation('do more stuff', 'claude-code', 'sess-auto-1', staleTimestamp);
+    expect(d.delegate).toBe(true);
+    expect(d.reason).toBe('route');
+    expect(d.resumeSessionId).toBeUndefined();
+  });
+
+  it('does NOT auto-resume when lastSessionAt is missing (legacy routes)', () => {
+    const d = resolveDelegation('do more stuff', 'claude-code', 'sess-auto-1');
+    expect(d.delegate).toBe(true);
+    expect(d.reason).toBe('route');
+    expect(d.resumeSessionId).toBeUndefined();
+  });
+
+  it('does NOT auto-resume when lastSessionId is missing', () => {
+    const d = resolveDelegation('do more stuff', 'claude-code', undefined, Date.now());
+    expect(d.delegate).toBe(true);
+    expect(d.reason).toBe('route');
+    expect(d.resumeSessionId).toBeUndefined();
+  });
+
   it('explicit resume takes precedence over lastSessionId', () => {
-    const d = resolveDelegation('resume explicit-id continue', 'codex', 'sess-auto-old');
+    const d = resolveDelegation('resume explicit-id continue', 'codex', 'sess-auto-old', Date.now());
+    expect(d.resumeSessionId).toBe('explicit-id');
+  });
+
+  it('explicit resume takes precedence even when lastSessionId is stale', () => {
+    const staleTimestamp = Date.now() - SESSION_RESUME_WINDOW_MS - 60_000;
+    const d = resolveDelegation('resume explicit-id continue', 'codex', 'sess-auto-old', staleTimestamp);
     expect(d.resumeSessionId).toBe('explicit-id');
   });
 
   it('lastSessionId is not used for prefix-based delegation (@cc)', () => {
-    const d = resolveDelegation('@cc do something', 'self', 'sess-auto-1');
+    const d = resolveDelegation('@cc do something', 'self', 'sess-auto-1', Date.now());
     expect(d.reason).toBe('prefix');
+    expect(d.resumeSessionId).toBeUndefined();
+  });
+
+  it('auto-resumes at the edge of the time window (just within)', () => {
+    const edgeTimestamp = Date.now() - SESSION_RESUME_WINDOW_MS + 1000; // 1 second before expiry
+    const d = resolveDelegation('continue work', 'claude-code', 'sess-edge', edgeTimestamp);
+    expect(d.resumeSessionId).toBe('sess-edge');
+  });
+
+  it('does NOT auto-resume just past the time window', () => {
+    const edgeTimestamp = Date.now() - SESSION_RESUME_WINDOW_MS - 1000; // 1 second past expiry
+    const d = resolveDelegation('continue work', 'claude-code', 'sess-edge', edgeTimestamp);
     expect(d.resumeSessionId).toBeUndefined();
   });
 });

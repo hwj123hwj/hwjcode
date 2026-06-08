@@ -1737,6 +1737,38 @@ export class FeishuGateway {
   }
 
   /**
+   * 撤回机器人已发送的消息
+   *
+   * 需要 `im:message:recall` 权限。仅能撤回机器人自己发送的消息。
+   *
+   * @returns true=撤回成功, false=撤回失败
+   */
+  async recallMessage(messageId: string): Promise<boolean> {
+    if (!messageId) return false;
+    try {
+      const token = await this.getTenantToken();
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+      const data: any = await res.json();
+      if (data.code !== 0) {
+        dwarn(`Failed to recall Feishu message: ${JSON.stringify(data)}`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      dwarn('Failed to recall Feishu message:', err);
+      return false;
+    }
+  }
+
+  /**
    * 更新已发送消息为 Markdown 富文本（post 格式）
    *
    * 注意：msg_type 不可变，初始消息必须是 post 类型才能用此方法更新为 post 格式。
