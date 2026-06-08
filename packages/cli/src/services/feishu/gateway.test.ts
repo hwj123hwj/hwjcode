@@ -2389,6 +2389,99 @@ describe('FeishuGateway - getChatName', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getChatMode — 精确判断会话类型（p2p 单聊 / group 群聊），用于 Dashboard 友好展示
+// ---------------------------------------------------------------------------
+
+describe('FeishuGateway - getChatMode', () => {
+  let gateway: FeishuGateway;
+
+  const mockFetchOk = (body: any) =>
+    ({ ok: true, json: async () => body }) as unknown as Response;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
+    vi.spyOn(gateway, 'getTenantToken').mockResolvedValue('mock-token');
+  });
+
+  it('returns "p2p" for a bot direct-message chat', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: '', chat_mode: 'p2p' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mode = await gateway.getChatMode('oc_p2p_dm');
+    expect(mode).toBe('p2p');
+  });
+
+  it('returns "group" for a normal group chat', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: '协作群', chat_mode: 'group' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mode = await gateway.getChatMode('oc_group');
+    expect(mode).toBe('group');
+  });
+
+  it('caches the chat mode after getChatName resolves (no second request)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: 'G', chat_mode: 'group' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 第一次走 getChatName 触发请求，顺带缓存 chat_mode
+    await gateway.getChatName('oc_combo');
+    // getChatMode 应命中缓存，不再发请求
+    const mode = await gateway.getChatMode('oc_combo');
+    expect(mode).toBe('group');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when the API responds with a non-zero error code (no permission)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 99991672, msg: 'no permission' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mode = await gateway.getChatMode('oc_noperm');
+    expect(mode).toBeNull();
+  });
+
+  it('returns null (does not throw) when fetch rejects', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network down'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mode = await gateway.getChatMode('oc_neterr');
+    expect(mode).toBeNull();
+  });
+
+  it('returns null for empty chatId without making a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const mode = await gateway.getChatMode('');
+    expect(mode).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still resolves p2p mode even when name is empty (p2p chats have no name)', async () => {
+    // 关键回归：p2p 单聊 name 为空，但 chat_mode 仍须可被识别为 p2p。
+    // 这保证我们不会把 p2p 和"无名群/无权限群"混为一谈。
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockFetchOk({ code: 0, data: { name: '', chat_mode: 'p2p' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const name = await gateway.getChatName('oc_p2p_noname');
+    const mode = await gateway.getChatMode('oc_p2p_noname');
+    expect(name).toBeNull(); // 无群名，fallback
+    expect(mode).toBe('p2p'); // 但类型精确可知
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 共用一次请求
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Goal-driven mode form card structure (regression for Feishu code=230099)
 // ---------------------------------------------------------------------------
 

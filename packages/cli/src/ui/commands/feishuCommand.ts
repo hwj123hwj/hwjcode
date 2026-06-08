@@ -171,8 +171,13 @@ export function safeTruncateForLog(text: string, limit = 150): string {
  *
  * 设计为模块级纯函数，便于单测，且不依赖运行时网关/凭证状态。群名解析
  * 由调用方提前完成后通过 `chatNames` 传入：
+ *  - p2p 单聊（与 Bot 的私聊）→ 显示「与机器人 X 的私聊」友好文案；
  *  - 有群名 → 主显示群名，并在括号内补充 chatId 方便排查；
- *  - 无群名（无权限 / 私聊 / 未解析）→ 直接显示 chatId（fallback）。
+ *  - 无群名（无权限 / 未解析的群）→ 直接显示 chatId（fallback）。
+ *
+ * 关于 p2p 判定：飞书 p2p 单聊与群聊的 chatId 都是 `oc_` 前缀，且 p2p 无群名，
+ * 仅靠"群名是否解析得出"会把无名群/无权限群误判为私聊。因此 p2p 集合由调用方
+ * 通过飞书 chat_mode 字段精确判定后传入（`p2pChatIds`），此处不做任何猜测。
  *
  * 活跃语义 = 「当前正在干活（Agent 仍在处理）」的群，可同时有多个。通过
  * `activeChatIds` 集合传入，命中的群以 🟢 前缀 + (Active) 后缀高亮。
@@ -180,6 +185,8 @@ export function safeTruncateForLog(text: string, limit = 150): string {
  * @param routes      feishu-projects.json 的路由表（chatId → { projectRoot }）
  * @param options.activeChatIds 当前正在干活的群 chatId 集合（Set 或数组，可空）
  * @param options.chatNames    chatId → 群名 的解析结果（可空）
+ * @param options.p2pChatIds   经 chat_mode 判定为 p2p 单聊的 chatId 集合（Set 或数组，可空）
+ * @param options.botName      Bot 名称，用于私聊文案「与机器人 X 的私聊」（可空）
  * @returns 可直接 join('\n') 的文本行数组
  */
 export function buildBoundProjectsLines(
@@ -187,6 +194,8 @@ export function buildBoundProjectsLines(
   options?: {
     activeChatIds?: Set<string> | string[] | null;
     chatNames?: Record<string, string>;
+    p2pChatIds?: Set<string> | string[] | null;
+    botName?: string;
   },
 ): string[] {
   const entries = Object.entries(routes || {});
@@ -194,7 +203,12 @@ export function buildBoundProjectsLines(
     options?.activeChatIds instanceof Set
       ? options.activeChatIds
       : new Set(options?.activeChatIds ?? []);
+  const p2pSet =
+    options?.p2pChatIds instanceof Set
+      ? options.p2pChatIds
+      : new Set(options?.p2pChatIds ?? []);
   const chatNames = options?.chatNames ?? {};
+  const botName = options?.botName?.trim();
 
   const lines: string[] = [tp('feishu.status.bound_projects_title', { count: entries.length })];
 
@@ -210,8 +224,18 @@ export function buildBoundProjectsLines(
   for (const [chatId, route] of entries) {
     const isActive = activeSet.has(chatId);
     const name = chatNames[chatId];
-    // 主显示名：优先群名（附带 chatId 便于排查），否则直接 chatId。
-    let display = name ? `${name} (${chatId})` : chatId;
+    // 主显示名优先级：p2p 单聊文案 > 群名(附 chatId) > 裸 chatId。
+    // p2p 判定优先于群名，避免上游误传 name 时把私聊显示成群名。
+    let display: string;
+    if (p2pSet.has(chatId)) {
+      display = botName
+        ? tp('feishu.status.p2p_chat_label', { bot: botName })
+        : t('feishu.status.p2p_chat_label_unknown');
+    } else if (name) {
+      display = `${name} (${chatId})`;
+    } else {
+      display = chatId;
+    }
     if (isActive) {
       display = `🟢 ${display} ${t('feishu.status.bound_active_suffix')}`;
     }
@@ -373,22 +397,35 @@ function emitFeishuProjectRoutesUpdated() {
 }
 
 /**
- * 批量解析飞书群名并通过 FeishuChatNamesResolved 事件推给 TUI Dashboard。
+ * 批量解析飞书群名 + 会话类型，并通过事件推给 TUI Dashboard。
  *
- * 仅在 Bot 运行中（activeGateway 存在）时执行；getChatName 自带进程内缓存，
- * 重复调用开销极小。单个群解析失败被 allSettled 吞掉，不影响其它群。
+ * 仅在 Bot 运行中（activeGateway 存在）时执行；getChatName / getChatMode 共用
+ * 进程内缓存（同一次 chats/{id} 请求填充），重复调用开销极小。单个解析失败被
+ * allSettled 吞掉，不影响其它会话。
+ *
+ * 解析结果分两路 emit：
+ *  - FeishuChatNamesResolved：chatId → 群名（仅有群名的）
+ *  - FeishuP2pChatsResolved：chat_mode='p2p' 的 chatId 列表（与 Bot 的私聊）
  */
 async function resolveAndEmitChatNames(chatIds: string[]): Promise<void> {
   if (!activeGateway || chatIds.length === 0) return;
   const chatNames: Record<string, string> = {};
+  const p2pChatIds: string[] = [];
   await Promise.allSettled(
     chatIds.map(async (chatId) => {
-      const name = await activeGateway!.getChatName(chatId);
+      const [name, mode] = await Promise.all([
+        activeGateway!.getChatName(chatId),
+        activeGateway!.getChatMode(chatId),
+      ]);
       if (name) chatNames[chatId] = name;
+      if (mode === 'p2p') p2pChatIds.push(chatId);
     }),
   );
   if (Object.keys(chatNames).length > 0) {
     appEvents.emit(AppEvent.FeishuChatNamesResolved, chatNames);
+  }
+  if (p2pChatIds.length > 0) {
+    appEvents.emit(AppEvent.FeishuP2pChatsResolved, p2pChatIds);
   }
 }
 
@@ -4243,13 +4280,19 @@ async function handleStatus(): Promise<string> {
     const routes = await loadProjectRoutes();
     const chatIds = Object.keys(routes);
     const chatNames: Record<string, string> = {};
+    const p2pChatIds: string[] = [];
 
     if (activeGateway && chatIds.length > 0) {
-      // 并发解析所有群名，单个失败不影响整体；整体加 5s 超时上限，避免 /feishu status 卡住。
+      // 并发解析所有群名 + 会话类型，单个失败不影响整体；整体加 5s 超时上限，避免 /feishu status 卡住。
+      // getChatName 与 getChatMode 共用同一次 chats/{id} 请求结果（进程内缓存），无额外开销。
       const resolveAll = Promise.allSettled(
         chatIds.map(async (chatId) => {
-          const name = await activeGateway!.getChatName(chatId);
+          const [name, mode] = await Promise.all([
+            activeGateway!.getChatName(chatId),
+            activeGateway!.getChatMode(chatId),
+          ]);
           if (name) chatNames[chatId] = name;
+          if (mode === 'p2p') p2pChatIds.push(chatId);
         }),
       );
       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 5000));
@@ -4262,6 +4305,8 @@ async function handleStatus(): Promise<string> {
         // 活跃 = 当前正在干活（Agent 仍在处理）的群集合，可同时多个。
         activeChatIds: processingChatIds,
         chatNames,
+        p2pChatIds,
+        botName: creds.botName,
       }),
     );
   } catch (e) {
