@@ -99,6 +99,7 @@ export * from './services/mcpResponseGuard.js';
 export * from './services/fileOperationQueue.js';
 export * from './services/backgroundTaskManager.js';
 export * from './services/backgroundModeSignal.js';
+export { formatClaudeCodeTaskResult } from './tools/delegate-agent.js';
 
 // Export IDE specific logic
 export * from './ide/ide-client.js';
