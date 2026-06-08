@@ -403,6 +403,107 @@ export class FeishuGateway {
   private recentContents: Map<string, number> = new Map();
   private readonly dedupWindowMs = 5000;
 
+  /**
+   * 高风险操作内容哈希去重：针对 restart / self-update 等会导致进程退出的命令，
+   * 飞书服务器可能因进程快速退出而认为消息未送达、延迟重发，导致反复重启。
+   * 对匹配关键词的消息计算内容哈希，3 小时窗口内同哈希静默丢弃。
+   * 持久化到磁盘，重启后依然生效。
+   */
+  private static readonly HIGH_RISK_KEYWORDS = [
+    '/feishu restart', '/飞书 restart', '/feishu update',
+    'self_update', 'self-update', '自更新', '重启', '热重启',
+  ] as const;
+  private static readonly HIGH_RISK_DEDUP_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 hours
+  private highRiskHashes: Map<string, number> = new Map(); // hash → first-seen timestamp
+
+  /** 获取高风险哈希去重文件的绝对路径 */
+  private getHighRiskDedupFilePath(): string {
+    const homeDir = os.homedir();
+    const geminiDir = path.join(homeDir, '.easycode-user');
+    return path.join(geminiDir, 'feishu-highrisk-dedup.json');
+  }
+
+  /** 从磁盘加载高风险哈希缓存，并清除过期条目 */
+  private loadHighRiskDedup(): void {
+    try {
+      const filePath = this.getHighRiskDedupFilePath();
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const entries: Array<[string, number]> = JSON.parse(content);
+        if (Array.isArray(entries)) {
+          const now = Date.now();
+          for (const [hash, ts] of entries) {
+            if (typeof hash === 'string' && typeof ts === 'number' && now - ts < FeishuGateway.HIGH_RISK_DEDUP_WINDOW_MS) {
+              this.highRiskHashes.set(hash, ts);
+            }
+          }
+          dlog(`[Feishu] Loaded ${this.highRiskHashes.size} active high-risk dedup entries from disk.`);
+        }
+      }
+    } catch (e: any) {
+      dwarn(`[Feishu] Failed to load high-risk dedup cache: ${e?.message || e}`);
+    }
+  }
+
+  /** 保存高风险哈希缓存到磁盘 */
+  private saveHighRiskDedup(): void {
+    try {
+      const filePath = this.getHighRiskDedupFilePath();
+      const dirPath = path.dirname(filePath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      const entries = Array.from(this.highRiskHashes.entries());
+      fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), 'utf8');
+    } catch (e: any) {
+      dwarn(`[Feishu] Failed to save high-risk dedup cache: ${e?.message || e}`);
+    }
+  }
+
+  /** 判断消息内容是否匹配高风险关键词 */
+  private isHighRiskMessage(text: string): boolean {
+    const lower = text.toLowerCase();
+    return FeishuGateway.HIGH_RISK_KEYWORDS.some(kw => lower.includes(kw));
+  }
+
+  /** 对消息内容计算简单哈希（用于去重比对） */
+  private computeContentHash(chatId: string, text: string): string {
+    const raw = `${chatId}:${text}`;
+    // Simple DJB2 hash — fast, sufficient for dedup purposes
+    let hash = 5381;
+    for (let i = 0; i < raw.length; i++) {
+      hash = ((hash << 5) + hash + raw.charCodeAt(i)) & 0x7FFFFFFF;
+    }
+    return `hr_${hash.toString(36)}`;
+  }
+
+  /**
+   * 检查高风险消息是否已在窗口内处理过。
+   * 如果是新的高风险消息，记录其哈希并持久化。
+   * @returns true 表示应静默丢弃，false 表示可以执行
+   */
+  private checkHighRiskDedup(chatId: string, text: string): boolean {
+    if (!this.isHighRiskMessage(text)) return false;
+
+    const hash = this.computeContentHash(chatId, text);
+    const now = Date.now();
+    const firstSeen = this.highRiskHashes.get(hash);
+
+    if (firstSeen !== undefined && now - firstSeen < FeishuGateway.HIGH_RISK_DEDUP_WINDOW_MS) {
+      dlog(`[Feishu] High-risk dedup: skipping duplicate "${text.slice(0, 40)}" (hash=${hash}, age=${Math.round((now - firstSeen) / 60000)}min)`);
+      return true;
+    }
+
+    // 新的高风险消息，记录并持久化
+    this.highRiskHashes.set(hash, now);
+    // 清理过期条目
+    for (const [h, ts] of this.highRiskHashes) {
+      if (now - ts >= FeishuGateway.HIGH_RISK_DEDUP_WINDOW_MS) this.highRiskHashes.delete(h);
+    }
+    this.saveHighRiskDedup();
+    return false;
+  }
+
   /** 群名缓存：key 为 chatId，value 为解析出的群名（成功才缓存，失败/空名不缓存以便后续重试） */
   private chatNameCache: Map<string, string> = new Map();
 
@@ -454,6 +555,7 @@ export class FeishuGateway {
     this.appSecret = appSecret;
     this.domain = domain;
     this.loadProcessedMessages();
+    this.loadHighRiskDedup();
   }
 
   private get apiBaseUrl(): string {
@@ -1257,6 +1359,14 @@ export class FeishuGateway {
         const firstSeen = this.recentContents.get(contentKey);
         if (firstSeen !== undefined && now - firstSeen < this.dedupWindowMs) {
           dlog(`Skipped duplicate message (content dedup): "${feishuMsg.text.slice(0, 30)}" (within ${now - firstSeen}ms)`);
+          return { code: 0 };
+        }
+
+        // 高风险操作内容哈希去重：防止 restart / self-update 等命令因飞书重发而反复执行
+        if (this.checkHighRiskDedup(feishuMsg.chatId, feishuMsg.text)) {
+          const preview = feishuMsg.text.length > 30 ? feishuMsg.text.slice(0, 30) + '…' : feishuMsg.text;
+          await this.sendMessage(feishuMsg.chatId,
+            `检测到疑似重复的飞书服务端消息推送：「${preview}」，已丢弃。如果是您自己发的消息，请变换措辞重发。`);
           return { code: 0 };
         }
 

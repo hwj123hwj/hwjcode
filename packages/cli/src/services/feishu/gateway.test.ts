@@ -1226,6 +1226,9 @@ describe('FeishuGateway - Message Deduplication', () => {
     gateway = new FeishuGateway('mock-app-id', 'mock-app-secret');
     messageCallback = null;
 
+    // Clear high-risk dedup cache to prevent cross-test pollution from disk
+    (gateway as any).highRiskHashes.clear();
+
     mockRegister.mockImplementation((handlers: any) => {
       if (handlers['im.message.receive_v1']) {
         messageCallback = handlers['im.message.receive_v1'];
@@ -1365,6 +1368,149 @@ describe('FeishuGateway - Message Deduplication', () => {
     await messageCallback(mockEvent);
     expect(callCount).toBe(2);
     expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(true);
+  });
+
+  it('deduplicates high-risk messages (restart/update) via content hash within 3-hour window', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    const restartEvent = {
+      event: {
+        message: {
+          message_id: 'om_hr_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: '/feishu restart' }),
+          chat_id: 'oc_restart_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    // 1. First /feishu restart should be processed
+    await messageCallback(restartEvent);
+    expect(callCount).toBe(1);
+
+    // 2. Same content, different messageId (simulating Feishu redelivery) should be dropped
+    const redeliverEvent = {
+      event: {
+        message: {
+          message_id: 'om_hr_002', // different ID — bypasses messageId dedup
+          message_type: 'text',
+          content: JSON.stringify({ text: '/feishu restart' }),
+          chat_id: 'oc_restart_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+    (gateway as any).recentContents.clear(); // bypass short-window content dedup
+    const result = await messageCallback(redeliverEvent);
+    expect(result).toEqual({ code: 0 });
+    expect(callCount).toBe(1); // still 1, deduplicated
+
+    // Verify that a warning message was sent back to the chat about the dropped duplicate
+    const allFetchCalls = (globalThis as any).fetch?.mock?.calls || [];
+    const sentMessages = allFetchCalls
+      .filter((call: any[]) => {
+        const url = call[0];
+        return typeof url === 'string' && url.includes('/im/v1/messages');
+      })
+      .map((call: any[]) => {
+        try {
+          const body = JSON.parse(call[1]?.body || '{}');
+          return JSON.parse(body?.content || '{}').text || '';
+        } catch { return ''; }
+      });
+    const warningMsg = sentMessages.find((t: string) => t.includes('疑似重复') && t.includes('已丢弃'));
+    expect(warningMsg).toBeTruthy();
+  });
+
+  it('allows different high-risk messages from the same chat', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    // First message: /feishu restart
+    const event1 = {
+      event: {
+        message: {
+          message_id: 'om_diff_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: '/feishu restart' }),
+          chat_id: 'oc_diff_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+    await messageCallback(event1);
+    expect(callCount).toBe(1);
+
+    // Second message: self_update (different content, should NOT be deduplicated)
+    const event2 = {
+      event: {
+        message: {
+          message_id: 'om_diff_002',
+          message_type: 'text',
+          content: JSON.stringify({ text: '请帮我 self_update 更新到最新版' }),
+          chat_id: 'oc_diff_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+    (gateway as any).recentContents.clear();
+    await messageCallback(event2);
+    expect(callCount).toBe(2);
+  });
+
+  it('does not deduplicate normal (non-high-risk) messages', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    const normalEvent = {
+      event: {
+        message: {
+          message_id: 'om_normal_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: '帮我写个 hello world' }),
+          chat_id: 'oc_normal_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    // Even with a different messageId but same content, normal messages are only
+    // caught by the 5-second content dedup, not the high-risk hash dedup.
+    await messageCallback(normalEvent);
+    expect(callCount).toBe(1);
+
+    const normalEvent2 = {
+      event: {
+        message: {
+          message_id: 'om_normal_002',
+          message_type: 'text',
+          content: JSON.stringify({ text: '帮我写个 hello world' }),
+          chat_id: 'oc_normal_chat',
+          chat_type: 'group',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+    (gateway as any).recentContents.clear(); // bypass short-window dedup
+    await messageCallback(normalEvent2);
+    // high-risk dedup does NOT apply to normal messages, so this goes through
+    expect(callCount).toBe(2);
   });
 });
 
