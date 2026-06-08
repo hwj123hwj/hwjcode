@@ -1875,9 +1875,10 @@ export class DeepVServerAdapter implements ContentGenerator {
    *   - 遍历 newChunk 的所有 parts（不是只看 parts[0]），同 chunk 同时
    *     含 text + functionCall 的情况也能正确处理；
    *   - 文本 part 累积到 accumulator 末尾的同质 part 上，避免文本碎片；
-   *   - functionCall part 按"最后一个未完成的 functionCall"原则合并：
-   *     先取 accumulator 末尾若是 functionCall 就 in-place 合并；否则
-   *     新增一个独立 part；
+   *   - functionCall part 按"id 判同"合并：accumulator 末尾若是同 id（或新
+   *     分片无 id 视为续传）的 functionCall 则 in-place 合并；若双方 id 都
+   *     存在且不同（并行 tool_call），作为新独立 part 推入，避免静默吞调用；
+   *     accumulator 末尾不是 functionCall 时也作为新独立 part 推入；
    *   - args 的合并兼容字符串增量（流式 JSON 拼接）和对象增量（浅合并）；
    *   - usageMetadata 与 finishReason 始终用最新 chunk 的值覆盖累积器。
    */
@@ -1935,30 +1936,47 @@ export class DeepVServerAdapter implements ContentGenerator {
       }
 
       if (newPart.functionCall) {
-        // functionCall 合并：找 accumulator 末尾是否已有 functionCall，
-        // 优先 in-place 合并（同一 callId / 同一 part 的增量 chunk）。
+        // functionCall 合并策略：
+        //   - 若新 chunk 是"同一个调用"的增量分片（同 id，或新分片无 id 视为续传），
+        //     则 in-place 合并进 accumulator 末尾的 functionCall；
+        //   - 若新 chunk 是"另一个并行调用"（两端 id 都存在且不同），
+        //     作为新的独立 part 推入，避免静默吞掉并行 tool_call。
         const lastAccPart = accumulatedParts[accumulatedParts.length - 1];
         if (lastAccPart && lastAccPart.functionCall) {
           const accFc = lastAccPart.functionCall;
           const newFc = newPart.functionCall;
 
-          // 🛡️ name: trim 防止模型返回带空格的工具名
-          if (newFc.name) accFc.name = String(newFc.name).trim();
-          // id 通常在第一个分片就到，但若后到也覆盖
-          if (newFc.id) accFc.id = newFc.id;
+          const isContinuation =
+            !newFc.id || !accFc.id || newFc.id === accFc.id;
 
-          // args 增量合并
-          if (newFc.args !== undefined && newFc.args !== null) {
-            if (typeof newFc.args === 'string' && typeof accFc.args === 'string') {
-              accFc.args = (accFc.args || '') + newFc.args;
-            } else if (typeof newFc.args === 'object') {
-              accFc.args = {
-                ...(typeof accFc.args === 'object' && accFc.args ? accFc.args : {}),
-                ...newFc.args,
-              };
-            } else {
-              accFc.args = newFc.args;
+          if (isContinuation) {
+            // 🛡️ name: trim 防止模型返回带空格的工具名
+            if (newFc.name) accFc.name = String(newFc.name).trim();
+            // id 通常在第一个分片就到，但若后到也覆盖
+            if (newFc.id) accFc.id = newFc.id;
+
+            // args 增量合并
+            if (newFc.args !== undefined && newFc.args !== null) {
+              if (typeof newFc.args === 'string' && typeof accFc.args === 'string') {
+                accFc.args = (accFc.args || '') + newFc.args;
+              } else if (typeof newFc.args === 'object') {
+                accFc.args = {
+                  ...(typeof accFc.args === 'object' && accFc.args ? accFc.args : {}),
+                  ...newFc.args,
+                };
+              } else {
+                accFc.args = newFc.args;
+              }
             }
+          } else {
+            // 并行调用：作为新的独立 part 推入
+            const partToPush: any = { ...newPart, functionCall: { ...newFc } };
+            if (!partToPush.functionCall.id) {
+              const generatedId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+              console.log(`[DeepV Server] 补全缺失的工具 ID (Merge parallel): ${partToPush.functionCall.name} -> ${generatedId}`);
+              partToPush.functionCall.id = generatedId;
+            }
+            accumulatedParts.push(partToPush);
           }
         } else {
           // 新的独立 functionCall part

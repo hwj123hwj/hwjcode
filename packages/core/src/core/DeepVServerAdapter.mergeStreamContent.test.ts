@@ -192,6 +192,102 @@ describe('DeepVServerAdapter.mergeStreamContent', () => {
     expect(parts[0].text).toBe("I'll check the time.");
     expect(parts[1].functionCall.name).toBe('local_time');
   });
+
+  it('preserves parallel tool_calls arriving in separate chunks (different ids)', () => {
+    // 回归守护：模型并行发出 2 个 task 调用，服务端通常分两个独立 chunk
+    // 下发；过去的合并逻辑会无脑 in-place 合并末尾 functionCall，导致第二
+    // 个 call 的 id/name 覆盖第一个、args 浅合并，并行调用被静默吞掉。
+    let acc = merge(null, {
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  id: 'call_1',
+                  name: 'task',
+                  args: { prompt: 'analyze A', description: 'A', max_turns: 5 },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    acc = merge(acc, {
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  id: 'call_2',
+                  name: 'task',
+                  args: { prompt: 'analyze B', description: 'B', max_turns: 5 },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const parts = acc.candidates[0].content.parts;
+    expect(parts).toHaveLength(2);
+    expect(parts[0].functionCall).toEqual({
+      id: 'call_1',
+      name: 'task',
+      args: { prompt: 'analyze A', description: 'A', max_turns: 5 },
+    });
+    expect(parts[1].functionCall).toEqual({
+      id: 'call_2',
+      name: 'task',
+      args: { prompt: 'analyze B', description: 'B', max_turns: 5 },
+    });
+
+    // turn.ts 看到的 functionCalls 必须是两个完整的并行调用
+    expect(acc.functionCalls).toHaveLength(2);
+    expect(acc.functionCalls.map((fc: { id: string }) => fc.id)).toEqual([
+      'call_1',
+      'call_2',
+    ]);
+  });
+
+  it('still merges continuation chunks that omit id (no false split)', () => {
+    // 守护反向情况：同一 call 的 args 续传分片不带 id，必须仍然合并进
+    // 末尾 functionCall，而不是误判为并行调用、生成新独立 part。
+    let acc = merge(null, {
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [{ functionCall: { id: 'call_1', name: 'task' } }],
+          },
+        },
+      ],
+    });
+    acc = merge(acc, {
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [{ functionCall: { args: '{"prompt":"hello"}' } }],
+          },
+        },
+      ],
+    });
+
+    const parts = acc.candidates[0].content.parts;
+    expect(parts).toHaveLength(1);
+    expect(parts[0].functionCall.id).toBe('call_1');
+    expect(parts[0].functionCall.args).toBe('{"prompt":"hello"}');
+  });
 });
 
 describe('DeepVServerAdapter.finalizeAccumulatedToolChunk', () => {
