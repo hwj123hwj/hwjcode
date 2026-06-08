@@ -76,7 +76,9 @@ describe('LarkCliTool', () => {
   let tool: LarkCliTool;
 
   beforeEach(async () => {
-    mockConfig = {} as Config;
+    mockConfig = {
+      getFeishuMode: () => false,
+    } as unknown as Config;
     tool = new LarkCliTool(mockConfig);
     vi.clearAllMocks();
     // Default: global binary detection fails -> fall back to npx.
@@ -278,6 +280,38 @@ describe('LarkCliTool', () => {
       child.close(0);
       const result = await promise;
       expect(result.authUrl).toBe(url);
+    });
+
+    it('should output localized guide and format when getFeishuMode() is true', async () => {
+      // Mock feishuMode to true
+      mockConfig.getFeishuMode = () => true;
+
+      const updates: string[] = [];
+      const child = nextChild();
+      const promise = tool.execute(
+        { command: 'auth login' },
+        new AbortController().signal,
+        (out) => updates.push(out),
+      );
+
+      const url =
+        'https://open.feishu.cn/page/cli?user_code=CJMV-5FQZ&lpv=1.0.44&ocv=1.0.44&from=cli';
+      child.emitStdout(`打开以下链接配置应用:\n\n  ${url}\n\n等待配置应用...\n`);
+      await new Promise((r) => setTimeout(r, 5));
+      child.close(1); // non-zero exit to trigger buildResult returnDisplay
+      const result = await promise;
+
+      expect(result.authUrl).toBe(url);
+      expect(result.status).toBe('auth_required');
+
+      // The update streaming should contain the Feishu Gateway localized tip
+      const updateText = updates.join('');
+      expect(updateText).toContain('飞书网关模式：请点击以下链接进行授权');
+      expect(updateText).toContain('选择 “已有应用”，选择本机器人即可');
+
+      // The final result returnDisplay should also contain the Feishu Gateway localized tip
+      expect(result.returnDisplay).toContain('飞书网关模式：需要登录认证，请点击以下链接进行授权');
+      expect(result.returnDisplay).toContain('选择 “已有应用”，选择本机器人即可');
     });
   });
 
