@@ -101,6 +101,21 @@ export * from './services/backgroundTaskManager.js';
 export * from './services/backgroundModeSignal.js';
 export { formatClaudeCodeTaskResult, isAcpDelegateTask } from './tools/delegate-agent.js';
 export {
+  CacheSafeParamsStore,
+  type CacheSafeParams,
+} from './services/cacheSafeParams.js';
+export {
+  runForkedAgent,
+  type RunForkedAgentOptions,
+  type RunForkedAgentResult,
+} from './agents/runForkedAgent.js';
+export {
+  runSideQuestion,
+  SIDE_QUESTION_SYSTEM_PROMPT,
+  type RunSideQuestionOptions,
+  type RunSideQuestionResult,
+} from './agents/runSideQuestion.js';
+export {
   EXTERNAL_AGENT_TYPES,
   isExternalAgentType,
   type ExternalAgentType,
