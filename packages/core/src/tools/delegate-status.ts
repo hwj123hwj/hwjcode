@@ -9,7 +9,7 @@ import { Type } from '@google/genai';
 import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
-import { extractCompactSummary } from './delegate-agent.js';
+import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
@@ -92,15 +92,15 @@ export class CheckDelegateStatusTool extends BaseTool<
     const taskManager = getBackgroundTaskManager();
     const task = taskManager.getTask(params.taskId);
 
-    if (!task || task.kind !== 'claude-code') {
+    if (!task || !isAcpDelegateTask(task)) {
       return {
         status: 'not_found',
         llmContent: JSON.stringify({
           status: 'not_found',
           taskId: params.taskId,
-          error: 'No Claude Code task found with this ID.',
+          error: 'No delegated agent task found with this ID.',
         }),
-        returnDisplay: `No Claude Code task found with ID: ${params.taskId}`,
+        returnDisplay: `No delegated agent task found with ID: ${params.taskId}`,
         summary: 'Not found',
       };
     }

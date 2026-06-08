@@ -99,7 +99,12 @@ export * from './services/mcpResponseGuard.js';
 export * from './services/fileOperationQueue.js';
 export * from './services/backgroundTaskManager.js';
 export * from './services/backgroundModeSignal.js';
-export { formatClaudeCodeTaskResult } from './tools/delegate-agent.js';
+export { formatClaudeCodeTaskResult, isAcpDelegateTask } from './tools/delegate-agent.js';
+export {
+  EXTERNAL_AGENT_TYPES,
+  isExternalAgentType,
+  type ExternalAgentType,
+} from './acp-client/externalAgentRegistry.js';
 
 // Export IDE specific logic
 export * from './ide/ide-client.js';
