@@ -797,6 +797,89 @@ export function parseBtwCommand(text: string): string | null {
 }
 
 /**
+ * Handle a `/btw <question>` side question in Feishu mode. MUST be called
+ * BEFORE any slash-command dispatcher (otherwise `btwCommand.action` from
+ * BuiltinCommandLoader will fire first and just return the usage hint).
+ *
+ * Forks a tool-less single-turn agent on the chat's own GeminiClient,
+ * cancels any previous in-flight `/btw` for the same chat, and sends the
+ * answer back as a single standalone message. Does NOT enter
+ * `messageQueues` and does NOT touch the running task card.
+ *
+ * Returns true if the message was a `/btw` command and was handled (caller
+ * should `return null` to short-circuit); false otherwise (caller should
+ * continue normal processing).
+ */
+async function handleFeishuBtwCommand(
+  msg: FeishuMessage,
+  gateway: FeishuGateway,
+  currentClient: GeminiClient,
+  currentConfig: Config | undefined | null,
+  messageText: string,
+): Promise<boolean> {
+  const btwQuestion = parseBtwCommand(messageText);
+  if (btwQuestion === null) return false;
+
+  if (!btwQuestion) {
+    await gateway.sendMessage(
+      msg.chatId,
+      '💡 用法: `/btw <你的问题>` — 派一个轻量旁路 agent 回答这个问题，主任务不受影响。',
+      msg.messageId,
+    );
+    return true;
+  }
+
+  // Cancel any previous in-flight /btw for this chat — only the latest matters.
+  sideQuestionControllers.get(msg.chatId)?.abort();
+  const ctrl = new AbortController();
+  sideQuestionControllers.set(msg.chatId, ctrl);
+
+  void (async () => {
+    try {
+      const contentGenerator = currentClient.getContentGenerator();
+      // Best-effort snapshot read — cold-start fallback is fine.
+      let snapshot = null;
+      try {
+        snapshot = currentClient.getChat().cacheSafeParams.get();
+      } catch {
+        // No chat yet — cold start is acceptable.
+      }
+      const model = currentConfig?.getModel() ?? 'auto';
+
+      const result = await runSideQuestion({
+        contentGenerator,
+        model,
+        question: btwQuestion,
+        cacheSafeSnapshot: snapshot,
+        signal: ctrl.signal,
+      });
+
+      if (sideQuestionControllers.get(msg.chatId) === ctrl) {
+        sideQuestionControllers.delete(msg.chatId);
+      }
+
+      const header = '🅱️ **旁路问答（/btw，主任务不受影响）**\n\n';
+      let body: string;
+      if (result.status === 'success') {
+        body = result.text.trim() || '（fork agent 未返回任何内容）';
+      } else if (result.status === 'cancelled') {
+        body = '⏹️ 已取消。' + (result.text ? `\n\n（已生成部分内容）\n${result.text}` : '');
+      } else {
+        body = `❌ 旁路问答失败：${result.error ?? '未知错误'}`;
+      }
+      await gateway.sendMessage(msg.chatId, header + body, msg.messageId);
+    } catch (err: any) {
+      dwarn(`[Feishu] /btw failed: ${err?.message ?? err}`);
+      await gateway
+        .sendMessage(msg.chatId, `❌ 旁路问答失败：${err?.message ?? err}`, msg.messageId)
+        .catch(() => {/* best effort */});
+    }
+  })();
+
+  return true;
+}
+
+/**
  * 🎯 Mid-turn injection drain (Feishu 端的对应实现，对称 App.tsx 里同名 callback)。
  *
  * 在当前群的 agent loop 处于 tool-call 间隙时调用，原子取走该群 `messageQueues`
@@ -2709,6 +2792,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
     }
 
+    // 🎯 /btw side-question — must be intercepted BEFORE any slash-command
+    // dispatcher fires. Otherwise the standard CLI `btwCommand` (registered
+    // via BuiltinCommandLoader) would handle it first and return only the
+    // "Usage: /btw <question>" hint, swallowing the actual question.
+    // The handler short-circuits the message: forks a tool-less single-turn
+    // agent and replies with the answer as a standalone Feishu message,
+    // never entering the chat's message queue.
+    if (await handleFeishuBtwCommand(msg, gateway, currentClient, currentConfig, messageText)) {
+      return null;
+    }
+
     // 🚀 斜杠命令（/help, /new, /stop, /bind 等）高优先级快速通道拦截：
     // 这些命令完全由系统控制或脚本程序处理，不进入 LLM 上下文，也不存在长耗时。
     // 为了极致的用户体验，它们应该完全绕过异步消息队列，直接高优先级秒速执行响应，绝不参与排队！
@@ -2806,71 +2900,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         return null; // 🚀 返回 null，防止 gateway.ts 底层二次发送纯文本消息造成重复
       }
-    }
-
-    // 🎯 /btw side-question bypass: runs immediately even when the main
-    // turn is busy, does NOT enter the queue, does NOT pollute the
-    // running turn's card/transcript. Answer is sent back as a single
-    // standalone message reply to the asker.
-    const btwQuestion = parseBtwCommand(messageText);
-    if (btwQuestion !== null) {
-      if (!btwQuestion) {
-        await gateway.sendMessage(
-          msg.chatId,
-          '💡 用法: `/btw <你的问题>` — 派一个轻量旁路 agent 回答这个问题，主任务不受影响。',
-          msg.messageId,
-        );
-        return null;
-      }
-
-      // Cancel any previous in-flight /btw for this chat — only the latest matters.
-      sideQuestionControllers.get(msg.chatId)?.abort();
-      const ctrl = new AbortController();
-      sideQuestionControllers.set(msg.chatId, ctrl);
-
-      void (async () => {
-        try {
-          const contentGenerator = currentClient.getContentGenerator();
-          // Best-effort snapshot read — cold-start fallback is fine.
-          let snapshot = null;
-          try {
-            snapshot = currentClient.getChat().cacheSafeParams.get();
-          } catch {
-            // No chat yet — cold start is acceptable.
-          }
-          const model = currentConfig?.getModel() ?? 'auto';
-
-          const result = await runSideQuestion({
-            contentGenerator,
-            model,
-            question: btwQuestion,
-            cacheSafeSnapshot: snapshot,
-            signal: ctrl.signal,
-          });
-
-          if (sideQuestionControllers.get(msg.chatId) === ctrl) {
-            sideQuestionControllers.delete(msg.chatId);
-          }
-
-          const header = '🅱️ **旁路问答（/btw，主任务不受影响）**\n\n';
-          let body: string;
-          if (result.status === 'success') {
-            body = result.text.trim() || '（fork agent 未返回任何内容）';
-          } else if (result.status === 'cancelled') {
-            body = '⏹️ 已取消。' + (result.text ? `\n\n（已生成部分内容）\n${result.text}` : '');
-          } else {
-            body = `❌ 旁路问答失败：${result.error ?? '未知错误'}`;
-          }
-          await gateway.sendMessage(msg.chatId, header + body, msg.messageId);
-        } catch (err: any) {
-          dwarn(`[Feishu] /btw failed: ${err?.message ?? err}`);
-          await gateway
-            .sendMessage(msg.chatId, `❌ 旁路问答失败：${err?.message ?? err}`, msg.messageId)
-            .catch(() => {/* best effort */});
-        }
-      })();
-
-      return null; // Do not enter the message queue.
     }
 
     // 2. 获取或创建 Chat 专属队列并排队
