@@ -1681,49 +1681,12 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     [logoShows, stdout, submitQuery],
   );
 
-  const queuePrompt = useCallback((promptText: string) => {
-    setQueuedPrompts((prev) => [...prev, promptText]);
-  }, []);
-
-  const updateQueueItem = useCallback((index: number, newContent: string) => {
-    const trimmed = newContent.trim();
-    if (trimmed === '') {
-      // 空内容 = 删除该项
-      setQueuedPrompts((prev) => prev.filter((_, i) => i !== index));
-      addItem(
-        {
-          type: MessageType.INFO,
-          text: tp('input.queue.item.deleted', { position: index + 1 }),
-        },
-        Date.now(),
-      );
-      // 如果删除后队列为空，退出编辑模式
-      setQueuedPrompts((prev) => {
-        if (prev.length === 0) {
-          setQueueEditMode(false);
-          setQueuePaused(false);
-        }
-        return prev;
-      });
-    } else {
-      // 更新内容
-      setQueuedPrompts((prev) =>
-        prev.map((item, i) => (i === index ? trimmed : item)),
-      );
-      addItem(
-        {
-          type: MessageType.INFO,
-          text: tp('input.queue.item.updated', { position: index + 1 }),
-        },
-        Date.now(),
-      );
-    }
-  }, [addItem, tp]);
-
   // 🎯 /btw side-question state. Lives outside the chat transcript: the
   // forked agent runs in parallel with the main turn, and its answer
   // appears in a bordered box below the input prompt. Closing it (Esc)
   // wipes the state without touching chat history.
+  // (Declared BEFORE queuePrompt because queuePrompt's defensive intercept
+  // calls startSideQuestion — moving it later would create a TDZ violation.)
   const [sideQuestion, setSideQuestion] = useState<SideQuestionState | null>(null);
   const sideQuestionAbortRef = useRef<AbortController | null>(null);
 
@@ -1832,6 +1795,61 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     },
     [config],
   );
+
+  // 🎯 Defense in depth: a `/btw …` prompt must NEVER enter the queue,
+  // regardless of which call path landed here. If a /btw slipped past the
+  // upstream intercepts (handleFinalSubmit / handlePromptOrQueue), we
+  // catch it here and fork the side question on the spot. This guards
+  // against any future call site that might forward user text directly
+  // into the queue.
+  const queuePrompt = useCallback((promptText: string) => {
+    const trimmedQueueText = promptText.trim();
+    if (/^\/btw(\s|$)/i.test(trimmedQueueText)) {
+      const q = trimmedQueueText.replace(/^\/btw\s*/i, '').trim();
+      if (q) {
+        startSideQuestion(q);
+        return;
+      }
+      // Bare `/btw` with no args — still don't queue it; drop silently.
+      return;
+    }
+    setQueuedPrompts((prev) => [...prev, promptText]);
+  }, [startSideQuestion]);
+
+  const updateQueueItem = useCallback((index: number, newContent: string) => {
+    const trimmed = newContent.trim();
+    if (trimmed === '') {
+      // 空内容 = 删除该项
+      setQueuedPrompts((prev) => prev.filter((_, i) => i !== index));
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: tp('input.queue.item.deleted', { position: index + 1 }),
+        },
+        Date.now(),
+      );
+      // 如果删除后队列为空，退出编辑模式
+      setQueuedPrompts((prev) => {
+        if (prev.length === 0) {
+          setQueueEditMode(false);
+          setQueuePaused(false);
+        }
+        return prev;
+      });
+    } else {
+      // 更新内容
+      setQueuedPrompts((prev) =>
+        prev.map((item, i) => (i === index ? trimmed : item)),
+      );
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: tp('input.queue.item.updated', { position: index + 1 }),
+        },
+        Date.now(),
+      );
+    }
+  }, [addItem, tp]);
 
   const handlePromptOrQueue = useCallback(
     (promptText: string, pauseQueueUntilResponse = false, silent = false) => {
