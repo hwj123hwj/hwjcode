@@ -7,7 +7,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useInput } from 'ink';
 import { t, tp, isChineseLocale } from '../utils/i18n.js';
-import { isBackgroundTaskPanelOpen, isWorkflowPanelOpen } from '../utils/modalState.js';
+import { isBackgroundTaskPanelOpen, isSideQuestionPanelOpen, isWorkflowPanelOpen } from '../utils/modalState.js';
 import {
   Config,
   GeminiClient,
@@ -787,7 +787,7 @@ export const useGeminiStream = (
                        (process.platform === 'darwin' && key.meta && input === 'q');
 
     // 🎯 如果后台任务面板或 workflow 面板打开，不处理 ESC（由 App.tsx 统一处理）
-    if (isCancelKey && (isBackgroundTaskPanelOpen() || isWorkflowPanelOpen())) {
+    if (isCancelKey && (isBackgroundTaskPanelOpen() || isWorkflowPanelOpen() || isSideQuestionPanelOpen())) {
       return;
     }
 

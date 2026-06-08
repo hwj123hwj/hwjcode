@@ -29,3 +29,13 @@ export function setWorkflowPanelOpen(open: boolean): void {
 export function isWorkflowPanelOpen(): boolean {
   return _workflowPanelOpen;
 }
+
+let _sideQuestionPanelOpen = false;
+
+export function setSideQuestionPanelOpen(open: boolean): void {
+  _sideQuestionPanelOpen = open;
+}
+
+export function isSideQuestionPanelOpen(): boolean {
+  return _sideQuestionPanelOpen;
+}
