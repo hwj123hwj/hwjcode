@@ -7,7 +7,7 @@
 
 import { Type } from '@google/genai';
 import { spawn } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { BaseTool, Icon, ToolResult } from './tools.js';
@@ -148,19 +148,28 @@ function cleanupSelf() {
 }
 
 async function main() {
+  log('[Relauncher] Helper script started. Polling parent process PID ' + PARENT_PID + '...');
+
   // 1) 轮询父进程退出（最多 ~30s，超时也继续，避免卡死）
   const deadline = Date.now() + 30000;
+  let printedAlive = false;
   while (isAlive(PARENT_PID) && Date.now() < deadline) {
+    if (!printedAlive) {
+      log('[Relauncher] Parent process PID ' + PARENT_PID + ' is still alive, sleeping...');
+      printedAlive = true;
+    }
     await sleep(300);
   }
+  log('[Relauncher] Parent process PID ' + PARENT_PID + ' exited or timeout reached.');
 
   // 2) 按需安装（INSTALL_ARGS 为 null 时跳过 = 仅重启）
   if (INSTALL_ARGS) {
-    log('Installing: npm ' + INSTALL_ARGS.join(' '));
+    log('[Relauncher] Installing package: npm ' + INSTALL_ARGS.join(' '));
     const install = spawnSync('npm', INSTALL_ARGS, { stdio: 'ignore', shell: true });
+    log('[Relauncher] Install step completed with exit status ' + install.status);
     if (install.status !== 0) {
       // 安装失败：不拉起旧版本，清理后退出，避免误导。
-      log('Install failed with status ' + install.status);
+      log('[Relauncher] ERROR: Install failed with status ' + install.status);
       cleanupSelf();
       process.exit(install.status || 1);
     }
@@ -172,7 +181,9 @@ async function main() {
     try {
       const fd = fs.openSync(LOG_PATH, 'a');
       stdio = ['ignore', fd, fd];
-    } catch (_) {
+      log('[Relauncher] Stdio will be redirected to: ' + LOG_PATH);
+    } catch (e) {
+      log('[Relauncher] Failed to open LOG_PATH: ' + e.message);
       stdio = 'ignore';
     }
   }
@@ -187,14 +198,14 @@ async function main() {
   const env = Object.assign({}, process.env, { EASYCODE_STARTUP_DELAY_MS: '2000' });
   let child;
   if (NODE_PATH && ENTRY_SCRIPT) {
-    log('Relaunch (absolute): ' + NODE_PATH + ' ' + ENTRY_SCRIPT + ' ' + RELAUNCH_ARGS.join(' '));
+    log('[Relauncher] Spawning child (absolute): ' + NODE_PATH + ' ' + ENTRY_SCRIPT + ' ' + RELAUNCH_ARGS.join(' '));
     child = spawn(NODE_PATH, [ENTRY_SCRIPT].concat(RELAUNCH_ARGS), {
       detached: true,
       stdio: stdio,
       env: env,
     });
   } else {
-    log('Relaunch (command): ' + RELAUNCH_CMD + ' ' + RELAUNCH_ARGS.join(' '));
+    log('[Relauncher] Spawning child (command fallback): ' + RELAUNCH_CMD + ' ' + RELAUNCH_ARGS.join(' '));
     child = spawn(RELAUNCH_CMD, RELAUNCH_ARGS, {
       detached: true,
       stdio: stdio,
@@ -203,14 +214,21 @@ async function main() {
     });
   }
 
+  if (child) {
+    log('[Relauncher] Spawn call returned successfully. Child PID is ' + child.pid);
+  } else {
+    log('[Relauncher] ERROR: Spawn call returned null or undefined child process!');
+  }
+
   // 关键：监听 spawn 失败事件，避免错误被静默吞掉（Ubuntu/macOS 重启失败时一无所知的根因）。
   child.on('error', (err) => {
-    log('Relaunch spawn error: ' + (err && err.message ? err.message : String(err)));
+    log('[Relauncher] Spawn child error event fired: ' + (err && err.message ? err.message : String(err)) + '\\n' + (err && err.stack ? err.stack : ''));
     cleanupSelf();
     process.exit(1);
   });
 
   child.unref();
+  log('[Relauncher] Child unref-ed successfully. Cleaning up helper and exiting relauncher process.');
 
   // 5) 自清理并退出。
   cleanupSelf();
@@ -240,12 +258,12 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     `easycode-relaunch-${parentPid}-${Date.now()}.js`,
   );
 
-  // 重启日志固定写到全局配置目录，便于排障（Ubuntu/macOS 重启失败时可查）。
+  // 重启日志固定写到全局配置目录，便于排障。
   let logPath: string | undefined;
   try {
     const logDir = join(homedir(), '.easycode-user');
     mkdirSync(logDir, { recursive: true });
-    logPath = join(logDir, 'relaunch.log');
+    logPath = join(logDir, 'cli-debug.log');
   } catch {
     logPath = undefined; // 日志是 best-effort，失败不阻断重启
   }
@@ -254,6 +272,22 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
   // process.argv[1] 在常规启动下一定存在；缺失时回退到命令查找模式。
   const relaunchNodePath = process.execPath;
   const relaunchEntryScript = process.argv[1] || undefined;
+
+  if (logPath) {
+    try {
+      appendFileSync(
+        logPath,
+        `[${new Date().toISOString()}] [Parent] Initiating relaunch helper.\n` +
+        `  - Parent PID: ${parentPid}\n` +
+        `  - Install Mode: ${JSON.stringify(install)}\n` +
+        `  - relaunchNodePath: ${relaunchNodePath}\n` +
+        `  - relaunchEntryScript: ${relaunchEntryScript}\n` +
+        `  - Temp Script Path: ${scriptPath}\n`
+      );
+    } catch {
+      // ignore
+    }
+  }
 
   const scriptContent = buildRelaunchScript({
     parentPid,
@@ -274,6 +308,17 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     stdio: 'ignore',
   });
   child.unref();
+
+  if (logPath) {
+    try {
+      appendFileSync(
+        logPath,
+        `[${new Date().toISOString()}] [Parent] Spawned helper process (Helper Script PID: ${child.pid || 'unknown'}). Exiting parent soon.\n`
+      );
+    } catch {
+      // ignore
+    }
+  }
 
   return scriptPath;
 }
