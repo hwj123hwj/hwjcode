@@ -9,7 +9,7 @@
  * Pure helpers for the Feishu "explicit dispatch" track: deciding when an
  * incoming message should be forcibly delegated to an external agent
  * (Claude Code or Codex), and building the directive that forces Easy Code's
- * agent loop to call the `delegate_to_claude_code` tool with the right
+ * agent loop to call the `delegate_to_agent` tool with the right
  * `agent` argument.
  *
  * Kept free of any Feishu/runtime dependencies so it can be unit-tested in
@@ -147,7 +147,7 @@ export type DelegateDirectiveMode = 'stream' | 'background';
 
 /**
  * Build the message handed to Easy Code's agent loop so it is forced to
- * delegate via the `delegate_to_claude_code` tool with the correct `agent`
+ * delegate via the `delegate_to_agent` tool with the correct `agent`
  * and `mode` arguments. The tool's streaming output then flows to the Feishu
  * card unchanged.
  *
@@ -176,7 +176,7 @@ export function buildDelegateDirective(
   return [
     `【强制派发指令】用户要求将以下任务交给本机的 ${label} 执行（${modeHint}）。`,
     resumeNote,
-    `你必须立即调用 delegate_to_claude_code 工具，参数：agent="${agent}"，mode="${mode}"${resumeArg}，task 填写下面的完整原文。`,
+    `你必须立即调用 delegate_to_agent 工具，参数：agent="${agent}"，mode="${mode}"${resumeArg}，task 填写下面的完整原文。`,
     '不要自己动手处理这个任务，也不要追问，直接派发：',
     '',
     task,
