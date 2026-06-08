@@ -39,6 +39,12 @@ import {
 import { FeishuGateway, FeishuMessage, FeishuFooterMetrics, buildCardKitFinalCard } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
 import {
+  type FeishuAgentTarget,
+  resolveDelegation,
+  buildDelegateDirective,
+  parseBindAgentFlag,
+} from '../../services/feishu/delegateDirective.js';
+import {
   REQUIRED_APP_SCOPES,
   SENSITIVE_GROUP_MSG_SCOPE,
   buildScopeApplyUrl,
@@ -425,6 +431,11 @@ interface FeishuProjectRoute {
     mode: 'on' | 'off' | 'auto';
     effort?: 'auto' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   };
+  /**
+   * Default agent for this chat. When 'claude-code', non-slash messages are
+   * forcibly delegated to the local Claude Code. Defaults to 'self' (Easy Code).
+   */
+  agent?: FeishuAgentTarget;
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
@@ -1562,7 +1573,7 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/status':           '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
   '/thinking':         '切换/配置 AI 思考模式与深度',
   '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
-  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`',
+  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 设默认派发给本机 Claude Code（或在消息前加 `@cc` 单条派发）',
   '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
   '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
   '/help':             '显示此帮助',
@@ -2221,12 +2232,27 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
 
     // 拦截群内自助绑定的 `/bind` 命令
+    // 支持：`/bind <路径>`、`/bind <路径> --agent claude-code`、`/bind --agent self`
     if (messageText.startsWith('/bind')) {
-      const parts = messageText.split(/\s+/);
-      if (parts.length < 2) {
-        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`';
+      const argString = messageText.slice('/bind'.length).trim();
+      const { agent, rest } = parseBindAgentFlag(argString);
+      const targetPath = rest.split(/\s+/).filter(Boolean)[0]?.trim();
+
+      // 仅切换默认 agent（不带路径）：用于给已绑定的群改派发目标
+      if (!targetPath && agent) {
+        try {
+          await saveProjectRoute(msg.chatId, { agent });
+          emitFeishuProjectRoutesUpdated();
+          const label = agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己';
+          return `✅ 已将本群的默认执行方切换为 **${label}**。`;
+        } catch (e: any) {
+          return `❌ 切换默认执行方失败: ${e.message}`;
+        }
       }
-      const targetPath = parts[1].trim();
+
+      if (!targetPath) {
+        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`（可选 `--agent claude-code`）';
+      }
       try {
         const path = await import('node:path');
         const fs = await import('node:fs');
@@ -2234,10 +2260,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
         if (!fs.existsSync(absPath)) {
           fs.mkdirSync(absPath, { recursive: true });
         }
-        await saveProjectRoute(msg.chatId, { projectRoot: absPath });
+        const routeUpdate: Partial<FeishuProjectRoute> = { projectRoot: absPath };
+        if (agent) routeUpdate.agent = agent;
+        await saveProjectRoute(msg.chatId, routeUpdate);
         // 📡 通知仪表板路由已更新
         emitFeishuProjectRoutesUpdated();
-        return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
+        const agentTip = agent
+          ? `\n🤖 **默认执行方**: ${agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己'}`
+          : '';
+        return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`${agentTip}\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
       } catch (e: any) {
         return `❌ 绑定目录失败: ${e.message}`;
       }
@@ -2847,6 +2878,22 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
       } else {
         currentMessage = messageTextForAI;
+      }
+
+      // 🤖 显式派发轨：`@cc/`cc` 前缀，或本群默认执行方为 claude-code 时，
+      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_claude_code 工具。
+      //    工具的流式输出会沿用现有 card 通道回传飞书。多模态图片在派发场景下
+      //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，Claude Code 可直接读盘）。
+      try {
+        const routeAgentForChat = (await loadProjectRoutes())[msg.chatId]?.agent;
+        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat);
+        if (delegation.delegate && delegation.task) {
+          messageTextForAI = buildDelegateDirective(delegation.task);
+          currentMessage = messageTextForAI;
+          dlog(`[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason})`);
+        }
+      } catch (e: any) {
+        dwarn(`[Feishu] Delegation routing check failed: ${e?.message || e}`);
       }
 
       const MAX_TURNS = 100;
