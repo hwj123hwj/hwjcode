@@ -38,8 +38,8 @@ export interface BackgroundTask {
   id: string;
   command: string;
   directory?: string;
-  /** Discriminator: 'shell' for process-based tasks, 'claude-code' for ACP delegate tasks. */
-  kind?: 'shell' | 'claude-code';
+  /** Discriminator: 'shell' for process-based tasks, 'claude-code' / 'codex' for ACP delegate tasks. */
+  kind?: 'shell' | 'claude-code' | 'codex';
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   pid?: number;
   startTime: number;
@@ -67,7 +67,7 @@ export class BackgroundTaskManager extends EventEmitter {
   /**
    * 创建一个新的后台任务
    */
-  createTask(command: string, directory?: string, kind?: 'shell' | 'claude-code'): BackgroundTask {
+  createTask(command: string, directory?: string, kind?: 'shell' | 'claude-code' | 'codex'): BackgroundTask {
     const id = generateTaskId(command, directory);
     const task: BackgroundTask = {
       id,

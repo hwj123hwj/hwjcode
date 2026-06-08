@@ -26,7 +26,7 @@ describe('CheckDelegateStatusTool', () => {
     const tool = makeTool();
     const res = await tool.execute({ taskId: 'nonexist' }, new AbortController().signal);
     expect(res.status).toBe('not_found');
-    expect(res.returnDisplay).toContain('No Claude Code task found');
+    expect(res.returnDisplay).toContain('No delegated agent task found');
   });
 
   it('returns not_found for a shell task (wrong kind)', async () => {
@@ -35,6 +35,28 @@ describe('CheckDelegateStatusTool', () => {
     const tool = makeTool();
     const res = await tool.execute({ taskId: mgr.getAllTasks()[0].id }, new AbortController().signal);
     expect(res.status).toBe('not_found');
+  });
+
+  it('finds a running codex task (kind:"codex" is treated as ACP delegate)', async () => {
+    const mgr = getBackgroundTaskManager();
+    const bgTask = mgr.createTask('[Codex] add tests', '/proj', 'codex');
+    mgr.appendOutput(bgTask.id, '🔧 Edit src/foo.ts\nAdding unit tests...');
+
+    const tool = makeTool();
+    const res = await tool.execute({ taskId: bgTask.id }, new AbortController().signal);
+    expect(res.status).toBe('running');
+  });
+
+  it('reports completed for a codex task', async () => {
+    const mgr = getBackgroundTaskManager();
+    const bgTask = mgr.createTask('[Codex] refactor', '/proj', 'codex');
+    bgTask.answer = 'Refactored 3 files.';
+    mgr.completeTask(bgTask.id, { exitCode: 0 });
+
+    const tool = makeTool();
+    const res = await tool.execute({ taskId: bgTask.id }, new AbortController().signal);
+    expect(res.status).toBe('completed');
+    expect(res.returnDisplay).toContain('Refactored 3 files.');
   });
 
   it('reports running status with progress snapshot', async () => {
