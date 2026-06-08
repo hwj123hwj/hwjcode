@@ -6,7 +6,7 @@
  */
 
 /**
- * Pure builder for the Feishu `/sessions` dashboard card — a CardKit 2.0 card
+ * Pure builder for the Feishu `/acp-session` dashboard card — a CardKit 2.0 card
  * that shows, in one place:
  *   - **Running / recent delegate tasks** on this machine (Claude Code / Codex),
  *     with live status: current tool, plan progress, token %, elapsed time.

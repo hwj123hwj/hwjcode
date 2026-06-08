@@ -6,7 +6,7 @@
  */
 
 /**
- * `/sessions` (alias `/会话`) — the Feishu multi-session dashboard.
+ * `/acp-session` (alias `/acp-会话`) — the Feishu multi-session dashboard.
  *
  * Sends a CardKit 2.0 card that combines two data sources:
  *   1. Running / recent **delegate tasks** from the in-process background task
@@ -117,7 +117,7 @@ function collectRunningTasks(): RunningTaskView[] {
 }
 
 /**
- * Handle the `/sessions` command: send the dashboard card and keep it fresh.
+ * Handle the `/acp-session` command: send the dashboard card and keep it fresh.
  * Resolves once the card has been sent (discovery + live refresh continue in
  * the background). Never throws — falls back to a plain text message on error.
  */
