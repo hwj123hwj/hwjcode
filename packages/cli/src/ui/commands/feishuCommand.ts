@@ -3170,7 +3170,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
 
       // 🤖 显式派发轨：`@cc` / `@codex` 前缀，或本群默认执行方为 claude-code / codex 时，
-      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_claude_code 工具
+      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_agent 工具
       //    （并按 delegation.agent 指定 codex 还是 claude-code）。
       //    工具的流式输出会沿用现有 card 通道回传飞书。多模态图片在派发场景下
       //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，目标 agent 可直接读盘）。
@@ -3652,12 +3652,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
               } else {
                 toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
               }
-            } else if (toolName === 'delegate_to_claude_code') {
+            } else if (toolName === 'delegate_to_agent') {
               // 🎯 派发给本机 Claude Code / Codex：与 task/shell 对齐，实时把外部
               //    agent 的执行过程（消息 / 工具调用 / 计划 / token）流式推到飞书卡片，
               //    而非只在结束时给结果。通过 updateOutput 消费累计 transcript。
               //    （仅 stream 模式会持续回传；background 模式工具会立即返回 Task ID。）
-              const delegateTool = toolRegistry.getTool('delegate_to_claude_code');
+              const delegateTool = toolRegistry.getTool('delegate_to_agent');
               if (delegateTool) {
                 const startTime = Date.now();
                 let lastCardUpdateTime = 0;
@@ -3671,7 +3671,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     const now = Date.now();
                     // 节流刷新外部 agent 的滚动过程，避免触发飞书 API 限流。
                     if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
-                      const liveProgressMarkdown = formatToolCallWithBorder('delegate_to_claude_code', req.args, true, output, true);
+                      const liveProgressMarkdown = formatToolCallWithBorder('delegate_to_agent', req.args, true, output, true);
                       const delegateFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                       delegateFooterMetrics.status = '外部 Agent 执行中';
                       if (streaming) {
@@ -3689,7 +3689,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 config?.getTelemetry?.()?.logToolCall?.(config, {
                   'event.name': 'tool_call',
                   'event.timestamp': new Date().toISOString(),
-                  function_name: 'delegate_to_claude_code',
+                  function_name: 'delegate_to_agent',
                   function_args: req.args,
                   duration_ms: durationMs,
                   success: true,
@@ -3704,7 +3704,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
                   responseParts: [{
                     functionResponse: {
                       id: req.callId,
-                      name: 'delegate_to_claude_code',
+                      name: 'delegate_to_agent',
                       response: { output: toolResult.llmContent },
                     }
                   }],
@@ -4201,7 +4201,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
         }
       }
-    } else if (toolName === 'delegate_to_claude_code') {
+    } else if (toolName === 'delegate_to_agent') {
       // 外部 Agent 的 transcript 可能极长（100K+），必须裁剪以防撑爆飞书卡片。
       // 实时态（isLive=true）：取尾部内容（最新进展更重要）+ 字符硬截断。
       // 最终态（isLive=false）：仅显示摘要前100字符。

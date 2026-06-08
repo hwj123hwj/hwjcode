@@ -31,8 +31,8 @@ const DELEGATE_MODES: readonly DelegateMode[] = ['stream', 'background'] as cons
 /** Default mode when the caller doesn't pick one. */
 const DEFAULT_MODE: DelegateMode = 'background';
 
-/** Parameters for {@link DelegateToClaudeCodeTool}. */
-export interface DelegateToClaudeCodeParams {
+/** Parameters for {@link DelegateToAgentTool}. */
+export interface DelegateToAgentParams {
   /** The full task/instruction handed to the external agent. */
   task: string;
   /**
@@ -63,14 +63,14 @@ export interface DelegateToClaudeCodeParams {
   /**
    * Resume an existing native session of the external agent instead of
    * starting fresh. Pass a `sessionId` discovered via session listing (the
-   * Feishu `/sessions` card). The external agent reloads that conversation's
+   * Feishu `/acp-session` card). The external agent reloads that conversation's
    * full history before running `task`, so follow-ups keep prior context.
    */
   resumeSessionId?: string;
 }
 
-/** Result shape for {@link DelegateToClaudeCodeTool}. */
-export interface DelegateToClaudeCodeResult extends ToolResult {
+/** Result shape for {@link DelegateToAgentTool}. */
+export interface DelegateToAgentResult extends ToolResult {
   status: 'success' | 'failed' | 'cancelled' | 'timed_out';
 }
 
@@ -80,16 +80,16 @@ export interface DelegateToClaudeCodeResult extends ToolResult {
  * the main agent is free to continue other work while the delegated task runs.
  * Completion is reported through the BackgroundTaskManager event system.
  */
-export class DelegateToClaudeCodeTool extends BaseTool<
-  DelegateToClaudeCodeParams,
-  DelegateToClaudeCodeResult
+export class DelegateToAgentTool extends BaseTool<
+  DelegateToAgentParams,
+  DelegateToAgentResult
 > {
-  static readonly Name: string = 'delegate_to_claude_code';
+  static readonly Name: string = 'delegate_to_agent';
 
   constructor(private readonly config: Config) {
     super(
-      DelegateToClaudeCodeTool.Name,
-      'DelegateToClaudeCode',
+      DelegateToAgentTool.Name,
+      'DelegateToAgent',
       [
         "Delegate a coding task to one of the user's local coding agents (Claude Code or Codex).",
         '',
@@ -144,7 +144,7 @@ export class DelegateToClaudeCodeTool extends BaseTool<
           resumeSessionId: {
             type: Type.STRING,
             description:
-              'Optional. Resume an existing native session of the external agent (a sessionId from the /sessions list) instead of starting fresh. The agent reloads that conversation before running the task.',
+              'Optional. Resume an existing native session of the external agent (a sessionId from the /acp-session list) instead of starting fresh. The agent reloads that conversation before running the task.',
           },
         },
         required: ['task'],
@@ -156,11 +156,11 @@ export class DelegateToClaudeCodeTool extends BaseTool<
     );
   }
 
-  validateToolParams(params: DelegateToClaudeCodeParams): string | null {
+  validateToolParams(params: DelegateToAgentParams): string | null {
     const errors = SchemaValidator.validate(
       this.schema.parameters,
       params,
-      DelegateToClaudeCodeTool.Name,
+      DelegateToAgentTool.Name,
     );
     if (errors) {
       return errors;
@@ -184,7 +184,7 @@ export class DelegateToClaudeCodeTool extends BaseTool<
     return null;
   }
 
-  getDescription(params: DelegateToClaudeCodeParams): string {
+  getDescription(params: DelegateToAgentParams): string {
     const agent = params.agent ?? DEFAULT_AGENT;
     const mode = params.mode ?? DEFAULT_MODE;
     const label = resolveExternalAgentSpec(agent).label;
@@ -194,10 +194,10 @@ export class DelegateToClaudeCodeTool extends BaseTool<
   }
 
   async execute(
-    params: DelegateToClaudeCodeParams,
+    params: DelegateToAgentParams,
     signal: AbortSignal,
     updateOutput?: (output: string) => void,
-  ): Promise<DelegateToClaudeCodeResult> {
+  ): Promise<DelegateToAgentResult> {
     const validationError = this.validateToolParams(params);
     if (validationError) {
       return {
@@ -256,13 +256,13 @@ export class DelegateToClaudeCodeTool extends BaseTool<
    * foreground by definition, with no post-hoc status to poll.
    */
   private async runStream(
-    params: DelegateToClaudeCodeParams,
+    params: DelegateToAgentParams,
     agent: ExternalAgentType,
     label: string,
     cwd: string,
     signal: AbortSignal,
     updateOutput?: (output: string) => void,
-  ): Promise<DelegateToClaudeCodeResult> {
+  ): Promise<DelegateToAgentResult> {
     const startTime = Date.now();
     try {
       const result = await runDelegatedTask({
@@ -272,7 +272,7 @@ export class DelegateToClaudeCodeTool extends BaseTool<
         signal,
         onUpdate: updateOutput,
         autoApprove: true,
-        timeoutMs: DelegateToClaudeCodeTool.DEFAULT_TIMEOUT_MS,
+        timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
       });
 
@@ -341,7 +341,7 @@ export class DelegateToClaudeCodeTool extends BaseTool<
    * BackgroundTaskManager with streaming output and final result.
    */
   private async runAsync(
-    params: DelegateToClaudeCodeParams,
+    params: DelegateToAgentParams,
     agent: ExternalAgentType,
     cwd: string,
     taskId: string,
@@ -364,10 +364,10 @@ export class DelegateToClaudeCodeTool extends BaseTool<
         cwd,
         signal,
         onUpdate: onStreamUpdate,
-        // Structured progress → persisted task record (drives the /sessions card).
+        // Structured progress → persisted task record (drives the /acp-session card).
         onProgress: (progress) => taskManager.updateProgress(taskId, progress),
         autoApprove: true,
-        timeoutMs: DelegateToClaudeCodeTool.DEFAULT_TIMEOUT_MS,
+        timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
       });
 

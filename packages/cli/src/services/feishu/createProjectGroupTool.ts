@@ -35,7 +35,7 @@ export interface CreateProjectGroupParams {
   /**
    * Optional: when set, the newly created group's default delegate agent is
    * pre-bound to this value. Messages in the group will be forcibly routed
-   * to `delegate_to_claude_code(agent=...)`. Omit to leave the group bound
+   * to `delegate_to_agent(agent=...)`. Omit to leave the group bound
    * to Easy Code itself (the default).
    */
   agent?: FeishuDelegateAgent;

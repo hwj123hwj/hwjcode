@@ -110,7 +110,7 @@ describe('resolveDelegation', () => {
 describe('buildDelegateDirective', () => {
   it('defaults to Claude Code + stream mode and names the tool', () => {
     const d = buildDelegateDirective('add tests');
-    expect(d).toContain('delegate_to_claude_code');
+    expect(d).toContain('delegate_to_agent');
     expect(d).toContain('add tests');
     expect(d).toContain('Claude Code');
     expect(d).toContain('agent="claude-code"');
@@ -121,7 +121,7 @@ describe('buildDelegateDirective', () => {
 
   it('builds a Codex directive when agent="codex" (still stream by default)', () => {
     const d = buildDelegateDirective('write benchmark', 'codex');
-    expect(d).toContain('delegate_to_claude_code');
+    expect(d).toContain('delegate_to_agent');
     expect(d).toContain('write benchmark');
     expect(d).toContain('Codex');
     expect(d).not.toContain('Claude Code');

@@ -52,7 +52,7 @@ import { BatchTool } from '../tools/batch.js';
 import { AskUserQuestionTool } from '../tools/ask-user-question.js';
 import { LocalTimeTool } from '../tools/local-time.js';
 import { LarkCliTool } from '../tools/lark-cli.js';
-import { DelegateToClaudeCodeTool } from '../tools/delegate-agent.js';
+import { DelegateToAgentTool } from '../tools/delegate-agent.js';
 import { CheckDelegateStatusTool } from '../tools/delegate-status.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
@@ -1149,7 +1149,7 @@ export class Config {
 
     // Delegate-to-external-agent (ACP client). Drives the user's local Claude
     // Code; gracefully reports a readable error if the bridge isn't installed.
-    registerCoreTool(DelegateToClaudeCodeTool, this);
+    registerCoreTool(DelegateToAgentTool, this);
     registerCoreTool(CheckDelegateStatusTool, this);
 
     // TaskTool (SubAgent) is available in both CLI and VSCode environments
