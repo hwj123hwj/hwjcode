@@ -7,7 +7,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
-import { t } from '../utils/i18n.js';
+import { t, tp } from '../utils/i18n.js';
 
 // ── 类型定义 ──────────────────────────────────────────────
 
@@ -40,6 +40,12 @@ export interface FeishuStatusDashboardProps {
   terminalWidth: number;
   /** chatId → 群名 的解析结果（尽力而为）。有群名时优先展示群名，否则 fallback 到 chatId。 */
   chatNames?: Record<string, string>;
+  /**
+   * 经飞书 chat_mode 判定为 p2p 单聊（与 Bot 的私聊）的 chatId 集合。
+   * 命中时展示「与机器人 X 的私聊」而非 chatId——p2p 单聊本身无群名，
+   * 且与无名群/无权限群的 chatId 同为 oc_ 前缀，必须靠 chat_mode 精确区分。
+   */
+  p2pChatIds?: Set<string>;
 }
 
 // ── 辅助 ──────────────────────────────────────────────────
@@ -85,6 +91,7 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
   isConnected,
   terminalWidth,
   chatNames,
+  p2pChatIds,
 }) => {
   const routeEntries = Object.entries(routes);
   const hasActiveGroups = activeGroupChatIds.size > 0;
@@ -169,13 +176,18 @@ export const FeishuStatusDashboard: React.FC<FeishuStatusDashboardProps> = ({
           <Box flexDirection="column" marginTop={0}>
             {visibleProjects.map(([chatId, route]) => {
               const isActive = activeGroupChatIds.has(chatId);
-              // 优先展示已解析的群名；无群名时 fallback 到 chatId。
-              // 屏幕足够宽时（>= 85 字符），显示完整的 chatId，否则使用短 chatId 截断，保证不换行。
+              // 显示名优先级：p2p 单聊文案 > 已解析群名 > chatId（宽屏完整 / 窄屏截断）。
+              // p2p 判定优先于群名，避免上游误传 name 时把私聊显示成群名。
               const resolvedName = chatNames?.[chatId];
               const isWide = terminalWidth >= 85;
-              const chatIdToShow = resolvedName
-                ? resolvedName
-                : isWide ? chatId : shortChatId(chatId);
+              const isP2p = p2pChatIds?.has(chatId) ?? false;
+              const chatIdToShow = isP2p
+                ? (botName
+                    ? tp('feishu.status.p2p_chat_label', { bot: botName })
+                    : t('feishu.status.p2p_chat_label_unknown'))
+                : resolvedName
+                  ? resolvedName
+                  : isWide ? chatId : shortChatId(chatId);
               return (
                 <Box key={chatId} justifyContent="space-between" marginTop={0}>
                   <Box>

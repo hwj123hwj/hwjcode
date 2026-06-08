@@ -25,6 +25,8 @@ export enum AppEvent {
   FeishuProjectRoutesUpdated = 'feishu-project-routes-updated',
   /** 飞书仪表板：群名称解析完成（chatId → 群名），用于在 Dashboard 中用群名替代 chatId 展示 */
   FeishuChatNamesResolved = 'feishu-chat-names-resolved',
+  /** 飞书仪表板：p2p 单聊（与 Bot 的私聊）解析完成（chatId 列表），用于展示「与机器人 X 的私聊」 */
+  FeishuP2pChatsResolved = 'feishu-p2p-chats-resolved',
   AuthenticationSuccessful = 'authentication-successful',
   AuthenticationFailed = 'authentication-failed',
   AuthenticationRequired = 'authentication-required',
