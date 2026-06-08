@@ -118,10 +118,8 @@ export const CARDKIT_LOADING_ELEMENT_ID = 'loading_icon';
  * 全局开关：是否启用 CardKit 2.0 流式卡片。
  *
  * 当前 CardKit 2.0 在生产环境表现不稳定（创建/推送偶发 5xx、卡片渲染不一致），
- * 默认短路到老版交互卡片（buildAdaptiveCard + sendCard）。
+ * 默认禁用 CardKit 2.0，统一走老版带标题的交互卡片（sendCard + updateCard）。
  * 设置环境变量 EASYCODE_FEISHU_CARDKIT_V2=1 可临时启用（仅供测试 / 开发）。
- *
- * 等 CardKit 2.0 稳定后改为默认 true，或抽成 settings 控制。
  */
 export function isCardKitV2Enabled(): boolean {
   return process.env['EASYCODE_FEISHU_CARDKIT_V2'] === '1';
