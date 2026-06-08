@@ -307,7 +307,6 @@ export const useGeminiStream = (
   geminiClient: GeminiClient,
   history: HistoryItem[],
   addItem: UseHistoryManagerReturn['addItem'],
-  setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
   config: Config,
   onDebugMessage: (message: string) => void,
   handleSlashCommand: (
@@ -1578,7 +1577,6 @@ User question: ${queryStr}`;
       setReasoning(null);
 
       const userMessageTimestamp = Date.now();
-      setShowHelp(false);
 
       // 🔄 异步更新模型配置（仅在新对话时，不在继续对话时）
       if (!options?.isContinuation && settings && config) {
@@ -1964,7 +1962,6 @@ User question: ${queryStr}`;
     },
     [
       streamingState,
-      setShowHelp,
       setModelSwitchedFromQuotaError,
       prepareQueryForGemini,
       processGeminiStreamEvents,

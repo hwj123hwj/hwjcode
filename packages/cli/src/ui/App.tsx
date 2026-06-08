@@ -600,7 +600,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   const [geminiMdFileCount, setGeminiMdFileCount] = useState<number>(0);
   const [debugMessage, setDebugMessage] = useState<string>('');
-  const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showBackgroundTaskPanel, setShowBackgroundTaskPanelState] = useState<boolean>(false);
 
   // 🎯 后台任务通知队列 - AI 忙时先缓存，等 AI 空闲后再注入历史
@@ -1403,7 +1402,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     clearItems,
     loadHistory,
     refreshStatic,
-    setShowHelp,
     setDebugMessage,
     openThemeDialog,
     openModelDialog,
@@ -1442,7 +1440,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     config.getGeminiClient(),
     history,
     addItem,
-    setShowHelp,
     config,
     setDebugMessage,
     handleSlashCommand,
@@ -2212,14 +2209,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
     // 处理取消键（主要用于非流响应状态下的取消操作）
     if (isCancelKey) {
-      // 如果帮助面板正在显示，按 ESC 关闭它
-      if (showHelp) {
-        setShowHelp(false);
-        return; // 阻止其他处理
-      }
       // 这里可以添加其他需要取消的操作，比如退出确认对话框等
       // 流响应的取消由useGeminiStream处理
-      // console.log('🌍 [App级别] 检测到取消键');
     }
 
     if (key.ctrl && input === 'o') {
@@ -2678,8 +2669,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
             <ShowMoreLines />
           </Box>
         </OverflowProvider>
-
-        {showHelp ? <Help commands={slashCommands} /> : null}
 
         {/* 显示思考过程框：reasoning 存在就显示。
             正文开始 / 流式结束 / 用户取消 / 新一轮提问 时由
