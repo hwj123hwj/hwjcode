@@ -966,28 +966,48 @@ $env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
 
 ---
 
-## 🤝 派发任务给本机 Claude Code
+## 🤝 派发任务给本机 Claude Code / Codex
 
-Easy Code 可以作为 **ACP 编排方**，把编码任务派发给你本机安装并登录的 **Claude Code** 执行——尤其适合飞书网关模式：你在飞书里说一句话，Easy Code 要么自己干，要么转交给 Claude Code 干。
+Easy Code 可以作为 **ACP 编排方**，把编码任务派发给你本机安装并登录的 **Claude Code** 或 **Codex** 执行——尤其适合飞书网关模式：你在飞书里说一句话，Easy Code 要么自己干，要么转交给本机的 cc / codex 干。
 
 ### 前提
 
-- 本机已安装并登录 **Claude Code**（派发会复用其本地登录态，不需要额外配置密钥）。
-- Easy Code 通过 Zed 官方的 `@zed-industries/claude-code-acp` 桥按需拉起（默认 `npx` 运行，不打入安装包）。
-  - 可用环境变量 `EASYCODE_CLAUDE_CODE_ACP_CMD` 覆盖启动命令（例如指向全局安装或本地构建）。
+- 本机已安装并登录 **Claude Code** 和/或 **Codex**（派发会复用其本地登录态，不需要额外配置密钥）。
+- Easy Code 通过官方 ACP 桥按需拉起（默认 `npx` 运行，不打入安装包）：
+  - Claude Code → `@agentclientprotocol/claude-agent-acp`，可用 `EASYCODE_CLAUDE_CODE_ACP_CMD` 覆盖启动命令。
+  - Codex → `@zed-industries/codex-acp`，可用 `EASYCODE_CODEX_ACP_CMD` 覆盖启动命令。
 
-### 两种派发方式
+### 派发方式
 
 | 方式 | 说明 |
 |:---|:---|
-| **模型自主** | Easy Code 的 AI 会按任务自行判断，必要时调用内置工具 `delegate_to_claude_code` 派发。 |
-| **显式强制（飞书）** | 消息前加 `@cc`（或 `/cc`）前缀单条强制派发，例如：`@cc 给 src/foo.ts 加单元测试`。 |
-| **群默认（飞书）** | `/bind <项目路径> --agent claude-code` 把整个群的默认执行方设为 Claude Code；`/bind --agent self` 改回 Easy Code 自己。 |
+| **模型自主** | Easy Code 的 AI 会按任务自行判断，必要时调用内置工具 `delegate_to_claude_code` 派发（可选 `agent: claude-code\|codex`）。 |
+| **显式强制（飞书）** | 消息前加 `@cc`（或 `/cc`）派发给 Claude Code、`@codex`（或 `/codex`、`@cdx`）派发给 Codex。例：`@cc 给 src/foo.ts 加单元测试`、`@codex 写个基准测试`。 |
+| **群默认（飞书）** | `/bind <项目路径> --agent claude-code\|codex` 把整个群的默认执行方设为对应 agent；`/bind --agent self` 改回 Easy Code 自己。 |
 
-派发期间，Claude Code 的执行进度（消息与工具调用）会通过飞书 CardKit 卡片**实时流式**回传，最终结果汇总返回。
+派发期间，外部 agent 的执行进度（消息与工具调用）会通过飞书 CardKit 卡片**实时流式**回传，最终结果汇总返回。
 
-> ⚠️ 在飞书无人值守场景下，派发的 Claude Code 默认**自动放行权限并可改文件**，请仅对可信项目使用。
-> ℹ️ 后续将支持把 `codex` 作为另一个可派发的本机 agent（同一套 ACP 客户端）。
+### 📊 多会话管理（飞书 `/sessions`）
+
+在飞书里发送 **`/sessions`**（别名 **`/会话`**）会推送一张 **CardKit 2.0 Dashboard 卡片**，集中展示本机的 Agent 会话：
+
+- **🚀 本机任务**：正在运行 / 最近的派发任务，带实时状态——状态徽章（🟢运行中 / ✅完成 / ❌失败）、当前工具、计划进度（`2/5`）、token 占用（`30%`）、已运行时长。卡片会在任务运行期间**自动刷新**。
+- **🗂️ 可续接的历史会话**：自动发现 Claude Code / Codex 各自本机已有的会话（标题、最近活动时间），并为每条给出续接指令。
+
+> 派发任务记录会持久化到 `~/.easycode-user/delegate-tasks/`，**网关重启后历史任务仍可在 `/sessions` 查看**（重启期间运行中的任务会被标记为失败）。
+
+### 🔄 续接已有会话
+
+想接着某个历史会话继续（保留完整上下文），用 `resume` 子语法：
+
+```text
+@cc:resume <sessionId> 继续把单元测试补全
+@codex:resume <sessionId> 把上次的重构收尾
+```
+
+`<sessionId>` 即 `/sessions` 卡片里列出的会话 id。外部 agent 会先 `session/load` 恢复该会话的完整历史，再执行你的新任务。绑定了默认 agent 的群也可直接发 `resume <sessionId> <任务>`。
+
+> ⚠️ 在飞书无人值守场景下，派发的外部 agent 默认**自动放行权限并可改文件**，请仅对可信项目使用。
 
 ---
 
