@@ -7,8 +7,8 @@
 
 import { Type } from '@google/genai';
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { BaseTool, Icon, ToolResult } from './tools.js';
 import { Config } from '../config/config.js';
@@ -37,12 +37,24 @@ export interface BuildRelaunchScriptOptions {
   parentPid: number;
   /** 安装模式。 */
   install: RelaunchInstallMode;
-  /** 重新拉起的命令（全局 bin 名）。 */
+  /** 重新拉起的命令（全局 bin 名）。仅在未提供 node 绝对路径时作为回退使用。 */
   relaunchCommand: string;
   /** 重新拉起的参数。 */
   relaunchArgs: string[];
   /** 外挂脚本自身的绝对路径（用于结束时自删）。 */
   scriptPath: string;
+  /**
+   * node 可执行文件的绝对路径（通常为 process.execPath）。
+   * 提供后将以 `<node> <entryScript> <args...>` 自举重启，彻底绕开 PATH/nvm/homebrew 查找。
+   */
+  relaunchNodePath?: string;
+  /**
+   * CLI 入口脚本的绝对路径（通常为 process.argv[1]）。
+   * 与 relaunchNodePath 配套使用：当前进程正是由这两者启动的，复用它们即可精确复刻启动方式。
+   */
+  relaunchEntryScript?: string;
+  /** 重启日志路径。提供后 relaunch 的 stdout/stderr 会重定向到此文件，便于排障。 */
+  logPath?: string;
 }
 
 /**
@@ -51,19 +63,38 @@ export interface BuildRelaunchScriptOptions {
  * 外挂生命周期：
  *   1) 轮询父 PID，直到父进程退出（process.kill(pid, 0) 抛 ESRCH 即已退出）
  *   2) 按 install 模式安装（none 跳过 / npm latest / 本地 tgz）
- *   3) detached + unref 拉起 `<relaunchCommand> <args...>`
+ *   3) detached + unref 拉起新进程，脱离本外挂生命周期
  *   4) 删除自身临时脚本
+ *
+ * 重启目标的两种模式：
+ *   - 绝对路径自举（推荐）：提供 relaunchNodePath + relaunchEntryScript 时，
+ *     以 `spawn(<node>, [<entryScript>, ...args], { detached })` 启动，**不使用 shell**。
+ *     当前进程正是由这两个绝对路径启动的，因此一定有效，彻底免疫 nvm / Homebrew /
+ *     非交互 shell 不加载 .bashrc 导致的 PATH 缺失（Ubuntu/macOS 重启失败的根因）。
+ *   - 命令回退：未提供绝对路径时，退回 `spawn(<command>, args, { shell:true })`。
  *
  * 同一套脚本被 SelfUpdateTool（更新+重启 / 仅重启）与 /feishu restart 共用。
  * 纯函数，只产字符串，便于单测。
  */
 export function buildRelaunchScript(opts: BuildRelaunchScriptOptions): string {
-  const { parentPid, install, relaunchCommand, relaunchArgs, scriptPath } = opts;
+  const {
+    parentPid,
+    install,
+    relaunchCommand,
+    relaunchArgs,
+    scriptPath,
+    relaunchNodePath,
+    relaunchEntryScript,
+    logPath,
+  } = opts;
 
   const PARENT_PID = JSON.stringify(parentPid);
   const RELAUNCH_CMD = JSON.stringify(relaunchCommand);
   const RELAUNCH_ARGS = JSON.stringify(relaunchArgs);
   const SCRIPT_PATH = JSON.stringify(scriptPath);
+  const NODE_PATH = JSON.stringify(relaunchNodePath ?? null);
+  const ENTRY_SCRIPT = JSON.stringify(relaunchEntryScript ?? null);
+  const LOG_PATH = JSON.stringify(logPath ?? null);
 
   // 依据安装模式，生成 npm install 的参数数组（或空表示跳过）。
   // 用 JSON 内联，自动处理路径中的空格/反斜杠/引号，杜绝注入。
@@ -84,6 +115,9 @@ const INSTALL_ARGS = ${INSTALL_ARGS}; // null = skip install (restart only)
 const RELAUNCH_CMD = ${RELAUNCH_CMD};
 const RELAUNCH_ARGS = ${RELAUNCH_ARGS};
 const SCRIPT_PATH = ${SCRIPT_PATH};
+const NODE_PATH = ${NODE_PATH};       // absolute node path; null = fall back to command lookup
+const ENTRY_SCRIPT = ${ENTRY_SCRIPT}; // absolute CLI entry script; null = fall back to command lookup
+const LOG_PATH = ${LOG_PATH};         // relaunch log file; null = ignore output
 
 function isAlive(pid) {
   try {
@@ -96,6 +130,13 @@ function isAlive(pid) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function log(msg) {
+  if (!LOG_PATH) return;
+  try {
+    fs.appendFileSync(LOG_PATH, '[' + new Date().toISOString() + '] ' + msg + '\\n');
+  } catch (_) { /* logging is best-effort */ }
 }
 
 function cleanupSelf() {
@@ -115,23 +156,56 @@ async function main() {
 
   // 2) 按需安装（INSTALL_ARGS 为 null 时跳过 = 仅重启）
   if (INSTALL_ARGS) {
+    log('Installing: npm ' + INSTALL_ARGS.join(' '));
     const install = spawnSync('npm', INSTALL_ARGS, { stdio: 'ignore', shell: true });
     if (install.status !== 0) {
       // 安装失败：不拉起旧版本，清理后退出，避免误导。
+      log('Install failed with status ' + install.status);
       cleanupSelf();
       process.exit(install.status || 1);
     }
   }
 
-  // 3) detached 拉起新进程（飞书常驻模式），脱离本外挂生命周期。
-  const child = spawn(RELAUNCH_CMD, RELAUNCH_ARGS, {
-    detached: true,
-    stdio: 'ignore',
-    shell: true,
+  // 3) 准备 stdio：有日志路径则重定向 stdout/stderr 到日志文件，否则 ignore。
+  let stdio = 'ignore';
+  if (LOG_PATH) {
+    try {
+      const fd = fs.openSync(LOG_PATH, 'a');
+      stdio = ['ignore', fd, fd];
+    } catch (_) {
+      stdio = 'ignore';
+    }
+  }
+
+  // 4) detached 拉起新进程，脱离本外挂生命周期。
+  //    优先用 node 绝对路径 + 入口脚本自举（免疫 PATH/nvm/homebrew 问题，不用 shell）；
+  //    否则回退到命令查找（shell:true）。
+  let child;
+  if (NODE_PATH && ENTRY_SCRIPT) {
+    log('Relaunch (absolute): ' + NODE_PATH + ' ' + ENTRY_SCRIPT + ' ' + RELAUNCH_ARGS.join(' '));
+    child = spawn(NODE_PATH, [ENTRY_SCRIPT].concat(RELAUNCH_ARGS), {
+      detached: true,
+      stdio: stdio,
+    });
+  } else {
+    log('Relaunch (command): ' + RELAUNCH_CMD + ' ' + RELAUNCH_ARGS.join(' '));
+    child = spawn(RELAUNCH_CMD, RELAUNCH_ARGS, {
+      detached: true,
+      stdio: stdio,
+      shell: true,
+    });
+  }
+
+  // 关键：监听 spawn 失败事件，避免错误被静默吞掉（Ubuntu/macOS 重启失败时一无所知的根因）。
+  child.on('error', (err) => {
+    log('Relaunch spawn error: ' + (err && err.message ? err.message : String(err)));
+    cleanupSelf();
+    process.exit(1);
   });
+
   child.unref();
 
-  // 4) 自清理并退出。
+  // 5) 自清理并退出。
   cleanupSelf();
   process.exit(0);
 }
@@ -146,6 +220,10 @@ main();
  * 这是 SelfUpdateTool 与 /feishu restart 共用的底层动作：调用方负责在此之后
  * 安排当前进程退出（外挂会轮询父 PID 消失后接管）。
  *
+ * 重启目标采用"绝对路径自举"：用当前进程的 process.execPath（node 绝对路径）
+ * 与 process.argv[1]（CLI 入口脚本绝对路径）精确复刻当前启动方式，彻底绕开
+ * nvm / Homebrew / 非交互 shell 不加载 .bashrc 导致的 PATH 缺失问题。
+ *
  * @returns 写出的脚本路径
  */
 export function launchRelaunchHelper(install: RelaunchInstallMode): string {
@@ -155,12 +233,30 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
     `easycode-relaunch-${parentPid}-${Date.now()}.js`,
   );
 
+  // 重启日志固定写到全局配置目录，便于排障（Ubuntu/macOS 重启失败时可查）。
+  let logPath: string | undefined;
+  try {
+    const logDir = join(homedir(), '.easycode-user');
+    mkdirSync(logDir, { recursive: true });
+    logPath = join(logDir, 'relaunch.log');
+  } catch {
+    logPath = undefined; // 日志是 best-effort，失败不阻断重启
+  }
+
+  // 当前进程的绝对启动信息：node 路径 + 入口脚本。
+  // process.argv[1] 在常规启动下一定存在；缺失时回退到命令查找模式。
+  const relaunchNodePath = process.execPath;
+  const relaunchEntryScript = process.argv[1] || undefined;
+
   const scriptContent = buildRelaunchScript({
     parentPid,
     install,
     relaunchCommand: SELF_UPDATE_RELAUNCH_COMMAND,
     relaunchArgs: SELF_UPDATE_RELAUNCH_ARGS,
     scriptPath,
+    relaunchNodePath,
+    relaunchEntryScript,
+    logPath,
   });
 
   writeFileSync(scriptPath, scriptContent, 'utf8');
