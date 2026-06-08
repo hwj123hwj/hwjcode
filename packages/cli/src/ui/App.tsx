@@ -2586,7 +2586,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       geminiClient?.isInitialized?.()
     ) {
       feishuAutoStartTriggered.current = true;
-      void handleSlashCommand('/feishu start');
+      // 🔄 自更新重启后的启动延迟：新进程先 sleep，给飞书服务端充足时间
+      // 完成老进程的 WebSocket 关闭确认和消息投递结算，避免消息重推。
+      const startupDelay = parseInt(process.env.EASYCODE_STARTUP_DELAY_MS || '0', 10);
+      if (startupDelay > 0) {
+        setTimeout(() => void handleSlashCommand('/feishu start'), startupDelay);
+      } else {
+        void handleSlashCommand('/feishu start');
+      }
     }
   }, [
     config,

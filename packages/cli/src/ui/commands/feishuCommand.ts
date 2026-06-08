@@ -86,6 +86,7 @@ import {
   AudioReaderTool,
   SelfUpdateTool,
   launchRelaunchHelper,
+  type RelaunchInstallMode,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -815,6 +816,36 @@ function clearMessageQueue() {
   }
   activeAbortControllers.clear();
   activeSenderOpenId = null;
+}
+
+/**
+ * 优雅重启：中止 AI → 清理队列 → 断开 WS → spawn 外挂 → 延迟退出。
+ * 统一 /feishu restart 和 self_update 的退出流程，确保飞书 SDK 有充足时间
+ * 完成 { code:0 } 确认，避免消息被飞书服务端重推。
+ */
+async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<void> {
+  // 1) 中止所有正在进行的 AI 生成
+  for (const controller of activeAbortControllers.values()) {
+    try { controller.abort(); } catch { /* ignore */ }
+  }
+  activeAbortControllers.clear();
+
+  // 2) 清理消息队列
+  clearMessageQueue();
+
+  // 3) 优雅关闭飞书网关（发送 WebSocket close frame，而非硬断）
+  if (activeGateway) {
+    try { await activeGateway.disconnect(); } catch { /* ignore */ }
+    activeGateway = null;
+  }
+
+  // 4) spawn 外挂脚本（等父进程退出后接管重启）
+  launchRelaunchHelper(install);
+
+  // 5) 延迟退出：给飞书侧充足时间完成消息投递确认
+  setTimeout(() => {
+    process.exit(0);
+  }, 1500).unref?.();
 }
 
 /**
@@ -2291,11 +2322,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const restartMatch = messageText.trim().match(/^\/(?:feishu|飞书)\s+restart\b/i);
     if (restartMatch) {
       try {
-        launchRelaunchHelper({ type: 'none' });
-        // 给一点时间把回复发回飞书，再退出当前进程，让 detached 外挂接管重启。
-        setTimeout(() => {
-          process.exit(0);
-        }, 1500).unref?.();
+        // 优雅重启：中止 AI → 断开 WS → spawn 外挂 → 延迟退出
+        gracefulRestartThenExit({ type: 'none' });
         return '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。';
       } catch (e: any) {
         return `❌ 重启失败：${e?.message || String(e)}`;
@@ -4007,7 +4035,20 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         // 🎯 动态注册自更新重启工具（仅飞书模式可见）：模型一调用即升级 easycode-ai
         //    到 latest 并以 `easycode --feishu` 自动重启。普通 CLI 模式绝不注册。
-        toolRegistry.registerTool(new SelfUpdateTool(config));
+        const selfUpdateTool = new SelfUpdateTool(config);
+        // 注入优雅退出回调：AI 调用 self_update 时，先中止生成、断开 WS、清理队列，再退出。
+        SelfUpdateTool.onBeforeRestart = async () => {
+          for (const controller of activeAbortControllers.values()) {
+            try { controller.abort(); } catch { /* ignore */ }
+          }
+          activeAbortControllers.clear();
+          clearMessageQueue();
+          if (activeGateway) {
+            try { await activeGateway.disconnect(); } catch { /* ignore */ }
+            activeGateway = null;
+          }
+        };
+        toolRegistry.registerTool(selfUpdateTool);
 
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');

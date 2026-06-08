@@ -180,12 +180,18 @@ async function main() {
   // 4) detached 拉起新进程，脱离本外挂生命周期。
   //    优先用 node 绝对路径 + 入口脚本自举（免疫 PATH/nvm/homebrew 问题，不用 shell）；
   //    否则回退到命令查找（shell:true）。
+  //
+  //    设置 EASYCODE_STARTUP_DELAY_MS 让新进程在初始化飞书网关前 sleep，
+  //    给飞书服务端充足时间完成老进程的 WebSocket 关闭确认和消息投递结算，
+  //    避免老进程尚未完全退出时新进程就接入导致消息重推。
+  const env = Object.assign({}, process.env, { EASYCODE_STARTUP_DELAY_MS: '2000' });
   let child;
   if (NODE_PATH && ENTRY_SCRIPT) {
     log('Relaunch (absolute): ' + NODE_PATH + ' ' + ENTRY_SCRIPT + ' ' + RELAUNCH_ARGS.join(' '));
     child = spawn(NODE_PATH, [ENTRY_SCRIPT].concat(RELAUNCH_ARGS), {
       detached: true,
       stdio: stdio,
+      env: env,
     });
   } else {
     log('Relaunch (command): ' + RELAUNCH_CMD + ' ' + RELAUNCH_ARGS.join(' '));
@@ -193,6 +199,7 @@ async function main() {
       detached: true,
       stdio: stdio,
       shell: true,
+      env: env,
     });
   }
 
@@ -303,6 +310,12 @@ export interface SelfUpdateParams {
  */
 export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
   static readonly Name: string = 'self_update';
+
+  /**
+   * 优雅退出前的回调。cli 层注入后，SelfUpdateTool 在 process.exit(0) 前会调用它，
+   * 给调用方一个中止 AI、关闭 WS 连接、清理队列的机会。
+   */
+  static onBeforeRestart: (() => Promise<void>) | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(private readonly config: Config) {
@@ -421,9 +434,17 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
       };
     }
 
-    // 安排当前进程退出。延迟一小段时间，给飞书侧机会把本次结果回传给用户。
+    // 安排当前进程退出。先执行优雅关闭回调（中止 AI、断开 WS 等），再延迟退出，
+    // 给飞书侧充足时间完成消息投递确认。
     const SHUTDOWN_DELAY_MS = 1500;
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        if (SelfUpdateTool.onBeforeRestart) {
+          await SelfUpdateTool.onBeforeRestart();
+        }
+      } catch {
+        // 优雅关闭失败不应阻断重启
+      }
       process.exit(0);
     }, SHUTDOWN_DELAY_MS).unref?.();
 
