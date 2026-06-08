@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  DelegateToClaudeCodeTool,
+  DelegateToAgentTool,
   formatClaudeCodeTaskResult,
   isAcpDelegateTask,
 } from './delegate-agent.js';
@@ -25,10 +25,10 @@ function makeTool(targetDir = '/proj') {
   const config = {
     getTargetDir: () => targetDir,
   } as unknown as Config;
-  return new DelegateToClaudeCodeTool(config);
+  return new DelegateToAgentTool(config);
 }
 
-describe('DelegateToClaudeCodeTool', () => {
+describe('DelegateToAgentTool', () => {
   beforeEach(() => {
     runDelegatedTask.mockReset();
     // Clear the singleton between tests so tasks don't accumulate.

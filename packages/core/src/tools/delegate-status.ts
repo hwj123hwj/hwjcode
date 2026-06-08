@@ -13,7 +13,7 @@ import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
-  /** The Task ID returned by delegate_to_claude_code. */
+  /** The Task ID returned by delegate_to_agent. */
   taskId: string;
 }
 
@@ -39,7 +39,7 @@ export class CheckDelegateStatusTool extends BaseTool<
       [
         "Query the current status and progress of a background Claude Code task.",
         '',
-        'Use this to check on a task you previously delegated with delegate_to_claude_code.',
+        'Use this to check on a task you previously delegated with delegate_to_agent.',
         'You do NOT need to check repeatedly — the system will notify you when the task completes.',
         'Only use this if you specifically need to know the current progress before continuing your work.',
         '',
@@ -52,7 +52,7 @@ export class CheckDelegateStatusTool extends BaseTool<
           taskId: {
             type: Type.STRING,
             description:
-              'The Task ID returned by the delegate_to_claude_code tool.',
+              'The Task ID returned by the delegate_to_agent tool.',
           },
         },
         required: ['taskId'],
