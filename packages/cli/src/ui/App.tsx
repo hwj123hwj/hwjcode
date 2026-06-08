@@ -349,6 +349,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const [feishuBotName, setFeishuBotName] = useState<string>('');
   const [feishuPlatform, setFeishuPlatform] = useState<string>('feishu');
   const [feishuChatNames, setFeishuChatNames] = useState<Record<string, string>>({});
+  const [feishuP2pChatIds, setFeishuP2pChatIds] = useState<Set<string>>(new Set());
 
   // 监听飞书消息处理与Bot运行状态事件
   useEffect(() => {
@@ -415,6 +416,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       setFeishuChatNames(prev => ({ ...prev, ...chatNames }));
     };
 
+    // 仪表板事件：p2p 单聊（与 Bot 的私聊）解析完成。合并进已有集合。
+    const handleFeishuP2pChatsResolved = (p2pChatIds: string[]) => {
+      setFeishuP2pChatIds(prev => new Set([...prev, ...p2pChatIds]));
+    };
+
     appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
     appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
     appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
@@ -424,6 +430,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     appEvents.on(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
     appEvents.on(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
     appEvents.on(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+    appEvents.on(AppEvent.FeishuP2pChatsResolved, handleFeishuP2pChatsResolved);
 
     return () => {
       appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
@@ -435,6 +442,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       appEvents.off(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
       appEvents.off(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
       appEvents.off(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+      appEvents.off(AppEvent.FeishuP2pChatsResolved, handleFeishuP2pChatsResolved);
     };
   }, []);
 
@@ -2982,6 +2990,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   isConnected={true}
                   terminalWidth={terminalWidth}
                   chatNames={feishuChatNames}
+                  p2pChatIds={feishuP2pChatIds}
                 />
               ) : (
                 <React.Fragment>

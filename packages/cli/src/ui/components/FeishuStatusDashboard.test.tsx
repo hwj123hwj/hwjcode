@@ -107,3 +107,77 @@ describe('<FeishuStatusDashboard /> chat name resolution', () => {
     expect(frame).toContain('oc_legacy');
   });
 });
+
+describe('<FeishuStatusDashboard /> p2p (bot direct-message) rendering', () => {
+  it('renders a p2p chat as a friendly "direct message with bot" label', () => {
+    const { lastFrame } = render(
+      <FeishuStatusDashboard
+        {...baseProps}
+        routes={{ oc_p2p: { projectRoot: '/home/u/cli-cwd' } }}
+        p2pChatIds={new Set(['oc_p2p'])}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    // 应出现私聊文案 + Bot 名（baseProps.botName = 'dvcode3'）
+    expect(frame).toMatch(/Direct message with bot|与机器人/i);
+    expect(frame).toContain('dvcode3');
+    // 不应再裸露 chatId 作为主显示
+    expect(frame).not.toContain('oc_p2p');
+  });
+
+  it('does NOT apply the p2p label to a normal group chat', () => {
+    const { lastFrame } = render(
+      <FeishuStatusDashboard
+        {...baseProps}
+        routes={{
+          oc_p2p: { projectRoot: '/p/dm' },
+          oc_group: { projectRoot: '/p/grp' },
+        }}
+        p2pChatIds={new Set(['oc_p2p'])}
+        chatNames={{ oc_group: 'Team Group' }}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Team Group');
+    expect(frame).toMatch(/Direct message with bot|与机器人/i);
+  });
+
+  it('prefers the p2p label over a (mistakenly) resolved name', () => {
+    const { lastFrame } = render(
+      <FeishuStatusDashboard
+        {...baseProps}
+        routes={{ oc_p2p: { projectRoot: '/p/dm' } }}
+        p2pChatIds={new Set(['oc_p2p'])}
+        chatNames={{ oc_p2p: 'Should Not Show' }}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toMatch(/Direct message with bot|与机器人/i);
+    expect(frame).not.toContain('Should Not Show');
+  });
+
+  it('still marks a p2p chat active when it is currently working', () => {
+    const { lastFrame } = render(
+      <FeishuStatusDashboard
+        {...baseProps}
+        routes={{ oc_p2p: { projectRoot: '/p/dm' } }}
+        p2pChatIds={new Set(['oc_p2p'])}
+        activeGroupChatIds={new Set(['oc_p2p'])}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toMatch(/Direct message with bot|与机器人/i);
+    expect(frame).toContain('🟢');
+  });
+
+  it('is backward compatible without the p2pChatIds prop', () => {
+    const { lastFrame } = render(
+      <FeishuStatusDashboard
+        {...baseProps}
+        routes={{ oc_x: { projectRoot: '/p/x' } }}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('oc_x');
+  });
+});

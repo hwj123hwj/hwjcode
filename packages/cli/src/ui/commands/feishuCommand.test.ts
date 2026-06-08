@@ -411,6 +411,68 @@ describe('buildBoundProjectsLines', () => {
     // 不应抛错，也不应出现 undefined 字样
     expect(joined).not.toContain('undefined');
   });
+
+  it('renders a p2p chat as a friendly "direct message with bot" label', () => {
+    const routes = { oc_p2p: { projectRoot: '/p/cli-cwd' } };
+    const lines = buildBoundProjectsLines(routes, {
+      p2pChatIds: ['oc_p2p'],
+      botName: '糖糖Bot',
+    });
+    const joined = lines.join('\n');
+    // 应出现私聊文案 + Bot 名
+    expect(joined).toMatch(/Direct message with bot|与机器人/i);
+    expect(joined).toContain('糖糖Bot');
+  });
+
+  it('falls back to an unknown-bot p2p label when botName is missing', () => {
+    const routes = { oc_p2p: { projectRoot: '/p/cli-cwd' } };
+    const lines = buildBoundProjectsLines(routes, { p2pChatIds: ['oc_p2p'] });
+    const joined = lines.join('\n');
+    expect(joined).toMatch(/Direct message with the bot|与机器人的私聊/i);
+  });
+
+  it('prefers the p2p label over a (mistakenly) resolved name for a p2p chat', () => {
+    // 防御：即便上游误传了 name，p2p 判定优先级更高，避免把私聊显示成群名。
+    const routes = { oc_p2p: { projectRoot: '/p/cli-cwd' } };
+    const lines = buildBoundProjectsLines(routes, {
+      p2pChatIds: new Set(['oc_p2p']),
+      chatNames: { oc_p2p: 'Should Not Show' },
+      botName: 'MyBot',
+    });
+    const joined = lines.join('\n');
+    expect(joined).toMatch(/Direct message with bot|与机器人/i);
+    expect(joined).toContain('MyBot');
+    expect(joined).not.toContain('Should Not Show');
+  });
+
+  it('does NOT apply the p2p label to normal group chats', () => {
+    const routes = {
+      oc_p2p: { projectRoot: '/p/dm' },
+      oc_group: { projectRoot: '/p/grp' },
+    };
+    const lines = buildBoundProjectsLines(routes, {
+      p2pChatIds: ['oc_p2p'],
+      chatNames: { oc_group: 'Team Group' },
+      botName: 'MyBot',
+    });
+    const groupLine = lines.find((l) => l.includes('Team Group'));
+    expect(groupLine).toBeDefined();
+    // 群聊行不应带私聊文案
+    expect(groupLine).not.toMatch(/Direct message with|与机器人/i);
+  });
+
+  it('still marks a p2p chat as active when it is currently working', () => {
+    const routes = { oc_p2p: { projectRoot: '/p/dm' } };
+    const lines = buildBoundProjectsLines(routes, {
+      p2pChatIds: ['oc_p2p'],
+      botName: 'MyBot',
+      activeChatIds: ['oc_p2p'],
+    });
+    const joined = lines.join('\n');
+    expect(joined).toMatch(/Direct message with bot|与机器人/i);
+    expect(joined).toContain('🟢');
+    expect(joined).toMatch(/Active|活跃/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
