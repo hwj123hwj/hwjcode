@@ -2788,6 +2788,42 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     handleSlashCommand,
   ]);
 
+  // 🔄 --feishu 自启兜底（重启场景专用）：
+  //    detached 进程无 TTY 时，Ink 降级渲染可能导致 useEffect 依赖不更新，
+  //    `/feishu start` 永远不触发。此轮询在重启场景下作为兜底，确保一定启动。
+  useEffect(() => {
+    if (!config.getFeishuAutoStart?.() || feishuAutoStartTriggered.current) return;
+    // 仅在重启场景（外挂设置了 EASYCODE_STARTUP_DELAY_MS）启用
+    if (!process.env.EASYCODE_STARTUP_DELAY_MS) return;
+
+    const startupDelay = parseInt(process.env.EASYCODE_STARTUP_DELAY_MS || '0', 10);
+    const timer = setInterval(() => {
+      if (feishuAutoStartTriggered.current) {
+        clearInterval(timer);
+        return;
+      }
+      if (geminiClient?.isInitialized?.()) {
+        feishuAutoStartTriggered.current = true;
+        clearInterval(timer);
+        void handleSlashCommand('/feishu start');
+      }
+    }, 500);
+
+    // 安全兜底：最多等 30s，即使 geminiClient 未初始化也强制触发
+    const deadline = setTimeout(() => {
+      clearInterval(timer);
+      if (!feishuAutoStartTriggered.current) {
+        feishuAutoStartTriggered.current = true;
+        void handleSlashCommand('/feishu start');
+      }
+    }, startupDelay + 30000);
+
+    return () => {
+      clearInterval(timer);
+      clearTimeout(deadline);
+    };
+  }, [config, geminiClient, handleSlashCommand]);
+
   // Store quitting render content but don't return early to avoid hooks order issues
   const quittingRender = quittingMessages ? (
     <Box flexDirection="column" marginBottom={1}>
