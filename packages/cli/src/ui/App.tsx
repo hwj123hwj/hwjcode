@@ -1695,6 +1695,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     sideQuestionAbortRef.current?.abort();
     sideQuestionAbortRef.current = null;
     setSideQuestion(null);
+    import('./utils/modalState.js').then(m => m.setSideQuestionPanelOpen(false));
   }, []);
 
   const startSideQuestion = useCallback(
@@ -1712,6 +1713,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         answer: '',
         status: 'pending',
       });
+      import('./utils/modalState.js').then(m => m.setSideQuestionPanelOpen(true));
 
       const geminiClient = config?.getGeminiClient();
       if (!geminiClient) {
