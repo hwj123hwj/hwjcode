@@ -3640,6 +3640,66 @@ async function handleStart(context?: CommandContext): Promise<string> {
               } else {
                 toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
               }
+            } else if (toolName === 'delegate_to_claude_code') {
+              // 🎯 派发给本机 Claude Code / Codex：与 task/shell 对齐，实时把外部
+              //    agent 的执行过程（消息 / 工具调用 / 计划 / token）流式推到飞书卡片，
+              //    而非只在结束时给结果。通过 updateOutput 消费累计 transcript。
+              //    （仅 stream 模式会持续回传；background 模式工具会立即返回 Task ID。）
+              const delegateTool = toolRegistry.getTool('delegate_to_claude_code');
+              if (delegateTool) {
+                const startTime = Date.now();
+                let lastCardUpdateTime = 0;
+                const CARD_UPDATE_THROTTLE_MS = 1500;
+
+                const toolResult = await delegateTool.execute(
+                  req.args,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    // 节流刷新外部 agent 的滚动过程，避免触发飞书 API 限流。
+                    if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('delegate_to_claude_code', req.args, true, output, true);
+                      const delegateFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      delegateFooterMetrics.status = '外部 Agent 执行中';
+                      if (streaming) {
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
+                        await streaming.pushFooter(delegateFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'Easy Code (外部 Agent 执行中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), delegateFooterMetrics);
+                      }
+                      lastCardUpdateTime = now;
+                    }
+                  }
+                );
+
+                const durationMs = Date.now() - startTime;
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'delegate_to_claude_code',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: typeof toolResult.llmContent === 'string'
+                    ? toolResult.llmContent.length
+                    : JSON.stringify(toolResult.llmContent).length,
+                });
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [{
+                    functionResponse: {
+                      id: req.callId,
+                      name: 'delegate_to_claude_code',
+                      response: { output: toolResult.llmContent },
+                    }
+                  }],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+              } else {
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
               // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
