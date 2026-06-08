@@ -731,6 +731,70 @@ interface QueuedMessage {
 const messageQueues = new Map<string, QueuedMessage[]>();
 const isProcessingQueues = new Map<string, boolean>();
 
+/**
+ * Export-only-for-tests: 把 messageQueues map 暴露出来供 mid-turn 注入单测
+ * 直接装填初始队列。生产代码不应使用这个出口。
+ */
+export const __testing_messageQueues = messageQueues;
+
+/**
+ * 🎯 Mid-turn injection drain (Feishu 端的对应实现，对称 App.tsx 里同名 callback)。
+ *
+ * 在当前群的 agent loop 处于 tool-call 间隙时调用，原子取走该群 `messageQueues`
+ * 里所有等待中的消息，并立即 resolve 它们的 Promise（防止 gateway 一端永远等
+ * 待）。返回 *仅包含消息文本* 的数组，调用方负责把它们拼成附加 user text part
+ * 跟随下一次 continuation 一起送给模型。
+ *
+ * 副作用：每条被 mid-turn 消耗掉的消息会通过 `notify` 回调向飞书群发一条
+ * "已合并到当前任务" 提示，纠正之前 enqueue 时发的 "排队第 X 位" UX。
+ *
+ * 仅取出"消息内容"（msg.text）；多模态附件不在 mid-turn 注入路径里支持（图
+ * 片/文件需要单独 between-turn 处理）。带附件的消息会被跳过并保留在队列中。
+ */
+export function drainChatQueueForMidTurnInjection(
+  chatId: string,
+  notify?: (msg: FeishuMessage) => Promise<void> | void,
+): string[] {
+  const queue = messageQueues.get(chatId);
+  if (!queue || queue.length === 0) return [];
+
+  const drained: QueuedMessage[] = [];
+  const remaining: QueuedMessage[] = [];
+  for (const item of queue) {
+    const text = (item.msg.text ?? '').trim();
+    const hasPendingImages =
+      Array.isArray(item.msg.pendingImages) && item.msg.pendingImages.length > 0;
+    const hasPendingFiles =
+      Array.isArray(item.msg.pendingFiles) && item.msg.pendingFiles.length > 0;
+    if (!text || hasPendingImages || hasPendingFiles) {
+      // 没有文本，或携带图片/文件 → 不走 mid-turn 注入路径，留给 between-turn 处理
+      // （多模态附件需要先下载到 projectRoot 才能让模型用，绕开这条快路径）
+      remaining.push(item);
+      continue;
+    }
+    drained.push(item);
+  }
+
+  if (drained.length === 0) return [];
+
+  // 原子替换队列剩余项
+  messageQueues.set(chatId, remaining);
+
+  // resolve 已注入项的 Promise（不再走独立 agent loop），并发"已合并"提示
+  for (const item of drained) {
+    try {
+      item.resolve(null);
+    } catch {
+      // ignore — resolver only ever observed once anyway
+    }
+    if (notify) {
+      void Promise.resolve(notify(item.msg)).catch(() => {/* best effort */});
+    }
+  }
+
+  return drained.map((item) => (item.msg.text ?? '').trim()).filter(Boolean);
+}
+
 function clearMessageQueue() {
   for (const queue of messageQueues.values()) {
     for (const item of queue) {
@@ -3476,7 +3540,37 @@ async function handleStart(context?: CommandContext): Promise<string> {
           await gateway.updateCard(activeCardId, 'Easy Code (思考中)', renderCurrentDisplay(blocks) + `\n\n*(🤖 Agent is still working... / Agent 正在结合工具结果继续工作...)*`, thinkingFooterMetrics);
         }
 
-        // 将工具结果作为下一轮输入
+        // 🎯 Mid-turn injection：在 tool 结果即将作为下一轮 user message 提交前，
+        // 取走本群 messageQueue 里所有等待中的纯文本消息，作为附加 user text part
+        // 跟随当前轮的 tool results 一起送给模型。模型在同一 continuation 请求里
+        // 就能同时看到 tool 结果 + 用户追加指令，避免要等整轮结束才被处理。
+        const injectedTexts = drainChatQueueForMidTurnInjection(
+          msg.chatId,
+          async (injectedMsg) => {
+            const preview = (injectedMsg.text ?? '').replace(/\s+/g, ' ').slice(0, 60);
+            const tail = (injectedMsg.text ?? '').length > 60 ? '…' : '';
+            await gateway
+              .sendMessage(
+                msg.chatId,
+                `📥 已合并到当前任务，AI 正在综合处理：「${preview}${tail}」`,
+                injectedMsg.messageId,
+              )
+              .catch(() => {/* best effort, UX-only */});
+          },
+        );
+        if (injectedTexts.length > 0) {
+          const header =
+            injectedTexts.length === 1
+              ? '[Easy Code - USER MID-TURN MESSAGE] The user sent the following instruction while you were executing tools. Factor it in for the remainder of this turn.'
+              : `[Easy Code - USER MID-TURN MESSAGES] The user sent ${injectedTexts.length} additional instructions while you were executing tools. Factor them in for the remainder of this turn.`;
+          const body = injectedTexts
+            .map((m, i) => (injectedTexts.length > 1 ? `${i + 1}. ${m}` : m))
+            .join('\n');
+          toolResponseParts.push({ text: `${header}\n\n${body}` });
+          dlog(`[Feishu] Mid-turn injected ${injectedTexts.length} queued message(s) into chat ${msg.chatId}`);
+        }
+
+        // 将工具结果（含可能注入的追加指令）作为下一轮输入
         currentMessage = toolResponseParts;
 
         // 🎯 体验优化：如果用户回答了交互式问题，重置卡片状态，迫使下一轮回复创建全新卡片，避免用户看不到老卡片的更新
