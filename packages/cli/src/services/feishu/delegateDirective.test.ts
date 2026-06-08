@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseDelegatePrefix,
+  parseResumeTask,
   resolveDelegation,
   buildDelegateDirective,
   parseBindAgentFlag,
@@ -140,6 +141,64 @@ describe('buildDelegateDirective', () => {
     const d = buildDelegateDirective('do x', 'claude-code', 'background');
     expect(d).toContain('agent="claude-code"');
     expect(d).toContain('mode="background"');
+  });
+
+  it('includes resumeSessionId when resuming a session', () => {
+    const d = buildDelegateDirective('继续', 'claude-code', 'stream', 'sess-9');
+    expect(d).toContain('resumeSessionId="sess-9"');
+    expect(d).toContain('续接');
+    expect(d).toContain('继续');
+  });
+});
+
+describe('parseResumeTask', () => {
+  it('extracts the session id and remaining task from "resume <id> <task>"', () => {
+    expect(parseResumeTask('resume sess-123 finish the tests')).toEqual({
+      resumeSessionId: 'sess-123',
+      task: 'finish the tests',
+    });
+  });
+
+  it('is case-insensitive and tolerates extra spaces', () => {
+    expect(parseResumeTask('RESUME   abc   do  x')).toEqual({
+      resumeSessionId: 'abc',
+      task: 'do  x',
+    });
+  });
+
+  it('returns the task unchanged when there is no resume prefix', () => {
+    expect(parseResumeTask('just do this')).toEqual({ task: 'just do this' });
+  });
+
+  it('allows an empty trailing task (resume with no follow-up)', () => {
+    expect(parseResumeTask('resume sess-123')).toEqual({
+      resumeSessionId: 'sess-123',
+      task: '',
+    });
+  });
+});
+
+describe('resolveDelegation — resume sub-syntax', () => {
+  it('parses "@cc:resume <id> <task>" into a resuming delegation', () => {
+    const d = resolveDelegation('@cc:resume sess-123 继续把测试补全');
+    expect(d.delegate).toBe(true);
+    expect(d.agent).toBe('claude-code');
+    expect(d.resumeSessionId).toBe('sess-123');
+    expect(d.task).toBe('继续把测试补全');
+  });
+
+  it('parses resume on a routed chat (no prefix) too', () => {
+    const d = resolveDelegation('resume cx-9 build it', 'codex');
+    expect(d.delegate).toBe(true);
+    expect(d.agent).toBe('codex');
+    expect(d.resumeSessionId).toBe('cx-9');
+    expect(d.task).toBe('build it');
+  });
+
+  it('leaves resumeSessionId undefined for a normal delegation', () => {
+    const d = resolveDelegation('@codex write a benchmark');
+    expect(d.resumeSessionId).toBeUndefined();
+    expect(d.task).toBe('write a benchmark');
   });
 });
 

@@ -118,8 +118,24 @@ export {
 export {
   EXTERNAL_AGENT_TYPES,
   isExternalAgentType,
+  resolveExternalAgentSpec,
   type ExternalAgentType,
+  type ExternalAgentSpec,
 } from './acp-client/externalAgentRegistry.js';
+export {
+  runDelegatedTask,
+  type RunTaskOptions,
+  type DelegateResult,
+  type DelegateStatus,
+  type DelegateProgress,
+  type DelegatePlanEntry,
+} from './acp-client/acpAgentClient.js';
+export {
+  listExternalSessions,
+  type ExternalSessionDescriptor,
+  type ListExternalSessionsOptions,
+  type ListExternalSessionsResult,
+} from './acp-client/sessionDiscovery.js';
 
 // Export IDE specific logic
 export * from './ide/ide-client.js';
