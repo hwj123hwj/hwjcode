@@ -20,6 +20,7 @@ import { StreamingState, type HistoryItem, MessageType, ToolCallStatus, type Ind
 import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
+import { computeMidTurnDrain } from './state/midTurnDrain.js';
 import { useAnimatedTitleIcon } from './hooks/useAnimatedTitleIcon.js';
 import { t, tp } from './utils/i18n.js';
 import { useLoadingIndicator } from './hooks/useLoadingIndicator.js';
@@ -1426,6 +1427,33 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openWorkflowPanel, // ⚡ 传递 openWorkflowPanel
   );
 
+  // 🎯 Mid-turn injection: 在 useGeminiStream 调用前先准备好 drain callback。
+  // useGeminiStream 在 tool-call 间隙调用它，原子取走 queuedPrompts 里所有
+  // 待注入项作为附加 user text 跟随下一次 continuation 一起送给模型。
+  // paused / editMode / 空队列 时返回空数组（不消耗），留给 useEffect 在
+  // Idle 时按既有 between-turn 方式处理。
+  //
+  // 用 ref 引用最新 state，避免每次 queuedPrompts 变化都让下游 useCallback
+  // 重建，从而触发不必要的重渲染。
+  const queuedPromptsRef = useRef(queuedPrompts);
+  const queuePausedRef = useRef(queuePaused);
+  const queueEditModeRef = useRef(queueEditMode);
+  useEffect(() => { queuedPromptsRef.current = queuedPrompts; }, [queuedPrompts]);
+  useEffect(() => { queuePausedRef.current = queuePaused; }, [queuePaused]);
+  useEffect(() => { queueEditModeRef.current = queueEditMode; }, [queueEditMode]);
+
+  const drainQueuedPromptsForInjection = useCallback((): string[] => {
+    const { drained, nextQueue } = computeMidTurnDrain(
+      queuedPromptsRef.current,
+      queuePausedRef.current,
+      queueEditModeRef.current,
+    );
+    if (drained.length > 0) {
+      setQueuedPrompts(nextQueue);
+    }
+    return drained;
+  }, []);
+
   const {
     streamingState,
     submitQuery,
@@ -1454,6 +1482,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     settings, // 传递设置对象以支持异步模型配置更新
     customProxyUrl,
     debateAdvanceAbortRef, // 🎭 共享的辩论推进 AbortController ref
+    drainQueuedPromptsForInjection, // 🎯 mid-turn 注入：tool 间隙原子取走排队消息
   );
 
   // 🎭 把真正的 submitQuery 绑到 ref 上，让 useDebateWizard 能在开始辩论时用它
