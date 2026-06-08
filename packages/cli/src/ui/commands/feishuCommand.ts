@@ -138,6 +138,7 @@ export function feishuGetToolShortName(name: string): string {
     case 'todo_write': return 'TodoWrite';
     case 'task': return 'SubAgentTask';
     case 'use_skill': return 'UseSkill';
+    case 'delegate_to_agent': return 'DelegateAgent';
     default: {
       return name.split(/[-_]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
     }
@@ -483,6 +484,12 @@ interface FeishuProjectRoute {
    * (Easy Code).
    */
   agent?: FeishuAgentTarget;
+  /**
+   * Most recent native sessionId from the external agent's last completed
+   * run in this chat. Used to auto-resume the session on the next message,
+   * so the agent retains conversation context across turns.
+   */
+  lastSessionId?: string;
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
@@ -3175,8 +3182,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       //    工具的流式输出会沿用现有 card 通道回传飞书。多模态图片在派发场景下
       //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，目标 agent 可直接读盘）。
       try {
-        const routeAgentForChat = (await loadProjectRoutes())[msg.chatId]?.agent;
-        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat);
+        const routeForChat = (await loadProjectRoutes())[msg.chatId];
+        const routeAgentForChat = routeForChat?.agent;
+        const lastSessionId = routeForChat?.lastSessionId;
+        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId);
         if (delegation.delegate && delegation.task) {
           messageTextForAI = buildDelegateDirective(
             delegation.task,
@@ -3699,6 +3708,16 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     : JSON.stringify(toolResult.llmContent).length,
                 });
 
+                // 🎯 将外部 agent 返回的 native sessionId 保存到群路由，
+                //    以便下次自动续接（用户自然续聊无需手动 resume）。
+                try {
+                  const payload = typeof toolResult.llmContent === 'string'
+                    ? JSON.parse(toolResult.llmContent) : toolResult.llmContent;
+                  if (payload?.sessionId) {
+                    await saveProjectRoute(msg.chatId, { lastSessionId: payload.sessionId });
+                  }
+                } catch { /* best-effort */ }
+
                 toolResponse = {
                   callId: req.callId,
                   responseParts: [{
@@ -4008,6 +4027,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
       mainArg = args.skillName;
     } else if (toolName === 'lark_cli' && args.command) {
       mainArg = `${args.command}${args.args && args.args.length > 0 ? ` ${args.args.join(' ')}` : ''}`;
+    } else if (toolName === 'delegate_to_agent') {
+      mainArg = args.agent === 'codex' ? '›_ Codex' : '✳ Claude Code';
     } else if (args.path) {
       mainArg = args.path;
     } else if (args.pattern) {

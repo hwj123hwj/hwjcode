@@ -200,6 +200,25 @@ describe('resolveDelegation — resume sub-syntax', () => {
     expect(d.resumeSessionId).toBeUndefined();
     expect(d.task).toBe('write a benchmark');
   });
+
+  it('auto-resumes using lastSessionId when no explicit resume and chat is routed', () => {
+    const d = resolveDelegation('do more stuff', 'claude-code', 'sess-auto-1');
+    expect(d.delegate).toBe(true);
+    expect(d.reason).toBe('route');
+    expect(d.resumeSessionId).toBe('sess-auto-1');
+    expect(d.task).toBe('do more stuff');
+  });
+
+  it('explicit resume takes precedence over lastSessionId', () => {
+    const d = resolveDelegation('resume explicit-id continue', 'codex', 'sess-auto-old');
+    expect(d.resumeSessionId).toBe('explicit-id');
+  });
+
+  it('lastSessionId is not used for prefix-based delegation (@cc)', () => {
+    const d = resolveDelegation('@cc do something', 'self', 'sess-auto-1');
+    expect(d.reason).toBe('prefix');
+    expect(d.resumeSessionId).toBeUndefined();
+  });
 });
 
 describe('parseBindAgentFlag', () => {
