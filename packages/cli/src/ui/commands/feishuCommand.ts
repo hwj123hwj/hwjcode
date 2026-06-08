@@ -3248,6 +3248,66 @@ async function handleStart(context?: CommandContext): Promise<string> {
                 // 降级使用常规 executeToolCall
                 toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
               }
+            } else if (toolName === 'lark_cli') {
+              const larkCliTool = toolRegistry.getTool('lark_cli');
+              if (larkCliTool) {
+                const startTime = Date.now();
+                let lastCardUpdateTime = 0;
+                const CARD_UPDATE_THROTTLE_MS = 1500;
+
+                const toolResult = await larkCliTool.execute(
+                  req.args,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    // 实时滚动更新授权链接与执行状态到飞书卡片上
+                    if (activeCardId && (now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS || output.includes('🔑') || output.includes('⚙️'))) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('lark_cli', req.args, true, output, true);
+                      const larkFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      larkFooterMetrics.status = output.includes('🔑') ? '等待授权中' : '执行命令中';
+                      if (streaming) {
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
+                        await streaming.pushFooter(larkFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'Easy Code (执行命令中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), larkFooterMetrics);
+                      }
+                      lastCardUpdateTime = now;
+                    }
+                  }
+                );
+
+                const durationMs = Date.now() - startTime;
+                const responseLength = typeof toolResult.llmContent === 'string'
+                  ? toolResult.llmContent.length
+                  : JSON.stringify(toolResult.llmContent).length;
+
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'lark_cli',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: responseLength,
+                });
+
+                const response = {
+                  functionResponse: {
+                    id: req.callId,
+                    name: 'lark_cli',
+                    response: { output: toolResult.llmContent },
+                  }
+                };
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [response],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+              } else {
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
               // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
@@ -3511,6 +3571,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
       mainArg = args.description || '';
     } else if (toolName === 'use_skill' && args.skillName) {
       mainArg = args.skillName;
+    } else if (toolName === 'lark_cli' && args.command) {
+      mainArg = `${args.command}${args.args && args.args.length > 0 ? ` ${args.args.join(' ')}` : ''}`;
     } else if (args.path) {
       mainArg = args.path;
     } else if (args.pattern) {
@@ -3690,6 +3752,20 @@ async function handleStart(context?: CommandContext): Promise<string> {
     } else if (toolName === 'task' || isSubAgentDisplay) {
       contentBox = isLive ? buildSubAgentDisplayBox(subagentData, args, isLive) : '';
       branchLine = isLive ? `\n └ ( sub-agent executing... )` : `\n └ ( sub-agent task completed )`;
+    } else if (toolName === 'lark_cli') {
+      const hasAuth = output && (output.includes('🔑') || output.includes('🔗'));
+      branchLine = isLive
+        ? `\n └ ( ${hasAuth ? '等待授权中...' : '正在执行 LARK 命令...'} )`
+        : `\n └ ( 执行完成 )`;
+      if (output) {
+        if (hasAuth) {
+          // 直接输出以便飞书客户端能原生解析并高亮点击超链接
+          contentBox = `\n${output}`;
+        } else {
+          const clamped = clampCodeBlock(output, { maxLines: 15, maxChars: 2000 });
+          contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
+        }
+      }
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
       branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
