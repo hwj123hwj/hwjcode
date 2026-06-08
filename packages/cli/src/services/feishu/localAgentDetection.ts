@@ -110,19 +110,19 @@ export function buildLocalAgentWelcomeHints(
   }
 
   const detected: string[] = [];
-  if (availability.claudeCode) detected.push('**Claude Code**');
-  if (availability.codex) detected.push('**Codex**');
+  if (availability.claudeCode) detected.push('[Claude Code]');
+  if (availability.codex) detected.push('[Codex]');
   lines.push(
     `💡 检测到您本机已安装 ${detected.join('、')}，您还可以发送以下命令拉一个绑定该 agent 的专属群：`,
   );
   if (availability.claudeCode) {
     lines.push(
-      '   拉个 cc 群 + 路径  （例如：`拉个 cc 群 D:\\projects\\my-app`，绑定本机 Claude Code）',
+      '   拉个 cc 群 + 路径  （例如：「拉个 cc 群 D:\\projects\\my-app，绑定本机 Claude Code」）',
     );
   }
   if (availability.codex) {
     lines.push(
-      '   拉个 codex 群 + 路径  （例如：`拉个 codex 群 D:\\projects\\my-app`，绑定本机 Codex）',
+      '   拉个 codex 群 + 路径  （例如：「拉个 codex 群 D:\\projects\\my-app，绑定本机 Codex」）',
     );
   }
   return lines;
