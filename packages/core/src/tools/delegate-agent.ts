@@ -60,6 +60,13 @@ export interface DelegateToClaudeCodeParams {
    *     stuff" semantics.
    */
   mode?: DelegateMode;
+  /**
+   * Resume an existing native session of the external agent instead of
+   * starting fresh. Pass a `sessionId` discovered via session listing (the
+   * Feishu `/sessions` card). The external agent reloads that conversation's
+   * full history before running `task`, so follow-ups keep prior context.
+   */
+  resumeSessionId?: string;
 }
 
 /** Result shape for {@link DelegateToClaudeCodeTool}. */
@@ -133,6 +140,11 @@ export class DelegateToClaudeCodeTool extends BaseTool<
             enum: [...DELEGATE_MODES],
             description:
               'Execution mode. "stream" = synchronous + live progress (use for `@codex`/`@cc` prefix, `/bind` routes, or "立刻/现在/看着做" intent). "background" = fire-and-forget with later system notification (use for batch / "后台/一会儿告诉我" intent). Defaults to "background".',
+          },
+          resumeSessionId: {
+            type: Type.STRING,
+            description:
+              'Optional. Resume an existing native session of the external agent (a sessionId from the /sessions list) instead of starting fresh. The agent reloads that conversation before running the task.',
           },
         },
         required: ['task'],
@@ -261,6 +273,7 @@ export class DelegateToClaudeCodeTool extends BaseTool<
         onUpdate: updateOutput,
         autoApprove: true,
         timeoutMs: DelegateToClaudeCodeTool.DEFAULT_TIMEOUT_MS,
+        resumeSessionId: params.resumeSessionId,
       });
 
       const duration = Math.round((Date.now() - startTime) / 1000);
@@ -351,14 +364,19 @@ export class DelegateToClaudeCodeTool extends BaseTool<
         cwd,
         signal,
         onUpdate: onStreamUpdate,
+        // Structured progress → persisted task record (drives the /sessions card).
+        onProgress: (progress) => taskManager.updateProgress(taskId, progress),
         autoApprove: true,
         timeoutMs: DelegateToClaudeCodeTool.DEFAULT_TIMEOUT_MS,
+        resumeSessionId: params.resumeSessionId,
       });
 
-      // Write the final answer into the task record.
+      // Write the final answer + native session id into the task record.
       const task = taskManager.getTask(taskId);
       if (task) {
         task.answer = result.answer || result.transcript;
+        if (result.sessionId) task.sessionId = result.sessionId;
+        if (result.progress) taskManager.updateProgress(taskId, result.progress);
       }
 
       if (result.status === 'success') {

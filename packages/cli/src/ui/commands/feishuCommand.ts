@@ -45,6 +45,7 @@ import {
   parseBindAgentFlag,
   agentDisplayLabel,
 } from '../../services/feishu/delegateDirective.js';
+import { handleSessionsCommand } from '../../services/feishu/sessionsCommand.js';
 import { CreateProjectGroupTool } from '../../services/feishu/createProjectGroupTool.js';
 import {
   detectLocalAgents,
@@ -2513,6 +2514,29 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
     }
 
+    // 📊 拦截 `/sessions`（或 `/会话`）：推送一张多会话 Dashboard 卡片，展示
+    //    本机正在运行/最近的委派任务（实时状态：当前工具/计划进度/token%/耗时）
+    //    + 各 CLI 可续接的历史会话（含 `@cc:resume <id>` 续接提示）。
+    //    直接由网关发卡并异步刷新，不经过 LLM 队列。
+    if (/^\/(sessions|会话)\b/i.test(messageText.trim())) {
+      try {
+        const boundCwd = (await loadProjectRoutes())[msg.chatId]?.projectRoot;
+        await handleSessionsCommand({
+          gateway,
+          chatId: msg.chatId,
+          replyToMessageId: msg.messageId,
+          cwd: boundCwd,
+        });
+      } catch (e) {
+        await gateway.sendMessage(
+          msg.chatId,
+          `❌ 获取会话列表失败：${e instanceof Error ? e.message : String(e)}`,
+          msg.messageId,
+        );
+      }
+      return null;
+    }
+
     // 🎯 更新全局活跃发送人 (让建群工具可以拉当前发消息的人进新群)
     activeSenderOpenId = msg.senderOpenId;
 
@@ -3142,9 +3166,16 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const routeAgentForChat = (await loadProjectRoutes())[msg.chatId]?.agent;
         const delegation = resolveDelegation(messageTextForAI, routeAgentForChat);
         if (delegation.delegate && delegation.task) {
-          messageTextForAI = buildDelegateDirective(delegation.task, delegation.agent);
+          messageTextForAI = buildDelegateDirective(
+            delegation.task,
+            delegation.agent,
+            'stream',
+            delegation.resumeSessionId,
+          );
           currentMessage = messageTextForAI;
-          dlog(`[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason})`);
+          dlog(
+            `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
+          );
         }
       } catch (e: any) {
         dwarn(`[Feishu] Delegation routing check failed: ${e?.message || e}`);

@@ -89,6 +89,54 @@ describe('runDelegatedTask', () => {
     expect(updates.length).toBeGreaterThan(0);
   }, 30_000);
 
+  it('resumes a native session via session/load and reports its id', async () => {
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'continue the work',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      resumeSessionId: 'sess-to-resume',
+      launchOverride: nodeLaunch(),
+    });
+
+    expect(result.status).toBe('success');
+    // The resumed id (not the stub's fresh "stub-session-1") is surfaced.
+    expect(result.sessionId).toBe('sess-to-resume');
+    expect(result.answer).toContain('chose:allow');
+  }, 30_000);
+
+  it('captures structured progress (tool count, plan, token usage)', async () => {
+    const snapshots: Array<{ toolCallCount: number }> = [];
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'do something rich',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'rich' },
+      },
+      onProgress: (p) => snapshots.push({ toolCallCount: p.toolCallCount }),
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.progress).toBeDefined();
+    expect(result.progress!.toolCallCount).toBeGreaterThanOrEqual(1);
+    expect(result.progress!.currentTool).toContain('Edit src/foo.ts');
+    expect(result.progress!.tokenUsed).toBe(1234);
+    expect(result.progress!.tokenSize).toBe(10000);
+    expect(result.progress!.plan).toHaveLength(3);
+    expect(result.progress!.plan![1]).toEqual({
+      content: 'Step two',
+      status: 'in_progress',
+    });
+    // The structured callback fired during the turn.
+    expect(snapshots.length).toBeGreaterThan(0);
+  }, 30_000);
+
   it('fails with actionable guidance when the agent cannot be launched', async () => {
     const result = await runDelegatedTask({
       agentType: 'claude-code',
