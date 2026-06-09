@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * https://github.com/OrionStarAI/EasyCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -9,11 +9,11 @@ import { Type } from '@google/genai';
 import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
-import { extractCompactSummary } from './delegate-agent.js';
+import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
-  /** The Task ID returned by delegate_to_claude_code. */
+  /** The Task ID returned by delegate_to_agent. */
   taskId: string;
 }
 
@@ -39,7 +39,7 @@ export class CheckDelegateStatusTool extends BaseTool<
       [
         "Query the current status and progress of a background Claude Code task.",
         '',
-        'Use this to check on a task you previously delegated with delegate_to_claude_code.',
+        'Use this to check on a task you previously delegated with delegate_to_agent.',
         'You do NOT need to check repeatedly — the system will notify you when the task completes.',
         'Only use this if you specifically need to know the current progress before continuing your work.',
         '',
@@ -52,7 +52,7 @@ export class CheckDelegateStatusTool extends BaseTool<
           taskId: {
             type: Type.STRING,
             description:
-              'The Task ID returned by the delegate_to_claude_code tool.',
+              'The Task ID returned by the delegate_to_agent tool.',
           },
         },
         required: ['taskId'],
@@ -92,15 +92,15 @@ export class CheckDelegateStatusTool extends BaseTool<
     const taskManager = getBackgroundTaskManager();
     const task = taskManager.getTask(params.taskId);
 
-    if (!task || task.kind !== 'claude-code') {
+    if (!task || !isAcpDelegateTask(task)) {
       return {
         status: 'not_found',
         llmContent: JSON.stringify({
           status: 'not_found',
           taskId: params.taskId,
-          error: 'No Claude Code task found with this ID.',
+          error: 'No delegated agent task found with this ID.',
         }),
-        returnDisplay: `No Claude Code task found with ID: ${params.taskId}`,
+        returnDisplay: `No delegated agent task found with ID: ${params.taskId}`,
         summary: 'Not found',
       };
     }

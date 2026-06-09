@@ -225,4 +225,9 @@ export interface SlashCommand {
 
   // Whether the command should be hidden from the autocomplete list.
   hidden?: boolean;
+
+  // When true, the command bypasses the user-prompt queue and runs even
+  // when the main agent is mid-turn. Used by side-channel commands like
+  // /btw that must not be blocked or delayed. Defaults to false.
+  immediate?: boolean;
 }

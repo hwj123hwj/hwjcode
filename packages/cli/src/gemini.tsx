@@ -898,6 +898,7 @@ export async function main() {
 
   const shouldBeInteractive =
     !!argv.promptInteractive ||
+    !!argv.feishu ||
     (process.stdin.isTTY && input?.length === 0 && !isExplicitNonInteractiveMode);
 
   // Render UI, passing necessary config values. Check that there is no command line question.
@@ -932,6 +933,19 @@ export async function main() {
     // Clear screen before rendering Welcome UI
     console.clear();
 
+    const renderOptions: any = { exitOnCtrlC: false };
+    if (!process.stdin.isTTY) {
+      // ✅ 避免在后台/无 TTY (detached) 启动时, Ink 尝试对 process.stdin 设置 raw mode 并报错崩溃。
+      // 传入一个拥有空 setRawMode / ref / unref 方法的 Readable 作为输入流，使 Ink 降级为非交互渲染而不抛出不支持 raw mode 异常或 ref 缺失错误。
+      const { Readable } = await import('node:stream');
+      const dummyStdin = new Readable({ read() {} });
+      (dummyStdin as any).setRawMode = () => {};
+      (dummyStdin as any).ref = () => {};
+      (dummyStdin as any).unref = () => {};
+      (dummyStdin as any).isTTY = true;
+      renderOptions.stdin = dummyStdin;
+    }
+
     const instance = render(
       <React.StrictMode>
         <AppWrapper
@@ -943,7 +957,7 @@ export async function main() {
           customProxyUrl={customProxyUrl}
         />
       </React.StrictMode>,
-      { exitOnCtrlC: false },
+      renderOptions,
     );
 
     registerCleanup(async () => {

@@ -5,7 +5,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { HistoryItem } from '../types.js';
+import { HistoryItem, HistoryItemWithoutId } from '../types.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
 
 // Type for the updater function passed to updateHistoryItem
@@ -106,7 +106,7 @@ export function useHistory(options?: UseHistoryOptions): UseHistoryManagerReturn
   const updateItem = useCallback(
     (
       id: number,
-      updates: Partial<Omit<HistoryItem, 'id'>> | HistoryItemUpdater,
+      updates: Partial<HistoryItemWithoutId> | HistoryItemUpdater,
     ) => {
       setHistory((prevHistory) =>
         prevHistory.map((item) => {
