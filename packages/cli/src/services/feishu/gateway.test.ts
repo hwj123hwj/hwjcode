@@ -44,9 +44,10 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
   };
 });
 
-// Mock loadProcessedMessages and saveProcessedMessages to isolate tests from real disk
+// Mock loadProcessedMessages and saveProcessedMessages to isolate tests from real disk.
+// processedMessages is a Map<id, firstSeenTimestamp> (at-most-once dedup store).
 vi.spyOn(FeishuGateway.prototype as any, 'loadProcessedMessages').mockImplementation(function(this: any) {
-  this.processedMessages = new Set();
+  this.processedMessages = new Map();
 });
 vi.spyOn(FeishuGateway.prototype as any, 'saveProcessedMessages').mockImplementation(() => {});
 
@@ -1315,7 +1316,9 @@ describe('FeishuGateway - Message Deduplication', () => {
     expect(callCount).toBe(1);
   });
 
-  it('keeps message out of processedMessages if processing fails, allowing retry', async () => {
+  it('records the message at receipt (at-most-once), so a failed turn is NOT re-run on redelivery', async () => {
+    // at-most-once 语义：消息在"受理时"就落盘，处理失败也不会因飞书重推而重跑。
+    // 这正是修复"上午处理完、下午被重推、agent 又跑一遍"的关键。
     let callCount = 0;
     let finishMessagePromise: (() => void) | null = null;
 
@@ -1343,31 +1346,65 @@ describe('FeishuGateway - Message Deduplication', () => {
       },
     };
 
-    // 1. Send message (starts processing)
+    // 1. Send message (starts processing). It is persisted to processedMessages
+    //    IMMEDIATELY on receipt — before onMessage even resolves.
     const callPromise = messageCallback(mockEvent);
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(callCount).toBe(1);
     expect((gateway as any).inFlightMessages.has('om_test_failure_123')).toBe(true);
+    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(true);
 
-    // 2. Let it fail
+    // 2. Let it fail.
     finishMessagePromise!();
     await callPromise;
 
-    // After failure, it should be removed from in-flight and NOT added to processedMessages
+    // After failure: removed from in-flight, but STILL recorded as processed
+    // (at-most-once) so a blind Feishu redelivery won't re-run it.
     expect((gateway as any).inFlightMessages.has('om_test_failure_123')).toBe(false);
-    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(false);
+    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(true);
 
-    // 3. Since it was not added to processedMessages, sending it again should trigger processing again!
+    // 3. A redelivery of the same message_id must be skipped (NOT reprocessed).
     gateway.onMessage = async (msg) => {
       callCount++;
       return 'success';
     };
+    (gateway as any).recentContents.clear(); // 绕过 5s 内容去重，单独验证 messageId 去重
+    const redeliverResult = await messageCallback(mockEvent);
+    expect(redeliverResult).toEqual({ code: 0 });
+    expect(callCount).toBe(1); // unchanged — the redelivery was deduped
+  });
 
-    (gateway as any).recentContents.clear(); // 绕过内容去重（因为内容和聊天室相同且两次发送时间太接近）
-    await messageCallback(mockEvent);
-    expect(callCount).toBe(2);
-    expect((gateway as any).processedMessages.has('om_test_failure_123')).toBe(true);
+  it('persists message ids at receipt and survives a simulated restart via load/save', () => {
+    // 受理即落盘 + 重启后仍生效：用真实的 record/save/load（绕过本文件顶部的 mock）
+    // 验证一条 id 写盘后，新实例 load 时仍认得它。
+    const store = new Map<string, number>();
+    const g = gateway as any;
+    // 临时还原真实实现（顶部 mock 会把 save/load 变成 no-op）。
+    const realSave = function (this: any) {
+      store.clear();
+      for (const [k, v] of this.processedMessages) store.set(k, v);
+    };
+    const realLoad = function (this: any) {
+      this.processedMessages = new Map(store);
+    };
+    const origSave = g.saveProcessedMessages;
+    const origLoad = g.loadProcessedMessages;
+    g.saveProcessedMessages = realSave;
+    try {
+      g.processedMessages = new Map();
+      g.recordProcessedMessage('om_persist_1');
+      expect(store.has('om_persist_1')).toBe(true);
+
+      // Simulate restart: wipe in-memory, then load from the persisted store.
+      g.processedMessages = new Map();
+      g.loadProcessedMessages = realLoad;
+      g.loadProcessedMessages();
+      expect(g.processedMessages.has('om_persist_1')).toBe(true);
+    } finally {
+      g.saveProcessedMessages = origSave;
+      g.loadProcessedMessages = origLoad;
+    }
   });
 
   it('deduplicates high-risk messages (restart/update) via content hash within 3-hour window', async () => {
