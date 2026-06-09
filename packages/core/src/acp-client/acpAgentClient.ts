@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * https://github.com/OrionStarAI/EasyCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -64,6 +64,15 @@ export interface RunTaskOptions {
   task: string;
   /** Working directory for the delegated session. Must be an absolute path. */
   cwd: string;
+  /**
+   * Resume an existing native session instead of starting a fresh one. When
+   * set, the client calls ACP `session/load` with this id (the bridge replays
+   * prior history via session updates) and then sends `task` as the next
+   * prompt. Both the Claude Code bridge and the Codex adapter advertise the
+   * `loadSession` capability. If `session/load` fails, the run falls back to a
+   * fresh `session/new` so the task still goes through.
+   */
+  resumeSessionId?: string;
   /** Cancellation signal — aborting cancels the remote turn and kills the child. */
   signal: AbortSignal;
   /**
@@ -71,6 +80,12 @@ export interface RunTaskOptions {
    * `updateOutput` contract used by tools and the Feishu card streamer.
    */
   onUpdate?: (output: string) => void;
+  /**
+   * Receives structured progress (current tool, plan, token usage) as the
+   * remote agent works. Used by the background task store and Feishu dashboard
+   * card to render rich, queryable state instead of a flat transcript blob.
+   */
+  onProgress?: (progress: DelegateProgress) => void;
   /** Auto-approve all permission requests. Defaults to true (headless). */
   autoApprove?: boolean;
   /** Override the watchdog timeout in ms. */
@@ -94,6 +109,33 @@ export interface RunTaskOptions {
 
 export type DelegateStatus = 'success' | 'failed' | 'cancelled' | 'timed_out';
 
+/** One entry of the remote agent's execution plan / TODO list. */
+export interface DelegatePlanEntry {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/**
+ * Structured snapshot of a delegated turn's progress, distilled from the ACP
+ * session updates. Unlike the transcript (a growing string), this is a small,
+ * queryable shape suitable for persistence and rich UI (the Feishu dashboard
+ * card). All fields are cumulative for the current turn.
+ */
+export interface DelegateProgress {
+  /** Title of the tool call currently in flight, if any. */
+  currentTool?: string;
+  /** Number of tool calls started so far this turn. */
+  toolCallCount: number;
+  /** Latest execution plan reported by the agent, if any. */
+  plan?: DelegatePlanEntry[];
+  /** Context tokens used, from the latest `usage_update`. */
+  tokenUsed?: number;
+  /** Context window size, from the latest `usage_update`. */
+  tokenSize?: number;
+  /** Epoch ms of the last session activity of any kind. */
+  lastActivityAt: number;
+}
+
 export interface DelegateResult {
   status: DelegateStatus;
   /** Human-readable label of the agent that ran (e.g. "Claude Code"). */
@@ -102,6 +144,14 @@ export interface DelegateResult {
   answer: string;
   /** Full interleaved transcript (tool calls + assistant text). */
   transcript: string;
+  /**
+   * The native session id used for this run — a fresh id from `session/new`,
+   * or the resumed id when {@link RunTaskOptions.resumeSessionId} was set.
+   * Persist this to enable later resume.
+   */
+  sessionId?: string;
+  /** Final structured progress snapshot for the turn. */
+  progress?: DelegateProgress;
   /** ACP stop reason, when the turn completed normally. */
   stopReason?: acp.StopReason;
   /** Populated for failed/timed_out/cancelled outcomes. */
@@ -198,19 +248,35 @@ class DelegateClient implements acp.Client {
    */
   lastActivityAt = Date.now();
 
+  /** Structured, queryable progress for the current turn (Tier 2 / dashboard). */
+  progress: DelegateProgress = { toolCallCount: 0, lastActivityAt: Date.now() };
+
   private lastFlush = 0;
+  private lastProgressFlush = 0;
 
   constructor(
     private readonly opts: {
       autoApprove: boolean;
       cwd: string;
       onUpdate?: (output: string) => void;
+      onProgress?: (progress: DelegateProgress) => void;
     },
   ) {}
 
   /** Record that the agent did something — resets the idle watchdog. */
   private markActivity(): void {
     this.lastActivityAt = Date.now();
+    this.progress.lastActivityAt = this.lastActivityAt;
+  }
+
+  /** Push the structured progress snapshot to the caller, throttled. */
+  private flushProgress(force = false): void {
+    const { onProgress } = this.opts;
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && now - this.lastProgressFlush < OUTPUT_UPDATE_INTERVAL_MS) return;
+    this.lastProgressFlush = now;
+    onProgress({ ...this.progress, plan: this.progress.plan ? [...this.progress.plan] : undefined });
   }
 
   /** Push the cumulative transcript to the caller, throttled. */
@@ -289,7 +355,11 @@ class DelegateClient implements acp.Client {
             this.transcript += `${detail}\n`;
           }
         }
+        // Structured progress: track the in-flight tool + a running count.
+        this.progress.currentTool = u.title ?? this.progress.currentTool;
+        this.progress.toolCallCount += 1;
         this.flush();
+        this.flushProgress();
         break;
       }
 
@@ -337,6 +407,15 @@ class DelegateClient implements acp.Client {
           this.transcript += `\n📋 Plan:\n${entries}\n`;
           this.flush();
         }
+        // Structured progress: keep the latest plan for the dashboard card.
+        this.progress.plan = (u.entries ?? []).map((e) => ({
+          content: e.content,
+          status:
+            e.status === 'completed' || e.status === 'in_progress'
+              ? e.status
+              : 'pending',
+        }));
+        this.flushProgress();
         break;
       }
 
@@ -344,7 +423,10 @@ class DelegateClient implements acp.Client {
       case 'usage_update': {
         const pct = u.size > 0 ? Math.round((u.used / u.size) * 100) : 0;
         this.transcript += `📊 Context: ${u.used}/${u.size} tokens (${pct}%)\n`;
+        this.progress.tokenUsed = u.used;
+        this.progress.tokenSize = u.size;
         this.flush();
+        this.flushProgress();
         break;
       }
 
@@ -506,7 +588,12 @@ export async function runDelegatedTask(
     Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
   );
 
-  const handler = new DelegateClient({ autoApprove, cwd, onUpdate: opts.onUpdate });
+  const handler = new DelegateClient({
+    autoApprove,
+    cwd,
+    onUpdate: opts.onUpdate,
+    onProgress: opts.onProgress,
+  });
   const connection = new acp.ClientSideConnection(() => handler, stream);
 
   let settled = false;
@@ -582,24 +669,53 @@ export async function runDelegatedTask(
     signal.removeEventListener('abort', onAbort);
     handler.flush(true);
     killChildProcess(child);
-    return result;
+    // Stamp the resolved native session id + final structured progress onto
+    // every outcome so callers can persist/resume and render rich status.
+    return {
+      ...result,
+      sessionId: result.sessionId ?? sessionId,
+      progress: result.progress ?? { ...handler.progress },
+    };
   };
 
   // Drive the whole turn as one unit so a child that dies/never starts at ANY
-  // stage (initialize / newSession / prompt) is caught by the childExited race
-  // rather than hanging on an unanswered request.
+  // stage (initialize / newSession|loadSession / prompt) is caught by the
+  // childExited race rather than hanging on an unanswered request.
   const turn = (async () => {
-    await connection.initialize({
+    const init = await connection.initialize({
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
         terminal: false,
       },
     });
-    phase = `已连接 ${label}，正在创建会话…`;
 
-    const session = await connection.newSession({ cwd, mcpServers: [] });
-    sessionId = session.sessionId;
+    // Resume an existing native session when asked (and the bridge supports
+    // it), otherwise start fresh. session/load replays prior history via
+    // session updates, so the resumed turn keeps full context.
+    const canResume = Boolean(init.agentCapabilities?.loadSession);
+    if (opts.resumeSessionId && canResume) {
+      phase = `已连接 ${label}，正在恢复会话 ${opts.resumeSessionId.slice(0, 8)}…`;
+      try {
+        await connection.loadSession({
+          sessionId: opts.resumeSessionId,
+          cwd,
+          mcpServers: [],
+        });
+        sessionId = opts.resumeSessionId;
+      } catch {
+        // Resume failed (stale id, bridge quirk) — fall back to a fresh
+        // session so the task still runs rather than hard-failing.
+        sessionId = undefined;
+      }
+    }
+
+    if (!sessionId) {
+      phase = `已连接 ${label}，正在创建会话…`;
+      const session = await connection.newSession({ cwd, mcpServers: [] });
+      sessionId = session.sessionId;
+    }
+
     phase = `已连接 ${label}，等待响应…`;
     handler.lastActivityAt = Date.now();
     promptSentAt = Date.now();

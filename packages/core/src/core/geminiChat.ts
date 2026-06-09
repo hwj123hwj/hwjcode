@@ -19,6 +19,7 @@ import {
   ContentUnion,
 } from '@google/genai';
 import { Content, stripUIFieldsFromArray } from '../types/extendedContent.js';
+import { CacheSafeParamsStore } from '../services/cacheSafeParams.js';
 import { retryWithBackoff } from '../utils/retry.js';
 import { isFunctionResponse, hasFunctionCall } from '../utils/messageInspectors.js';
 import { MESSAGE_ROLES } from '../config/messageRoles.js';
@@ -159,6 +160,14 @@ export class GeminiChat {
 
   // 保存创建时指定的模型，避免被config覆盖
   private specifiedModel: string;
+
+  /**
+   * Snapshot of the last successful request's parameters, populated after
+   * each `sendMessage` / `sendMessageStream` succeeds. Forked side agents
+   * (e.g. `/btw`) read from this to reuse the prompt-cache prefix.
+   * Public for cross-package access without an extra getter call.
+   */
+  readonly cacheSafeParams = new CacheSafeParamsStore();
 
   constructor(
     private readonly config: Config,
@@ -1293,6 +1302,24 @@ export class GeminiChat {
         consolidatedOutputContents.shift(); // Remove the first element as it's merged
       }
       this.history.push(...consolidatedOutputContents);
+    }
+
+    // 🎯 Snapshot cache-safe params at the natural end-of-turn boundary.
+    // Forked side-question agents (`/btw`) read this to reuse the prompt
+    // cache prefix on long histories. Best-effort: snapshot failure must
+    // never break the main turn, so it's wrapped defensively.
+    try {
+      this.cacheSafeParams.set({
+        model: this.specifiedModel,
+        contents: stripUIFieldsFromArray(this.history.slice()),
+        systemInstruction: this.generationConfig.systemInstruction,
+        timestamp: Date.now(),
+      });
+    } catch (snapshotErr) {
+      // Snapshot is an optimization, not load-bearing. Swallow.
+      logger.warn(
+        `[GeminiChat] cacheSafeParams snapshot failed (non-fatal): ${snapshotErr}`,
+      );
     }
   }
 

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -118,10 +118,8 @@ export const CARDKIT_LOADING_ELEMENT_ID = 'loading_icon';
  * 全局开关：是否启用 CardKit 2.0 流式卡片。
  *
  * 当前 CardKit 2.0 在生产环境表现不稳定（创建/推送偶发 5xx、卡片渲染不一致），
- * 默认短路到老版交互卡片（buildAdaptiveCard + sendCard）。
+ * 默认禁用 CardKit 2.0，统一走老版带标题的交互卡片（sendCard + updateCard）。
  * 设置环境变量 EASYCODE_FEISHU_CARDKIT_V2=1 可临时启用（仅供测试 / 开发）。
- *
- * 等 CardKit 2.0 稳定后改为默认 true，或抽成 settings 控制。
  */
 export function isCardKitV2Enabled(): boolean {
   return process.env['EASYCODE_FEISHU_CARDKIT_V2'] === '1';
@@ -506,6 +504,14 @@ export class FeishuGateway {
 
   /** 群名缓存：key 为 chatId，value 为解析出的群名（成功才缓存，失败/空名不缓存以便后续重试） */
   private chatNameCache: Map<string, string> = new Map();
+
+  /**
+   * 会话类型缓存：key 为 chatId，value 为飞书 chat_mode（'p2p' 单聊 / 'group' 群聊 / 'topic' 话题群）。
+   * 由 getChatName 的同一次 API 调用顺带填充，getChatMode 优先命中此缓存，避免重复请求。
+   * 注意：与 chatNameCache 独立——p2p 单聊无群名（name 为空，不进 chatNameCache），
+   * 但其 chat_mode 仍须可被精确识别，故单独缓存。
+   */
+  private chatModeCache: Map<string, string> = new Map();
 
   /** 外部注入的消息处理回调 */
   onMessage: OnMessageCallback | null = null;
@@ -1095,9 +1101,45 @@ export class FeishuGateway {
       return cached;
     }
 
+    await this.fetchAndCacheChatInfo(chatId);
+    return this.chatNameCache.get(chatId) ?? null;
+  }
+
+  /**
+   * 精确判断会话类型（飞书 chat_mode 字段）。
+   *
+   * 用于 TUI 仪表板友好展示——例如把"与 Bot 的私聊"（chat_mode='p2p'）
+   * 与普通群聊区分开。**这是唯一可靠的判据**：p2p 单聊和群聊的 chatId
+   * 都是 `oc_` 前缀，无法靠前缀或"群名是否解析得出"来区分（无名群/无权限群
+   * 同样没有群名，但它们不是 p2p）。
+   *
+   * 与 getChatName 共用同一次 API 调用结果（chatModeCache），优先命中缓存。
+   *
+   * @param chatId 飞书会话 ID（oc_ 开头）
+   * @returns 'p2p' | 'group' | 'topic' 等飞书 chat_mode 值；无法解析时返回 null
+   */
+  async getChatMode(chatId: string): Promise<string | null> {
+    if (!chatId) return null;
+
+    const cached = this.chatModeCache.get(chatId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    await this.fetchAndCacheChatInfo(chatId);
+    return this.chatModeCache.get(chatId) ?? null;
+  }
+
+  /**
+   * 拉取飞书会话详情（GET /im/v1/chats/{chat_id}），一次请求同时填充
+   * chatNameCache（仅非空群名）与 chatModeCache（chat_mode）。
+   *
+   * 失败 / 无权限 / 网络异常时静默不缓存，允许后续重试。
+   */
+  private async fetchAndCacheChatInfo(chatId: string): Promise<void> {
     try {
       const token = await this.getTenantToken();
-      if (!token) return null;
+      if (!token) return;
 
       const res = await fetch(
         `${this.apiBaseUrl}/open-apis/im/v1/chats/${encodeURIComponent(chatId)}`,
@@ -1109,21 +1151,24 @@ export class FeishuGateway {
       const data: any = await res.json();
 
       if (data.code !== 0) {
-        dlog(`[Feishu] getChatName(${chatId}) failed: ${JSON.stringify(data)}`);
-        return null;
+        dlog(`[Feishu] fetchChatInfo(${chatId}) failed: ${JSON.stringify(data)}`);
+        return;
       }
 
+      // chat_mode：'p2p' / 'group' / 'topic'。即便群名为空（p2p 单聊）也要缓存类型。
+      const mode =
+        typeof data.data?.chat_mode === 'string' ? data.data.chat_mode.trim() : '';
+      if (mode) {
+        this.chatModeCache.set(chatId, mode);
+      }
+
+      // 群名：p2p 单聊或无名群为空，不缓存以便调用方 fallback。
       const name = typeof data.data?.name === 'string' ? data.data.name.trim() : '';
-      if (!name) {
-        // 私聊会话或无名群：没有可展示的群名，交给调用方 fallback。
-        return null;
+      if (name) {
+        this.chatNameCache.set(chatId, name);
       }
-
-      this.chatNameCache.set(chatId, name);
-      return name;
     } catch (e: any) {
-      dlog(`[Feishu] getChatName(${chatId}) threw: ${e?.message || e}`);
-      return null;
+      dlog(`[Feishu] fetchChatInfo(${chatId}) threw: ${e?.message || e}`);
     }
   }
 
@@ -1687,6 +1732,38 @@ export class FeishuGateway {
       return true;
     } catch (err) {
       dwarn('Failed to update Feishu message:', err);
+      return false;
+    }
+  }
+
+  /**
+   * 撤回机器人已发送的消息
+   *
+   * 需要 `im:message:recall` 权限。仅能撤回机器人自己发送的消息。
+   *
+   * @returns true=撤回成功, false=撤回失败
+   */
+  async recallMessage(messageId: string): Promise<boolean> {
+    if (!messageId) return false;
+    try {
+      const token = await this.getTenantToken();
+      const res = await fetch(
+        `${this.apiBaseUrl}/open-apis/im/v1/messages/${messageId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        },
+      );
+      const data: any = await res.json();
+      if (data.code !== 0) {
+        dwarn(`Failed to recall Feishu message: ${JSON.stringify(data)}`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      dwarn('Failed to recall Feishu message:', err);
       return false;
     }
   }

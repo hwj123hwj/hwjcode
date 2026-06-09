@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * SPDX-License-Identifier: Apache-2.0
  *
  * Regression tests for the "symlinked skill folders are not discovered" bug.

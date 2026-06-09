@@ -157,6 +157,13 @@ export const Help: React.FC<Help> = ({ commands }) => {
         </Text>{' '}
         {t('help.shortcut.exit')}
       </Text>
+
+      <Box height={1} />
+
+      {/* More help */}
+      <Text color={Colors.Gray}>
+        {t('help.more.help')}
+      </Text>
     </Box>
   );
 };

@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
+import { isSideQuestionPanelOpen } from '../utils/modalState.js';
 import { SuggestionsDisplay } from './SuggestionsDisplay.js';
 import { useInputHistory } from '../hooks/useInputHistory.js';
 import { TextBuffer } from './shared/text-buffer.js';
@@ -571,6 +572,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       }
 
       if (key.name === 'escape') {
+        // When the /btw side-question panel is open, let App.tsx handle ESC.
+        if (isSideQuestionPanelOpen()) {
+          return;
+        }
         if (shellModeActive) {
           setShellModeActive(false);
           return;

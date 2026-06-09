@@ -99,7 +99,43 @@ export * from './services/mcpResponseGuard.js';
 export * from './services/fileOperationQueue.js';
 export * from './services/backgroundTaskManager.js';
 export * from './services/backgroundModeSignal.js';
-export { formatClaudeCodeTaskResult } from './tools/delegate-agent.js';
+export { formatClaudeCodeTaskResult, isAcpDelegateTask } from './tools/delegate-agent.js';
+export {
+  CacheSafeParamsStore,
+  type CacheSafeParams,
+} from './services/cacheSafeParams.js';
+export {
+  runForkedAgent,
+  type RunForkedAgentOptions,
+  type RunForkedAgentResult,
+} from './agents/runForkedAgent.js';
+export {
+  runSideQuestion,
+  SIDE_QUESTION_SYSTEM_PROMPT,
+  type RunSideQuestionOptions,
+  type RunSideQuestionResult,
+} from './agents/runSideQuestion.js';
+export {
+  EXTERNAL_AGENT_TYPES,
+  isExternalAgentType,
+  resolveExternalAgentSpec,
+  type ExternalAgentType,
+  type ExternalAgentSpec,
+} from './acp-client/externalAgentRegistry.js';
+export {
+  runDelegatedTask,
+  type RunTaskOptions,
+  type DelegateResult,
+  type DelegateStatus,
+  type DelegateProgress,
+  type DelegatePlanEntry,
+} from './acp-client/acpAgentClient.js';
+export {
+  listExternalSessions,
+  type ExternalSessionDescriptor,
+  type ListExternalSessionsOptions,
+  type ListExternalSessionsResult,
+} from './acp-client/sessionDiscovery.js';
 
 // Export IDE specific logic
 export * from './ide/ide-client.js';
