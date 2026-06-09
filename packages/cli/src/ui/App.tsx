@@ -20,6 +20,9 @@ import { StreamingState, type HistoryItem, MessageType, ToolCallStatus, type Ind
 import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
+import { computeMidTurnDrain } from './state/midTurnDrain.js';
+import { runSideQuestion } from 'deepv-code-core';
+import { SideQuestionPanel, type SideQuestionState } from './components/SideQuestionPanel.js';
 import { useAnimatedTitleIcon } from './hooks/useAnimatedTitleIcon.js';
 import { t, tp } from './utils/i18n.js';
 import { useLoadingIndicator } from './hooks/useLoadingIndicator.js';
@@ -41,7 +44,7 @@ import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
 import { useGoalActive } from './hooks/useGoalActive.js';
 import { useConsoleMessages } from './hooks/useConsoleMessages.js';
 import { useBackgroundTaskNotifications, formatBackgroundTaskResult } from './hooks/useBackgroundTaskNotifications.js';
-import { formatClaudeCodeTaskResult } from 'deepv-code-core';
+import { formatClaudeCodeTaskResult, isAcpDelegateTask } from 'deepv-code-core';
 import { BackgroundTaskPanel } from './components/BackgroundTaskPanel.js';
 import { BackgroundTaskHint } from './components/BackgroundTaskHint.js';
 import { Header } from './components/Header.js';
@@ -348,6 +351,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   const [feishuBotName, setFeishuBotName] = useState<string>('');
   const [feishuPlatform, setFeishuPlatform] = useState<string>('feishu');
   const [feishuChatNames, setFeishuChatNames] = useState<Record<string, string>>({});
+  const [feishuP2pChatIds, setFeishuP2pChatIds] = useState<Set<string>>(new Set());
 
   // 监听飞书消息处理与Bot运行状态事件
   useEffect(() => {
@@ -414,6 +418,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       setFeishuChatNames(prev => ({ ...prev, ...chatNames }));
     };
 
+    // 仪表板事件：p2p 单聊（与 Bot 的私聊）解析完成。合并进已有集合。
+    const handleFeishuP2pChatsResolved = (p2pChatIds: string[]) => {
+      setFeishuP2pChatIds(prev => new Set([...prev, ...p2pChatIds]));
+    };
+
     appEvents.on(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
     appEvents.on(AppEvent.FeishuBotProcessingEnd, handleFeishuProcessingEnd);
     appEvents.on(AppEvent.FeishuBotStarted, handleFeishuBotStarted);
@@ -423,6 +432,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     appEvents.on(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
     appEvents.on(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
     appEvents.on(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+    appEvents.on(AppEvent.FeishuP2pChatsResolved, handleFeishuP2pChatsResolved);
 
     return () => {
       appEvents.off(AppEvent.FeishuBotProcessingStart, handleFeishuProcessingStart);
@@ -434,6 +444,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       appEvents.off(AppEvent.FeishuMessageLog, handleFeishuMessageLog);
       appEvents.off(AppEvent.FeishuProjectRoutesUpdated, handleFeishuProjectRoutesUpdated);
       appEvents.off(AppEvent.FeishuChatNamesResolved, handleFeishuChatNamesResolved);
+      appEvents.off(AppEvent.FeishuP2pChatsResolved, handleFeishuP2pChatsResolved);
     };
   }, []);
 
@@ -600,7 +611,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
   const [geminiMdFileCount, setGeminiMdFileCount] = useState<number>(0);
   const [debugMessage, setDebugMessage] = useState<string>('');
-  const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showBackgroundTaskPanel, setShowBackgroundTaskPanelState] = useState<boolean>(false);
 
   // 🎯 后台任务通知队列 - AI 忙时先缓存，等 AI 空闲后再注入历史
@@ -1403,7 +1413,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     clearItems,
     loadHistory,
     refreshStatic,
-    setShowHelp,
     setDebugMessage,
     openThemeDialog,
     openModelDialog,
@@ -1428,6 +1437,33 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     openWorkflowPanel, // ⚡ 传递 openWorkflowPanel
   );
 
+  // 🎯 Mid-turn injection: 在 useGeminiStream 调用前先准备好 drain callback。
+  // useGeminiStream 在 tool-call 间隙调用它，原子取走 queuedPrompts 里所有
+  // 待注入项作为附加 user text 跟随下一次 continuation 一起送给模型。
+  // paused / editMode / 空队列 时返回空数组（不消耗），留给 useEffect 在
+  // Idle 时按既有 between-turn 方式处理。
+  //
+  // 用 ref 引用最新 state，避免每次 queuedPrompts 变化都让下游 useCallback
+  // 重建，从而触发不必要的重渲染。
+  const queuedPromptsRef = useRef(queuedPrompts);
+  const queuePausedRef = useRef(queuePaused);
+  const queueEditModeRef = useRef(queueEditMode);
+  useEffect(() => { queuedPromptsRef.current = queuedPrompts; }, [queuedPrompts]);
+  useEffect(() => { queuePausedRef.current = queuePaused; }, [queuePaused]);
+  useEffect(() => { queueEditModeRef.current = queueEditMode; }, [queueEditMode]);
+
+  const drainQueuedPromptsForInjection = useCallback((): string[] => {
+    const { drained, nextQueue } = computeMidTurnDrain(
+      queuedPromptsRef.current,
+      queuePausedRef.current,
+      queueEditModeRef.current,
+    );
+    if (drained.length > 0) {
+      setQueuedPrompts(nextQueue);
+    }
+    return drained;
+  }, []);
+
   const {
     streamingState,
     submitQuery,
@@ -1442,7 +1478,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     config.getGeminiClient(),
     history,
     addItem,
-    setShowHelp,
     config,
     setDebugMessage,
     handleSlashCommand,
@@ -1457,6 +1492,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     settings, // 传递设置对象以支持异步模型配置更新
     customProxyUrl,
     debateAdvanceAbortRef, // 🎭 共享的辩论推进 AbortController ref
+    drainQueuedPromptsForInjection, // 🎯 mid-turn 注入：tool 间隙原子取走排队消息
   );
 
   // 🎭 把真正的 submitQuery 绑到 ref 上，让 useDebateWizard 能在开始辩论时用它
@@ -1488,20 +1524,21 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     onTaskCompleted: useCallback((task: BackgroundTask) => {
       console.log('[App] Background task completed, adding to history:', task.id);
 
-      const isClaudeCode = task.kind === 'claude-code';
+      const isAcpDelegate = isAcpDelegateTask(task);
+      const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
 
       // 🎯 使用 tool_group 格式显示任务输出（仿 Claude Code 风格）
       const shortId = task.id;
       const truncatedOutput = truncateBackgroundTaskOutput(task.output);
       const toolGroupItem: IndividualToolCallDisplay = {
         callId: `bg-${task.id}`,
-        name: isClaudeCode ? 'Claude Code' : t('background.task.output'),
-        toolId: isClaudeCode ? 'claude_code_task_output' : 'background_task_output',
+        name: isAcpDelegate ? agentLabel : t('background.task.output'),
+        toolId: isAcpDelegate ? 'claude_code_task_output' : 'background_task_output',
         description: `${shortId} ${task.command}`,
-        resultDisplay: isClaudeCode
+        resultDisplay: isAcpDelegate
           ? (task.answer || truncatedOutput || 'Task completed')
           : (truncatedOutput || `Exit code: ${task.exitCode ?? 'unknown'}`),
-        status: isClaudeCode ? ToolCallStatus.Success : (task.exitCode === 0 ? ToolCallStatus.Success : ToolCallStatus.Error),
+        status: isAcpDelegate ? ToolCallStatus.Success : (task.exitCode === 0 ? ToolCallStatus.Success : ToolCallStatus.Error),
         confirmationDetails: undefined,
       };
       addItem(
@@ -1510,11 +1547,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       );
 
       // 🎯 构建通知消息（包含完整的任务信息，供 AI 理解）
-      const resultText = isClaudeCode
+      const resultText = isAcpDelegate
         ? formatClaudeCodeTaskResult(task)
         : formatBackgroundTaskResult(task);
-      const notificationText = isClaudeCode
-        ? `[Easy Code - SYSTEM NOTIFICATION] Claude Code task completed (Task ID: ${task.id}).\n\n${resultText}`
+      const notificationText = isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task completed (Task ID: ${task.id}).\n\n${resultText}`
         : `[Easy Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${task.id}). Exit code: ${task.exitCode ?? 'unknown'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
 
       // 🎯 如果 AI 当前空闲，自动触发 AI 继续处理（静默模式，不显示用户消息）
@@ -1528,13 +1565,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     }, [addItem, streamingState, submitQuery]),
     onTaskFailed: useCallback((task: BackgroundTask) => {
       console.log('[App] Background task failed:', task.id);
-      const isClaudeCode = task.kind === 'claude-code';
+      const isAcpDelegate = isAcpDelegateTask(task);
+      const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
       const shortId = task.id;
       const truncatedOutput = truncateBackgroundTaskOutput(task.error || task.output);
       const toolGroupItem: IndividualToolCallDisplay = {
         callId: `bg-${task.id}`,
-        name: isClaudeCode ? 'Claude Code' : t('background.task.output'),
-        toolId: isClaudeCode ? 'claude_code_task_output' : 'background_task_output',
+        name: isAcpDelegate ? agentLabel : t('background.task.output'),
+        toolId: isAcpDelegate ? 'claude_code_task_output' : 'background_task_output',
         description: `${shortId} ${task.command}`,
         resultDisplay: truncatedOutput || 'Unknown error',
         status: ToolCallStatus.Error,
@@ -1546,8 +1584,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       );
 
       // 🎯 构建通知消息（包含完整的任务信息，供 AI 理解）
-      const notificationText = isClaudeCode
-        ? `[Easy Code - SYSTEM NOTIFICATION] Claude Code task failed (Task ID: ${task.id}).\n\n${formatClaudeCodeTaskResult(task)}`
+      const notificationText = isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task failed (Task ID: ${task.id}).\n\n${formatClaudeCodeTaskResult(task)}`
         : `[System] Background task failed (Task ID: ${task.id}). Command: ${task.command}. Error: ${task.error || 'Unknown error'}. Output:\n${task.output?.substring(0, 1000) || '(no output)'}`;
 
       // 🎯 如果 AI 当前空闲，自动触发 AI 继续处理（静默模式，不显示用户消息）
@@ -1643,9 +1681,142 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     [logoShows, stdout, submitQuery],
   );
 
-  const queuePrompt = useCallback((promptText: string) => {
-    setQueuedPrompts((prev) => [...prev, promptText]);
+  // 🎯 /btw side-question state. Lives outside the chat transcript: the
+  // forked agent runs in parallel with the main turn, and its answer
+  // appears in a bordered box below the input prompt. Closing it (Esc)
+  // wipes the state without touching chat history.
+  // (Declared BEFORE queuePrompt because queuePrompt's defensive intercept
+  // calls startSideQuestion — moving it later would create a TDZ violation.)
+  const [sideQuestion, setSideQuestion] = useState<SideQuestionState | null>(null);
+  const sideQuestionAbortRef = useRef<AbortController | null>(null);
+
+  const closeSideQuestion = useCallback(() => {
+    // Abort any in-flight fork; safe to call when already done.
+    sideQuestionAbortRef.current?.abort();
+    sideQuestionAbortRef.current = null;
+    setSideQuestion(null);
+    import('./utils/modalState.js').then(m => m.setSideQuestionPanelOpen(false));
   }, []);
+
+  const startSideQuestion = useCallback(
+    (question: string) => {
+      const trimmed = question.trim();
+      if (!trimmed) return;
+
+      // If a previous /btw is still streaming or shown, cancel & replace.
+      sideQuestionAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      sideQuestionAbortRef.current = ctrl;
+
+      setSideQuestion({
+        question: trimmed,
+        answer: '',
+        status: 'pending',
+      });
+      import('./utils/modalState.js').then(m => m.setSideQuestionPanelOpen(true));
+
+      const geminiClient = config?.getGeminiClient();
+      if (!geminiClient) {
+        setSideQuestion({
+          question: trimmed,
+          answer: '',
+          status: 'failed',
+          error: 'GeminiClient not initialized yet.',
+        });
+        return;
+      }
+
+      let contentGenerator;
+      try {
+        contentGenerator = geminiClient.getContentGenerator();
+      } catch (e: unknown) {
+        setSideQuestion({
+          question: trimmed,
+          answer: '',
+          status: 'failed',
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return;
+      }
+
+      // Cache-safe snapshot is best-effort; fall back to null (cold start).
+      let snapshot = null;
+      try {
+        snapshot = geminiClient.getChat().cacheSafeParams.get();
+      } catch {
+        // No chat yet — that's fine, cold start will work too.
+      }
+
+      const model = config.getModel();
+      const cacheNote = snapshot
+        ? `↻ Reusing main chat's prompt cache prefix (${snapshot.contents.length} messages).`
+        : 'ℹ️ Cold start (no main turn completed yet) — no cache hit possible.';
+
+      // Promote pending → streaming on first chunk; accumulate text.
+      void (async () => {
+        const result = await runSideQuestion({
+          contentGenerator,
+          model,
+          question: trimmed,
+          cacheSafeSnapshot: snapshot,
+          signal: ctrl.signal,
+          onChunk: (delta) => {
+            setSideQuestion((prev) => {
+              if (!prev) return prev;
+              if (prev.status === 'pending' || prev.status === 'streaming') {
+                return {
+                  ...prev,
+                  status: 'streaming',
+                  answer: prev.answer + delta,
+                  cacheNote,
+                };
+              }
+              return prev;
+            });
+          },
+        });
+
+        setSideQuestion((prev) => {
+          if (!prev) return prev;
+          // Don't clobber a state that was already cleared by a newer /btw.
+          if (sideQuestionAbortRef.current !== ctrl) return prev;
+          return {
+            ...prev,
+            answer: result.text || prev.answer,
+            status:
+              result.status === 'success'
+                ? 'done'
+                : result.status === 'cancelled'
+                ? 'cancelled'
+                : 'failed',
+            error: result.error,
+            cacheNote,
+          };
+        });
+      })();
+    },
+    [config],
+  );
+
+  // 🎯 Defense in depth: a `/btw …` prompt must NEVER enter the queue,
+  // regardless of which call path landed here. If a /btw slipped past the
+  // upstream intercepts (handleFinalSubmit / handlePromptOrQueue), we
+  // catch it here and fork the side question on the spot. This guards
+  // against any future call site that might forward user text directly
+  // into the queue.
+  const queuePrompt = useCallback((promptText: string) => {
+    const trimmedQueueText = promptText.trim();
+    if (/^\/btw(\s|$)/i.test(trimmedQueueText)) {
+      const q = trimmedQueueText.replace(/^\/btw\s*/i, '').trim();
+      if (q) {
+        startSideQuestion(q);
+        return;
+      }
+      // Bare `/btw` with no args — still don't queue it; drop silently.
+      return;
+    }
+    setQueuedPrompts((prev) => [...prev, promptText]);
+  }, [startSideQuestion]);
 
   const updateQueueItem = useCallback((index: number, newContent: string) => {
     const trimmed = newContent.trim();
@@ -1689,6 +1860,20 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         return;
       }
 
+      // 🎯 /btw side-question bypass: runs immediately (even mid-turn),
+      // does NOT go into the prompt queue, does NOT write to transcript.
+      // Matches the SlashCommand `immediate: true` flag on btwCommand.
+      if (/^\/btw(\s|$)/i.test(sanitizedPrompt)) {
+        const question = sanitizedPrompt.replace(/^\/btw\s*/i, '');
+        if (!question) {
+          // Empty /btw — show usage hint via the standard slash-command path.
+          sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
+          return;
+        }
+        startSideQuestion(question);
+        return;
+      }
+
       if (streamingState !== StreamingState.Idle) {
         queuePrompt(sanitizedPrompt);
         // 不再显示 "ℹ️Queued #X:" 的 INFO 消息，队列在输入框上方显示
@@ -1697,7 +1882,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
       sendPromptImmediately(sanitizedPrompt, pauseQueueUntilResponse, silent);
     },
-    [addItem, queuePrompt, queuedPrompts.length, sendPromptImmediately, streamingState],
+    [addItem, queuePrompt, queuedPrompts.length, sendPromptImmediately, streamingState, startSideQuestion],
   );
 
   // Session自动保存 - 监听streaming状态变化
@@ -1748,6 +1933,22 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
         // 首先检查是否是slash命令
         if (trimmedValue.startsWith('/')) {
+          // 🎯 /btw 旁路 — MUST come BEFORE handleSlashCommand below.
+          // Otherwise the registered btwCommand action fires first and
+          // only returns the "Usage:" hint, swallowing the actual question.
+          // The bypass forks a side-question agent and renders the answer
+          // in the SideQuestionPanel below the input, never entering the
+          // chat transcript or the prompt queue.
+          if (/^\/btw(\s|$)/i.test(trimmedValue)) {
+            const question = trimmedValue.replace(/^\/btw\s*/i, '').trim();
+            if (question) {
+              startSideQuestion(question);
+              return;
+            }
+            // Empty `/btw` — fall through so the standard processor shows
+            // the usage hint via btwCommand.action.
+          }
+
           // 特殊处理：/queue clear 命令
           if (trimmedValue === '/queue clear') {
             if (queuedPrompts.length > 0) {
@@ -2068,6 +2269,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                        (isIDEATerminal && key.ctrl && input === 'q') ||
                        (process.platform === 'darwin' && key.meta && input === 'q');
 
+    // 🎯 /btw side-question panel takes top priority for Esc — while it's
+    // visible, Esc closes it (and aborts an in-flight fork). Main agent's
+    // streaming is unaffected either way.
+    if (sideQuestion && isCancelKey) {
+      closeSideQuestion();
+      return;
+    }
+
     // 处理队列编辑模式
     if (queueEditMode) {
       if (key.return) {
@@ -2210,14 +2419,8 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
     // 处理取消键（主要用于非流响应状态下的取消操作）
     if (isCancelKey) {
-      // 如果帮助面板正在显示，按 ESC 关闭它
-      if (showHelp) {
-        setShowHelp(false);
-        return; // 阻止其他处理
-      }
       // 这里可以添加其他需要取消的操作，比如退出确认对话框等
       // 流响应的取消由useGeminiStream处理
-      // console.log('🌍 [App级别] 检测到取消键');
     }
 
     if (key.ctrl && input === 'o') {
@@ -2564,7 +2767,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       geminiClient?.isInitialized?.()
     ) {
       feishuAutoStartTriggered.current = true;
-      void handleSlashCommand('/feishu start');
+      // 🔄 自更新重启后的启动延迟：新进程先 sleep，给飞书服务端充足时间
+      // 完成老进程的 WebSocket 关闭确认和消息投递结算，避免消息重推。
+      const startupDelay = parseInt(process.env.EASYCODE_STARTUP_DELAY_MS || '0', 10);
+      if (startupDelay > 0) {
+        setTimeout(() => void handleSlashCommand('/feishu start'), startupDelay);
+      } else {
+        void handleSlashCommand('/feishu start');
+      }
     }
   }, [
     config,
@@ -2579,6 +2789,42 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     geminiClient,
     handleSlashCommand,
   ]);
+
+  // 🔄 --feishu 自启兜底（重启场景专用）：
+  //    detached 进程无 TTY 时，Ink 降级渲染可能导致 useEffect 依赖不更新，
+  //    `/feishu start` 永远不触发。此轮询在重启场景下作为兜底，确保一定启动。
+  useEffect(() => {
+    if (!config.getFeishuAutoStart?.() || feishuAutoStartTriggered.current) return;
+    // 仅在重启场景（外挂设置了 EASYCODE_STARTUP_DELAY_MS）启用
+    if (!process.env.EASYCODE_STARTUP_DELAY_MS) return;
+
+    const startupDelay = parseInt(process.env.EASYCODE_STARTUP_DELAY_MS || '0', 10);
+    const timer = setInterval(() => {
+      if (feishuAutoStartTriggered.current) {
+        clearInterval(timer);
+        return;
+      }
+      if (geminiClient?.isInitialized?.()) {
+        feishuAutoStartTriggered.current = true;
+        clearInterval(timer);
+        void handleSlashCommand('/feishu start');
+      }
+    }, 500);
+
+    // 安全兜底：最多等 30s，即使 geminiClient 未初始化也强制触发
+    const deadline = setTimeout(() => {
+      clearInterval(timer);
+      if (!feishuAutoStartTriggered.current) {
+        feishuAutoStartTriggered.current = true;
+        void handleSlashCommand('/feishu start');
+      }
+    }, startupDelay + 30000);
+
+    return () => {
+      clearInterval(timer);
+      clearTimeout(deadline);
+    };
+  }, [config, geminiClient, handleSlashCommand]);
 
   // Store quitting render content but don't return early to avoid hooks order issues
   const quittingRender = quittingMessages ? (
@@ -2676,8 +2922,6 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
             <ShowMoreLines />
           </Box>
         </OverflowProvider>
-
-        {showHelp ? <Help commands={slashCommands} /> : null}
 
         {/* 显示思考过程框：reasoning 存在就显示。
             正文开始 / 流式结束 / 用户取消 / 新一轮提问 时由
@@ -2955,6 +3199,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                   isConnected={true}
                   terminalWidth={terminalWidth}
                   chatNames={feishuChatNames}
+                  p2pChatIds={feishuP2pChatIds}
                 />
               ) : (
                 <React.Fragment>
@@ -3195,6 +3440,13 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
 
               {/* 🎯 后台任务提示 - 显示在输入框下方 */}
               <BackgroundTaskHint />
+
+              {/* 🎯 /btw 旁路问答面板 - 显示在输入框下方，最高占终端 40% */}
+              <SideQuestionPanel
+                state={sideQuestion}
+                terminalHeight={terminalHeight}
+                terminalWidth={terminalWidth}
+              />
             </>
           )}
 

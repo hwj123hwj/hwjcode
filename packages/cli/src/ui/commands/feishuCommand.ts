@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * https://github.com/OrionStarAI/DeepVCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,7 +43,14 @@ import {
   resolveDelegation,
   buildDelegateDirective,
   parseBindAgentFlag,
+  agentDisplayLabel,
 } from '../../services/feishu/delegateDirective.js';
+import { handleSessionsCommand } from '../../services/feishu/sessionsCommand.js';
+import { CreateProjectGroupTool } from '../../services/feishu/createProjectGroupTool.js';
+import {
+  detectLocalAgents,
+  buildLocalAgentWelcomeHints,
+} from '../../services/feishu/localAgentDetection.js';
 import {
   REQUIRED_APP_SCOPES,
   SENSITIVE_GROUP_MSG_SCOPE,
@@ -80,6 +87,8 @@ import {
   AudioReaderTool,
   SelfUpdateTool,
   launchRelaunchHelper,
+  type RelaunchInstallMode,
+  runSideQuestion,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -129,6 +138,7 @@ export function feishuGetToolShortName(name: string): string {
     case 'todo_write': return 'TodoWrite';
     case 'task': return 'SubAgentTask';
     case 'use_skill': return 'UseSkill';
+    case 'delegate_to_agent': return 'DelegateAgent';
     default: {
       return name.split(/[-_]+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
     }
@@ -164,8 +174,13 @@ export function safeTruncateForLog(text: string, limit = 150): string {
  *
  * 设计为模块级纯函数，便于单测，且不依赖运行时网关/凭证状态。群名解析
  * 由调用方提前完成后通过 `chatNames` 传入：
+ *  - p2p 单聊（与 Bot 的私聊）→ 显示「与机器人 X 的私聊」友好文案；
  *  - 有群名 → 主显示群名，并在括号内补充 chatId 方便排查；
- *  - 无群名（无权限 / 私聊 / 未解析）→ 直接显示 chatId（fallback）。
+ *  - 无群名（无权限 / 未解析的群）→ 直接显示 chatId（fallback）。
+ *
+ * 关于 p2p 判定：飞书 p2p 单聊与群聊的 chatId 都是 `oc_` 前缀，且 p2p 无群名，
+ * 仅靠"群名是否解析得出"会把无名群/无权限群误判为私聊。因此 p2p 集合由调用方
+ * 通过飞书 chat_mode 字段精确判定后传入（`p2pChatIds`），此处不做任何猜测。
  *
  * 活跃语义 = 「当前正在干活（Agent 仍在处理）」的群，可同时有多个。通过
  * `activeChatIds` 集合传入，命中的群以 🟢 前缀 + (Active) 后缀高亮。
@@ -173,6 +188,8 @@ export function safeTruncateForLog(text: string, limit = 150): string {
  * @param routes      feishu-projects.json 的路由表（chatId → { projectRoot }）
  * @param options.activeChatIds 当前正在干活的群 chatId 集合（Set 或数组，可空）
  * @param options.chatNames    chatId → 群名 的解析结果（可空）
+ * @param options.p2pChatIds   经 chat_mode 判定为 p2p 单聊的 chatId 集合（Set 或数组，可空）
+ * @param options.botName      Bot 名称，用于私聊文案「与机器人 X 的私聊」（可空）
  * @returns 可直接 join('\n') 的文本行数组
  */
 export function buildBoundProjectsLines(
@@ -180,6 +197,8 @@ export function buildBoundProjectsLines(
   options?: {
     activeChatIds?: Set<string> | string[] | null;
     chatNames?: Record<string, string>;
+    p2pChatIds?: Set<string> | string[] | null;
+    botName?: string;
   },
 ): string[] {
   const entries = Object.entries(routes || {});
@@ -187,7 +206,12 @@ export function buildBoundProjectsLines(
     options?.activeChatIds instanceof Set
       ? options.activeChatIds
       : new Set(options?.activeChatIds ?? []);
+  const p2pSet =
+    options?.p2pChatIds instanceof Set
+      ? options.p2pChatIds
+      : new Set(options?.p2pChatIds ?? []);
   const chatNames = options?.chatNames ?? {};
+  const botName = options?.botName?.trim();
 
   const lines: string[] = [tp('feishu.status.bound_projects_title', { count: entries.length })];
 
@@ -203,8 +227,18 @@ export function buildBoundProjectsLines(
   for (const [chatId, route] of entries) {
     const isActive = activeSet.has(chatId);
     const name = chatNames[chatId];
-    // 主显示名：优先群名（附带 chatId 便于排查），否则直接 chatId。
-    let display = name ? `${name} (${chatId})` : chatId;
+    // 主显示名优先级：p2p 单聊文案 > 群名(附 chatId) > 裸 chatId。
+    // p2p 判定优先于群名，避免上游误传 name 时把私聊显示成群名。
+    let display: string;
+    if (p2pSet.has(chatId)) {
+      display = botName
+        ? tp('feishu.status.p2p_chat_label', { bot: botName })
+        : t('feishu.status.p2p_chat_label_unknown');
+    } else if (name) {
+      display = `${name} (${chatId})`;
+    } else {
+      display = chatId;
+    }
     if (isActive) {
       display = `🟢 ${display} ${t('feishu.status.bound_active_suffix')}`;
     }
@@ -366,22 +400,35 @@ function emitFeishuProjectRoutesUpdated() {
 }
 
 /**
- * 批量解析飞书群名并通过 FeishuChatNamesResolved 事件推给 TUI Dashboard。
+ * 批量解析飞书群名 + 会话类型，并通过事件推给 TUI Dashboard。
  *
- * 仅在 Bot 运行中（activeGateway 存在）时执行；getChatName 自带进程内缓存，
- * 重复调用开销极小。单个群解析失败被 allSettled 吞掉，不影响其它群。
+ * 仅在 Bot 运行中（activeGateway 存在）时执行；getChatName / getChatMode 共用
+ * 进程内缓存（同一次 chats/{id} 请求填充），重复调用开销极小。单个解析失败被
+ * allSettled 吞掉，不影响其它会话。
+ *
+ * 解析结果分两路 emit：
+ *  - FeishuChatNamesResolved：chatId → 群名（仅有群名的）
+ *  - FeishuP2pChatsResolved：chat_mode='p2p' 的 chatId 列表（与 Bot 的私聊）
  */
 async function resolveAndEmitChatNames(chatIds: string[]): Promise<void> {
   if (!activeGateway || chatIds.length === 0) return;
   const chatNames: Record<string, string> = {};
+  const p2pChatIds: string[] = [];
   await Promise.allSettled(
     chatIds.map(async (chatId) => {
-      const name = await activeGateway!.getChatName(chatId);
+      const [name, mode] = await Promise.all([
+        activeGateway!.getChatName(chatId),
+        activeGateway!.getChatMode(chatId),
+      ]);
       if (name) chatNames[chatId] = name;
+      if (mode === 'p2p') p2pChatIds.push(chatId);
     }),
   );
   if (Object.keys(chatNames).length > 0) {
     appEvents.emit(AppEvent.FeishuChatNamesResolved, chatNames);
+  }
+  if (p2pChatIds.length > 0) {
+    appEvents.emit(AppEvent.FeishuP2pChatsResolved, p2pChatIds);
   }
 }
 
@@ -432,10 +479,20 @@ interface FeishuProjectRoute {
     effort?: 'auto' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
   };
   /**
-   * Default agent for this chat. When 'claude-code', non-slash messages are
-   * forcibly delegated to the local Claude Code. Defaults to 'self' (Easy Code).
+   * Default agent for this chat. When 'claude-code' or 'codex', non-slash
+   * messages are forcibly delegated to that local agent. Defaults to 'self'
+   * (Easy Code).
    */
   agent?: FeishuAgentTarget;
+  /**
+   * Most recent native sessionId from the external agent's last completed
+   * run in this chat. Used to auto-resume the session on the next message
+   * (within the time window), so the agent retains conversation context
+   * across turns in a continuous conversation.
+   */
+  lastSessionId?: string;
+  /** Timestamp (Date.now()) when lastSessionId was saved. */
+  lastSessionAt?: number;
 }
 
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
@@ -718,11 +775,203 @@ interface QueuedMessage {
   msg: FeishuMessage;
   resolve: (value: any) => void;
   reject: (err: any) => void;
+  /** 排队提示消息的 message_id，用于后续更新/撤回 */
+  queueTipMessageId?: string | null;
 }
 
 // 群聊独立的队列容器
 const messageQueues = new Map<string, QueuedMessage[]>();
 const isProcessingQueues = new Map<string, boolean>();
+
+/**
+ * Per-chat AbortController for in-flight `/btw` side questions. A new
+ * `/btw` in the same chat cancels the previous one. Cleared on resolve.
+ */
+const sideQuestionControllers = new Map<string, AbortController>();
+
+/**
+ * Export-only-for-tests: 把 messageQueues map 暴露出来供 mid-turn 注入单测
+ * 直接装填初始队列。生产代码不应使用这个出口。
+ */
+export const __testing_messageQueues = messageQueues;
+
+/**
+ * Detect a `/btw` side-question command in raw Feishu message text.
+ * Returns the trimmed question (without the `/btw` prefix) if matched,
+ * otherwise null. Exported so unit tests can lock the matcher behavior
+ * independently from the running Feishu loop.
+ */
+export function parseBtwCommand(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/^\/btw(?:\s+([\s\S]+))?$/i);
+  if (!m) return null;
+  const question = (m[1] ?? '').trim();
+  return question.length > 0 ? question : '';
+}
+
+/**
+ * Handle a `/btw <question>` side question in Feishu mode. MUST be called
+ * BEFORE any slash-command dispatcher (otherwise `btwCommand.action` from
+ * BuiltinCommandLoader will fire first and just return the usage hint).
+ *
+ * Forks a tool-less single-turn agent on the chat's own GeminiClient,
+ * cancels any previous in-flight `/btw` for the same chat, and sends the
+ * answer back as a single standalone message. Does NOT enter
+ * `messageQueues` and does NOT touch the running task card.
+ *
+ * Returns true if the message was a `/btw` command and was handled (caller
+ * should `return null` to short-circuit); false otherwise (caller should
+ * continue normal processing).
+ */
+async function handleFeishuBtwCommand(
+  msg: FeishuMessage,
+  gateway: FeishuGateway,
+  currentClient: GeminiClient,
+  currentConfig: Config | undefined | null,
+  messageText: string,
+): Promise<boolean> {
+  const btwQuestion = parseBtwCommand(messageText);
+  if (btwQuestion === null) return false;
+
+  if (!btwQuestion) {
+    await gateway.sendMessage(
+      msg.chatId,
+      '💡 用法: `/btw <你的问题>` — 派一个轻量旁路 agent 回答这个问题，主任务不受影响。',
+      msg.messageId,
+    );
+    return true;
+  }
+
+  // Cancel any previous in-flight /btw for this chat — only the latest matters.
+  sideQuestionControllers.get(msg.chatId)?.abort();
+  const ctrl = new AbortController();
+  sideQuestionControllers.set(msg.chatId, ctrl);
+
+  void (async () => {
+    try {
+      const contentGenerator = currentClient.getContentGenerator();
+      // Best-effort snapshot read — cold-start fallback is fine.
+      let snapshot = null;
+      try {
+        snapshot = currentClient.getChat().cacheSafeParams.get();
+      } catch {
+        // No chat yet — cold start is acceptable.
+      }
+      const model = currentConfig?.getModel() ?? 'auto';
+
+      const result = await runSideQuestion({
+        contentGenerator,
+        model,
+        question: btwQuestion,
+        cacheSafeSnapshot: snapshot,
+        signal: ctrl.signal,
+      });
+
+      if (sideQuestionControllers.get(msg.chatId) === ctrl) {
+        sideQuestionControllers.delete(msg.chatId);
+      }
+
+      const header = '🅱️ **旁路问答（/btw，主任务不受影响）**\n\n';
+      let body: string;
+      if (result.status === 'success') {
+        body = result.text.trim() || '（fork agent 未返回任何内容）';
+      } else if (result.status === 'cancelled') {
+        body = '⏹️ 已取消。' + (result.text ? `\n\n（已生成部分内容）\n${result.text}` : '');
+      } else {
+        body = `❌ 旁路问答失败：${result.error ?? '未知错误'}`;
+      }
+      await gateway.sendMessage(msg.chatId, header + body, msg.messageId);
+    } catch (err: any) {
+      dwarn(`[Feishu] /btw failed: ${err?.message ?? err}`);
+      await gateway
+        .sendMessage(msg.chatId, `❌ 旁路问答失败：${err?.message ?? err}`, msg.messageId)
+        .catch(() => {/* best effort */});
+    }
+  })();
+
+  return true;
+}
+
+/**
+ * 🎯 Mid-turn injection drain (Feishu 端的对应实现，对称 App.tsx 里同名 callback)。
+ *
+ * 在当前群的 agent loop 处于 tool-call 间隙时调用，原子取走该群 `messageQueues`
+ * 里所有等待中的消息，并立即 resolve 它们的 Promise（防止 gateway 一端永远等
+ * 待）。返回 *仅包含消息文本* 的数组，调用方负责把它们拼成附加 user text part
+ * 跟随下一次 continuation 一起送给模型。
+ *
+ * 副作用：每条被 mid-turn 消耗掉的消息会通过 `notify` 回调向飞书群发一条
+ * "已合并到当前任务" 提示，纠正之前 enqueue 时发的 "排队第 X 位" UX。
+ *
+ * 仅取出"消息内容"（msg.text）；多模态附件不在 mid-turn 注入路径里支持（图
+ * 片/文件需要单独 between-turn 处理）。带附件的消息会被跳过并保留在队列中。
+ */
+export function drainChatQueueForMidTurnInjection(
+  chatId: string,
+  notify?: (item: QueuedMessage) => Promise<void> | void,
+): string[] {
+  const queue = messageQueues.get(chatId);
+  if (!queue || queue.length === 0) return [];
+
+  const drained: QueuedMessage[] = [];
+  const remaining: QueuedMessage[] = [];
+  for (const item of queue) {
+    const text = (item.msg.text ?? '').trim();
+    const hasPendingImages =
+      Array.isArray(item.msg.pendingImages) && item.msg.pendingImages.length > 0;
+    const hasPendingFiles =
+      Array.isArray(item.msg.pendingFiles) && item.msg.pendingFiles.length > 0;
+    if (!text || hasPendingImages || hasPendingFiles) {
+      // 没有文本，或携带图片/文件 → 不走 mid-turn 注入路径，留给 between-turn 处理
+      // （多模态附件需要先下载到 projectRoot 才能让模型用，绕开这条快路径）
+      remaining.push(item);
+      continue;
+    }
+    drained.push(item);
+  }
+
+  if (drained.length === 0) return [];
+
+  // 原子替换队列剩余项
+  messageQueues.set(chatId, remaining);
+
+  // resolve 已注入项的 Promise（不再走独立 agent loop），并更新排队提示消息
+  for (const item of drained) {
+    try {
+      item.resolve(null);
+    } catch {
+      // ignore — resolver only ever observed once anyway
+    }
+    if (notify) {
+      void Promise.resolve(notify(item)).catch(() => {/* best effort */});
+    }
+  }
+
+  return drained.map((item) => (item.msg.text ?? '').trim()).filter(Boolean);
+}
+
+/**
+ * 更新指定群聊中剩余排队消息的排队位置提示。
+ * 当某条消息出队（被处理或被合并）后，排在其后的消息位置号需要前移。
+ * 此函数遍历剩余队列，对每条有 queueTipMessageId 的消息调用
+ * gateway.updateMessage 更新其排队提示文案。
+ */
+async function refreshQueuePositions(
+  gateway: FeishuGateway,
+  chatId: string,
+): Promise<void> {
+  const queue = messageQueues.get(chatId);
+  if (!queue || queue.length === 0) return;
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    if (item.queueTipMessageId) {
+      const position = i + 1;
+      const updatedTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${position} 位）...*`;
+      await gateway.updateMessage(item.queueTipMessageId, updatedTip).catch(() => {/* best effort */});
+    }
+  }
+}
 
 function clearMessageQueue() {
   for (const queue of messageQueues.values()) {
@@ -744,6 +993,44 @@ function clearMessageQueue() {
   }
   activeAbortControllers.clear();
   activeSenderOpenId = null;
+}
+
+/**
+ * 优雅重启：中止 AI → 清理队列 → 断开 WS → spawn 外挂 → 延迟退出。
+ * 统一 /feishu restart 和 self_update 的退出流程，确保飞书 SDK 有充足时间
+ * 完成 { code:0 } 确认，避免消息被飞书服务端重推。
+ */
+async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<void> {
+  // 1) 中止所有正在进行的 AI 生成
+  for (const controller of activeAbortControllers.values()) {
+    try { controller.abort(); } catch { /* ignore */ }
+  }
+  activeAbortControllers.clear();
+
+  // 2) 清理消息队列
+  clearMessageQueue();
+
+  // 3) 优雅关闭飞书网关（发送 WebSocket close frame，而非硬断）
+  if (activeGateway) {
+    try { await activeGateway.disconnect(); } catch { /* ignore */ }
+    activeGateway = null;
+  }
+
+  // 4) spawn 外挂脚本（等父进程退出后接管重启）
+  launchRelaunchHelper(install);
+
+  // 5) 非 Windows 提示：飞书模式下新进程在后台静默启动，用户看不到界面
+  if (process.platform !== 'win32') {
+    console.log(
+      '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
+      '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+    );
+  }
+
+  // 6) 延迟退出：给飞书侧充足时间完成消息投递确认
+  setTimeout(() => {
+    process.exit(0);
+  }, 1500).unref?.();
 }
 
 /**
@@ -1573,8 +1860,9 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/status':           '查看当前的 CLI 版本、积分剩余、当前模型、思考模式及上下文大小',
   '/thinking':         '切换/配置 AI 思考模式与深度',
   '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
-  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 设默认派发给本机 Claude Code（或在消息前加 `@cc` 单条派发）',
+  '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 或 `--agent codex` 设默认派发方（或在消息前加 `@cc` / `@codex` 单条派发）',
   '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
+  '/acp-session':      '查看本机外部 Agent（Claude Code / Codex）的运行任务和历史会话',
   '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
   '/help':             '显示此帮助',
 };
@@ -2220,19 +2508,18 @@ async function handleStart(context?: CommandContext): Promise<string> {
     const restartMatch = messageText.trim().match(/^\/(?:feishu|飞书)\s+restart\b/i);
     if (restartMatch) {
       try {
-        launchRelaunchHelper({ type: 'none' });
-        // 给一点时间把回复发回飞书，再退出当前进程，让 detached 外挂接管重启。
-        setTimeout(() => {
-          process.exit(0);
-        }, 1500).unref?.();
-        return '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。';
+        // 优雅重启：中止 AI → 断开 WS → spawn 外挂 → 延迟退出
+        gracefulRestartThenExit({ type: 'none' });
+        return process.platform === 'win32'
+          ? '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。'
+          : '🔄 收到重启指令，正在热重启飞书机器人（不更新版本）。根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。';
       } catch (e: any) {
         return `❌ 重启失败：${e?.message || String(e)}`;
       }
     }
 
     // 拦截群内自助绑定的 `/bind` 命令
-    // 支持：`/bind <路径>`、`/bind <路径> --agent claude-code`、`/bind --agent self`
+    // 支持：`/bind <路径>`、`/bind <路径> --agent claude-code|codex|self`、`/bind --agent codex`
     if (messageText.startsWith('/bind')) {
       const argString = messageText.slice('/bind'.length).trim();
       const { agent, rest } = parseBindAgentFlag(argString);
@@ -2243,15 +2530,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
         try {
           await saveProjectRoute(msg.chatId, { agent });
           emitFeishuProjectRoutesUpdated();
-          const label = agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己';
-          return `✅ 已将本群的默认执行方切换为 **${label}**。`;
+          return `✅ 已将本群的默认执行方切换为 **${agentDisplayLabel(agent)}**。`;
         } catch (e: any) {
           return `❌ 切换默认执行方失败: ${e.message}`;
         }
       }
 
       if (!targetPath) {
-        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`（可选 `--agent claude-code`）';
+        return '❌ 绑定命令格式不正确。\n格式：`/bind <您本地项目的绝对物理路径>`（可选 `--agent claude-code|codex|self`）';
       }
       try {
         const path = await import('node:path');
@@ -2266,12 +2552,36 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 📡 通知仪表板路由已更新
         emitFeishuProjectRoutesUpdated();
         const agentTip = agent
-          ? `\n🤖 **默认执行方**: ${agent === 'claude-code' ? '本机 Claude Code' : 'Easy Code 自己'}`
+          ? `\n🤖 **默认执行方**: ${agentDisplayLabel(agent)}`
           : '';
         return `✅ 恭喜！本群已成功绑定本地项目工作区！\n📂 **工作目录**: \`${absPath}\`${agentTip}\n💬 您现在可以直接在群里向我提问，我将全力协助您！`;
       } catch (e: any) {
         return `❌ 绑定目录失败: ${e.message}`;
       }
+    }
+
+    // 📊 拦截 `/acp-session`（或 `/acp会话`）：推送一张多会话 Dashboard 卡片，展示
+    //    本机正在运行/最近的委派任务（实时状态：当前工具/计划进度/token%/耗时）
+    //    + 各 CLI 可续接的历史会话（含 `@cc:resume <id>` 续接提示）。
+    //    直接由网关发卡并异步刷新，不经过 LLM 队列。
+    //    注：不使用 /sessions 是因为 CLI 自带 /session 命令会抢先匹配。
+    if (/^\/acp-(session|会话)\b/i.test(messageText.trim())) {
+      try {
+        const boundCwd = (await loadProjectRoutes())[msg.chatId]?.projectRoot;
+        await handleSessionsCommand({
+          gateway,
+          chatId: msg.chatId,
+          replyToMessageId: msg.messageId,
+          cwd: boundCwd,
+        });
+      } catch (e) {
+        await gateway.sendMessage(
+          msg.chatId,
+          `❌ 获取会话列表失败：${e instanceof Error ? e.message : String(e)}`,
+          msg.messageId,
+        );
+      }
+      return null;
     }
 
     // 🎯 更新全局活跃发送人 (让建群工具可以拉当前发消息的人进新群)
@@ -2472,14 +2782,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
         ));
 
         // 注册专属于此 chatId 的建群工具
-        toolRegistry.registerTool(new CreateProjectGroupTool(
+        toolRegistry.registerTool(new CreateProjectGroupTool({
           gateway,
-          () => activeSenderOpenIds.get(msg.chatId),
-          async (newChatId, path) => {
-            await saveProjectRoute(newChatId, { projectRoot: path });
+          getSenderOpenId: () => activeSenderOpenIds.get(msg.chatId),
+          getActiveChatId: () => activeChatId,
+          onProjectCreated: async (newChatId, path, agent) => {
+            const update: Partial<FeishuProjectRoute> = { projectRoot: path };
+            if (agent) update.agent = agent;
+            await saveProjectRoute(newChatId, update);
             emitFeishuProjectRoutesUpdated();
-          }
-        ));
+          },
+        }));
 
         // 注册飞书模式专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
@@ -2550,6 +2863,17 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
     }
 
+    // 🎯 /btw side-question — must be intercepted BEFORE any slash-command
+    // dispatcher fires. Otherwise the standard CLI `btwCommand` (registered
+    // via BuiltinCommandLoader) would handle it first and return only the
+    // "Usage: /btw <question>" hint, swallowing the actual question.
+    // The handler short-circuits the message: forks a tool-less single-turn
+    // agent and replies with the answer as a standalone Feishu message,
+    // never entering the chat's message queue.
+    if (await handleFeishuBtwCommand(msg, gateway, currentClient, currentConfig, messageText)) {
+      return null;
+    }
+
     // 🚀 斜杠命令（/help, /new, /stop, /bind 等）高优先级快速通道拦截：
     // 这些命令完全由系统控制或脚本程序处理，不进入 LLM 上下文，也不存在长耗时。
     // 为了极致的用户体验，它们应该完全绕过异步消息队列，直接高优先级秒速执行响应，绝不参与排队！
@@ -2592,14 +2916,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
             }
             const isProcessing = isProcessingQueues.get(msg.chatId) || false;
 
+            let queueTipMessageId: string | null = null;
             if (isProcessing || queue.length > 0) {
               const queuePosition = queue.length + 1;
               const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
-              await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+              queueTipMessageId = await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
             }
 
             return new Promise<string | null>((resolve, reject) => {
-              queue!.push({ msg: fakeMsg, resolve, reject });
+              queue!.push({ msg: fakeMsg, resolve, reject, queueTipMessageId });
               const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
               processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
             });
@@ -2657,14 +2982,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
     }
     const isProcessing = isProcessingQueues.get(msg.chatId) || false;
 
+    let queueTipMessageId: string | null = null;
     if (isProcessing || queue.length > 0) {
       const queuePosition = queue.length + 1;
       const queueTip = `⏳ *当前项目任务正在执行中，您的新请求已放入项目队列排队（当前排在第 ${queuePosition} 位）...*`;
-      await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
+      queueTipMessageId = await gateway.sendMessage(msg.chatId, queueTip, msg.messageId);
     }
 
     return new Promise<string | null>((resolve, reject) => {
-      queue!.push({ msg, resolve, reject });
+      queue!.push({ msg, resolve, reject, queueTipMessageId });
       const richErr = initErrorMsg || (debugTrail.length ? `trail=[${debugTrail.join('|')}]` : '');
       processMessageQueueForChat(gateway, currentConfig, currentClient, creds, msg.chatId, richErr);
     });
@@ -2880,17 +3206,28 @@ async function handleStart(context?: CommandContext): Promise<string> {
         currentMessage = messageTextForAI;
       }
 
-      // 🤖 显式派发轨：`@cc/`cc` 前缀，或本群默认执行方为 claude-code 时，
-      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_claude_code 工具。
+      // 🤖 显式派发轨：`@cc` / `@codex` 前缀，或本群默认执行方为 claude-code / codex 时，
+      //    将消息改写为强制派发指令，让 agent loop 调用 delegate_to_agent 工具
+      //    （并按 delegation.agent 指定 codex 还是 claude-code）。
       //    工具的流式输出会沿用现有 card 通道回传飞书。多模态图片在派发场景下
-      //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，Claude Code 可直接读盘）。
+      //    丢弃（图片/文件的绝对路径已在重建步骤中拼入任务文本，目标 agent 可直接读盘）。
       try {
-        const routeAgentForChat = (await loadProjectRoutes())[msg.chatId]?.agent;
-        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat);
+        const routeForChat = (await loadProjectRoutes())[msg.chatId];
+        const routeAgentForChat = routeForChat?.agent;
+        const lastSessionId = routeForChat?.lastSessionId;
+        const lastSessionAt = routeForChat?.lastSessionAt;
+        const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId, lastSessionAt);
         if (delegation.delegate && delegation.task) {
-          messageTextForAI = buildDelegateDirective(delegation.task);
+          messageTextForAI = buildDelegateDirective(
+            delegation.task,
+            delegation.agent,
+            'stream',
+            delegation.resumeSessionId,
+          );
           currentMessage = messageTextForAI;
-          dlog(`[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason})`);
+          dlog(
+            `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
+          );
         }
       } catch (e: any) {
         dwarn(`[Feishu] Delegation routing check failed: ${e?.message || e}`);
@@ -3355,6 +3692,79 @@ async function handleStart(context?: CommandContext): Promise<string> {
               } else {
                 toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
               }
+            } else if (toolName === 'delegate_to_agent') {
+              // 🎯 派发给本机 Claude Code / Codex：与 task/shell 对齐，实时把外部
+              //    agent 的执行过程（消息 / 工具调用 / 计划 / token）流式推到飞书卡片，
+              //    而非只在结束时给结果。通过 updateOutput 消费累计 transcript。
+              //    （仅 stream 模式会持续回传；background 模式工具会立即返回 Task ID。）
+              const delegateTool = toolRegistry.getTool('delegate_to_agent');
+              if (delegateTool) {
+                const startTime = Date.now();
+                let lastCardUpdateTime = 0;
+                // CardKit V2 增量推送轻量，可更低节流；旧版整卡 PATCH 仍需保守节流。
+                const CARD_UPDATE_THROTTLE_MS = streaming ? 500 : 1500;
+
+                const delegateArgs = { ...req.args };
+
+                const toolResult = await delegateTool.execute(
+                  delegateArgs,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    // 节流刷新外部 agent 的滚动过程，避免触发飞书 API 限流。
+                    if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('delegate_to_agent', req.args, true, output, true);
+                      const delegateFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      delegateFooterMetrics.status = '外部 Agent 执行中';
+                      if (streaming) {
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
+                        await streaming.pushFooter(delegateFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'Easy Code (外部 Agent 执行中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), delegateFooterMetrics);
+                      }
+                      lastCardUpdateTime = now;
+                    }
+                  }
+                );
+
+                const durationMs = Date.now() - startTime;
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'delegate_to_agent',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: typeof toolResult.llmContent === 'string'
+                    ? toolResult.llmContent.length
+                    : JSON.stringify(toolResult.llmContent).length,
+                });
+
+                // 🎯 将外部 agent 返回的 native sessionId 保存到群路由，
+                //    以便下次自动续接（用户自然续聊无需手动 resume）。
+                try {
+                  const payload = typeof toolResult.llmContent === 'string'
+                    ? JSON.parse(toolResult.llmContent) : toolResult.llmContent;
+                  if (payload?.sessionId) {
+                    await saveProjectRoute(msg.chatId, { lastSessionId: payload.sessionId, lastSessionAt: Date.now() });
+                  }
+                } catch { /* best-effort */ }
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [{
+                    functionResponse: {
+                      id: req.callId,
+                      name: 'delegate_to_agent',
+                      response: { output: toolResult.llmContent },
+                    }
+                  }],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+              } else {
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
               // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
@@ -3466,7 +3876,42 @@ async function handleStart(context?: CommandContext): Promise<string> {
           await gateway.updateCard(activeCardId, 'Easy Code (思考中)', renderCurrentDisplay(blocks) + `\n\n*(🤖 Agent is still working... / Agent 正在结合工具结果继续工作...)*`, thinkingFooterMetrics);
         }
 
-        // 将工具结果作为下一轮输入
+        // 🎯 Mid-turn injection：在 tool 结果即将作为下一轮 user message 提交前，
+        // 取走本群 messageQueue 里所有等待中的纯文本消息，作为附加 user text part
+        // 跟随当前轮的 tool results 一起送给模型。模型在同一 continuation 请求里
+        // 就能同时看到 tool 结果 + 用户追加指令，避免要等整轮结束才被处理。
+        const injectedTexts = drainChatQueueForMidTurnInjection(
+          msg.chatId,
+          async (injectedItem) => {
+            const preview = (injectedItem.msg.text ?? '').replace(/\s+/g, ' ').slice(0, 60);
+            const tail = (injectedItem.msg.text ?? '').length > 60 ? '…' : '';
+            const mergedTip = `📥 已合并到当前任务，AI 正在综合处理：「${preview}${tail}」`;
+            // 优先更新原排队提示消息，避免发重复消息；更新失败则回退为发送新消息
+            if (injectedItem.queueTipMessageId) {
+              const updated = await gateway.updateMessage(injectedItem.queueTipMessageId, mergedTip).catch(() => false);
+              if (!updated) {
+                await gateway.sendMessage(msg.chatId, mergedTip, injectedItem.msg.messageId).catch(() => {/* best effort */});
+              }
+            } else {
+              await gateway.sendMessage(msg.chatId, mergedTip, injectedItem.msg.messageId).catch(() => {/* best effort */});
+            }
+            // 更新剩余排队消息的位置编号
+            await refreshQueuePositions(gateway, msg.chatId);
+          },
+        );
+        if (injectedTexts.length > 0) {
+          const header =
+            injectedTexts.length === 1
+              ? '[Easy Code - USER MID-TURN MESSAGE] The user sent the following instruction while you were executing tools. Factor it in for the remainder of this turn.'
+              : `[Easy Code - USER MID-TURN MESSAGES] The user sent ${injectedTexts.length} additional instructions while you were executing tools. Factor them in for the remainder of this turn.`;
+          const body = injectedTexts
+            .map((m, i) => (injectedTexts.length > 1 ? `${i + 1}. ${m}` : m))
+            .join('\n');
+          toolResponseParts.push({ text: `${header}\n\n${body}` });
+          dlog(`[Feishu] Mid-turn injected ${injectedTexts.length} queued message(s) into chat ${msg.chatId}`);
+        }
+
+        // 将工具结果（含可能注入的追加指令）作为下一轮输入
         currentMessage = toolResponseParts;
 
         // 🎯 体验优化：如果用户回答了交互式问题，重置卡片状态，迫使下一轮回复创建全新卡片，避免用户看不到老卡片的更新
@@ -3620,6 +4065,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
       mainArg = args.skillName;
     } else if (toolName === 'lark_cli' && args.command) {
       mainArg = `${args.command}${args.args && args.args.length > 0 ? ` ${args.args.join(' ')}` : ''}`;
+    } else if (toolName === 'delegate_to_agent') {
+      mainArg = args.agent === 'codex' ? '›_ Codex' : '✳ Claude Code';
     } else if (args.path) {
       mainArg = args.path;
     } else if (args.pattern) {
@@ -3813,6 +4260,25 @@ async function handleStart(context?: CommandContext): Promise<string> {
           contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
         }
       }
+    } else if (toolName === 'delegate_to_agent') {
+      // 外部 Agent 的 transcript 可能极长（100K+），必须裁剪以防撑爆飞书卡片。
+      // 实时态（isLive=true）：取尾部内容（最新进展更重要）+ 字符硬截断。
+      // 最终态（isLive=false）：仅显示摘要前100字符。
+      if (isLive && output) {
+        // 先按行取尾（最新进展在尾部），再做字符截断
+        const lines = output.split('\n');
+        const tailLines = lines.length > 30 ? lines.slice(-30) : lines;
+        const clamped = clampCodeBlock(tailLines.join('\n'), { maxLines: 30, maxChars: 4000 });
+        contentBox = `\n\`\`\`\n${clamped.text}\n\`\`\``;
+        const totalLines = lines.length;
+        const omittedHead = totalLines > 30 ? totalLines - 30 : 0;
+        branchLine = (omittedHead > 0 || clamped.truncated)
+          ? `\n └ ( 显示最近 ${Math.min(30, totalLines)} 行，${omittedHead > 0 ? `省略前 ${omittedHead} 行` : ''}${clamped.truncated && omittedHead > 0 ? '，' : ''}${clamped.truncated ? '内容过长已截断' : ''} )`
+          : `\n └ ( 外部 Agent 执行中... )`;
+      } else {
+        const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
+        branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
+      }
     } else {
       const summary = output ? (output.length > 100 ? output.slice(0, 100) + '...' : output) : 'success';
       branchLine = `\n └ ( ${summary.replace(/\n/g, ' ')} )`;
@@ -3839,6 +4305,14 @@ async function handleStart(context?: CommandContext): Promise<string> {
         if (!item) continue;
 
         const { msg, resolve, reject } = item;
+        // 出队后：更新/清除排队提示消息，并刷新剩余排队位置
+        if (item.queueTipMessageId) {
+          // 排队提示不再需要，撤回该提示消息以保持对话整洁
+          await gateway.recallMessage(item.queueTipMessageId).catch(() => {/* best effort */});
+        }
+        // 刷新剩余排队消息的位置编号
+        await refreshQueuePositions(gateway, chatId);
+
         try {
           const result = await handleSingleFeishuMessage(msg, gateway, config, geminiClient, creds, initErrorMsg);
           resolve(result);
@@ -3886,21 +4360,44 @@ async function handleStart(context?: CommandContext): Promise<string> {
         ));
 
         // 🎯 动态注册自动建群及多项目隔离管理工具：create_project_and_group_chat
-        toolRegistry.registerTool(new CreateProjectGroupTool(
+        toolRegistry.registerTool(new CreateProjectGroupTool({
           gateway,
-          () => activeSenderOpenId ?? undefined,
-          async (chatId, path) => {
-            await saveProjectRoute(chatId, { projectRoot: path });
+          getSenderOpenId: () => activeSenderOpenId ?? undefined,
+          getActiveChatId: () => activeChatId,
+          onProjectCreated: async (chatId, path, agent) => {
+            const update: Partial<FeishuProjectRoute> = { projectRoot: path };
+            if (agent) update.agent = agent;
+            await saveProjectRoute(chatId, update);
             emitFeishuProjectRoutesUpdated();
-          }
-        ));
+          },
+        }));
 
         // 🎯 动态注册专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(config));
 
         // 🎯 动态注册自更新重启工具（仅飞书模式可见）：模型一调用即升级 easycode-ai
         //    到 latest 并以 `easycode --feishu` 自动重启。普通 CLI 模式绝不注册。
-        toolRegistry.registerTool(new SelfUpdateTool(config));
+        const selfUpdateTool = new SelfUpdateTool(config);
+        // 注入优雅退出回调：AI 调用 self_update 时，先中止生成、断开 WS、清理队列，再退出。
+        SelfUpdateTool.onBeforeRestart = async () => {
+          for (const controller of activeAbortControllers.values()) {
+            try { controller.abort(); } catch { /* ignore */ }
+          }
+          activeAbortControllers.clear();
+          clearMessageQueue();
+          if (activeGateway) {
+            try { await activeGateway.disconnect(); } catch { /* ignore */ }
+            activeGateway = null;
+          }
+          // 非 Windows 提示：飞书模式下新进程在后台静默启动，用户看不到界面
+          if (process.platform !== 'win32') {
+            console.log(
+              '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
+              '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+            );
+          }
+        };
+        toolRegistry.registerTool(selfUpdateTool);
 
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');
@@ -3922,13 +4419,24 @@ async function handleStart(context?: CommandContext): Promise<string> {
           const welcomeLines: string[] = [
             `👋 你好！我已成功上线，随时为你服务！`,
             ``,
-            `📂 当前私聊工作目录：\`${projectRoot}\``,
+            `📂 当前私聊工作目录："${projectRoot}"`,
             ``,
-            `💡 如需使用其他工作目录，请发送：**拉个群 + 文件夹路径**`,
-            `   例如：拉个群 D:\\projects\\my-app`,
-            ``,
-            `❓ 需要帮助请发送 /help`,
+            `💡 如需使用其他工作目录，请发送：[拉个群 + 文件夹路径]`,
+            `   例如：「拉个群 D:\\projects\\my-app」`,
           ];
+
+          // 🤖 本机 agent 检测：发现 claude / codex 时，追加专属群提示
+          try {
+            const availability = await detectLocalAgents();
+            const agentHints = buildLocalAgentWelcomeHints(availability);
+            if (agentHints.length > 0) {
+              welcomeLines.push('', ...agentHints);
+            }
+          } catch (detectErr: any) {
+            dwarn(`[Feishu] detectLocalAgents failed (non-fatal): ${detectErr?.message ?? detectErr}`);
+          }
+
+          welcomeLines.push('', `❓ 需要帮助请发送 /help`);
 
           // 🔍 检查飞书应用权限状态，将缺失权限的快捷申请链接追加到欢迎消息
           try {
@@ -3941,7 +4449,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
               if (missing.length === 0 && hasGroupMsgScope) {
                 welcomeLines.push('', `✅ 应用权限配置完整，所有功能均可正常使用。`);
               } else {
-                welcomeLines.push('', `⚠️ **以下应用权限尚未开通，部分功能可能受限：**`);
+                welcomeLines.push('', `⚠️ [以下应用权限尚未开通，部分功能可能受限：]`);
 
                 if (missing.length > 0) {
                   const scopeApplyUrl = buildScopeApplyUrl({
@@ -4084,13 +4592,19 @@ async function handleStatus(): Promise<string> {
     const routes = await loadProjectRoutes();
     const chatIds = Object.keys(routes);
     const chatNames: Record<string, string> = {};
+    const p2pChatIds: string[] = [];
 
     if (activeGateway && chatIds.length > 0) {
-      // 并发解析所有群名，单个失败不影响整体；整体加 5s 超时上限，避免 /feishu status 卡住。
+      // 并发解析所有群名 + 会话类型，单个失败不影响整体；整体加 5s 超时上限，避免 /feishu status 卡住。
+      // getChatName 与 getChatMode 共用同一次 chats/{id} 请求结果（进程内缓存），无额外开销。
       const resolveAll = Promise.allSettled(
         chatIds.map(async (chatId) => {
-          const name = await activeGateway!.getChatName(chatId);
+          const [name, mode] = await Promise.all([
+            activeGateway!.getChatName(chatId),
+            activeGateway!.getChatMode(chatId),
+          ]);
           if (name) chatNames[chatId] = name;
+          if (mode === 'p2p') p2pChatIds.push(chatId);
         }),
       );
       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 5000));
@@ -4103,6 +4617,8 @@ async function handleStatus(): Promise<string> {
         // 活跃 = 当前正在干活（Agent 仍在处理）的群集合，可同时多个。
         activeChatIds: processingChatIds,
         chatNames,
+        p2pChatIds,
+        botName: creds.botName,
       }),
     );
   } catch (e) {
@@ -4340,137 +4856,6 @@ async function handleInteractive(): Promise<string> {
   }
 
   return t('feishu.interactive.already_running');
-}
-
-interface CreateProjectGroupParams {
-  project_path: string;
-  group_name: string;
-}
-
-class CreateProjectGroupTool extends BaseTool<CreateProjectGroupParams, ToolResult> {
-  static readonly Name = 'create_project_and_group_chat';
-
-  constructor(
-    private readonly gateway: FeishuGateway,
-    private readonly getSenderOpenId: () => string | undefined,
-    private readonly onProjectCreated: (chatId: string, path: string) => Promise<void>
-  ) {
-    super(
-      CreateProjectGroupTool.Name,
-      'CreateProjectAndGroupChat',
-      'Creates a new local project directory AND a dedicated Feishu group chat in one step: creates the directory, creates the group, invites the current user, binds the workspace route, and sends a welcome message. Use this tool when the user wants to set up a project workspace with a bound Feishu group (e.g. "拉个群", "建个项目群", "create a project group"). For creating a standalone Feishu group chat WITHOUT a local project directory or workspace binding, use lark_cli with command="im +chat-create" instead. Only available in direct/P2P chat.',
-      Icon.Globe,
-      {
-        type: Type.OBJECT,
-        properties: {
-          project_path: {
-            type: Type.STRING,
-            description: 'The absolute local physical path to create or bind, e.g. D:\\my-project'
-          },
-          group_name: {
-            type: Type.STRING,
-            description: 'The name for the newly created group chat'
-          }
-        },
-        required: ['project_path', 'group_name']
-      }
-    );
-  }
-
-  async execute(params: CreateProjectGroupParams, signal: AbortSignal): Promise<ToolResult> {
-    const senderOpenId = this.getSenderOpenId();
-    if (!senderOpenId) {
-      return {
-        llmContent: 'Error: Cannot create group chat because the sender openId is unknown.',
-        returnDisplay: 'Error: Sender unknown'
-      };
-    }
-
-    try {
-      const fs = await import('node:fs');
-      const path = await import('node:path');
-
-      // 1. 本地目录安全校检/自建
-      const absPath = path.resolve(params.project_path);
-      if (!fs.existsSync(absPath)) {
-        fs.mkdirSync(absPath, { recursive: true });
-        dlog(`[CreateProjectGroupTool] Created folder: ${absPath}`);
-      }
-
-      // 2. 飞书端调用建群并拉人
-      const newChatId = await this.gateway.createGroupChat(params.group_name, senderOpenId);
-      if (!newChatId) {
-        return {
-          llmContent: `Error: Feishu open platform failed to create group chat '${params.group_name}'.`,
-          returnDisplay: 'Error creating Feishu chat'
-        };
-      }
-
-      // 3. 触发持久化绑定路由
-      await this.onProjectCreated(newChatId, absPath);
-
-      // 4. 主动往新群发首条欢迎及就绪通知消息
-      const welcomeMsg = `👋 您好！本群项目工作目录 \`${absPath}\` 已经成功就绪。现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！`;
-      await this.gateway.sendMessage(newChatId, welcomeMsg);
-
-      // 🎯 5. 异步检测是否缺失 im:message.group_msg 权限，并在当前的私聊会话中进行提醒和卡片推送
-      if (activeChatId) {
-        const privateChatId = activeChatId;
-        void (async () => {
-          try {
-            const probe = await probeCredentials(
-              this.gateway.getAppId(),
-              this.gateway.getAppSecret(),
-              this.gateway.getDomain()
-            );
-            if (probe && (!probe.grantedScopes || !probe.grantedScopes.includes(SENSITIVE_GROUP_MSG_SCOPE))) {
-              const applyUrl = buildScopeApplyUrl({
-                appId: this.gateway.getAppId(),
-                scopes: [SENSITIVE_GROUP_MSG_SCOPE],
-                brand: this.gateway.getDomain() as any,
-                tokenType: 'tenant',
-              });
-              const eventSubUrl = buildEventSubUrl({
-                appId: this.gateway.getAppId(),
-                brand: this.gateway.getDomain() as any,
-              });
-              const permissionPageUrl = buildPermissionPageUrl({
-                appId: this.gateway.getAppId(),
-                brand: this.gateway.getDomain() as any,
-              });
-
-              const warningMsg = `💬 **【重要体验提示 — 免 @ 权限】**\n\n` +
-                `您刚才成功创建了项目群「${params.group_name}」。\n\n` +
-                `⚠️ **检测到您的 Bot 尚未开通「读取关联群聊内所有消息」敏感权限（\`${SENSITIVE_GROUP_MSG_SCOPE}\`）。**\n` +
-                `由于飞书平台限制，如果您不开通此权限，您在此群里提问时**每次消息都必须强制 @ 机器人**，体验较为繁琐。\n\n` +
-                `💡 **建议您一键申请开通此免 @ 权限（无需中断当前体验）：**\n` +
-                `  1️⃣ **第一步：一键申请权限（自动预选）**\n` +
-                `     👉 ${applyUrl}\n` +
-                `  2️⃣ **第二步：在事件订阅页确认订阅 \`im.message.receive_v1\`**\n` +
-                `     👉 ${eventSubUrl}\n` +
-                `  3️⃣ **第三步：在权限管理页申请发布一个版本**\n` +
-                `     👉 ${permissionPageUrl}\n\n` +
-                `开通后即可在群内直接对话，实现无缝协作！`;
-
-              await this.gateway.sendMessage(privateChatId, warningMsg);
-            }
-          } catch (err: any) {
-            dwarn(`[CreateProjectGroupTool] Check scopes or send warning failed: ${err.message}`);
-          }
-        })();
-      }
-
-      return {
-        llmContent: `Successfully created project directory at '${absPath}', and created dedicated Feishu group chat '${params.group_name}' with ID '${newChatId}'. Invited user and sent setup ready notification into the group successfully.`,
-        returnDisplay: `Successfully created project and group chat ${params.group_name}`
-      };
-    } catch (e: any) {
-      return {
-        llmContent: `Error during project creation and binding: ${e.message}`,
-        returnDisplay: `Error: ${e.message}`
-      };
-    }
-  }
 }
 
 /** 通用 MessageActionReturn 包装 */

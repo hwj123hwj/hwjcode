@@ -14,6 +14,7 @@ import { ErrorMessage } from './messages/ErrorMessage.js';
 import { ToolGroupMessage } from './messages/ToolGroupMessage.js';
 import { GeminiMessageContent } from './messages/GeminiMessageContent.js';
 import { CompressionMessage } from './messages/CompressionMessage.js';
+import { Help } from './Help.js';
 import { Box } from 'ink';
 import { AboutBox } from './AboutBox.js';
 import { StatsDisplay } from './StatsDisplay.js';
@@ -115,6 +116,9 @@ export const HistoryItemDisplay = memo(({
     })() : null}
     {item.type === 'compression' ? (
       <CompressionMessage compression={item.compression} />
+    ) : null}
+    {item.type === 'help' ? (
+      <Help commands={item.commands ?? []} />
     ) : null}
   </Box>
 ), (prev, next) => {

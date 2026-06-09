@@ -16,15 +16,9 @@ import type { Config } from '../config/config.js';
 /**
  * SelfUpdateTool / buildRelaunchScript — 飞书模式下"更新并重启 / 仅重启"。
  *
- * 进程不能自杀续命，故由一个 detached 的纯 JS 外挂脚本接力：
- *   父进程退出 → 外挂轮询父 PID 消失 → (按需)安装 → 拉起 easycode --feishu → 自删。
- *
- * 三种安装模式（install）：
- *   - { type: 'none' }            仅重启，不安装
- *   - { type: 'npm' }             npm i -g easycode-ai@latest
- *   - { type: 'tgz', path }       npm i -g <本地 tgz 绝对路径>
- *
- * 同一套外挂机制被 SelfUpdateTool 与 /feishu restart 共用，不造第二套轮子。
+ * 重启方式（双轨）：
+ *   - Windows: cmd.exe /c <command>（有 conpty，用户可见 TUI）
+ *   - Linux/macOS: login shell -l -c <command>（加载 .bashrc/.profile，使 nvm 等 PATH 生效）
  */
 describe('buildRelaunchScript', () => {
   const base = {
@@ -56,16 +50,13 @@ describe('buildRelaunchScript', () => {
     expect(script).toContain('/abs/easycode-ai-1.1.3.tgz');
     expect(script).toContain('install');
     expect(script).toContain('-g');
-    // tgz 模式不应出现 @latest
     expect(script).not.toContain('@latest');
   });
 
   it('none mode (restart only) installs nothing — INSTALL_ARGS is null', () => {
     const script = buildRelaunchScript({ ...base, install: noneMode });
-    // 关键：安装参数被禁用（运行时跳过 npm install）
     expect(script).toContain('INSTALL_ARGS = null');
     expect(script).not.toContain('@latest');
-    // 仍然要重启
     expect(script).toContain('easycode');
     expect(script).toContain('--feishu');
   });
@@ -109,10 +100,54 @@ describe('buildRelaunchScript', () => {
     expect(script).toContain(JSON.stringify(['--feishu', '--weird "arg"']));
   });
 
-  it('does not branch on OS (single cross-platform path)', () => {
-    const script = buildRelaunchScript({ ...base, install: npmMode });
-    expect(script).not.toContain('cmd.exe');
-    expect(script).not.toContain('/bin/bash');
+  it('contains dual launch strategy: cmd.exe for Windows, login shell for non-Windows', () => {
+    const script = buildRelaunchScript({ ...base, install: noneMode });
+    // Windows branch
+    expect(script).toContain('cmd.exe');
+    expect(script).toContain('/c');
+    // Non-Windows branch: login shell
+    expect(script).toContain('findLoginShell');
+    expect(script).toContain('-l');
+    expect(script).toContain('-c');
+    // Platform check
+    expect(script).toContain('process.platform');
+  });
+
+  it('findLoginShell prioritizes bash over zsh over sh', () => {
+    const script = buildRelaunchScript({ ...base, install: noneMode });
+    expect(script).toContain('/bin/bash');
+    expect(script).toContain('/bin/zsh');
+    expect(script).toContain('/bin/sh');
+    // bash 应排在 zsh 前面
+    const bashIdx = script.indexOf('/bin/bash');
+    const zshIdx = script.indexOf('/bin/zsh');
+    const shIdx = script.indexOf('/bin/sh');
+    expect(bashIdx).toBeLessThan(zshIdx);
+    expect(zshIdx).toBeLessThan(shIdx);
+  });
+
+  it('listens for spawn error event so failures are observable', () => {
+    const script = buildRelaunchScript({ ...base, install: noneMode });
+    expect(script).toContain("on('error'");
+  });
+
+  it('redirects relaunch output to a log file when logPath is provided', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: noneMode,
+      logPath: '/home/u/.easycode-user/relaunch.log',
+    });
+    expect(script).toContain(JSON.stringify('/home/u/.easycode-user/relaunch.log'));
+    expect(script).toContain('openSync');
+  });
+
+  it('produces valid JavaScript with logPath', () => {
+    const script = buildRelaunchScript({
+      ...base,
+      install: npmMode,
+      logPath: '/tmp/relaunch.log',
+    });
+    expect(() => new Function(script)).not.toThrow();
   });
 
   it('embeds tgz path via JSON to handle spaces/backslashes safely', () => {
@@ -122,6 +157,12 @@ describe('buildRelaunchScript', () => {
       install: { type: 'tgz', path: winPath },
     });
     expect(script).toContain(JSON.stringify(winPath));
+  });
+
+  it('does not contain obsolete NODE_PATH / ENTRY_SCRIPT variables', () => {
+    const script = buildRelaunchScript({ ...base, install: noneMode });
+    expect(script).not.toContain('NODE_PATH');
+    expect(script).not.toContain('ENTRY_SCRIPT');
   });
 });
 
@@ -151,11 +192,9 @@ describe('SelfUpdateTool', () => {
 
   it('requires source path when source is a local tgz', () => {
     const tool = new SelfUpdateTool(makeConfig());
-    // source=local 但未给 path → 校验失败
     expect(
       tool.validateToolParams({ action: 'update_and_restart', source: 'local' }),
     ).not.toBeNull();
-    // 给了 path → 通过
     expect(
       tool.validateToolParams({
         action: 'update_and_restart',

@@ -7,7 +7,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useInput } from 'ink';
 import { t, tp, isChineseLocale } from '../utils/i18n.js';
-import { isBackgroundTaskPanelOpen, isWorkflowPanelOpen } from '../utils/modalState.js';
+import { isBackgroundTaskPanelOpen, isSideQuestionPanelOpen, isWorkflowPanelOpen } from '../utils/modalState.js';
 import {
   Config,
   GeminiClient,
@@ -307,7 +307,6 @@ export const useGeminiStream = (
   geminiClient: GeminiClient,
   history: HistoryItem[],
   addItem: UseHistoryManagerReturn['addItem'],
-  setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
   config: Config,
   onDebugMessage: (message: string) => void,
   handleSlashCommand: (
@@ -326,6 +325,11 @@ export const useGeminiStream = (
   // 🎭 辩论推进的 AbortController ref。由 App.tsx 持有并共享给 useDebateWizard，
   // 让首启 switchModel 和自动推进的 switchModel 用同一个可中止句柄。
   debateAdvanceAbortRef?: React.MutableRefObject<AbortController | null>,
+  // 🎯 Mid-turn 注入：在 tool-call 间隙原子取走所有可注入的排队消息，
+  // 让它们作为附加 user text 跟随下一次 continuation 一起送给模型。
+  // 调用者负责保证 atomic（被这里取走的项会被从 UI 队列中移除），
+  // 在 paused / editMode / 空队列 时应返回空数组。
+  drainQueuedPromptsForInjection?: () => string[],
 ) => {
   const [initError, setInitError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -783,7 +787,7 @@ export const useGeminiStream = (
                        (process.platform === 'darwin' && key.meta && input === 'q');
 
     // 🎯 如果后台任务面板或 workflow 面板打开，不处理 ESC（由 App.tsx 统一处理）
-    if (isCancelKey && (isBackgroundTaskPanelOpen() || isWorkflowPanelOpen())) {
+    if (isCancelKey && (isBackgroundTaskPanelOpen() || isWorkflowPanelOpen() || isSideQuestionPanelOpen())) {
       return;
     }
 
@@ -1578,7 +1582,6 @@ User question: ${queryStr}`;
       setReasoning(null);
 
       const userMessageTimestamp = Date.now();
-      setShowHelp(false);
 
       // 🔄 异步更新模型配置（仅在新对话时，不在继续对话时）
       if (!options?.isContinuation && settings && config) {
@@ -1964,7 +1967,6 @@ User question: ${queryStr}`;
     },
     [
       streamingState,
-      setShowHelp,
       setModelSwitchedFromQuotaError,
       prepareQueryForGemini,
       processGeminiStreamEvents,
@@ -2091,6 +2093,22 @@ User question: ${queryStr}`;
 
       markToolsAsSubmitted(callIdsToMarkAsSubmitted);
 
+      // 🎯 Mid-turn injection: drain queued user prompts at this tool-call
+      // boundary so they ride along with the tool results in the same
+      // continuation request. The model sees them in the SAME conversation
+      // turn — no need to wait for streamingState to fully return to Idle.
+      const injectedPrompts = drainQueuedPromptsForInjection?.() ?? [];
+      if (injectedPrompts.length > 0) {
+        const header =
+          injectedPrompts.length === 1
+            ? '[Easy Code - USER MID-TURN MESSAGE] The user sent the following instruction while you were executing tools. Factor it in for the remainder of this turn.'
+            : `[Easy Code - USER MID-TURN MESSAGES] The user sent ${injectedPrompts.length} additional instructions while you were executing tools. Factor them in for the remainder of this turn.`;
+        const body = injectedPrompts
+          .map((m, i) => (injectedPrompts.length > 1 ? `${i + 1}. ${m}` : m))
+          .join('\n');
+        responsesToSend.push({ text: `${header}\n\n${body}` });
+      }
+
       // Don't continue if model was switched due to quota error
       if (modelSwitchedFromQuotaError) {
         return;
@@ -2111,6 +2129,7 @@ User question: ${queryStr}`;
       geminiClient,
       performMemoryRefresh,
       modelSwitchedFromQuotaError,
+      drainQueuedPromptsForInjection,
     ],
   );
 

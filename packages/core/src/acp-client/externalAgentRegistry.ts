@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Easy Code team
+ * Copyright 2026 Easy Code team
  * https://github.com/OrionStarAI/EasyCode
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -20,7 +20,13 @@
  */
 
 /** Stable identifiers for the external agents we can delegate to. */
-export type ExternalAgentType = 'claude-code'; // future: | 'codex'
+export type ExternalAgentType = 'claude-code' | 'codex';
+
+/** All external agent types in a stable order, useful for tests/iteration. */
+export const EXTERNAL_AGENT_TYPES: readonly ExternalAgentType[] = [
+  'claude-code',
+  'codex',
+] as const;
 
 /** How to launch an external ACP agent over stdio. */
 export interface ExternalAgentSpec {
@@ -45,6 +51,7 @@ export interface ExternalAgentSpec {
  */
 const OVERRIDE_ENV: Record<ExternalAgentType, string> = {
   'claude-code': 'EASYCODE_CLAUDE_CODE_ACP_CMD',
+  'codex': 'EASYCODE_CODEX_ACP_CMD',
 };
 
 const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
@@ -53,6 +60,17 @@ const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
     label: 'Claude Code',
     command: 'npx',
     args: ['-y', '@agentclientprotocol/claude-agent-acp'],
+  },
+  'codex': {
+    // Codex CLI does not speak ACP natively. We drive it through Zed
+    // Industries' official adapter (github.com/zed-industries/codex-acp),
+    // which spawns the user's locally-installed `codex` and exposes ACP
+    // over stdio. Assumes the user has already authenticated via
+    // `codex login` (or has CODEX_API_KEY / OPENAI_API_KEY in env).
+    type: 'codex',
+    label: 'Codex',
+    command: 'npx',
+    args: ['-y', '@zed-industries/codex-acp'],
   },
 };
 

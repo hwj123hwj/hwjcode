@@ -46,7 +46,6 @@ export const useSlashCommandProcessor = (
   clearItems: UseHistoryManagerReturn['clearItems'],
   loadHistory: UseHistoryManagerReturn['loadHistory'],
   refreshStatic: (clearScrollback?: boolean) => void,
-  setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
   onDebugMessage: (message: string) => void,
   openThemeDialog: () => void,
   openModelDialog: () => void,
@@ -338,7 +337,6 @@ export const useSlashCommandProcessor = (
               switch (result.type) {
                 case 'tool':
                   // 执行其他命令时关闭帮助面板
-                  setShowHelp(false);
                   return {
                     type: 'schedule_tool',
                     toolName: result.toolName,
@@ -346,7 +344,6 @@ export const useSlashCommandProcessor = (
                   };
                 case 'message':
                   // 执行其他命令时关闭帮助面板
-                  setShowHelp(false);
                   addItem(
                     {
                       type:
@@ -361,74 +358,60 @@ export const useSlashCommandProcessor = (
                 case 'dialog':
                   switch (result.dialog) {
                     case 'help':
-                      setShowHelp(true);
+                      addItem({ type: 'help', commands } as Omit<HistoryItem, 'id'>, Date.now());
                       return { type: 'handled' };
                     case 'auth':
-                      setShowHelp(false);
                       openAuthDialog();
                       return { type: 'handled' };
                     case 'login':
-                      setShowHelp(false);
                       openLoginDialog();
                       return { type: 'handled' };
                     case 'theme':
-                      setShowHelp(false);
                       openThemeDialog();
                       return { type: 'handled' };
                     case 'model':
-                      setShowHelp(false);
                       openModelDialog();
                       return { type: 'handled' };
                     case 'customModelWizard':
-                      setShowHelp(false);
                       openCustomModelWizard();
                       return { type: 'handled' };
                     case 'editor':
-                      setShowHelp(false);
                       openEditorDialog();
                       return { type: 'handled' };
                     case 'privacy':
-                      setShowHelp(false);
                       openPrivacyNotice();
                       return { type: 'handled' };
                     case 'settings-menu':
-                      setShowHelp(false);
                       if (openSettingsMenuDialog) {
                         openSettingsMenuDialog();
                       }
                       return { type: 'handled' };
                     case 'init-choice':
-                      setShowHelp(false);
                       if (result.metadata && openInitChoiceDialog) {
                         openInitChoiceDialog(result.metadata as any);
                       }
                       return { type: 'handled' };
                     case 'plugin-install':
-                      setShowHelp(false);
                       if (openPluginInstallDialog) {
                         openPluginInstallDialog();
                       }
                       return { type: 'handled' };
                     case 'debate-wizard':
-                      setShowHelp(false);
                       if (openDebateWizard) {
                         openDebateWizard();
                       }
                       return { type: 'handled' };
                     case 'debate-resume':
-                      setShowHelp(false);
                       if (resumeDebate) {
                         resumeDebate();
                       }
                       return { type: 'handled' };
                     case 'goal-wizard':
-                      setShowHelp(false);
                       if (openGoalWizard) {
                         openGoalWizard();
                       }
                       return { type: 'handled' };
                     case 'workflow-panel':
-                      setShowHelp(false);
                       if (openWorkflowPanel) {
                         openWorkflowPanel();
                       }
@@ -441,7 +424,6 @@ export const useSlashCommandProcessor = (
                     }
                   }
                 case 'load_history': {
-                  setShowHelp(false);
                   await config
                     ?.getGeminiClient()
                     ?.setHistory(result.clientHistory);
@@ -455,7 +437,6 @@ export const useSlashCommandProcessor = (
                   return { type: 'handled' };
                 }
                 case 'switch_session': {
-                  setShowHelp(false);
                   // 更新全局sessionId
                   if (config && result.sessionId) {
                     config.setSessionId(result.sessionId);
@@ -483,8 +464,6 @@ export const useSlashCommandProcessor = (
                   return { type: 'handled' };
                 }
                 case 'quit':
-                  setShowHelp(false);
-
                   // 🎯 优化：防抖处理
                   // 如果已经在退出中，直接忽略重复的退出指令
                   if (getIsQuitting()) {
@@ -554,21 +533,18 @@ export const useSlashCommandProcessor = (
                   return { type: 'handled' };
 
                 case 'submit_prompt':
-                  setShowHelp(false);
                   return {
                     type: 'submit_prompt',
                     content: result.content,
                     silent: result.silent, // 🎯 传递静默模式
                   };
                 case 'select_session':
-                  setShowHelp(false);
                   // 透传 select_session action
                   return {
                     type: 'select_session',
                     sessions: result.sessions,
                   } as any; // Temporary cast, need to update SlashCommandProcessorResult type
                 case 'refine_result':
-                  setShowHelp(false);
                   return {
                     type: 'refine_result',
                     original: result.original,
@@ -585,7 +561,6 @@ export const useSlashCommandProcessor = (
             }
           } catch (e) {
             // 执行命令出错时也要关闭帮助面板
-            setShowHelp(false);
             addItem(
               {
                 type: MessageType.ERROR,
@@ -597,11 +572,9 @@ export const useSlashCommandProcessor = (
           }
 
           // 命令执行完成但没有返回 result 时，也要关闭帮助面板
-          setShowHelp(false);
           return { type: 'handled' };
         } else if (commandToExecute.subCommands) {
           // 命令需要子命令时，关闭帮助面板
-          setShowHelp(false);
           const helpText = `Command '/${commandToExecute.name}' requires a subcommand. Available:\n${commandToExecute.subCommands
             .map((sc) => `  - ${sc.name}: ${sc.description || ''}`)
             .join('\n')}`;
@@ -615,7 +588,6 @@ export const useSlashCommandProcessor = (
       }
 
       // 未知命令时也要关闭帮助面板
-      setShowHelp(false);
       addMessage({
         type: MessageType.ERROR,
         content: `Unknown command: ${trimmed}`,
@@ -626,7 +598,6 @@ export const useSlashCommandProcessor = (
       [
     config,
     addItem,
-    setShowHelp,
     openAuthDialog,
     openLoginDialog,
     commands,
