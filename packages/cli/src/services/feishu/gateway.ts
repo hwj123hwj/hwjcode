@@ -348,9 +348,23 @@ export class FeishuGateway {
   private _onReady: (() => void) | null = null;
   private _onDisconnect: ((error?: Error) => void) | null = null;
 
-  /** 消息去重：记录已处理的消息 ID（LRU 缓存，最多保留 500 条） */
-  private processedMessages: Set<string> = new Set();
-  private readonly maxProcessedMessages = 500;
+  /**
+   * 消息去重：记录已"受理"的消息 ID（at-most-once）。value 为首次受理的时间戳。
+   *
+   * 关键：一条消息**在决定处理它的那一刻就落盘**（而非等处理成功后），所以即便
+   * 进程在处理途中被 self_update / 重启 / 崩溃 / 部署带走，这条 id 也已在磁盘上，
+   * 飞书之后（含 WS 重连）重推同一条时必被识别丢弃，不会重复执行。
+   *
+   * 采用"按时间窗口淘汰"而非"按数量淘汰"：忙碌的一天若处理超过旧上限(500)条，
+   * 会把当天早些时候的 id 挤掉，导致下午的重推认不出来。飞书的重推窗口远小于此，
+   * 故保留 {@link processedRetentionMs}（默认 48h）足以覆盖任何重推，又有
+   * {@link maxProcessedMessages} 作为内存/磁盘的安全上限。
+   */
+  private processedMessages: Map<string, number> = new Map();
+  /** 安全上限：超过则按时间从最旧开始丢弃（正常达不到，仅防失控增长）。 */
+  private readonly maxProcessedMessages = 5000;
+  /** 去重记录保留时长：超过此年龄的 id 在落盘/加载时被清除。 */
+  private readonly processedRetentionMs = 48 * 60 * 60 * 1000;
 
   /** 内存中的 in-flight 消息集合，用于在长耗时处理期间拦截飞书并发重试 */
   private inFlightMessages: Set<string> = new Set();
@@ -362,26 +376,44 @@ export class FeishuGateway {
     return path.join(geminiDir, 'feishu-processed-messages.json');
   }
 
-  /** 从文件加载已处理的消息 ID */
+  /**
+   * 从文件加载已处理的消息 ID。兼容两种磁盘格式：
+   *   - 旧版：`string[]`（仅 id，无时间戳）—— 迁移时按"当前时间"赋时间戳；
+   *   - 新版：`Array<[id, timestamp]>`。
+   * 加载时顺带清除超过 {@link processedRetentionMs} 的过期条目。
+   */
   private loadProcessedMessages(): void {
+    this.processedMessages = new Map();
     try {
       const filePath = this.getProcessedMessagesFilePath();
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, 'utf8');
-        const ids = JSON.parse(content);
-        if (Array.isArray(ids)) {
-          this.processedMessages = new Set(ids.filter(id => typeof id === 'string' && id.startsWith('om_')));
-          dlog(`[Feishu] Loaded ${this.processedMessages.size} processed message IDs from persistent cache.`);
-          return;
+      if (!fs.existsSync(filePath)) return;
+      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (!Array.isArray(parsed)) return;
+      const now = Date.now();
+      for (const entry of parsed) {
+        let id: string | undefined;
+        let ts: number;
+        if (typeof entry === 'string') {
+          id = entry; // 旧格式：无时间戳，迁移为"现在"，让其再存活一个保留窗口
+          ts = now;
+        } else if (Array.isArray(entry) && typeof entry[0] === 'string') {
+          id = entry[0];
+          ts = typeof entry[1] === 'number' ? entry[1] : now;
+        } else {
+          continue;
         }
+        if (!id.startsWith('om_')) continue;
+        if (now - ts >= this.processedRetentionMs) continue; // 过期丢弃
+        this.processedMessages.set(id, ts);
       }
+      dlog(`[Feishu] Loaded ${this.processedMessages.size} processed message IDs from persistent cache.`);
     } catch (e: any) {
       dwarn(`[Feishu] Failed to load processed messages: ${e?.message || e}`);
+      this.processedMessages = new Map();
     }
-    this.processedMessages = new Set();
   }
 
-  /** 保存已处理的消息 ID 到文件 */
+  /** 保存已处理的消息 ID（含时间戳）到文件。 */
   private saveProcessedMessages(): void {
     try {
       const filePath = this.getProcessedMessagesFilePath();
@@ -389,12 +421,38 @@ export class FeishuGateway {
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
-      const ids = Array.from(this.processedMessages);
-      fs.writeFileSync(filePath, JSON.stringify(ids, null, 2), 'utf8');
-      dlog(`[Feishu] Saved ${ids.length} processed message IDs to persistent cache.`);
+      const entries = Array.from(this.processedMessages.entries());
+      fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), 'utf8');
+      dlog(`[Feishu] Saved ${entries.length} processed message IDs to persistent cache.`);
     } catch (e: any) {
       dwarn(`[Feishu] Failed to save processed messages: ${e?.message || e}`);
     }
+  }
+
+  /**
+   * 受理即落盘（at-most-once 的核心）：在**决定处理某条消息的那一刻**调用，
+   * 把它的 id 立刻写入持久去重表并落盘。即便随后进程在处理途中退出，这条 id
+   * 也已在磁盘上，飞书重推会被识别丢弃。
+   *
+   * 同时执行清理：先按年龄淘汰过期条目，再按数量上限淘汰最旧条目。
+   */
+  private recordProcessedMessage(messageId: string): void {
+    if (!messageId || !messageId.startsWith('om_')) return;
+    const now = Date.now();
+    // 刷新/写入时间戳（Map 保证 id 唯一）。
+    this.processedMessages.delete(messageId);
+    this.processedMessages.set(messageId, now);
+    // 1) 按年龄淘汰过期条目。
+    for (const [id, ts] of this.processedMessages) {
+      if (now - ts >= this.processedRetentionMs) this.processedMessages.delete(id);
+    }
+    // 2) 按数量上限淘汰最旧条目（Map 迭代顺序即插入顺序，最旧在前）。
+    while (this.processedMessages.size > this.maxProcessedMessages) {
+      const oldest = this.processedMessages.keys().next().value;
+      if (oldest === undefined) break;
+      this.processedMessages.delete(oldest);
+    }
+    this.saveProcessedMessages();
   }
 
   /** 内容去重：key 为 "chatId:text"，value 为首次处理时间戳（5 秒窗口内相同内容视为重复） */
@@ -1415,9 +1473,12 @@ export class FeishuGateway {
           return { code: 0 };
         }
 
-        // 标记为正在处理
+        // 标记为正在处理（内存级并发拦截）+ 受理即落盘（at-most-once 的核心）。
+        // 关键顺序：在调用 onMessage 之前就把 id 持久化，这样即便处理途中进程被
+        // self_update / 重启 / 崩溃带走，飞书之后重推也会被识别丢弃，不会重跑。
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
           this.inFlightMessages.add(feishuMsg.messageId);
+          this.recordProcessedMessage(feishuMsg.messageId);
         }
 
         this.recentContents.set(contentKey, now);
@@ -1431,16 +1492,8 @@ export class FeishuGateway {
           if (this.textChoiceCallback) {
             const consumed = this.textChoiceCallback(feishuMsg);
             if (consumed) {
-              // 该消息已被文本选择器消费，不触发 onMessage
-              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
-                this.processedMessages.add(feishuMsg.messageId);
-                if (this.processedMessages.size > this.maxProcessedMessages) {
-                  const iterator = this.processedMessages.values();
-                  const oldest = iterator.next().value;
-                  if (oldest) this.processedMessages.delete(oldest);
-                }
-                this.saveProcessedMessages();
-              }
+              // 该消息已被文本选择器消费，不触发 onMessage。
+              // 去重已在受理时落盘（见上方 recordProcessedMessage），此处无需再记。
               return { code: 0 };
             }
           }
@@ -1453,16 +1506,7 @@ export class FeishuGateway {
               if (reply) {
                 await this.sendMessage(feishuMsg.chatId, reply, feishuMsg.messageId);
               }
-              // 🎯 处理成功，记录已成功处理的消息并持久化
-              if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
-                this.processedMessages.add(feishuMsg.messageId);
-                if (this.processedMessages.size > this.maxProcessedMessages) {
-                  const iterator = this.processedMessages.values();
-                  const oldest = iterator.next().value;
-                  if (oldest) this.processedMessages.delete(oldest);
-                }
-                this.saveProcessedMessages(); // ✨ 持久化到磁盘
-              }
+              // 去重已在受理时（调用 onMessage 之前）落盘，处理成功无需再记。
             } catch (err) {
               derror('feishu onMessage handler error:', err);
             } finally {
