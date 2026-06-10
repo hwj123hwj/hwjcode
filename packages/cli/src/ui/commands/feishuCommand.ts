@@ -796,6 +796,16 @@ const sideQuestionControllers = new Map<string, AbortController>();
 export const __testing_messageQueues = messageQueues;
 
 /**
+ * Export-only-for-tests: 把 isProcessingQueues / activeAbortControllers 暴露出来
+ * 供 /stop 竞态 bug 的单测验证状态流转。生产代码不应使用这些出口。
+ */
+export const __testing_isProcessingQueues = isProcessingQueues;
+export const __testing_activeAbortControllers = activeAbortControllers;
+export const __testing_decrementProcessingCount = decrementProcessingCount;
+export const __testing_activeProcessingCount = { get: () => activeProcessingCount };
+export const __testing_processingChatIds = processingChatIds;
+
+/**
  * Detect a `/btw` side-question command in raw Feishu message text.
  * Returns the trimmed question (without the `/btw` prefix) if matched,
  * otherwise null. Exported so unit tests can lock the matcher behavior
@@ -2032,6 +2042,26 @@ async function handleFeishuCommand(
         controller.abort();
         if (chatId) {
           activeAbortControllers.delete(chatId);
+          // FIX: /stop 必须同步递减处理计数，否则 UI 状态（如飞书卡片 footer）
+          // 仍显示「处理中」，且旧 finally 块的 decrementProcessingCount 会
+          // 误减新任务的计数
+          decrementProcessingCount(chatId);
+          // FIX: 清除该 chat 的队列处理状态，防止 /stop 后新消息被错误入队
+          // （/stop 只做了 abort + delete controller，遗漏了 isProcessingQueues 和
+          //  messageQueues 的清理，导致竞态窗口期间新消息看到 isProcessing=true
+          //  被错误入队且无法自愈。详见 docs/bug-report-stop-queue-race-condition.md）
+          isProcessingQueues.set(chatId, false);
+          // FIX: 清空该 chat 的消息队列（拒绝任何排队中的消息）
+          // 注意：必须同时清空数组内容（splice(0)），否则旧 processMessageQueueForChat
+          // 的 while 循环仍持有数组引用，会继续处理已被 resolve(null) 的消息。
+          const pendingQueue = messageQueues.get(chatId);
+          if (pendingQueue) {
+            for (const item of pendingQueue) {
+              item.resolve(null);
+            }
+            pendingQueue.splice(0); // 清空数组内容，让旧 while 循环看到 length=0 后自然退出
+            messageQueues.delete(chatId);
+          }
         } else {
           activeAbortController = null;
         }
@@ -3943,6 +3973,11 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return null;
     } catch (err: any) {
       if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('cancelled') || err.message?.includes('canceled')) {
+        // 注：不在此处清除 isProcessingQueues，因为 processMessageQueueForChat 的
+        // while 循环仍在运行。如果在 catch 中设置 isProcessingQueues=false，会破坏
+        // 防重入守卫，允许新消息并发进入同一 chat 的处理循环。
+        // isProcessingQueues 的清除统一由 processMessageQueueForChat 的 finally 负责，
+        // /stop 命令会提前设置 isProcessingQueues=false 来关闭竞态窗口。
         if (activeCardId && streaming) {
           const abortedFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           abortedFooterMetrics.status = '已中止';
@@ -3971,7 +4006,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
       emitFeishuMessageLog(msg.chatId, `❌ ${err.message}`, 'tool');
       return errorReply;
     } finally {
-      activeAbortControllers.delete(msg.chatId);
+      // FIX: 只删除属于本次任务调用的控制器，避免误删新任务的控制器
+      // （旧 finally 块异步执行时，新任务可能已注册了同 chatId 的新控制器）
+      const currentController = activeAbortControllers.get(msg.chatId);
+      if (currentController === abortController) {
+        activeAbortControllers.delete(msg.chatId);
+      }
       decrementProcessingCount(msg.chatId);
 
       // 💾 持久化本会话的 AI 客户端历史（对齐 CLI useSessionAutoSave）。飞书无 React
@@ -4321,6 +4361,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
       }
     } finally {
+      // 注：isProcessingQueues 的清除在此处完成。/stop 命令会提前设置
+      // isProcessingQueues=false 来关闭竞态窗口，此处再次设置 false 是无害的
+      // （false → false）。理论上存在旧 finally 清除新处理标志的极窄竞态窗口
+      // （/stop 设 false → 新消息 B 设 true → 旧 finally 设 false），但实际概率
+      // 极低：旧 finally 在 AbortError 传播后几乎立即执行（微秒级），而新消息 B
+      // 需要经过飞书消息接收、入队、processMessageQueueForChat 入口检查等异步步骤
+      // 才能设置 true，时间差远大于旧 finally 的执行窗口。
       isProcessingQueues.set(chatId, false);
     }
   }
