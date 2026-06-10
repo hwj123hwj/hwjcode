@@ -40,6 +40,9 @@ export enum SceneType {
 
   /** 图片辅助识别场景（用于不支持图片的纯文本模型） */
   IMAGE_READER = 'image_reader',
+
+  /** 目标达成评估场景 */
+  GOAL_EVALUATION = 'goal_evaluation',
 }
 
 /**
@@ -61,6 +64,7 @@ export const SCENE_MODEL_MAPPING: Record<SceneType, string> = {
   [SceneType.COMPRESSION]: 'gemini-2.5-flash',    // 保持不变
   [SceneType.SUB_AGENT]: 'auto',                  // 原: claude-sonnet-4@20250514 → 现: auto
   [SceneType.IMAGE_READER]: 'gemini-2.5-flash',   // 图片识别：使用最便宜的 flash 模型
+  [SceneType.GOAL_EVALUATION]: 'deepseek-v4-flash', // 目标达成评估场景
 };
 
 /**
@@ -107,6 +111,7 @@ export class SceneManager {
       [SceneType.COMPRESSION]: '对话压缩',
       [SceneType.SUB_AGENT]: 'SubAgent子代理',
       [SceneType.IMAGE_READER]: '图片识别',
+      [SceneType.GOAL_EVALUATION]: '目标达成评估',
     };
 
     return displayNames[scene] || scene;
