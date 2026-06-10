@@ -2185,6 +2185,68 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGoalActive, streamingState, getIsQuitting]);
 
+  // ──── Loop 模式 Watchdog 轮询 ────
+  useEffect(() => {
+    const loopInterval = setInterval(() => {
+      try {
+        const client = config.getGeminiClient();
+        if (!client) return;
+
+        const loopCtx = client.getLoopContext();
+        if (!loopCtx) return;
+
+        const now = Date.now();
+
+        // 1. 检查是否过期
+        if (now > loopCtx.expiresAt) {
+          client.clearLoopContext();
+          addItem(
+            {
+              type: MessageType.INFO,
+              text: '🔄 /loop Watchdog loop has reached its expiration limit (3 days) and has stopped.',
+            },
+            Date.now(),
+          );
+          return;
+        }
+
+        const timeForNextRun = now - loopCtx.lastRunAt >= loopCtx.intervalMs;
+
+        // 2. 如果到时间了，或者有挂起的待执行任务
+        if (timeForNextRun || loopCtx.isPendingRun) {
+          const isIdle = streamingState === StreamingState.Idle && !getIsQuitting();
+
+          if (isIdle) {
+            // 标志位更新：置为已执行
+            loopCtx.lastRunAt = now;
+            loopCtx.isPendingRun = false;
+
+            addItem(
+              {
+                type: MessageType.INFO,
+                text: `🔄 [Loop Run] Executing scheduled watchdog prompt: "${loopCtx.prompt}"`,
+              },
+              Date.now(),
+            );
+
+            // 触发执行
+            submitQuery(loopCtx.prompt);
+          } else {
+            // 模型当前处于 Busy 状态，将标志位置为挂起，等空闲下来立即补执行
+            loopCtx.isPendingRun = true;
+          }
+        }
+      } catch (err) {
+        // Prevent any loop execution error from crashing the CLI
+        void err;
+      }
+    }, 1000); // 1秒高精度轮询
+
+    return () => {
+      clearInterval(loopInterval);
+    };
+  }, [config, streamingState, addItem, submitQuery]);
+
   const { shouldShowSummary, completionElapsedTime } = useTaskCompletionSummary(
     streamingState,
     lastElapsedTimeBeforeIdleRef.current

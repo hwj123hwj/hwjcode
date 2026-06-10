@@ -50,6 +50,8 @@ export interface FeishuMessage {
   pendingImages?: Array<{ imageKey: string; placeholder: string }>;
   /** 待下载的文件信息（不在 gateway 中直接下载，留给 feishuCommand 在确定 projectRoot 后下载到 .deepvcode/inbound/） */
   pendingFiles?: Array<{ fileKey: string; fileName: string; placeholder: string }>;
+  /** 消息创建时间（毫秒时间戳），来自飞书事件 header.create_time，用于陈旧消息过滤 */
+  createTime?: number;
 }
 
 export type OnMessageCallback = (msg: FeishuMessage) => Promise<string | null>;
@@ -458,6 +460,15 @@ export class FeishuGateway {
   /** 内容去重：key 为 "chatId:text"，value 为首次处理时间戳（5 秒窗口内相同内容视为重复） */
   private recentContents: Map<string, number> = new Map();
   private readonly dedupWindowMs = 5000;
+
+  /**
+   * 陈旧消息过滤：记录 WS 连接就绪的时间戳，丢弃早于此时间创建的消息，
+   * 防止飞书重连后推送断连期间的积压旧消息。
+   * 重连时也会更新此时间戳。
+   */
+  private connectedAtMs: number = 0;
+  /** 陈旧消息允许的时钟偏移量（毫秒），消息创建时间早于 connectedAtMs 减去此值才被丢弃 */
+  private readonly STALE_CLOCK_SKEW_MS = 5000;
 
   /**
    * 高风险操作内容哈希去重：针对 restart / self-update 等会导致进程退出的命令，
@@ -1376,8 +1387,13 @@ export class FeishuGateway {
       'im.message.receive_v1': async (data: any) => {
       try {
         const event = data.event || data;
+        const header = data.header || {};
         const message = event.message || {};
         const sender = event.sender || {};
+
+        // 提取消息创建时间（飞书事件 header.create_time，毫秒时间戳字符串）
+        const messageCreateTime: number | undefined =
+          header.create_time ? parseInt(String(header.create_time), 10) : undefined;
 
         // 解析文本内容，确保始终返回字符串
         let text = '';
@@ -1443,7 +1459,18 @@ export class FeishuGateway {
           messageType: message.message_type || 'text',
           pendingImages: pendingImages.length > 0 ? pendingImages : undefined,
           pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
+          createTime: messageCreateTime && !isNaN(messageCreateTime) ? messageCreateTime : undefined,
         };
+
+        // 陈旧消息过滤：丢弃早于连接就绪时间创建的消息（飞书重连后推送的积压旧消息）
+        if (feishuMsg.createTime && this.connectedAtMs) {
+          const staleThreshold = this.connectedAtMs - this.STALE_CLOCK_SKEW_MS;
+          if (feishuMsg.createTime < staleThreshold) {
+            const ageSec = ((this.connectedAtMs - feishuMsg.createTime) / 1000).toFixed(1);
+            dlog(`Skipped stale message (created ${ageSec}s before connection): ${feishuMsg.messageId}`);
+            return { code: 0 };
+          }
+        }
 
         // 消息去重：先按 messageId (包括正在执行的和已成功执行的)，再按内容+时间窗口兜底
         if (feishuMsg.messageId && feishuMsg.messageId.startsWith('om_')) {
@@ -1602,6 +1629,7 @@ export class FeishuGateway {
         domain: domainUrl,
         loggerLevel: 3, // error only
         onReady: () => {
+          this.connectedAtMs = Date.now();
           dlog('Feishu Bot ready');
           this._onReady?.();
           if (!settled) { settled = true; resolve(); }
@@ -1615,6 +1643,7 @@ export class FeishuGateway {
           dlog('Feishu reconnecting...');
         },
         onReconnected: () => {
+          this.connectedAtMs = Date.now();
           dlog('Feishu reconnected');
         },
       });

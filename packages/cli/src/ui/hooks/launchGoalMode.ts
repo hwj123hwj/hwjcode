@@ -64,6 +64,8 @@ export function launchGoalMode(
         startedAt: Date.now(),
         hours: result.hours,
         task: result.task,
+        criteria: result.criteria,
+        forbidden: result.forbidden,
       });
     }
   } catch (err) {
