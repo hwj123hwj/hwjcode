@@ -65,6 +65,52 @@ export interface GoalContext {
    * already carries the full task description).
    */
   task: string;
+
+  /**
+   * Objective completion criteria from the wizard.
+   */
+  criteria?: string;
+
+  /**
+   * Forbidden/sensitive actions from the wizard.
+   */
+  forbidden?: string;
+}
+
+/**
+ * Loop context retained in GeminiClient memory for the lifetime of a
+ * /loop session.
+ */
+export interface LoopContext {
+  /**
+   * The raw prompt or slash command to be executed at each interval.
+   */
+  prompt: string;
+
+  /**
+   * The time interval in milliseconds between runs.
+   */
+  intervalMs: number;
+
+  /**
+   * The expiration timestamp (Date.now() + duration), after which the loop ceases.
+   */
+  expiresAt: number;
+
+  /**
+   * The creation timestamp of this loop task.
+   */
+  startedAt: number;
+
+  /**
+   * The timestamp when this loop last started execution.
+   */
+  lastRunAt: number;
+
+  /**
+   * Whether there is a pending run waiting for the model to become idle.
+   */
+  isPendingRun: boolean;
 }
 
 /**

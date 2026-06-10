@@ -98,7 +98,7 @@ import { ExtensionCommandLoader } from '../../services/ExtensionCommandLoader.js
 import { FileCommandLoader } from '../../services/FileCommandLoader.js';
 import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command-loader.js';
 import { SettingScope } from '../../config/settings.js';
-import { getAvailableModels } from './modelCommand.js';
+import { getAvailableModels, refreshModelsInBackground } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
 import { launchGoalMode } from '../hooks/launchGoalMode.js';
 import {
@@ -342,6 +342,7 @@ export function buildSubAgentDisplayBox(
 
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
+let feishuLoopInterval: NodeJS.Timeout | null = null;
 
 /** 正在处理的飞书消息计数器 */
 let activeProcessingCount = 0;
@@ -2618,6 +2619,16 @@ async function handleStart(context?: CommandContext): Promise<string> {
           if (activeClient) {
             dlog(`[Feishu] Lazy refreshAuth succeeded; geminiClient is ready.`);
             initErrorMsg = '';
+
+            // 🔄 异步刷新云端模型列表（与 CLI useGeminiStream 行为对齐）
+            // 飞书用户可能从不使用 CLI 交互，若不在消息处理时同步，
+            // 模型列表会一直停留在进程启动时的快照，无法感知服务端增删。
+            const feishuSettings = globalCommandContext?.services?.settings;
+            if (feishuSettings && activeConfig) {
+              refreshModelsInBackground(feishuSettings, activeConfig).catch(() => {
+                // 静默失败，不阻塞飞书消息处理
+              });
+            }
           }
         } catch (e: any) {
           initErrorMsg = `Lazy refreshAuth failed: ${e.message || String(e)}`;
@@ -4332,11 +4343,92 @@ async function handleStart(context?: CommandContext): Promise<string> {
   gateway.onDisconnect = () => {
     dlog('Feishu connection closed');
     resetProcessingCount();
+    if (feishuLoopInterval) {
+      clearInterval(feishuLoopInterval);
+      feishuLoopInterval = null;
+    }
   };
 
   try {
     await gateway.connect();
     activeGateway = gateway;
+
+    // 🎯 启动飞书看门狗 /loop 周期性任务调度器
+    if (feishuLoopInterval) {
+      clearInterval(feishuLoopInterval);
+    }
+    feishuLoopInterval = setInterval(async () => {
+      try {
+        if (!activeGateway) return;
+        for (const [chatId, session] of isolatedSessions.entries()) {
+          const client = session.geminiClient;
+          if (!client) continue;
+
+          const loopCtx = client.getLoopContext();
+          if (!loopCtx) continue;
+
+          const now = Date.now();
+
+          // 1. 检查是否过期
+          if (now > loopCtx.expiresAt) {
+            client.clearLoopContext();
+            await activeGateway.sendMessage(
+              chatId,
+              `🔄 *[Loop Watchdog]* Active loop has reached its expiration limit (3 days) and has stopped.`
+            ).catch(() => {/* best effort */});
+            continue;
+          }
+
+          const timeForNextRun = now - loopCtx.lastRunAt >= loopCtx.intervalMs;
+
+          // 2. 如果到时间了，或者存在挂起的任务
+          if (timeForNextRun || loopCtx.isPendingRun) {
+            const isProcessing = isProcessingQueues.get(chatId) || false;
+
+            if (!isProcessing) {
+              // 标志位更新：置为已执行
+              loopCtx.lastRunAt = now;
+              loopCtx.isPendingRun = false;
+
+              await activeGateway.sendMessage(
+                chatId,
+                `🔄 *[Loop Run]* Executing scheduled watchdog prompt: "${loopCtx.prompt}"`
+              ).catch(() => {/* best effort */});
+
+              // 构造一个模拟的飞书消息来触发队列处理
+              const fakeMsg: FeishuMessage = {
+                messageId: `loop_${now}`,
+                chatId: chatId,
+                chatType: 'group',
+                senderOpenId: creds.ownerOpenId || '', // 模拟拥有者执行
+                text: loopCtx.prompt,
+                mentions: [],
+                messageType: 'text',
+              };
+
+              let queue = messageQueues.get(chatId);
+              if (!queue) {
+                queue = [];
+                messageQueues.set(chatId, queue);
+              }
+
+              // 模拟将消息加入队列中并触发执行
+              const resolve = () => {};
+              const reject = () => {};
+              queue.push({ msg: fakeMsg, resolve, reject, queueTipMessageId: null });
+              processMessageQueueForChat(activeGateway, session.config, client, creds, chatId);
+            } else {
+              // 正在处理中，将标志位置为挂起，等空闲下来立即补执行
+              loopCtx.isPendingRun = true;
+            }
+          }
+        }
+      } catch (err) {
+        // Prevent background loop error from crashing Feishu Gateway
+        void err;
+      }
+    }, 5000); // 5s 周期，兼顾资源占用与响应速度
+
     // 📡 携带 botName / platform，供 TUI 仪表板显示（否则 Bot 名显示为 unknown）
     appEvents.emit(AppEvent.FeishuBotStarted, {
       botName: creds.botName,
