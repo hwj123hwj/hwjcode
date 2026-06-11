@@ -12,6 +12,7 @@ import { TodoSummaryLine } from './TodoDisplayRenderer.js';
 import { SubAgentDisplayRenderer } from './SubAgentDisplayRenderer.js';
 import { McpThinkingDisplayRenderer } from './McpThinkingDisplayRenderer.js';
 import { GoalAchievedDisplayRenderer } from './GoalAchievedDisplayRenderer.js';
+import { GoalRejectedDisplayRenderer } from './GoalRejectedDisplayRenderer.js';
 import { Colors } from '../../colors.js';
 import { MarkdownDisplay } from '../../utils/MarkdownDisplay.js';
 import { GeminiRespondingSpinner } from '../GeminiRespondingSpinner.js';
@@ -466,6 +467,14 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
                 <Text color={Colors.Gray}>└ </Text>
                 <Box flexGrow={1}>
                   <GoalAchievedDisplayRenderer data={resultDisplay as any} />
+                </Box>
+              </Box>
+            ) : null}
+            {typeof resultDisplay !== 'string' && (resultDisplay as any).type === 'goal_rejected_display' ? (
+              <Box flexDirection="row">
+                <Text color={Colors.Gray}>└ </Text>
+                <Box flexGrow={1}>
+                  <GoalRejectedDisplayRenderer data={resultDisplay as any} />
                 </Box>
               </Box>
             ) : null}

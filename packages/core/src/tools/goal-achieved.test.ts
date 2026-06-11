@@ -8,6 +8,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GoalAchievedTool, GoalAchievedParams } from './goal-achieved.js';
 import { Config } from '../config/config.js';
 import type { GoalContext } from '../utils/goalContinuationPrompt.js';
+import { runGoalEvaluation } from '../agents/runGoalEvaluation.js';
+
+vi.mock('../agents/runGoalEvaluation.js', () => ({
+  runGoalEvaluation: vi.fn(),
+}));
 
 /**
  * Lightweight mock GeminiClient surface — only the bits goal-achieved
@@ -23,6 +28,13 @@ function makeMockClient(initialCtx: GoalContext | null = null) {
   return {
     getGoalContext,
     clearGoalContext,
+    getContentGenerator: vi.fn(),
+    getContentGeneratorForModel: vi.fn(),
+    getChat: vi.fn(() => ({
+      cacheSafeParams: {
+        get: vi.fn()
+      }
+    })),
     // Expose for assertions about post-call state.
     _peek: () => ctx,
   };
@@ -165,6 +177,70 @@ describe('GoalAchievedTool', () => {
       expect(String(result.llmContent)).toMatch(
         /not produce an unrequested wrap-up|wait for the user/i,
       );
+    });
+  });
+
+  // ─── execute: with independent evaluator ────────────────────────────
+
+  describe('execute (with independent evaluator)', () => {
+    let mockConfigWithCloudModels: Config;
+
+    beforeEach(() => {
+      mockClient = makeMockClient(baseCtx);
+      mockConfigWithCloudModels = {
+        getGeminiClient: () => mockClient,
+        getUsageStatisticsEnabled: () => false,
+        getCloudModels: () => [{ name: 'deepseek-v4-flash', available: true }],
+        getCustomModels: () => [],
+      } as unknown as Config;
+      tool = new GoalAchievedTool(mockConfigWithCloudModels);
+      vi.clearAllMocks();
+    });
+
+    it('clears goal context and finishes if evaluator approves', async () => {
+      vi.mocked(runGoalEvaluation).mockResolvedValueOnce({
+        status: 'approved',
+        feedback: '[GOAL_EVALUATION: APPROVED] All clear.',
+      });
+
+      const result = await tool.execute({ reason: 'all criteria satisfied' }, abortSignal);
+
+      expect(runGoalEvaluation).toHaveBeenCalledTimes(1);
+      expect(mockClient.clearGoalContext).toHaveBeenCalledTimes(1);
+      expect(mockClient._peek()).toBeNull();
+      expect(result.summary).toBe('goal achieved');
+    });
+
+    it('rejects completion, leaves context active, and returns feedback if evaluator rejects', async () => {
+      vi.mocked(runGoalEvaluation).mockResolvedValueOnce({
+        status: 'rejected',
+        feedback: '[GOAL_EVALUATION: REJECTED] You missed the tests.',
+      });
+
+      const result = await tool.execute({ reason: 'all criteria satisfied' }, abortSignal);
+
+      expect(runGoalEvaluation).toHaveBeenCalledTimes(1);
+      expect(mockClient.clearGoalContext).not.toHaveBeenCalled();
+      expect(mockClient._peek()).not.toBeNull(); // Goal context is preserved
+      expect(result.summary).toBe('goal completion rejected');
+      expect(result.returnDisplay).toEqual({
+        type: 'goal_rejected_display',
+        feedback: '[GOAL_EVALUATION: REJECTED] You missed the tests.',
+      });
+    });
+
+    it('falls back to happy path (self-judgment) if runGoalEvaluation returns failed/error', async () => {
+      vi.mocked(runGoalEvaluation).mockResolvedValueOnce({
+        status: 'failed',
+        feedback: 'API error',
+      });
+
+      const result = await tool.execute({ reason: 'all criteria satisfied' }, abortSignal);
+
+      expect(runGoalEvaluation).toHaveBeenCalledTimes(1);
+      expect(mockClient.clearGoalContext).toHaveBeenCalledTimes(1);
+      expect(mockClient._peek()).toBeNull(); // Cleared on fallback
+      expect(result.summary).toBe('goal achieved');
     });
   });
 

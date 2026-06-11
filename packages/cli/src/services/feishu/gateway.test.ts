@@ -1549,6 +1549,123 @@ describe('FeishuGateway - Message Deduplication', () => {
     // high-risk dedup does NOT apply to normal messages, so this goes through
     expect(callCount).toBe(2);
   });
+
+  it('filters stale messages created before the WS connection was established', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    const now = Date.now();
+
+    // Simulate a message that was created 60 seconds before the connection was established
+    const staleEvent = {
+      header: {
+        create_time: String(now - 60000), // 60s before connection
+      },
+      event: {
+        message: {
+          message_id: 'om_stale_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'old message from before reconnect' }),
+          chat_id: 'oc_stale_chat',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    const result = await messageCallback(staleEvent);
+    expect(result).toEqual({ code: 0 });
+    expect(callCount).toBe(0); // stale message should be dropped
+  });
+
+  it('allows fresh messages created after the WS connection was established', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    const now = Date.now();
+
+    // Simulate a message created after the connection was established
+    const freshEvent = {
+      header: {
+        create_time: String(now + 1000), // 1s after connection
+      },
+      event: {
+        message: {
+          message_id: 'om_fresh_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'fresh message after reconnect' }),
+          chat_id: 'oc_fresh_chat',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    await messageCallback(freshEvent);
+    expect(callCount).toBe(1); // fresh message should be processed
+  });
+
+  it('allows messages without header.create_time (no timestamp = pass through)', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    // No header.create_time — backward compatible, should not be filtered
+    const noTimestampEvent = {
+      event: {
+        message: {
+          message_id: 'om_no_ts_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'message without timestamp' }),
+          chat_id: 'oc_no_ts_chat',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    await messageCallback(noTimestampEvent);
+    expect(callCount).toBe(1);
+  });
+
+  it('respects STALE_CLOCK_SKEW_MS tolerance for near-boundary messages', async () => {
+    let callCount = 0;
+    gateway.onMessage = async (msg) => {
+      callCount++;
+      return 'ok';
+    };
+
+    const now = Date.now();
+
+    // Message created 3 seconds before connection (within 5s clock skew tolerance)
+    const borderlineEvent = {
+      header: {
+        create_time: String(now - 3000), // 3s before, within 5s skew
+      },
+      event: {
+        message: {
+          message_id: 'om_borderline_001',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'borderline message' }),
+          chat_id: 'oc_borderline_chat',
+          chat_type: 'p2p',
+        },
+        sender: { sender_id: { open_id: 'ou_001' } },
+      },
+    };
+
+    await messageCallback(borderlineEvent);
+    // Within clock skew tolerance, should NOT be filtered
+    expect(callCount).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
