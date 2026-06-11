@@ -72,13 +72,14 @@ export async function runGoalEvaluation(
 
   const userContent: Content = {
     role: 'user',
-    parts: [{ text: `${GOAL_EVALUATION_SYSTEM_PROMPT}\n\n${promptText}` }],
+    parts: [{ text: promptText }],
   };
 
   const result = await runForkedAgent({
     contentGenerator: opts.contentGenerator,
     model: opts.model,
     userContent,
+    systemInstruction: GOAL_EVALUATION_SYSTEM_PROMPT,
     cacheSafeSnapshot: opts.cacheSafeSnapshot,
     signal: opts.signal,
   });
