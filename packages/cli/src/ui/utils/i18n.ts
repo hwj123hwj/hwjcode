@@ -293,6 +293,7 @@ export const translations = {
     'subagent.token.consumption': 'Token Usage:',
     'subagent.tool.calls.count': '{count} calls',
     'subagent.turns': 'Turns:',
+    'subagent.running': 'SubAgent is thinking and executing...',
 
     // Tool Stats Display
     'tool.stats.no.calls': 'No tool calls have been made in this session yet.',
@@ -1961,6 +1962,7 @@ export const translations = {
     'subagent.token.consumption': 'Token消耗:',
     'subagent.tool.calls.count': '{count}次',
     'subagent.turns': '轮次:',
+    'subagent.running': '子Agent正在思考和执行...',
 
     // Tool Stats Display
     'tool.stats.no.calls': '本次会话中尚未进行工具调用。',
