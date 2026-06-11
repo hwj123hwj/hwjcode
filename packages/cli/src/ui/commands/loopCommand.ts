@@ -42,8 +42,27 @@ const rootAction = async (
   const client = config.getGeminiClient();
   const currentLoop = client?.getLoopContext();
 
-  const trimmed = (argsStr || '').trim();
-  const args = trimmed ? trimmed.split(/\s+/) : [];
+  let expiresMs = 3 * 24 * 60 * 60 * 1000; // 3 days default max
+  let cleanArgsStr = (argsStr || '').trim();
+
+  // Parse and strip --expires option if present
+  const expiresRegex = /--expires\s+(\S+)/i;
+  const expiresMatch = cleanArgsStr.match(expiresRegex);
+  if (expiresMatch) {
+    const expiresStr = expiresMatch[1];
+    const parsedExpires = parseDuration(expiresStr);
+    if (parsedExpires === null) {
+      return {
+        type: 'message',
+        messageType: 'error',
+        content: `Invalid expires duration format "${expiresStr}". Use e.g. "1h", "30m", "10s".`,
+      };
+    }
+    expiresMs = parsedExpires;
+    cleanArgsStr = cleanArgsStr.replace(expiresRegex, '').trim();
+  }
+
+  const args = cleanArgsStr ? cleanArgsStr.split(/\s+/) : [];
   if (args.length === 0) {
     if (currentLoop) {
       const remainingTime = Math.max(0, currentLoop.expiresAt - Date.now());
@@ -69,9 +88,9 @@ const rootAction = async (
       content: [
         '🔄 /loop Watchdog Command — Schedule a recurring task in the current session.',
         'Usage:',
-        '  /loop <interval> <prompt>   - Start a watchdog loop (e.g., `/loop 5m check if build is passing`)',
-        '  /loop clear                - Stop the active watchdog loop',
-        '  /loop                      - Show current loop status',
+        '  /loop <interval> <prompt> [--expires <duration>]   - Start a watchdog loop with a lifetime limit (e.g. `--expires 1h`)',
+        '  /loop clear                                        - Stop the active watchdog loop',
+        '  /loop                                              - Show current loop status',
         '\nSupported intervals: s (seconds), m (minutes), h (hours). Minimum interval is 1m (60s).',
       ].join('\n'),
     };
@@ -114,8 +133,7 @@ const rootAction = async (
   }
 
   const now = Date.now();
-  const maxDuration = 3 * 24 * 60 * 60 * 1000; // 3 days max
-  const expiresAt = now + maxDuration;
+  const expiresAt = now + expiresMs;
 
   client.setLoopContext({
     prompt: promptText,
