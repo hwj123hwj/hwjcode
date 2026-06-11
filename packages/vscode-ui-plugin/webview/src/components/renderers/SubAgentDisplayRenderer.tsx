@@ -5,6 +5,7 @@
 
 import React from 'react';
 import './Renderers.css';
+import { useTranslation } from '../../hooks/useTranslation';
 
 interface ToolCall {
   id?: string;
@@ -177,6 +178,7 @@ const getToolStatusColor = (status: string): string => {
 };
 
 export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = ({ data }) => {
+  const { t } = useTranslation();
   const statusInfo = getStatusInfo(data.status);
 
   console.log('🎯 [SubAgentDisplayRenderer] Rendering SubAgent data:', data);
@@ -250,25 +252,25 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
       <div className="subagent-stats">
         <div className="subagent-stat-item">
           <span className="subagent-connector">├─</span>
-          <span className="subagent-stat-label">工具调用:</span>
-          <span className="subagent-stat-value">{data.stats.totalToolCalls}次</span>
+          <span className="subagent-stat-label">{t('subagent.toolCalls')}</span>
+          <span className="subagent-stat-value">{t('subagent.toolCallsCount', { count: data.stats.totalToolCalls })}</span>
         </div>
 
         <div className="subagent-stat-item">
           <span className="subagent-connector">├─</span>
-          <span className="subagent-stat-label">执行时间:</span>
+          <span className="subagent-stat-label">{t('subagent.executionTime')}</span>
           <span className="subagent-stat-value">{formattedDuration || '< 1ms'}</span>
         </div>
 
         <div className="subagent-stat-item">
           <span className="subagent-connector">├─</span>
-          <span className="subagent-stat-label">Token消耗:</span>
+          <span className="subagent-stat-label">{t('subagent.tokenConsumption')}</span>
           <span className="subagent-stat-value">{formatTokenUsage(data.stats.tokenUsage)}</span>
         </div>
 
         <div className="subagent-stat-item">
           <span className="subagent-connector">└─</span>
-          <span className="subagent-stat-label">轮次:</span>
+          <span className="subagent-stat-label">{t('subagent.turns')}</span>
           <span className="subagent-stat-value">{data.currentTurn ?? '-'}/{data.maxTurns ?? '-'}</span>
         </div>
 
@@ -297,7 +299,7 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
       {data.status === 'running' && data.toolCalls && data.toolCalls.length > 0 && (
         <div className="subagent-running-hint">
           <span className="subagent-spinner">⠏</span>
-          <span className="subagent-running-text">子Agent正在思考和执行...</span>
+          <span className="subagent-running-text">{t('subagent.running')}</span>
         </div>
       )}
     </div>

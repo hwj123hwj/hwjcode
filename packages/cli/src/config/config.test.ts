@@ -147,6 +147,30 @@ describe('parseArguments', () => {
     expect(argv.promptInteractive).toBe('interactive prompt');
     expect(argv.prompt).toBeUndefined();
   });
+
+  it('should default continue to true', async () => {
+    process.argv = ['node', 'script.js'];
+    const argv = await parseArguments();
+    expect(argv.continue).toBe(true);
+  });
+
+  it('should allow explicit --continue to be true', async () => {
+    process.argv = ['node', 'script.js', '--continue'];
+    const argv = await parseArguments();
+    expect(argv.continue).toBe(true);
+  });
+
+  it('should allow explicit -c to be true', async () => {
+    process.argv = ['node', 'script.js', '-c'];
+    const argv = await parseArguments();
+    expect(argv.continue).toBe(true);
+  });
+
+  it('should allow explicit --no-continue to be false', async () => {
+    process.argv = ['node', 'script.js', '--no-continue'];
+    const argv = await parseArguments();
+    expect(argv.continue).toBe(false);
+  });
 });
 
 describe('loadCliConfig', () => {

@@ -702,6 +702,15 @@ PPT组件布局
     },
   },
 
+  subagent: {
+    running: '子Agent正在思考和执行...',
+    toolCalls: '工具调用:',
+    executionTime: '执行时间:',
+    tokenConsumption: 'Token消耗:',
+    turns: '轮次:',
+    toolCallsCount: '{{count}}次',
+  },
+
   goalWizard: {
     buttonTooltip: '目标驱动模式（自动开启 YOLO + 持续工作）',
     title: '目标驱动模式 / Goal-Driven Mode',
