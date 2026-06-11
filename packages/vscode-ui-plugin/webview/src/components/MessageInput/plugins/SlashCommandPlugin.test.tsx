@@ -39,8 +39,8 @@ vi.mock('@lexical/react/LexicalTypeaheadMenuPlugin', () => ({
 
 vi.mock('lexical', () => ({
   TextNode: class MockTextNode {
-    replace: vi.fn();
-    selectEnd: vi.fn();
+    replace = vi.fn();
+    selectEnd = vi.fn();
   },
   $getSelection: vi.fn(() => null),
   $isRangeSelection: vi.fn(() => true),

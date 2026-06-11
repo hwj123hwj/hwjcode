@@ -52,9 +52,9 @@ describe('runGoalEvaluation', () => {
     expect(result.feedback).toBe('[GOAL_EVALUATION: APPROVED] All targets met.');
 
     const call = (gen.generateContentStream as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.config.systemInstruction).toBe(GOAL_EVALUATION_SYSTEM_PROMPT);
     const lastContent = call.contents[call.contents.length - 1];
     const wrapped = lastContent.parts[0].text;
-    expect(wrapped).toContain(GOAL_EVALUATION_SYSTEM_PROMPT);
     expect(wrapped).toContain('React 19');
     expect(wrapped).toContain('All code compiled');
     expect(wrapped).toContain('I compiled everything');

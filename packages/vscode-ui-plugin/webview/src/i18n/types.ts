@@ -672,6 +672,15 @@ export interface Translations {
     resuming: string;
   };
 
+  subagent: {
+    running: string;
+    toolCalls: string;
+    executionTime: string;
+    tokenConsumption: string;
+    turns: string;
+    toolCallsCount: string;
+  };
+
   goalWizard: {
     buttonTooltip: string;
     title: string;

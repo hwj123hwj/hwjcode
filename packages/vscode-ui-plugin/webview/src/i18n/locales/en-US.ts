@@ -702,6 +702,15 @@ Corner Accent (bottom left): Small Beijing icons (palace corner, candied haws) w
     },
   },
 
+  subagent: {
+    running: 'SubAgent is thinking and executing...',
+    toolCalls: 'Tool Calls:',
+    executionTime: 'Execution Time:',
+    tokenConsumption: 'Token Usage:',
+    turns: 'Turns:',
+    toolCallsCount: '{{count}} calls',
+  },
+
   goalWizard: {
     buttonTooltip: 'Goal-Driven Mode (auto YOLO + persistent work)',
     title: 'Goal-Driven Mode',

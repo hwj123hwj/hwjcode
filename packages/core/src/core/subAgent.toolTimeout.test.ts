@@ -19,21 +19,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // (which requires Config, ToolRegistry, GeminiClient, etc.)
 // Instead we replicate the exact toolCompletionPromise pattern from subAgent.ts.
 
-const TOOL_COMPLETION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — must match subAgent.ts
+const TOOL_COMPLETION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes — must match subAgent.ts
 
 /**
  * Replicates the toolCompletionPromise pattern from SubAgent.processAndStorePendingToolResults.
  * Returns { promise, resolver } so tests can control when/if the resolver fires.
  */
 function makeToolCompletionPromise(toolNames: string[]): {
-  promise: Promise<any[]>;
-  resolver: ((results: any[]) => void) | undefined;
+  promise: Promise<unknown[]>;
+  resolver: ((results: unknown[]) => void) | undefined;
   rejecter: ((err: Error) => void) | undefined;
 } {
-  let resolver: ((results: any[]) => void) | undefined;
+  let resolver: ((results: unknown[]) => void) | undefined;
   let rejecter: ((err: Error) => void) | undefined;
 
-  const promise = new Promise<any[]>((resolve, reject) => {
+  const promise = new Promise<unknown[]>((resolve, reject) => {
     resolver = resolve;
     rejecter = reject;
     setTimeout(() => {
@@ -73,7 +73,7 @@ describe('SubAgent toolCompletionPromise timeout', () => {
     expect(results[0].callId).toBe('cmd-1');
   });
 
-  it('rejects after 10 minutes when tool callback never fires', async () => {
+  it('rejects after 3 minutes when tool callback never fires', async () => {
     const { promise } = makeToolCompletionPromise(['run_shell_command', 'read_file']);
 
     // Advance time just under 10 minutes — should not reject yet
@@ -87,7 +87,7 @@ describe('SubAgent toolCompletionPromise timeout', () => {
     // Advance past the deadline
     vi.advanceTimersByTime(2000);
     await expect(promise).rejects.toThrow(
-      /Tool completion timeout after 600s/
+      /Tool completion timeout after 180s/
     );
   });
 

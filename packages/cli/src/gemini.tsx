@@ -686,13 +686,13 @@ export async function main() {
       // logIfNotSilent('log', `📝 Created new session: ${finalSessionId}`);
     }
   } else if (argv.continue) {
-    // 用户明确要求继续上一个会话
+    // 默认或用户明确要求继续上一个会话
     logIfNotSilent('log', `🔄 Continuing last session...`);
     const sessionData = await sessionManager.initializeSession(true);
     finalSessionId = sessionData.sessionId as any;
     logIfNotSilent('log', `📝 Continuing last session: ${finalSessionId}`);
   } else {
-    // 直接启动：创建新的独立sessionId，不尝试恢复任何之前的会话
+    // 显式指定 --no-continue：创建新的独立sessionId，不尝试恢复任何之前的会话
     logIfNotSilent('log', ``);
     const newSession = await sessionManager.createNewSession();
     finalSessionId = newSession.sessionId as any;

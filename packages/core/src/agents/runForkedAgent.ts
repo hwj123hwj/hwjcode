@@ -42,10 +42,13 @@ export interface RunForkedAgentOptions {
   /**
    * Optional cache-safe params snapshot. When present, its `contents` is
    * used as the request prefix (cache hit), and its `systemInstruction`
-   * carries over. When `null`/`undefined`, the fork sends only `userContent`
+   * carries over (unless overridden by the systemInstruction parameter below).
+   * When `null`/`undefined`, the fork sends only `userContent`
    * with a minimal config (no cache hit, but feature still works).
    */
   cacheSafeSnapshot: CacheSafeParams | null;
+  /** Optional custom system prompt to override any snapshot instructions. */
+  systemInstruction?: string;
   /** Independent abort signal. NEVER share with the main agent. */
   signal: AbortSignal;
   /** Receives streaming answer chunks (cumulative? no, deltas). */
@@ -80,7 +83,9 @@ export async function runForkedAgent(
   // Tools must be empty — fork is text-only by design.
   // generationConfig stays minimal so cache invalidation surface is small.
   const config: Record<string, unknown> = { tools: [] };
-  if (cacheSafeSnapshot?.systemInstruction !== undefined) {
+  if (opts.systemInstruction !== undefined) {
+    config.systemInstruction = opts.systemInstruction;
+  } else if (cacheSafeSnapshot?.systemInstruction !== undefined) {
     config.systemInstruction = cacheSafeSnapshot.systemInstruction;
   }
 

@@ -241,7 +241,7 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       alias: 'c',
       type: 'boolean',
       description: 'Continue from the last active session',
-      default: false,
+      default: true,
     })
     .option('session', {
       type: 'string',

@@ -200,7 +200,7 @@ export const SubAgentDisplayRenderer: React.FC<SubAgentDisplayRendererProps> = (
           <GeminiRespondingSpinner
             nonRespondingDisplay="⠏"
           />
-          <Text color={Colors.AccentBlue}> 子Agent正在思考和执行...</Text>
+          <Text color={Colors.AccentBlue}> {t('subagent.running')}</Text>
         </Box>
       )}
     </Box>
