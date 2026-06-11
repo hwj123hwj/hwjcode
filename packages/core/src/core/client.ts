@@ -49,6 +49,7 @@ import { logger } from '../utils/enhancedLogger.js';
 import {
   buildGoalContinuationMessage,
   type GoalContext,
+  type LoopContext,
 } from '../utils/goalContinuationPrompt.js';
 import { GoalAchievedTool } from '../tools/goal-achieved.js';
 
@@ -102,6 +103,7 @@ export class GeminiClient {
    * 不清除的情况：/clear（仅清屏不清上下文）；普通会话切换。
    */
   private activeGoalContext: GoalContext | null = null;
+  private activeLoopContext: LoopContext | null = null;
 
   constructor(private config: Config) {
     if (config.getProxy()) {
@@ -248,6 +250,33 @@ export class GeminiClient {
    */
   getGoalContext(): GoalContext | null {
     return this.activeGoalContext;
+  }
+
+  /**
+   * 启动 /loop 模式时调用。
+   */
+  setLoopContext(ctx: LoopContext): void {
+    this.activeLoopContext = ctx;
+    logger.info(
+      `[GeminiClient] Loop context activated. IntervalMs=${ctx.intervalMs}, promptLen=${ctx.prompt.length}`,
+    );
+  }
+
+  /**
+   * 清除 /loop 模式。
+   */
+  clearLoopContext(): void {
+    if (this.activeLoopContext) {
+      logger.info('[GeminiClient] Loop context cleared.');
+    }
+    this.activeLoopContext = null;
+  }
+
+  /**
+   * 获取活跃的 loop context。
+   */
+  getLoopContext(): LoopContext | null {
+    return this.activeLoopContext;
   }
 
   /**
