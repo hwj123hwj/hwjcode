@@ -123,6 +123,34 @@ describe('loopCommand', () => {
       });
       expect(result?.content).toContain('Prompt cannot be empty');
     });
+
+    it('successfully registers a loop with a custom --expires value', async () => {
+      const result = await loopCommand.action?.(mockContext, '5m run tests --expires 30m');
+
+      expect(result).toMatchObject({
+        type: 'message',
+        messageType: 'info',
+        content: '🔄 Loop activated. Waiting for the first interval...',
+      });
+
+      const activeCtx = mockClient._peek();
+      expect(activeCtx).not.toBeNull();
+      expect(activeCtx?.prompt).toBe('run tests');
+      expect(activeCtx?.intervalMs).toBe(5 * 60 * 1000);
+
+      const expectedExpiresAt = activeCtx!.startedAt + 30 * 60 * 1000;
+      // Allow slight delta in time execution
+      expect(Math.abs(activeCtx!.expiresAt - expectedExpiresAt)).toBeLessThan(100);
+    });
+
+    it('returns error if --expires format is invalid', async () => {
+      const result = await loopCommand.action?.(mockContext, '5m run tests --expires invalid');
+      expect(result).toMatchObject({
+        type: 'message',
+        messageType: 'error',
+      });
+      expect(result?.content).toContain('Invalid expires duration format');
+    });
   });
 
   describe('clearAction', () => {
