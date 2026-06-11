@@ -288,7 +288,7 @@ export interface McpThinkingDisplay {
   thoughtHistoryLength?: number;
 }
 
-export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay | GoalAchievedDisplay;
+export type ToolResultDisplay = string | FileDiff | TodoDisplay | SubAgentDisplay | McpThinkingDisplay | GoalAchievedDisplay | GoalRejectedDisplay;
 
 // Export tool output message utilities
 export {
@@ -357,6 +357,11 @@ export interface TodoDisplay {
 export interface GoalAchievedDisplay {
   type: 'goal_achieved_display';
   reason: string;
+}
+
+export interface GoalRejectedDisplay {
+  type: 'goal_rejected_display';
+  feedback: string;
 }
 
 export interface SubAgentDisplay {

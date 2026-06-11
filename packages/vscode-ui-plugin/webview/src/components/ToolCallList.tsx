@@ -12,6 +12,7 @@ import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { DiffRenderer } from './renderers/DiffRenderer';
 import { BackgroundTaskOutputRenderer } from './renderers/BackgroundTaskOutputRenderer';
 import { GoalAchievedDisplayRenderer } from './renderers/GoalAchievedDisplayRenderer';
+import { GoalRejectedDisplayRenderer } from './renderers/GoalRejectedDisplayRenderer';
 import { AskUserQuestionMessage } from './AskUserQuestionMessage';
 import './renderers/Renderers.css';
 
@@ -25,6 +26,7 @@ const getResultType = (result: any): string | null => {
   if (dataType === 'todo_display') return 'todo_display';
   if (dataType === 'subagent_display' || dataType === 'subagent_update') return 'subagent_display';
   if (dataType === 'goal_achieved_display') return 'goal_achieved_display';
+  if (dataType === 'goal_rejected_display') return 'goal_rejected_display';
   if (result?.fileDiff || result?.data?.fileDiff) return 'diff_display';
   if (result?.toolName === 'background_task_output' || result?.data?.toolName === 'background_task_output') return 'background_task_output';
 
@@ -103,6 +105,13 @@ const renderResult = (result: any): React.ReactNode => {
     console.log('🎯 [renderResult] Goal achieved display detected');
     const goalData = result.data || result;
     return <GoalAchievedDisplayRenderer data={goalData} />;
+  }
+
+  // 🎯 Goal rejected 拒绝卡片
+  if (dataType === 'goal_rejected_display') {
+    console.log('🎯 [renderResult] Goal rejected display detected');
+    const rejectData = result.data || result;
+    return <GoalRejectedDisplayRenderer data={rejectData} />;
   }
 
   // Diff显示 - 检查两种可能的结构

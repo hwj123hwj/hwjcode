@@ -9,6 +9,8 @@ import { BaseTool, Icon, ToolResult } from './tools.js';
 import { Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { todoStore } from './todo-store.js';
+import { runGoalEvaluation } from '../agents/runGoalEvaluation.js';
+import { SceneType } from '../core/sceneManager.js';
 
 /**
  * Parameters for the GoalAchievedTool.
@@ -144,33 +146,15 @@ export class GoalAchievedTool extends BaseTool<GoalAchievedParams, ToolResult> {
 
     const reason = params.reason.trim();
 
-    // Side effect — clear the goal context. Wrap defensively: a
-    // completion signal MUST NOT fail just because we couldn't reach
-    // the client (which would leave the indicator ticking forever
-    // and re-trigger compression injection). Worst case, log and proceed.
-    let hadActiveGoal = false;
+    let client = null;
     try {
-      const client = this.config.getGeminiClient();
-      if (client) {
-        hadActiveGoal = !!client.getGoalContext();
-        if (hadActiveGoal) {
-          client.clearGoalContext();
-          todoStore.clear(); // 🎯 妙计：当 Goal 完成时，自动清除悬挂的任务面板
-        }
-      }
+      client = this.config.getGeminiClient();
     } catch {
-      // Swallow — clearing is a best-effort cleanup. The model already
-      // declared completion; surfacing this as an error to the model
-      // would just confuse it.
+      // Swallow
     }
+    const activeGoalContext = client ? client.getGoalContext() : null;
 
-    // Build response. Two distinct messages:
-    //   - llmContent: machine-readable, tells the model what just happened
-    //     and how it should behave next. Strongly worded "you are no
-    //     longer under contract" prevents it from continuing to push
-    //     the goal agenda.
-    //   - returnDisplay: human-readable confirmation.
-    if (!hadActiveGoal) {
+    if (!activeGoalContext) {
       // Model called this without an active goal — graceful no-op so we
       // don't destabilize the tool loop. Tell the model not to do this
       // again, but keep the response structure consistent.
@@ -183,6 +167,90 @@ export class GoalAchievedTool extends BaseTool<GoalAchievedParams, ToolResult> {
         returnDisplay: '⚠ goal_achieved called outside /goal mode — ignored.',
         summary: 'no active goal',
       };
+    }
+
+    // 🎯 1) 引入独立评估器判定逻辑
+    let evaluationPassed = true;
+    let feedback = '';
+
+    const cloudModels = typeof this.config.getCloudModels === 'function' ? (this.config.getCloudModels() || []) : [];
+    const isCloudAvailable = cloudModels.some(
+      m => m.name === 'deepseek-v4-flash' && m.available !== false
+    );
+    const customModels = typeof this.config.getCustomModels === 'function' ? (this.config.getCustomModels() || []) : [];
+    const isCustomAvailable = customModels.some(
+      m => m.modelId === 'deepseek-v4-flash' && m.enabled !== false
+    );
+    const isEvaluatorAvailable = isCloudAvailable || isCustomAvailable;
+
+    if (isEvaluatorAvailable && client) {
+      try {
+        const contentGenerator = client.getContentGenerator();
+        const chat = client.getChat();
+        const snapshot = chat ? chat.cacheSafeParams.get() : null;
+
+        const verdict = await runGoalEvaluation({
+          contentGenerator,
+          model: 'deepseek-v4-flash',
+          task: activeGoalContext.task || '',
+          criteria: activeGoalContext.criteria || '',
+          reason: reason,
+          cacheSafeSnapshot: snapshot,
+          signal: _signal,
+        });
+
+        if (verdict.status === 'approved') {
+          evaluationPassed = true;
+          feedback = verdict.feedback;
+        } else if (verdict.status === 'rejected') {
+          evaluationPassed = false;
+          feedback = verdict.feedback;
+        } else {
+          // 降级：评估运行失败（可能网络/额度），回退到自觉完成模式
+          console.warn(`[GoalAchievedTool] Evaluator run failed, falling back to self-judgment: ${verdict.feedback}`);
+          evaluationPassed = true;
+        }
+      } catch (err) {
+        // 降级：发生异常时回退到自觉完成模式
+        console.warn(`[GoalAchievedTool] Error during evaluation run, falling back to self-judgment:`, err);
+        evaluationPassed = true;
+      }
+    }
+
+    // 🎯 2) 评估不通过：拒绝目标达成，阻止退出 goal 模式
+    if (!evaluationPassed) {
+      const rejectLlmContent = [
+        '[goal_achieved] Goal completion REJECTED by independent supervisor.',
+        'Based on the conversation history and your justification, the supervisor has judged that the completion criteria are NOT fully or objectively satisfied.',
+        '',
+        '--- SUPERVISOR FEEDBACK ---',
+        feedback,
+        '',
+        '--- WHAT TO DO NEXT ---',
+        '1. Do NOT stop. Your goal contract remains active, and the minimum continuous-work hours and no-stop discipline still apply.',
+        '2. Read the supervisor feedback carefully to identify unmet requirements, missing verifications, or other gaps.',
+        '3. Take corrective actions (e.g., write the missing files, fix the errors, or run tests to verify your implementation).',
+        '4. Once you have fully resolved the feedback and verified everything, you may call the goal_achieved tool again with a new justification.',
+      ].join('\n');
+
+      return {
+        llmContent: rejectLlmContent,
+        returnDisplay: {
+          type: 'goal_rejected_display',
+          feedback: feedback,
+        },
+        summary: 'goal completion rejected',
+      };
+    }
+
+    // 🎯 3) 评估通过或降级：清除 goal 上下文，退出 goal 模式
+    try {
+      if (client) {
+        client.clearGoalContext();
+        todoStore.clear(); // 🎯 妙计：当 Goal 完成时，自动清除悬挂的任务面板
+      }
+    } catch {
+      // Swallow
     }
 
     const llmAck =
