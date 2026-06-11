@@ -44,6 +44,20 @@ import DragDropGlobalTest from './DragDropGlobalTest';
 
 import './MultiSessionApp.css';
 
+// Parse duration to milliseconds (e.g. "5m", "1h", "30s")
+function parseDuration(durationStr: string): number | null {
+  const match = durationStr.trim().match(/^(\d+)([smh])$/i);
+  if (!match) return null;
+  const value = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  switch (unit) {
+    case 's': return value * 1000;
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    default: return null;
+  }
+}
+
 /**
  * MultiSessionApp - 支持多Session的主应用组件
  *
@@ -257,6 +271,16 @@ export const MultiSessionApp: React.FC = () => {
 
   // 流式聊天支持：维护正在流式接收的消息
   const streamingMessages = useRef<Map<string, { messageId: string; content: string; sessionId: string }>>(new Map());
+
+  // 🎯 /loop 模式 Webview 前端 Watchdog 状态管理
+  const loopContextsRef = useRef<Map<string, {
+    prompt: string;
+    intervalMs: number;
+    expiresAt: number;
+    startedAt: number;
+    lastRunAt: number;
+    isPendingRun: boolean;
+  }>>(new Map());
 
   // 🟢 isCustomModelOnlyMode 的最新值 ref —— 让 checkAuthenticationError 这种
   // 用 useCallback([], …) 固定身份的回调，也能读到当前值。
@@ -1655,6 +1679,166 @@ export const MultiSessionApp: React.FC = () => {
       return; // ⛔️ 阻止发送给 AI
     }
 
+    // 🎯 拦截 /loop 相关命令
+    if (textContent.toLowerCase() === '/loop' || textContent.toLowerCase().startsWith('/loop ')) {
+      const loopArgsStr = textContent.slice(5).trim();
+      const loopArgs = loopArgsStr ? loopArgsStr.split(/\s+/) : [];
+
+      if (loopArgs.length === 0) {
+        // 展示状态：/loop
+        const currentLoop = loopContextsRef.current.get(sessionId);
+        let statusText = '';
+        if (currentLoop) {
+          const remainingTime = Math.max(0, currentLoop.expiresAt - Date.now());
+          const remainingMin = Math.ceil(remainingTime / 60000);
+          statusText = [
+            `🔄 Active Watchdog Loop:`,
+            `- Prompt: "${currentLoop.prompt}"`,
+            `- Interval: ${currentLoop.intervalMs / 1000}s`,
+            `- Status: Running (expires in ${remainingMin} minutes)`,
+            `- Started: ${new Date(currentLoop.startedAt).toLocaleTimeString()}`,
+            `- Last Run: ${currentLoop.lastRunAt ? new Date(currentLoop.lastRunAt).toLocaleTimeString() : 'Never'}`,
+            `\nTo stop this loop, use: /loop clear`
+          ].join('\n');
+        } else {
+          statusText = [
+            '🔄 /loop Watchdog Command — Schedule a recurring task in the current session.',
+            'Usage:',
+            '  /loop <interval> <prompt> [--expires <duration>]   - Start a watchdog loop with a lifetime limit (e.g. `--expires 1h`)',
+            '  /loop clear                                        - Stop the active watchdog loop',
+            '  /loop                                              - Show current loop status',
+            '\nSupported intervals: s (seconds), m (minutes), h (hours). Minimum interval is 1m (60s).'
+          ].join('\n');
+        }
+
+        // 添加一条系统消息展示状态
+        addMessage(sessionId, {
+          id: `loop-status-${Date.now()}`,
+          type: 'system',
+          content: createTextMessageContent(statusText),
+          timestamp: Date.now()
+        });
+        return; // ⛔️ 阻止发送给 AI
+      }
+
+      if (loopArgs[0].toLowerCase() === 'clear') {
+        const currentLoop = loopContextsRef.current.get(sessionId);
+        if (currentLoop) {
+          loopContextsRef.current.delete(sessionId);
+          addMessage(sessionId, {
+            id: `loop-clear-${Date.now()}`,
+            type: 'system',
+            content: createTextMessageContent('🔄 Active watchdog loop cleared and stopped.'),
+            timestamp: Date.now()
+          });
+        } else {
+          addMessage(sessionId, {
+            id: `loop-clear-${Date.now()}`,
+            type: 'system',
+            content: createTextMessageContent('No active /loop watchdog to clear.'),
+            timestamp: Date.now()
+          });
+        }
+        return; // ⛔️ 阻止发送给 AI
+      }
+
+      // 开始解析 /loop <interval> <prompt> [--expires <duration>]
+      let expiresMs = 3 * 24 * 60 * 60 * 1000; // 3 days default max
+      let cleanArgsStr = loopArgsStr;
+
+      // Parse and strip --expires option if present
+      const expiresRegex = /--expires\s+(\S+)/i;
+      const expiresMatch = cleanArgsStr.match(expiresRegex);
+      if (expiresMatch) {
+        const expiresStr = expiresMatch[1];
+        const parsedExpires = parseDuration(expiresStr);
+        if (parsedExpires === null) {
+          addMessage(sessionId, {
+            id: `loop-err-${Date.now()}`,
+            type: 'system',
+            content: createTextMessageContent(`❌ Invalid expires duration format "${expiresStr}". Use e.g. "1h", "30m", "10s".`),
+            timestamp: Date.now()
+          });
+          return;
+        }
+        expiresMs = parsedExpires;
+        cleanArgsStr = cleanArgsStr.replace(expiresRegex, '').trim();
+      }
+
+      const args = cleanArgsStr ? cleanArgsStr.split(/\s+/) : [];
+      if (args.length === 0) {
+        addMessage(sessionId, {
+          id: `loop-err-${Date.now()}`,
+          type: 'system',
+          content: createTextMessageContent('❌ Interval and prompt cannot be empty. Usage: `/loop 5m run tests`'),
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      const intervalStr = args[0];
+      const intervalMs = parseDuration(intervalStr);
+      if (intervalMs === null) {
+        addMessage(sessionId, {
+          id: `loop-err-${Date.now()}`,
+          type: 'system',
+          content: createTextMessageContent(`❌ Invalid interval format "${intervalStr}". Use e.g. "5m", "10s", "1h".`),
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      if (intervalMs < 60000) {
+        addMessage(sessionId, {
+          id: `loop-err-${Date.now()}`,
+          type: 'system',
+          content: createTextMessageContent('❌ Minimum loop interval is 1 minute (60s / 1m) to prevent API rate limiting and spam.'),
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      const promptText = args.slice(1).join(' ').trim();
+      if (!promptText) {
+        addMessage(sessionId, {
+          id: `loop-err-${Date.now()}`,
+          type: 'system',
+          content: createTextMessageContent('❌ Prompt cannot be empty. Please specify what the loop should do (e.g. `/loop 5m run tests`).'),
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const expiresAt = now + expiresMs;
+
+      // 注册到本地 Ref 中
+      loopContextsRef.current.set(sessionId, {
+        prompt: promptText,
+        intervalMs,
+        expiresAt,
+        startedAt: now,
+        lastRunAt: 0, // 从未执行过
+        isPendingRun: false
+      });
+
+      addMessage(sessionId, {
+        id: `loop-sched-${Date.now()}`,
+        type: 'system',
+        content: createTextMessageContent(`🔄 Loop scheduled! Will run "${promptText}" every ${intervalStr}. To stop, use "/loop clear".`),
+        timestamp: Date.now()
+      });
+
+      addMessage(sessionId, {
+        id: `loop-act-${Date.now()}`,
+        type: 'system',
+        content: createTextMessageContent('🔄 Loop activated. Waiting for the first interval...'),
+        timestamp: Date.now()
+      });
+
+      return; // ⛔️ 阻止发送给 AI 闲聊
+    }
+
     const currentSession = state.sessions.get(sessionId);
     if (!currentSession) return;
 
@@ -2182,6 +2366,74 @@ User question: ${contentStr}`;
     // 否则使用后端给的标题（可能是默认值）
     return session.info.name || '新建会话';
   };
+
+  // ──── Loop 模式 Watchdog 前端高精度轮询 ────
+  useEffect(() => {
+    const loopInterval = setInterval(() => {
+      try {
+        const activeSessionId = state.currentSessionId;
+        if (!activeSessionId) return;
+
+        // 扫一下所有的正在运行的 Loop
+        for (const [sessId, loopCtx] of loopContextsRef.current.entries()) {
+          const session = state.sessions.get(sessId);
+          if (!session) {
+            // Session 已不存在，清理掉
+            loopContextsRef.current.delete(sessId);
+            continue;
+          }
+
+          const now = Date.now();
+
+          // 1. 检查是否过期
+          if (now > loopCtx.expiresAt) {
+            loopContextsRef.current.delete(sessId);
+            addMessage(sessId, {
+              id: `loop-expire-${Date.now()}`,
+              type: 'system',
+              content: createTextMessageContent('🔄 /loop Watchdog loop has reached its expiration limit and has stopped.'),
+              timestamp: Date.now()
+            });
+            continue;
+          }
+
+          const timeForNextRun = now - loopCtx.lastRunAt >= loopCtx.intervalMs;
+
+          // 2. 如果到时间了，或者有挂起的待执行任务
+          if (timeForNextRun || loopCtx.isPendingRun) {
+            // 判断当前 Session 是否空闲（没有正在进行的模型运算）
+            const isIdle = !session.isProcessing;
+
+            if (isIdle) {
+              // 更新标志位
+              loopCtx.lastRunAt = now;
+              loopCtx.isPendingRun = false;
+
+              // 打印一个运行提示
+              addMessage(sessId, {
+                id: `loop-run-${Date.now()}`,
+                type: 'system',
+                content: createTextMessageContent(`🔄 [Loop Run] Executing scheduled watchdog prompt: "${loopCtx.prompt}"`),
+                timestamp: Date.now()
+              });
+
+              // 触发真实发送（调用 handleSendMessage 往后端投递）
+              handleSendMessage(createTextMessageContent(loopCtx.prompt), sessId);
+            } else {
+              // 状态繁忙，标记挂起，等待空闲后立即补发
+              loopCtx.isPendingRun = true;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error in VSCode Webview /loop poll:', err);
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(loopInterval);
+    };
+  }, [state.currentSessionId, state.sessions, addMessage, handleSendMessage]);
 
   /**
    * 检查Session是否未使用（没有聊天历史）
