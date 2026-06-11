@@ -313,10 +313,43 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       wrappedUpdateOutput(createSubAgentUpdateMessage(currentDisplayData));
 
       // 执行任务
-      const result = await subAgent.executeTask(
-        params.prompt,
-        params.max_turns
-      );
+      // 🛡️ 整体超时保护：SubAgent 执行最多 30 分钟，防止无限运行导致 OOM 或卡死
+      const SUBAGENT_OVERALL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+      // 将 timeoutId 提取为独立变量，避免在 Promise executor 内部引用尚未赋值的
+      // const 变量（TDZ ReferenceError），导致整体超时保护完全失效。
+      let overallTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      const overallTimeoutPromise = new Promise<SubAgentResult>((_, reject) => {
+        overallTimeoutId = setTimeout(() => {
+          subAgent.cancel();
+          reject(new Error(`SubAgent overall timeout after ${SUBAGENT_OVERALL_TIMEOUT_MS / 1000}s — forcibly cancelled`));
+        }, SUBAGENT_OVERALL_TIMEOUT_MS);
+      });
+
+      let result: SubAgentResult;
+      try {
+        result = await Promise.race([
+          subAgent.executeTask(params.prompt, params.max_turns),
+          overallTimeoutPromise,
+        ]);
+      } catch (overallTimeoutError) {
+        // 整体超时：返回部分结果而不是让错误传播
+        const errorMessage = overallTimeoutError instanceof Error ? overallTimeoutError.message : String(overallTimeoutError);
+        console.warn(`[TaskTool] SubAgent overall timeout: ${errorMessage}`);
+        result = {
+          success: false,
+          summary: `Task execution timed out after ${SUBAGENT_OVERALL_TIMEOUT_MS / 1000}s. Partial results may be available in the execution log.`,
+          error: errorMessage,
+          reason: 'execution_error',
+          executionLog: [],
+          tokenUsage: currentDisplayData.stats.tokenUsage,
+        };
+      } finally {
+        // 🛡️ 清理整体超时 timer，防止泄漏
+        if (overallTimeoutId !== undefined) {
+          clearTimeout(overallTimeoutId);
+          overallTimeoutId = undefined;
+        }
+      }
 
       // 更新最终状态和统计
       const finalStats = {
@@ -411,10 +444,18 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
       newToolCalls.push(newToolCall);
     }
 
+    // 🛡️ 防止 toolCalls 无限增长导致 OOM：超过上限时截断旧条目
+    const MAX_DISPLAY_TOOL_CALLS = 50;
+    if (newToolCalls.length > MAX_DISPLAY_TOOL_CALLS) {
+      newToolCalls = newToolCalls.slice(-MAX_DISPLAY_TOOL_CALLS);
+    }
+
     // 重新计算统计信息
+    // 注意：totalToolCalls 应反映实际总数（含被截断的），而非仅显示数
+    const totalToolCalls = displayData.stats.totalToolCalls + (existingIndex >= 0 ? 0 : 1);
     const newStats = {
       ...displayData.stats,
-      totalToolCalls: newToolCalls.length,
+      totalToolCalls,
       successfulToolCalls: newToolCalls.filter(tc => tc.status === 'Success').length,
     };
 

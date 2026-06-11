@@ -25,6 +25,20 @@ import { SceneManager, SceneType } from './sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
 import { AgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
 
+// ─── SubAgent 超时与内存保护常量 ───
+
+/** 单轮流式响应的最大 wall-clock 时间。超时后 abort signal 并返回已收集的部分结果。 */
+const TURN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/** 工具完成回调的最大等待时间。从 10 分钟降至 3 分钟，减少卡住感知时间。 */
+const TOOL_COMPLETION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+/** executionLog 最大条目数。超出时截断旧条目，防止内存无限增长。 */
+const MAX_EXECUTION_LOG_ENTRIES = 200;
+
+/** SubAgent 整体执行的最大 wall-clock 时间（由 TaskTool 设置，此处仅作文档说明）。 */
+// const SUBAGENT_OVERALL_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — enforced in TaskTool.execute()
+
 export interface SubAgentExecutionContext {
   agentId: string;
   taskDescription: string;
@@ -76,6 +90,8 @@ export class SubAgent {
 
   // 用于等待工具完成回调的Promise resolver
   private toolCompletionResolver?: (results: any[]) => void;
+  // 工具完成超时 timer ID，正常完成时 clearTimeout 防止泄漏
+  private toolCompletionTimeoutId?: ReturnType<typeof setTimeout>;
 
   // 待处理的工具结果，下次callGemini时一起发送
   private pendingToolResults: PartListUnion[] = [];
@@ -467,16 +483,16 @@ export class SubAgent {
       return;
     }
 
-    // SubAgent 工具等待超时：比 shell.ts 的 300s 多一层缓冲，防止工具回调永久挂起
-    const TOOL_COMPLETION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-
+    // SubAgent 工具等待超时：从 10 分钟降至 3 分钟，减少卡住感知时间
+    // 正常完成时 clearTimeout 防止 timer 泄漏
     try {
       // 创建Promise等待工具完成回调，附加超时保护
       const toolCompletionPromise = new Promise<any[]>((resolve, reject) => {
         this.toolCompletionResolver = resolve;
-        setTimeout(() => {
+        this.toolCompletionTimeoutId = setTimeout(() => {
           if (this.toolCompletionResolver) {
             this.toolCompletionResolver = undefined;
+            this.toolCompletionTimeoutId = undefined;
             const toolNames = toolCallRequests.map(r => r.name).join(', ');
             reject(new Error(
               `Tool completion timeout after ${TOOL_COMPLETION_TIMEOUT_MS / 1000}s. ` +
@@ -497,6 +513,13 @@ export class SubAgent {
 
       // 等待工具完成回调
       const completedCalls = await toolCompletionPromise;
+
+      // 🎯 正常完成：清除超时 timer，防止泄漏
+      if (this.toolCompletionTimeoutId !== undefined) {
+        clearTimeout(this.toolCompletionTimeoutId);
+        this.toolCompletionTimeoutId = undefined;
+      }
+
       this.log(`Received ${completedCalls.length} tool call results via callback`);
 
       // 将工具结果转换为function responses并存储到pendingToolResults
@@ -509,6 +532,11 @@ export class SubAgent {
 
       this.log(`${completedCalls.length} tool calls completed, results stored in pending queue`);
     } catch (error) {
+      // 🎯 超时或异常：也要清除 timer
+      if (this.toolCompletionTimeoutId !== undefined) {
+        clearTimeout(this.toolCompletionTimeoutId);
+        this.toolCompletionTimeoutId = undefined;
+      }
       this.log(`Tool execution failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
@@ -577,10 +605,29 @@ export class SubAgent {
     const streamRequestStart = Date.now();
     this.log(`[turn ${this.context.currentTurn}] Sending stream request (ctx ~${messageParts.length} parts)`);
 
+    // 🛡️ 轮次超时保护：创建本地 AbortController，与外部 signal 组合
+    // 如果单轮流式响应超过 TURN_TIMEOUT_MS（5 分钟），主动中断流并返回已收集的部分结果
+    const turnAbortController = new AbortController();
+    const turnTimeoutId = setTimeout(() => {
+      this.log(`[turn ${this.context.currentTurn}] ⚠️ Turn timeout (${TURN_TIMEOUT_MS / 1000}s) — aborting stream`);
+      turnAbortController.abort();
+    }, TURN_TIMEOUT_MS);
+
+    // 组合外部 signal 和轮次超时 signal：任一触发都中断流
+    const combinedSignal = this.abortSignal
+      ? AbortSignal.any([this.abortSignal, turnAbortController.signal])
+      : turnAbortController.signal;
+
+    // 如果外部 signal 已经 abort，直接抛出
+    if (this.abortSignal?.aborted) {
+      clearTimeout(turnTimeoutId);
+      throw new Error('Task cancelled by AbortSignal');
+    }
+
     const streamGenerator = await this.subAgentChat.sendMessageStream({
       message: messageParts,
       config: {
-        abortSignal: this.abortSignal
+        abortSignal: combinedSignal
       }
     }, this.context.agentId, SceneType.SUB_AGENT);
 
@@ -596,6 +643,7 @@ export class SubAgent {
     let lastUsageMetadata: any = null;
     let chunkCount = 0;
     let firstChunkMs: number | undefined;
+    let turnTimedOut = false;
 
     // 心跳定时器：每30秒打印一次，区分"AI慢慢推理"和"真的卡住"
     const heartbeatId = setInterval(() => {
@@ -607,6 +655,13 @@ export class SubAgent {
       for await (const chunk of streamGenerator) {
         // 跳过取消信号已触发的情况
         if (this.abortSignal?.aborted) break;
+
+        // 🛡️ 检查轮次超时
+        if (turnAbortController.signal.aborted) {
+          turnTimedOut = true;
+          this.log(`[turn ${this.context.currentTurn}] Turn timed out — returning partial response with ${allParts.length} parts collected so far`);
+          break;
+        }
 
         chunkCount++;
         if (chunkCount === 1) {
@@ -631,8 +686,9 @@ export class SubAgent {
       }
     } finally {
       clearInterval(heartbeatId);
+      clearTimeout(turnTimeoutId);
       const totalMs = Date.now() - streamRequestStart;
-      this.log(`[turn ${this.context.currentTurn}] Stream done: ${chunkCount} chunks, first=${firstChunkMs ?? 'n/a'}ms, total=${totalMs}ms`);
+      this.log(`[turn ${this.context.currentTurn}] Stream done: ${chunkCount} chunks, first=${firstChunkMs ?? 'n/a'}ms, total=${totalMs}ms${turnTimedOut ? ' (TIMED OUT)' : ''}`);
     }
 
     if (lastUsageMetadata) {
@@ -865,11 +921,17 @@ export class SubAgent {
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
     const formattedMessage = `[${timestamp}] ${message}`;
     this.executionLog.push(formattedMessage);
+    // 🛡️ 防止 executionLog 无限增长导致 OOM：超出上限时截断旧条目
+    if (this.executionLog.length > MAX_EXECUTION_LOG_ENTRIES) {
+      this.executionLog = this.executionLog.slice(-MAX_EXECUTION_LOG_ENTRIES);
+    }
     console.log('[SubAgent] ' + formattedMessage);
   }
 
   /**
    * 尝试压缩对话历史
+   * 🛡️ 加固：压缩失败时，如果历史过长（超过 50 条消息），强制截断旧轮次，
+   * 防止对话历史无限增长导致 OOM。
    */
   private async tryCompressHistory(): Promise<void> {
     if (!this.subAgentChat) {
@@ -901,7 +963,35 @@ export class SubAgent {
     } catch (error) {
       // 压缩失败不应该影响正常执行
       this.log(`⚠️ Conversation history compression failed: ${error instanceof Error ? error.message : String(error)}`);
+
+      // 🛡️ 硬截断兜底：压缩失败时，如果历史过长，强制截断旧轮次防止 OOM
+      this.truncateHistoryIfTooLong();
     }
+  }
+
+  /**
+   * 🛡️ 硬截断兜底：当压缩失败且历史过长时，强制截断旧轮次。
+   * 保留系统指令 + 最近 N 轮对话，丢弃中间历史。
+   * 这是最后的防线，确保即使压缩服务完全不可用，历史也不会无限增长。
+   */
+  private truncateHistoryIfTooLong(): void {
+    if (!this.subAgentChat) return;
+
+    const MAX_HISTORY_MESSAGES = 50; // 最多保留 50 条消息（约 25 轮对话）
+    const currentHistory = this.subAgentChat.getHistory();
+
+    if (currentHistory.length <= MAX_HISTORY_MESSAGES) return;
+
+    // 保留前 2 条（通常是系统指令 + 第一轮任务描述）和最近的消息
+    const keepHead = 2;
+    const keepTail = MAX_HISTORY_MESSAGES - keepHead;
+    const truncatedHistory = [
+      ...currentHistory.slice(0, keepHead),
+      ...currentHistory.slice(-keepTail),
+    ];
+
+    this.subAgentChat.setHistory(truncatedHistory);
+    this.log(`🛡️ History truncated: ${currentHistory.length} -> ${truncatedHistory.length} messages (compression fallback)`);
   }
 
   /**
