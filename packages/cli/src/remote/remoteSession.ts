@@ -7,7 +7,7 @@
 
 
 import WebSocket from 'ws';
-import { Config, ToolRegistry, executeToolCall, GeminiClient, ToolCallRequestInfo, SceneType, AuthType, ApprovalMode, GeminiChat, MESSAGE_ROLES, GeminiEventType, ServerGeminiStreamEvent, CoreToolScheduler, ToolCall as EngineToolCall, CompletedToolCall, ToolConfirmationOutcome } from 'deepv-code-core';
+import { Config, ToolRegistry, executeToolCall, GeminiClient, ToolCallRequestInfo, SceneType, AuthType, ApprovalMode, GeminiChat, MESSAGE_ROLES, GeminiEventType, ServerGeminiStreamEvent, CoreToolScheduler, ToolCall as EngineToolCall, CompletedToolCall, ToolConfirmationOutcome, QuotaStatusService } from 'deepv-code-core';
 import { EditorType } from 'deepv-code-core';
 import { GenerateContentResponse, FunctionCall, Part } from '@google/genai';
 import { Content } from 'deepv-code-core';
@@ -145,6 +145,8 @@ export class RemoteSession {
 
       remoteLogger.info('RemoteSession', `会话初始化完成: ${this.sessionId}`);
       this.sendMessage(MessageFactory.createStatus('idle', 'Easy Code 远程会话已就绪'));
+      // 🎯 启动时拉取限额
+      this.fetchAndSendQuota();
     } catch (error) {
       remoteLogger.error('RemoteSession', `会话初始化失败: ${this.sessionId}`, error);
       this.sendError(`会话初始化失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -295,6 +297,27 @@ export class RemoteSession {
     // 开始处理新指令
     console.log(`[${formatTimestamp()}] ${t('cloud.remote.message.processing')}`);
     remoteLogger.info('RemoteSession', `开始处理指令: ${this.sessionId}`);
+
+    // 🎯 限额拦截：发送前检查当前模型配额
+    try {
+      const currentModel = this.config.getModel() || 'auto';
+      const check = QuotaStatusService.getInstance().isQuotaLowForModel(currentModel);
+      if (check.low && check.item) {
+        const params: Record<string, string> = {
+          model: currentModel,
+          remaining: String(Math.round(check.item.remaining)),
+          limit: String(Math.round(check.item.limit)),
+          pct: check.item.limit > 0 ? String(Math.round((check.item.remaining / check.item.limit) * 100)) : '0',
+        };
+        const warningText = check.item.remaining <= 0
+          ? tp('quota.warning.exhausted', params)
+          : tp('quota.warning.low', params);
+        this.sendMessage(MessageFactory.createOutput(`⚠️ ${warningText}\n`, true, 'stdout'));
+      }
+    } catch (err) {
+      // 静默失败
+    }
+
     this.currentProcessingPromise = this.processCommand(command);
 
     try {
@@ -572,6 +595,8 @@ export class RemoteSession {
           // idle 前先收尾思考段，确保客户端结束当前折叠区
           this.finalizeThought();
           this.sendMessage(MessageFactory.createStatus('idle', '指令执行完成'));
+          // 🎯 忙→闲：拉取限额
+          this.fetchAndSendQuota();
           return;
         }
 
@@ -715,6 +740,20 @@ export class RemoteSession {
   /**
    * 添加UI展示记录
    */
+  private async fetchAndSendQuota(): Promise<void> {
+    try {
+      const status = await QuotaStatusService.getInstance().fetchQuotaStatus();
+      if (status) {
+        const summary = QuotaStatusService.getInstance().buildSummary(status, this.config.getModel());
+        if (summary) {
+          this.sendMessage(MessageFactory.createOutput(`${summary}\n`, true, 'stdout'));
+        }
+      }
+    } catch {
+      // 静默失败
+    }
+  }
+
   private addUIRecord(record: Omit<UIDisplayRecord, 'id' | 'timestamp'>): UIDisplayRecord {
     const fullRecord: UIDisplayRecord = {
       id: `ui_${Date.now()}_${Math.random().toString(16).slice(2)}`,

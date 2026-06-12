@@ -152,6 +152,7 @@ import {
   getDeepXQuotaErrorMessage,
   UserTierId,
   isCustomModel,
+  QuotaStatusService,
 } from 'deepv-code-core';
 import { checkForUpdates } from './utils/updateCheck.js';
 import ansiEscapes from 'ansi-escapes';
@@ -1474,6 +1475,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     hasContentStarted, // 🆕 接收内容开始标志
     isCreatingCheckpoint, // 🎯 接收checkpoint创建状态
     isExecutingTools, // 🎯 接收工具执行状态
+    quotaSummary, // 🎯 限额信息（闲时展示，不进历史）
   } = useGeminiStream(
     config.getGeminiClient(),
     history,
@@ -1501,6 +1503,11 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     submitQueryForDebateRef.current = submitQuery;
     submitQueryForGoalRef.current = submitQuery;
   }, [submitQuery]);
+
+  // 🎯 启动时拉取限额状态
+  useEffect(() => {
+    QuotaStatusService.getInstance().fetchQuotaStatus();
+  }, []);
 
   // 当进入响应状态（工作中时），重置 token 使用状态，避免在刚开始时显示旧的数据
   useEffect(() => {
@@ -2976,6 +2983,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 isFocused={!isEditorDialogOpen}
               />
             ))}
+            {/* 🎯 限额信息：闲时打印，不进会话历史上下文 */}
+            {quotaSummary && (
+              <Box flexDirection="column" marginTop={1} marginLeft={2}>
+                {quotaSummary.split('\n').map((line, i) => (
+                  <Text key={i} wrap="wrap" color={'#888'}>{line}</Text>
+                ))}
+              </Box>
+            )}
             {isWorkflowPanelOpen && pendingHistoryItems.length > 0 && (
               <Box paddingX={1}>
                 <Text dimColor>{pendingHistoryItems.length} update{pendingHistoryItems.length !== 1 ? 's' : ''} pending (will show when panel closes)</Text>

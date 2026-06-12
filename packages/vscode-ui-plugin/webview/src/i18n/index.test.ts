@@ -64,6 +64,12 @@ describe('i18n index', () => {
       expect(formatTranslation('Hello {{name}}', { name: 'Ada' })).toBe('Hello Ada');
     });
 
+    it('should replace single-brace placeholders', () => {
+      expect(formatTranslation('Hello {name}', { name: 'Ada' })).toBe('Hello Ada');
+      expect(formatTranslation('{pct}% left', { pct: 45 })).toBe('45% left');
+      expect(formatTranslation('Count: {count}', { count: 0 })).toBe('Count: 0');
+    });
+
     it('should replace multiple placeholders', () => {
       const result = formatTranslation('{{greeting}} {{name}}!', {
         greeting: 'Hello',

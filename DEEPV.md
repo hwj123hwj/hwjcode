@@ -112,3 +112,7 @@ Easy Code (Monorepo)
 
 ## Easy Code Added Memories
 - Easy Code/Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。
+
+## DeepV Code Added Memories
+- Easy Code 发版 tag 版本号对齐规则：CLI 和 VSCode 的 release tag 版本号必须对齐（如 cli-release-v1.1.15 和 vscode-release-v1.1.15），package.json 中的版本号必须严格低于 tag 版本号。
+- 演示了工具调用能力，用户要求尽可能多地展示可用工具
