@@ -567,6 +567,28 @@ function setupBasicMessageHandlers() {
       const currentContext = contextService.getCurrentContext();
 
       // 使用AI服务处理消息（流式处理，内部会发送响应到前端）
+
+      // 🎯 限额拦截：发送前检查当前模型配额
+      try {
+        const { QuotaStatusService: QSS } = await import('deepv-code-core');
+        const geminiClient = aiService.getGeminiClient();
+        const currentModel = geminiClient?.getCurrentModel() ?? 'auto';
+        const check = QSS.getInstance().isQuotaLowForModel(currentModel);
+        if (check.low && check.item) {
+          logger.warn(`[Quota] Pre-send warning for model ${currentModel}`);
+          communicationService.sendGenericMessage('quota_warning', {
+            sessionId: message.sessionId,
+            model: currentModel,
+            remaining: Math.round(check.item.remaining),
+            limit: Math.round(check.item.limit),
+            pct: check.item.limit > 0 ? Math.round((check.item.remaining / check.item.limit) * 100) : 0,
+          });
+        }
+      } catch (err) {
+        // 静默失败，不阻断发送
+        logger.debug('[Quota] Pre-send check failed', err instanceof Error ? err : undefined);
+      }
+
       await aiService.processChatMessage(message, currentContext);
       logger.info('Chat message processed successfully');
 
@@ -1979,7 +2001,7 @@ async function processPendingBackgroundNotifications(sessionId: string) {
  */
 function setupBackgroundTaskHandlers() {
   // 延迟导入以避免循环依赖
-  import('deepv-code-core').then(({ getBackgroundTaskManager }) => {
+  import('deepv-code-core').then(({ getBackgroundTaskManager, QuotaStatusService }) => {
     const taskManager = getBackgroundTaskManager();
 
     // 发送当前任务列表到 Webview
@@ -2071,7 +2093,58 @@ function setupBackgroundTaskHandlers() {
       });
     });
 
+    // 🎯 注册 AI 处理完成回调，忙→闲时拉取限额并通知前端
+    AIService.onProcessingComplete((sessionId) => {
+      import('deepv-code-core').then(async ({ QuotaStatusService: QSS }) => {
+        try {
+          const status = await QSS.getInstance().fetchQuotaStatus();
+          if (status) {
+            const aiService = await sessionManager.getInitializedAIService(sessionId);
+            const geminiClient = aiService?.getGeminiClient();
+            const currentModel = geminiClient?.getCurrentModel() ?? 'auto';
+            const match = (m: any) => {
+              if (m.modelId.toLowerCase() === currentModel.toLowerCase()) return true;
+              return m.modelIds?.split(',').some((id: string) => id.trim().toLowerCase() === currentModel.toLowerCase());
+            };
+            const matchedModels = status.roleModelQuota.models.filter(match).map(m => ({
+              modelId: m.modelId,
+              cycle: m.cycle,
+              limit: Math.round(m.limit),
+              used: Math.round(m.used),
+              pct: m.limit > 0 ? Math.round((1 - m.used / m.limit) * 100) : 0,
+            }));
+            const daily = status.dailyQuota.enabled && !status.dailyQuota.whitelisted
+              ? { limit: Math.round(status.dailyQuota.limit), pct: status.dailyQuota.limit > 0 ? Math.round((1 - status.dailyQuota.used / status.dailyQuota.limit) * 100) : 0 }
+              : null;
+            const weekly = status.zhWeeklyQuota.applicable && status.zhWeeklyQuota.enabled
+              ? { limit: Math.round(status.zhWeeklyQuota.limit), pct: status.zhWeeklyQuota.limit > 0 ? Math.round((1 - status.zhWeeklyQuota.used / status.zhWeeklyQuota.limit) * 100) : 0 }
+              : null;
+            if (matchedModels.length === 0 && !daily && !weekly) return;
+            const whitelisted = status.roleModelQuota.whitelisted;
+            communicationService.sendGenericMessage('quota_status', {
+              sessionId,
+              models: matchedModels,
+              daily,
+              weekly,
+              whitelisted,
+            });
+          }
+        } catch {
+          // 静默失败
+        }
+      }).catch(err => {
+        logger.error('Failed to fetch quota status', err instanceof Error ? err : undefined);
+      });
+    });
+
     logger.info('✅ Background task handlers initialized');
+
+    // 🎯 启动时主动拉取限额状态（与 CLI App.tsx useEffect 做法对齐）
+    // 这样在首次用户消息发送前 cache 即有数据，
+    // onChatMessage 中的 isQuotaLowForModel 才能正确判断是否需要发送 quota_warning。
+    QuotaStatusService.getInstance().fetchQuotaStatus().catch(err => {
+      logger.debug('[Quota] Startup fetch failed (non-blocking)', err instanceof Error ? err : undefined);
+    });
   }).catch(error => {
     logger.error('Failed to setup background task handlers', error instanceof Error ? error : undefined);
   });

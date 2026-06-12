@@ -370,6 +370,19 @@ export const zhCN: Translations = {
     manualFailed: '压缩失败',
   },
 
+  quota: {
+    title: '限额状态',
+    warning: '配额不足',
+    modelLimit: '模型配额',
+    dailyLimit: '今日积分',
+    weeklyLimit: '珠海周积分',
+    whitelisted: '白名单用户，不受限制',
+    pctLeft: '剩余 {pct}%',
+    dsV4Hint: 'deepseek-v4 系列不受上述配额限制',
+    exhausted: '当前模型 {model} 积分已用尽（总额 {limit}）。建议使用 /model 切换模型。',
+    lowWarning: '当前模型 {model} 剩余积分不足（{remaining}/{limit}，剩余 {pct}%）。长任务可能无法完成，建议使用 /model 切换模型。',
+  },
+
   reasoning: {
     title: 'AI 思考中',
     expand: '展开思考过程',

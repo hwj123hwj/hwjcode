@@ -507,6 +507,15 @@ export const translations = {
     'startup.warning.custom.proxy.server': '🔗 Custom server: {url}\n   Please verify trustworthiness and monitor your API usage.',
     'startup.warning.low.credits': '⚠️  Your remaining credits are running low ({percentage}% left). Please consider purchasing more credits to continue using the service.',
 
+    // Quota Status Display (busy→idle summary, not in history)
+    'quota.title.model': 'Model Quota',
+    'quota.title.daily': 'Daily Credits',
+    'quota.title.weekly': 'Weekly Credits',
+    'quota.item.whitelisted': 'Whitelisted user, no limit',
+    'quota.item.ds_v4_hint': 'deepseek-v4 series exempt from all above limits',
+    'quota.warning.exhausted': 'Model {model} credits exhausted (limit {limit}). Suggest switching via /model.',
+    'quota.warning.low': 'Model {model} credits low ({remaining}/{limit}, {pct}% left). Long tasks may fail, suggest switching via /model.',
+
     // DeepX Quota Error Messages
     'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 Your account\'s available Credits are insufficient to continue using this service\n💡 Please consider subscribing to a higher quota plan. Details: https://easycode.deepvlab.ai/\n\n\x1b[33m🎁 For free trial opportunities, contact our Boss: https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
     'deepx.quota.exceeded.with.upgrade': '🚫 Daily {limitType} limit reached for {model}\n💡 Please upgrade your plan at: https://easycode.deepvlab.ai/',
@@ -2176,6 +2185,15 @@ export const translations = {
     'startup.warning.filesystem.error': '由于文件系统错误，无法验证当前目录。',
     'startup.warning.custom.proxy.server': '🔗 检测到自定义代理服务器地址：{url}\n   您正在使用企业级服务器地址。',
     'startup.warning.low.credits': '⚠️  您的剩余积分不多了（剩余 {percentage}%）。请考虑充值以继续使用服务。',
+
+    // Quota Status Display (busy→idle summary, not in history)
+    'quota.title.model': '模型配额',
+    'quota.title.daily': '今日积分',
+    'quota.title.weekly': '珠海周积分',
+    'quota.item.whitelisted': '白名单用户，不受限制',
+    'quota.item.ds_v4_hint': 'deepseek-v4 系列不受上述配额限制',
+    'quota.warning.exhausted': '当前模型 {model} 积分已用尽（总额 {limit}）。建议使用 /model 切换模型。',
+    'quota.warning.low': '当前模型 {model} 剩余积分不足（{remaining}/{limit}，剩余 {pct}%）。长任务可能无法完成，建议使用 /model 切换模型。',
 
     // DeepX Quota Error Messages
     'deepx.quota.no.configuration': '─────────────────────────────────────────────────────\n🚫 当前账户可用的 Credit（积分）不足以继续使用本服务\n💡 请考虑订阅更多额度的套餐。详情请访问官网：https://easycode.deepvlab.ai/\n\n\x1b[33m🎁 如果希望获得免费体验机会，请联系我们的Boss：https://x.com/fusheng_0306\x1b[0m\n─────────────────────────────────────────────────────',
