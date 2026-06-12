@@ -96,6 +96,9 @@ interface MultiSessionMessageFromExtension {
        'stream_recovery_end' |
        // 🔐 认证过期通知
        'auth_expired' |
+       // 🎯 限额状态更新
+       'quota_status' |
+       'quota_warning' |
        // 🟢 自定义模型管理响应
        'custom_models_response' |
        'custom_models_changed' |

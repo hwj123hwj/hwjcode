@@ -93,7 +93,7 @@ export interface ChatMessage {
   toolMessageType?: 'status' | 'output';  // 区分状态消息和输出消息
 
   // 🎯 系统通知字段（用于循环检测、压缩等通知）
-  notificationType?: 'loop_detected' | 'compression' | 'warning' | 'info';
+  notificationType?: 'loop_detected' | 'compression' | 'warning' | 'info' | 'quota';
   notificationTitle?: string;
   notificationDescription?: string;
   notificationReason?: string;

@@ -29,7 +29,7 @@ export const getSystemLocale = (): SupportedLocale => {
     // Try to get VS Code language setting
     if (typeof window !== 'undefined' && window.navigator) {
       const language = window.navigator.language;
-      
+
       // Map common locale formats to supported locales
       const localeMap: Record<string, SupportedLocale> = {
         'zh': 'zh-CN',
@@ -69,11 +69,11 @@ export const getTranslation = (
   fallback?: string
 ): string => {
   const translation = translations[locale] || translations[DEFAULT_LOCALE];
-  
+
   try {
     const keys = keyPath.split('.');
     let current: any = translation;
-    
+
     for (const key of keys) {
       if (current && typeof current === 'object' && key in current) {
         current = current[key];
@@ -82,7 +82,7 @@ export const getTranslation = (
         return fallback || keyPath;
       }
     }
-    
+
     return typeof current === 'string' ? current : fallback || keyPath;
   } catch (error) {
     console.warn(`Translation error for key "${keyPath}":`, error);
@@ -96,9 +96,15 @@ export const getTranslation = (
  * @param params Parameters to replace placeholders
  */
 export const formatTranslation = (text: string, params: Record<string, string | number>): string => {
-  return text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    return params[key]?.toString() || match;
+  // First, replace double curly braces e.g., {{name}}
+  let formatted = text.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    return params[key]?.toString() !== undefined ? params[key].toString() : match;
   });
+  // Then, replace single curly braces e.g., {name}
+  formatted = formatted.replace(/\{(\w+)\}/g, (match, key) => {
+    return params[key]?.toString() !== undefined ? params[key].toString() : match;
+  });
+  return formatted;
 };
 
 /**

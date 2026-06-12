@@ -111,7 +111,7 @@ describe('GeminiChat.fixRequestContents', () => {
       expect(result).toEqual(input);
     });
 
-    it('ID 不匹配的 response 应该被认为是未匹配（cancel 补全后与原 response 合并）', () => {
+    it('ID 不匹配的 response 应该被认为是未匹配（cancel 补全，失配 fr 被移除）', () => {
       const input: Content[] = [
         {
           role: MESSAGE_ROLES.MODEL,
@@ -141,7 +141,6 @@ describe('GeminiChat.fixRequestContents', () => {
             response: { result: 'user cancel' }
           }
         },
-        { functionResponse: { name: 'search', id: 'xyz789', response: { result: '晴天' } } }
       ]);
     });
 

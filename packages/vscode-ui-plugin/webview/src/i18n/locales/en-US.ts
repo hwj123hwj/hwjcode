@@ -370,6 +370,19 @@ export const enUS: Translations = {
     manualFailed: 'Compression failed',
   },
 
+  quota: {
+    title: 'Quota Status',
+    warning: 'Quota Warning',
+    modelLimit: 'Model Quota',
+    dailyLimit: 'Daily Credits',
+    weeklyLimit: 'Weekly Credits',
+    whitelisted: 'Whitelisted user, no limit',
+    pctLeft: '{pct}% left',
+    dsV4Hint: 'deepseek-v4 series exempt from all above limits',
+    exhausted: 'Model {model} credits exhausted (limit {limit}). Suggest switching via /model.',
+    lowWarning: 'Model {model} credits low ({remaining}/{limit}, {pct}% left). Long tasks may fail, suggest switching via /model.',
+  },
+
   reasoning: {
     title: 'AI Thinking',
     expand: 'Expand thinking process',

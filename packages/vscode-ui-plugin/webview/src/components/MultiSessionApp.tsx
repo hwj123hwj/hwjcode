@@ -1030,6 +1030,67 @@ export const MultiSessionApp: React.FC = () => {
     }));
 
     // 🔐 监听认证过期通知（服务端返回 HTTP 401 时由 extension 主动推送）
+
+    // 🎯 限额状态：忙→闲时展示限额摘要
+    cleanups.push(messageService.onExtensionMessage('quota_status', (payload: any) => {
+      const targetSessionId: string | undefined =
+        payload?.sessionId || stateRef.current.currentSessionId || undefined;
+      if (!targetSessionId) return;
+      const descLines: string[] = [];
+      const cycleLabel = (c: string) => ({ daily: '日', weekly: '周', monthly: '月' } as Record<string, string>)[c] || '';
+      if (payload?.models?.length > 0) {
+        descLines.push(t('quota.modelLimit'));
+        for (const m of payload.models) {
+          descLines.push(`   ${m.modelId}  ${cycleLabel(m.cycle)}${m.limit}    ${t('quota.pctLeft', { pct: String(m.pct) })}`);
+        }
+      }
+      if (payload?.daily) {
+        descLines.push(`${t('quota.dailyLimit')}  ${payload.daily.limit}    ${t('quota.pctLeft', { pct: String(payload.daily.pct) })}`);
+      }
+      if (payload?.weekly) {
+        descLines.push(`${t('quota.weeklyLimit')}  ${payload.weekly.limit}    ${t('quota.pctLeft', { pct: String(payload.weekly.pct) })}`);
+      }
+      descLines.push('');
+      descLines.push(t('quota.dsV4Hint'));
+      addMessage(targetSessionId, {
+        id: `quota-status-${Date.now()}`,
+        type: 'notification',
+        content: createTextMessageContent(''),
+        timestamp: Date.now(),
+        notificationType: 'quota',
+        notificationTitle: t('quota.title'),
+        notificationDescription: descLines.join('\n'),
+        severity: 'info',
+      } as any);
+    }));
+
+    // 🎯 限额警告：发送前配额不足
+    cleanups.push(messageService.onExtensionMessage('quota_warning', (payload: any) => {
+      const targetSessionId: string | undefined =
+        payload?.sessionId || stateRef.current.currentSessionId || undefined;
+      if (!targetSessionId) return;
+      const params = {
+        model: payload?.model || '',
+        remaining: String(payload?.remaining ?? ''),
+        limit: String(payload?.limit ?? ''),
+        pct: String(payload?.pct ?? ''),
+      };
+      const isExhausted = (payload?.remaining ?? 0) <= 0;
+      addMessage(targetSessionId, {
+        id: `quota-warning-${Date.now()}`,
+        type: 'notification',
+        content: createTextMessageContent(''),
+        timestamp: Date.now(),
+        notificationType: 'quota',
+        notificationTitle: t('quota.warning'),
+        notificationDescription: isExhausted
+          ? t('quota.exhausted', params)
+          : t('quota.lowWarning', params),
+        severity: 'warning',
+      } as any);
+    }));
+
+    // 🔐 监听认证过期通知（服务端返回 HTTP 401 时由 extension 主动推送）
     cleanups.push(messageService.onAuthExpired(({ reason }) => {
       console.log('🔐 [MultiSessionApp] Auth expired notification received:', reason);
       setIsLoggedIn(false);
