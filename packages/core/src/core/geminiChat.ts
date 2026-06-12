@@ -844,10 +844,26 @@ export class GeminiChat {
           if (!part.functionResponse) return true; // 保留非 functionResponse 部分
 
           const response = part.functionResponse;
-          const hasMatchingId = response.id && finalToolCallStack[response.id];
+          const respId = typeof response.id === 'string' && response.id.length > 0 ? response.id : undefined;
+          const hasMatchingId = !!respId && !!finalToolCallStack[respId];
           const hasMatchingName = response.name && finalToolCallNames[response.name];
 
-          if (hasMatchingId || hasMatchingName) {
+          // 🐛 修复（用户实拍 Bedrock 400，id=toolu_bdrk_01LX34yHPMS4XDGJsDcYuWTc）：
+          //   fr 若**带了精确 id**，就必须能在前文找到 id 完全相同的 functionCall。
+          //   否则说明它的 tool_use 确实丢了（典型：上下文压缩切走了携带该 tool_use
+          //   的 model 消息，只剩这条带真实 Bedrock id 的 fr）——这是真·孤立 fr，必须移除。
+          //
+          //   旧实现用 `hasMatchingId || hasMatchingName`：只要历史**别处**还有一个
+          //   **同名**工具调用（哪怕 id 完全不同），name 兜底就会误放行这条 id 失配的
+          //   孤立 fr；转成 Anthropic tool_result 后 tool_use_id 在前文找不到对应
+          //   tool_use → Bedrock/Anthropic 直接 400:
+          //     unexpected `tool_use_id` found in `tool_result` blocks.
+          //
+          //   正确语义：name 兜底只服务于「fr 无 id」的 Gemini 原生历史（Gemini 协议
+          //   不强制 callId）。一旦 fr 自带 id，就以 id 为准、不再降级到 name 模糊匹配。
+          const keep = respId ? hasMatchingId : hasMatchingName;
+
+          if (keep) {
             return true;
           } else {
             console.warn(
