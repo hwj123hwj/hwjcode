@@ -40,7 +40,16 @@
 
 ---
 
-## [2026-05-30] fix | Corrected oral error in Release Process Guide
+---
+
+## [2026-06-12] fix | 发版流程新增 4 条禁止事项纪律
+
+### Pages Updated
+- `wiki/release-process.md` — 新增 4 条红线纪律（第4-6条）：
+  - #4 Tag 必须在 master 分支上创建，禁止在 `ls-dev` 打 tag
+  - #5 版本号遇到已有 tag 必须往上跳，不得跳过不打或删已有的
+  - #6 严禁擅自操作远程 tag（删除/修改/覆盖）
+  - 补充 CLI 和 VSCode tag 版本号对齐规则至红线部分
 
 ### Pages Updated
 - `wiki/release-process.md` — 将步骤 5 中的口音错误字样“砸板”修改为规范词“发版”。

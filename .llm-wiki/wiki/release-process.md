@@ -1,6 +1,6 @@
 ---
 type: guide
-date: 2026-05-29
+date: 2026-06-12
 tags: [release, git, tag, ci-cd, npm, workflow]
 ---
 
@@ -23,7 +23,20 @@ tags: [release, git, tag, ci-cd, npm, workflow]
 
 ### 3. ⚠️ 打 Tag 前本地必须构建全绿 (防远程挂掉)
 - **硬性红线要求**：在执行任何打 Tag 动作并推送到远程之前，**必须首先在本地运行 `npm run build` 确保整个 Monorepo 编译完完全全全绿通过**！
-- 严禁“先打 Tag 推送，再本地验证”或者“带病（编译类型报错）上远程”，否则 CI/CD 流水线将会因 TypeScript 编译错误而立即失败，导致版本号废损。
+- 严禁"先打 Tag 推送，再本地验证"或者"带病（编译类型报错）上远程"，否则 CI/CD 流水线将会因 TypeScript 编译错误而立即失败，导致版本号废损。
+
+### 4. ⚠️ Tag 必须在 master 分支上创建
+- **硬性红线要求**：所有 release tag（包括 `cli-release-v*` 和 `vscode-release-v*`）**必须**在 `master` 分支上创建，严禁在 `ls-dev` 或其他开发/功能分支上打 tag。
+- 误打在错误分支的 tag 必须删除后在 master 上重新创建。
+
+### 5. ⚠️ 版本号遇到已存在的 tag 必须往上跳
+- 打 tag 前必须先 `git fetch --tags origin` 同步远程最新 tag 列表，确认最新版本号。
+- 如果远程已存在当前版本号的 tag（哪怕是其他模块的 tag），**必须递增到下一版本号**，不得自作主张跳过不补，也不得擅自删除已有的远程 tag。
+- CLI 和 VSCode 的 release tag 版本号必须对齐（如 `cli-release-v1.1.17` 和 `vscode-release-v1.1.17`）。
+
+### 6. ⚠️ 严禁擅自操作远程 tag
+- **未经用户明确指示，严禁删除、修改或覆盖远程已有的 tag**。
+- Protected tag 在 GitLab 上删除需走网页界面，不得通过 API 或 CLI 尝试绕过。
 
 ---
 
