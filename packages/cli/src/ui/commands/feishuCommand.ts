@@ -45,6 +45,7 @@ import {
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage, FeishuFooterMetrics, buildCardKitFinalCard } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
+import { NanobananaGenerateTool } from 'deepv-code-core';
 import {
   type FeishuAgentTarget,
   resolveDelegation,
@@ -2969,6 +2970,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 注册飞书模式专属的自更新重启工具（普通 CLI 模式绝不注册）
         toolRegistry.registerTool(new SelfUpdateTool(isolatedConfig));
 
+        // 注册飞书模式专属的 NanoBanana 图片生成工具（普通 CLI 模式通过 slash command 使用）
+        toolRegistry.registerTool(new NanobananaGenerateTool());
+
         await isolatedClient.setTools();
         dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
 
@@ -3988,6 +3992,78 @@ async function handleStart(context?: CommandContext): Promise<string> {
               } else {
                 toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
               }
+            } else if (toolName === 'nanobanana_generate') {
+              // 🎯 NanoBanana 图片生成：实时展示进度（提交 → 轮询 → 下载 → 发送）
+              const nanoBananaTool = toolRegistry.getTool('nanobanana_generate');
+              if (nanoBananaTool) {
+                const startTime = Date.now();
+                let lastCardUpdateTime = 0;
+                const CARD_UPDATE_THROTTLE_MS = 3000;
+
+                const toolResult = await nanoBananaTool.execute(
+                  req.args,
+                  abortController.signal,
+                  async (output) => {
+                    const now = Date.now();
+                    if (activeCardId && now - lastCardUpdateTime >= CARD_UPDATE_THROTTLE_MS) {
+                      const liveProgressMarkdown = formatToolCallWithBorder('nanobanana_generate', req.args, true, output, true);
+                      const nanoFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
+                      nanoFooterMetrics.status = `图片生成中: ${output}`;
+                      if (streaming) {
+                        await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
+                        await streaming.pushFooter(nanoFooterMetrics);
+                      } else {
+                        await gateway.updateCard(activeCardId, 'Easy Code (图片生成中)', renderCurrentDisplay(blocks, '', liveProgressMarkdown), nanoFooterMetrics);
+                      }
+                      lastCardUpdateTime = now;
+                    }
+                  },
+                );
+
+                const durationMs = Date.now() - startTime;
+                config?.getTelemetry?.()?.logToolCall?.(config, {
+                  'event.name': 'tool_call',
+                  'event.timestamp': new Date().toISOString(),
+                  function_name: 'nanobanana_generate',
+                  function_args: req.args,
+                  duration_ms: durationMs,
+                  success: true,
+                  prompt_id: req.prompt_id,
+                  response_length: typeof toolResult.llmContent === 'string'
+                    ? toolResult.llmContent.length
+                    : JSON.stringify(toolResult.llmContent).length,
+                });
+
+                toolResponse = {
+                  callId: req.callId,
+                  responseParts: [{
+                    functionResponse: {
+                      id: req.callId,
+                      name: 'nanobanana_generate',
+                      response: { output: toolResult.llmContent },
+                    }
+                  }],
+                  resultDisplay: toolResult.returnDisplay,
+                };
+
+                // 🎯 图片生成完成后，自动将本地图片文件发送到飞书聊天
+                //    扫描 llmContent 中的本地文件路径，上传并发送
+                const llmContentStr = typeof toolResult.llmContent === 'string'
+                  ? toolResult.llmContent
+                  : JSON.stringify(toolResult.llmContent);
+                const projectRoot: string =
+                  (typeof config?.getProjectRoot === 'function' && config.getProjectRoot()) ||
+                  process.cwd();
+                await sendDetectedFiles(
+                  gateway,
+                  msg.chatId,
+                  msg.messageId,
+                  llmContentStr,
+                  projectRoot,
+                );
+              } else {
+                toolResponse = await executeToolCall(config, req, toolRegistry, abortController.signal);
+              }
             } else {
               // 其它非 Shell 工具，直接通过 executeToolCall 执行
               // 在开始执行前，向飞书卡片展示该工具的进行中状态 (⏳)，节流保护
@@ -4757,6 +4833,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
         };
         toolRegistry.registerTool(selfUpdateTool);
 
+        // 注册飞书模式专属的 NanoBanana 图片生成工具
+        toolRegistry.registerTool(new NanobananaGenerateTool());
+
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');
       } catch (toolErr: any) {
@@ -4911,7 +4990,8 @@ async function handleStop(context?: CommandContext): Promise<string> {
       const removedGroupTool = toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
       const removedAudioTool = toolRegistry.unregisterTool(AudioReaderTool.Name);
       const removedSelfUpdate = toolRegistry.unregisterTool(SelfUpdateTool.Name);
-      if (removed || removedGroupTool || removedAudioTool || removedSelfUpdate) {
+      const removedNanoBanana = toolRegistry.unregisterTool(NanobananaGenerateTool.Name);
+      if (removed || removedGroupTool || removedAudioTool || removedSelfUpdate || removedNanoBanana) {
         await geminiClient.setTools();
         dlog('Unregistered Feishu file-send and group-chat tools successfully.');
       }
@@ -5190,6 +5270,7 @@ async function handleLogout(context?: CommandContext): Promise<string> {
         toolRegistry.unregisterTool(CreateProjectGroupTool.Name);
         toolRegistry.unregisterTool(AudioReaderTool.Name);
         toolRegistry.unregisterTool(SelfUpdateTool.Name);
+        toolRegistry.unregisterTool(NanobananaGenerateTool.Name);
         await geminiClient.setTools();
       } catch {
         // ignore

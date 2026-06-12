@@ -177,6 +177,9 @@ export * from './tools/mcp-client.js';
 export * from './tools/mcp-tool.js';
 export * from './tools/todo-store.js';
 
+// NanoBanana image generation tool
+export * from './tools/nanobanana-generate.js';
+
 // PPT tools
 export * from './tools/ppt/index.js';
 
