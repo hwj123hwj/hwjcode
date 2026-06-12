@@ -99,6 +99,7 @@ export * from './services/mcpResponseGuard.js';
 export * from './services/fileOperationQueue.js';
 export * from './services/backgroundTaskManager.js';
 export * from './services/backgroundModeSignal.js';
+export { QuotaStatusService } from './services/quotaStatusService.js';
 export { formatClaudeCodeTaskResult, isAcpDelegateTask } from './tools/delegate-agent.js';
 export {
   CacheSafeParamsStore,

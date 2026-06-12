@@ -36,6 +36,8 @@ export const SystemNotificationMessage: React.FC<SystemNotificationMessageProps>
         return '✨';
       case 'warning':
         return '⚠️';
+      case 'quota':
+        return '📊';
       default:
         return 'ℹ️';
     }
