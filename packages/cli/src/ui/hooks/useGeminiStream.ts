@@ -34,6 +34,7 @@ import {
   type SessionData,
   MESSAGE_ROLES,
   isCustomModel,
+  QuotaStatusService,
 } from 'deepv-code-core';
 import { updateWindowTitleWithSummary } from '../../gemini.js';
 import { type Part, type PartListUnion, FinishReason } from '@google/genai';
@@ -1544,6 +1545,31 @@ export const useGeminiStream = (
       )
         return;
 
+      // 🎯 限额拦截：发送前检查当前模型配额
+      if (
+        !options?.isContinuation &&
+        !options?.silent
+      ) {
+        const currentModel = config.getModel();
+        const check = QuotaStatusService.getInstance().isQuotaLowForModel(currentModel);
+        if (check.low && check.item) {
+          const params = {
+            model: currentModel,
+            remaining: String(Math.round(check.item.remaining)),
+            limit: String(Math.round(check.item.limit)),
+            pct: check.item.limit > 0 ? String(Math.round((check.item.remaining / check.item.limit) * 100)) : '0',
+          };
+          const warningText = check.item.remaining <= 0
+            ? tp('quota.warning.exhausted', params)
+            : tp('quota.warning.low', params);
+          addItem(
+            { type: MessageType.INFO, text: `⚠️ ${warningText}` },
+            Date.now(),
+          );
+        }
+        // 不清除 quotaSummary——闲时拉取的展示和拦截警告各自独立
+      }
+
       // 保存原始查询用于历史记录
       const originalQuery = query;
 
@@ -2141,6 +2167,9 @@ User question: ${queryStr}`;
   // 🎯 记住在当前响应周期中是否有过工具调用
   const [hadToolsInCurrentResponse, setHadToolsInCurrentResponse] = useState(false);
 
+  // 🎯 限额信息展示文本（闲时打印，不进历史上下文）
+  const [quotaSummary, setQuotaSummary] = useState<string | null>(null);
+
   // 🎭 辩论推进的 AbortController ref（可能由外部传入共享）。
   //    落到一个内部 fallback ref 上，保证在未传入时也能工作。
   const internalDebateAdvanceAbortRef = useRef<AbortController | null>(null);
@@ -2162,6 +2191,18 @@ User question: ${queryStr}`;
         // 播放响应完成提示音
         AudioNotification.play(NotificationSound.RESPONSE_COMPLETE).catch(err => {
           console.debug('[AudioNotification] Failed to play response complete sound:', err);
+        });
+
+        // 🎯 忙→闲：拉取限额状态并显示
+        QuotaStatusService.getInstance().fetchQuotaStatus().then((status) => {
+          if (status) {
+            const text = QuotaStatusService.getInstance().buildSummary(status, config.getModel());
+            if (text) {
+              setQuotaSummary(text);
+              // 15 秒后自动清除，避免一直占屏
+              setTimeout(() => setQuotaSummary(null), 15000);
+            }
+          }
         });
 
         // 🎭 辩论模式：一轮响应完成后，切到下一个模型并喂中介话
@@ -2394,5 +2435,6 @@ User question: ${queryStr}`;
     hasContentStarted, // 🆕 导出内容开始标志
     isCreatingCheckpoint, // 🎯 导出checkpoint创建状态
     isExecutingTools, // 🎯 导出工具执行状态
+    quotaSummary, // 🎯 限额信息（闲时展示，不进历史）
   };
 };

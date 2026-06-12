@@ -105,6 +105,7 @@ export interface FeishuFooterMetrics {
   cacheRead?: number; // 缓存读取 tokens 数
   cacheHitRate?: number; // 缓存命中百分比 (0-100)
   credits?: number; // 扣减点数
+  quota?: string; // 配额摘要（单行，无 emoji），忙→闲时拉取展示
 }
 
 /** CardKit 2.0 流式卡片中正文的固定 element_id */
@@ -194,6 +195,10 @@ export function renderFooterMarkdown(metrics: FeishuFooterMetrics): string {
   if (metrics.contextPercentage != null) {
     const remainingPercentage = Math.max(0, 100 - metrics.contextPercentage);
     parts.push(`上下文剩余 ${remainingPercentage.toFixed(0)}%`);
+  }
+
+  if (metrics.quota) {
+    parts.push(metrics.quota);
   }
 
   if (parts.length === 0) return '';

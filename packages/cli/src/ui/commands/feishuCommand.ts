@@ -89,6 +89,7 @@ import {
   launchRelaunchHelper,
   type RelaunchInstallMode,
   runSideQuestion,
+  QuotaStatusService,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
@@ -3279,6 +3280,34 @@ async function handleStart(context?: CommandContext): Promise<string> {
       // Get initial footer metrics
       const initialFooterMetrics = await getFeishuStatusMetrics(config, geminiClient);
 
+      // 🎯 发送前拦截：检查当前模型配额，不足则把警告（无 emoji）挂到首卡 footer
+      try {
+        const quotaModel = config.getModel() || 'auto';
+        const quotaCheck =
+          QuotaStatusService.getInstance().isQuotaLowForModel(quotaModel);
+        if (quotaCheck.low && quotaCheck.item) {
+          const params: Record<string, string> = {
+            model: quotaModel,
+            remaining: String(Math.round(quotaCheck.item.remaining)),
+            limit: String(Math.round(quotaCheck.item.limit)),
+            pct:
+              quotaCheck.item.limit > 0
+                ? String(
+                    Math.round(
+                      (quotaCheck.item.remaining / quotaCheck.item.limit) * 100,
+                    ),
+                  )
+                : '0',
+          };
+          initialFooterMetrics.quota =
+            quotaCheck.item.remaining <= 0
+              ? tp('quota.warning.exhausted', params)
+              : tp('quota.warning.low', params);
+        }
+      } catch {
+        // 静默失败，不影响正常流程
+      }
+
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const stream = geminiClient.sendMessageStream(
           currentMessage,
@@ -3409,14 +3438,31 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
         const currentFinalMarkdown = renderCurrentDisplay(blocks);
 
+        // 🎯 忙→闲：仅在「本轮无工具调用、即将定稿」时拉取最新配额，
+        //    生成单行摘要注入终态 footer（有工具调用说明还要继续，不拉取）。
+        let quotaFooter = '';
+        if (toolCallRequests.length === 0) {
+          try {
+            const qs = QuotaStatusService.getInstance();
+            const status = await qs.fetchQuotaStatus();
+            quotaFooter = qs.buildFooterSummary(
+              status ?? undefined,
+              config.getModel(),
+            );
+          } catch {
+            // 静默失败
+          }
+        }
+
         // 结束流式输出，做最终的、无中间提示的更新
         if (activeCardId && streaming) {
           // CardKit 流式中：只 pushContent 把最终文本推上去，footer 保持流式状态
           await streaming.pushContent(currentFinalMarkdown || '（无回复）');
         } else if (activeCardId && !streaming) {
-          // 老路径回退：整卡 patch
+          // 老路径回退：整卡 patch（定稿时带上配额摘要）
           const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
           finalFooterMetrics.status = '已完成';
+          if (quotaFooter) finalFooterMetrics.quota = quotaFooter;
           const success = await safeUpdateCardWithRetry(gateway, activeCardId, 'Easy Code', currentFinalMarkdown || '（无回复）', finalFooterMetrics);
           if (!success) {
             dwarn('[Feishu Stream] Failed to update final card with retry. Fallback to sending new card.');
@@ -3441,6 +3487,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           if (!activeCardId) {
             const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
             finalFooterMetrics.status = '已完成';
+            if (quotaFooter) finalFooterMetrics.quota = quotaFooter;
             // 兜底分支文本量不大，直接发个静态卡即可（不必再走 CardKit）
             activeCardId = await gateway.sendCard(
               msg.chatId,
@@ -3454,6 +3501,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             // 已经走的 CardKit 流式：关闭 streaming_mode 并整卡更新到终态
             const finalFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
             finalFooterMetrics.status = '已完成';
+            if (quotaFooter) finalFooterMetrics.quota = quotaFooter;
             await streaming.finalize(currentFinalMarkdown || '（无回复）', finalFooterMetrics);
             streaming = null;
           }

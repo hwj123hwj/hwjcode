@@ -367,6 +367,19 @@ export interface Translations {
     manualFailed: string;
   };
 
+  quota: {
+    title: string;
+    warning: string;
+    modelLimit: string;
+    dailyLimit: string;
+    weeklyLimit: string;
+    whitelisted: string;
+    pctLeft: string;
+    dsV4Hint: string;
+    exhausted: string;
+    lowWarning: string;
+  };
+
   reasoning: {
     title: string;
     expand: string;
