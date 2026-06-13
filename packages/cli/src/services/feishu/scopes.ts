@@ -40,6 +40,7 @@ export type LarkBrand = FeishuCredentials['domain'];
  * - 资源（文件/图片）：im:resource
  * - 卡片：cardkit:card:*
  * - 应用自身权限查询（让 dvcode 能 probe 已开通的 scope）：application:application:self_manage
+ * - 知识库读取：wiki:wiki:readonly（wiki 节点内容读取）
  *
  * ⚠️ 关于"群消息免 @"：这里的 `im:message.group_at_msg:readonly` 只能让 bot 收到
  * 群里**@bot 的消息**。如果要在群里**无需 @ 直接响应所有用户消息**，必须额外申请
@@ -77,6 +78,10 @@ export const REQUIRED_APP_SCOPES = [
 
   // 通讯录基础（取群成员/发送人姓名展示）
   'contact:user.base:readonly',
+
+  // 文档与知识库（wiki 页面内容读取，旧版 doc 降级读取）
+  'docs:doc:readonly',
+  'wiki:wiki:readonly',
 ] as const;
 
 export type RequiredAppScope = (typeof REQUIRED_APP_SCOPES)[number];
