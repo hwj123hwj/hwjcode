@@ -19,6 +19,8 @@
  * (`SESSIONS_CARD_ELEMENT_ID`) so updates are a single whole-card replace.
  */
 
+import { feishuToolEmoji } from './toolEmoji.js';
+
 /** Element id of the dashboard body — stable so the card can be updated. */
 export const SESSIONS_CARD_ELEMENT_ID = 'sessions_body';
 
@@ -114,7 +116,7 @@ function renderRunningTask(t: RunningTaskView, now: number): string {
 
   const detail: string[] = [];
   if (t.status === 'running' && t.currentTool) {
-    detail.push(`🔧 ${t.currentTool}`);
+    detail.push(`${feishuToolEmoji({ name: t.currentTool })} ${t.currentTool}`);
   }
   if (typeof t.planDone === 'number' && typeof t.planTotal === 'number' && t.planTotal > 0) {
     detail.push(`📋 ${t.planDone}/${t.planTotal}`);

@@ -159,6 +159,11 @@ describe('runDelegatedTask', () => {
     expect(result.progress).toBeDefined();
     expect(result.progress!.toolCallCount).toBeGreaterThanOrEqual(1);
     expect(result.progress!.currentTool).toContain('Edit src/foo.ts');
+    // The ACP ToolKind is captured alongside the title for semantic UI icons.
+    expect(result.progress!.currentToolKind).toBe('edit');
+    // The latest agent narration (emitted after the tool call) is mirrored into
+    // structured progress; the tool-call boundary reset the prior buffer first.
+    expect(result.progress!.lastMessage).toBe('chose:allow');
     expect(result.progress!.tokenUsed).toBe(1234);
     expect(result.progress!.tokenSize).toBe(10000);
     expect(result.progress!.plan).toHaveLength(3);
