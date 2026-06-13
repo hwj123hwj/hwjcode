@@ -73,6 +73,16 @@ export interface RunTaskOptions {
    * fresh `session/new` so the task still goes through.
    */
   resumeSessionId?: string;
+  /**
+   * Model the user wants the external agent to run, matched against the agent's
+   * advertised model state (the `models` field of the `session/new` |
+   * `session/load` response). Matched by `ModelInfo.modelId` exactly, falling
+   * back to a case-insensitive substring match on `ModelInfo.name`. When unset,
+   * or when no model matches, the bridge keeps its default model. Honored via
+   * the (experimental) ACP `session/set_model`; agents that don't support
+   * runtime model switching simply ignore it and keep their default.
+   */
+  model?: string;
   /** Cancellation signal — aborting cancels the remote turn and kills the child. */
   signal: AbortSignal;
   /**
@@ -291,6 +301,75 @@ export function extractModelName(models: unknown): string | undefined {
   const current = ms.availableModels.find((mo) => mo.modelId === ms.currentModelId);
   const name = current?.name;
   return typeof name === 'string' && name ? name : undefined;
+}
+
+/**
+ * Resolve a user-requested model string to a concrete `modelId` from an ACP
+ * session model state (the `models` field of a `session/new` | `session/load`
+ * response). The match is, in order:
+ *   1. exact `ModelInfo.modelId === requested` (trimmed), then
+ *   2. case-insensitive substring match on `ModelInfo.name`.
+ * Returns the matched `modelId`, or undefined when the state is missing /
+ * malformed or nothing matches. Mirrors {@link extractModelName}'s defensive,
+ * structure-distrusting style (validate at runtime; never assume the shape).
+ */
+export function resolveModelId(
+  models: unknown,
+  requested: string,
+): string | undefined {
+  if (typeof requested !== 'string') return undefined;
+  const want = requested.trim();
+  if (!want) return undefined;
+
+  const ms = models as
+    | { availableModels?: Array<{ modelId?: unknown; name?: unknown }> }
+    | null
+    | undefined;
+  if (!ms || typeof ms !== 'object' || !Array.isArray(ms.availableModels)) {
+    return undefined;
+  }
+
+  // 1) Exact modelId match.
+  const exact = ms.availableModels.find(
+    (mo) => typeof mo?.modelId === 'string' && mo.modelId === want,
+  );
+  if (exact && typeof exact.modelId === 'string') return exact.modelId;
+
+  // 2) Case-insensitive substring match on the human-readable name.
+  const wantLower = want.toLowerCase();
+  const byName = ms.availableModels.find(
+    (mo) =>
+      typeof mo?.name === 'string' &&
+      typeof mo?.modelId === 'string' &&
+      mo.name.toLowerCase().includes(wantLower),
+  );
+  if (byName && typeof byName.modelId === 'string') return byName.modelId;
+
+  return undefined;
+}
+
+/** Look up a model's human-readable name by its modelId in a session model state. */
+function modelNameById(models: unknown, modelId: string): string | undefined {
+  const ms = models as
+    | { availableModels?: Array<{ modelId?: unknown; name?: unknown }> }
+    | null
+    | undefined;
+  if (!ms || typeof ms !== 'object' || !Array.isArray(ms.availableModels)) {
+    return undefined;
+  }
+  const found = ms.availableModels.find(
+    (mo) => typeof mo?.modelId === 'string' && mo.modelId === modelId,
+  );
+  return found && typeof found.name === 'string' && found.name
+    ? found.name
+    : undefined;
+}
+
+/** Read the current model id from a session model state, if present. */
+function currentModelIdOf(models: unknown): string | undefined {
+  const ms = models as { currentModelId?: unknown } | null | undefined;
+  if (!ms || typeof ms !== 'object') return undefined;
+  return typeof ms.currentModelId === 'string' ? ms.currentModelId : undefined;
 }
 
 /** Pick the most permissive "allow" option from a permission request. */
@@ -804,6 +883,10 @@ export async function runDelegatedTask(
     // it), otherwise start fresh. session/load replays prior history via
     // session updates, so the resumed turn keeps full context.
     const canResume = Boolean(init.agentCapabilities?.loadSession);
+    // The session model state from whichever path established the session
+    // (resume → loaded, fresh → session). Used to resolve an optional
+    // requested model before the prompt goes out.
+    let savedModels: unknown;
     if (opts.resumeSessionId && canResume) {
       phase = `已连接 ${label}，正在恢复会话 ${opts.resumeSessionId.slice(0, 8)}…`;
       try {
@@ -813,7 +896,8 @@ export async function runDelegatedTask(
           mcpServers: [],
         });
         sessionId = opts.resumeSessionId;
-        handler.noteModel(extractModelName((loaded as { models?: unknown }).models));
+        savedModels = (loaded as { models?: unknown }).models;
+        handler.noteModel(extractModelName(savedModels));
       } catch {
         // Resume failed (stale id, bridge quirk) — fall back to a fresh
         // session so the task still runs rather than hard-failing.
@@ -825,7 +909,34 @@ export async function runDelegatedTask(
       phase = `已连接 ${label}，正在创建会话…`;
       const session = await connection.newSession({ cwd, mcpServers: [] });
       sessionId = session.sessionId;
-      handler.noteModel(extractModelName((session as { models?: unknown }).models));
+      savedModels = (session as { models?: unknown }).models;
+      handler.noteModel(extractModelName(savedModels));
+    }
+
+    // Honor an optional requested model via the (experimental) ACP
+    // `session/set_model`, *before* the prompt. This is best-effort: a bridge
+    // that doesn't implement the unstable method returns "method not found",
+    // and a model string that matches nothing is a no-op — neither must ever
+    // fail the delegation. We only call set_model when we resolved a concrete
+    // modelId that differs from the session's current one.
+    if (opts.model) {
+      const targetId = resolveModelId(savedModels, opts.model);
+      if (!targetId) {
+        handler.transcript += `⚠️ 未找到匹配的模型「${opts.model}」，沿用默认模型\n`;
+        handler.flush();
+      } else if (targetId !== currentModelIdOf(savedModels)) {
+        try {
+          await connection.unstable_setSessionModel({ sessionId, modelId: targetId });
+          const targetName = modelNameById(savedModels, targetId) ?? targetId;
+          handler.noteModel(targetName);
+          handler.transcript += `🔧 已切换模型 → ${targetName}\n`;
+          handler.flush();
+        } catch {
+          // Bridge doesn't support runtime model switching — keep its default.
+          handler.transcript += `⚠️ 当前 agent 不支持运行时切换模型，沿用默认模型\n`;
+          handler.flush();
+        }
+      }
     }
 
     phase = `已连接 ${label}，等待响应…`;
