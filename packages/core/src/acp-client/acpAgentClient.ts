@@ -55,7 +55,7 @@ const HEARTBEAT_INTERVAL_MS = 10 * 1000;
  * common stall is an unauthenticated / first-run / offline bridge that emits
  * `available_commands_update` and then goes silent forever.
  */
-const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 6 * 60 * 1000;
 
 export interface RunTaskOptions {
   /** Which external agent to drive. */
