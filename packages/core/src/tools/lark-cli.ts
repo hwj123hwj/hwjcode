@@ -140,6 +140,7 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         '- Create doc from short inline text: command="docs +create" args=["--api-version", "v2", "--title", "Title", "--content", "<short-text>", "--doc-format", "markdown"]',
         '- Fetch doc content: command="docs +fetch" args=["--api-version", "v2", "--doc", "<doc_url_or_token>"]',
         '  NOTE: The flag is --doc (NOT --document-id). Accepts document URL or plain token.',
+        '  FALLBACK FOR OLD DOC: If docs +fetch returns error code 3380002 "Unsupported document type \'doc\'", the document is an old-style doc (not docx). Fallback to the low-level api command: command="api" args=["GET", "/open-apis/doc/v2/<doc_token>/raw_content"]. This requires the docs:doc:readonly scope (NOT doc:doc:readonly — docs is the domain, doc is the sub-permission). If api fails with scope 99991672, ask the user to open the page directly.',
         '- Update doc content: command="docs +update" args=["--api-version", "v2", "--doc", "<doc_url_or_token>", "--command", "overwrite", "--content", "@<relative-path>"]',
         '  CRITICAL: v2 API requires --command (overwrite|append) and --content (NOT --markdown --mode). Use --content with @file for long content. The @ prefix reads a local file (must be relative path like temp/myfile.md).',
         '- Search docs: command="docs +search" args=["--query", "<keyword>"]',
@@ -194,6 +195,11 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         '- List nodes in space: command="wiki +node-list" args=["--space-id", "<id>"]',
         '- Create wiki node: command="wiki +node-create" args=["--space-id", "<id>", "--title", "New Page"]',
         '- Get node info: command="wiki +node-get" args=["--node-token", "<token>"]',
+        '  NOTE: Returns node metadata including obj_type and obj_token. To read the actual content, use docs +fetch with the obj_token from the node-get result.',
+        '  READING WIKI CONTENT (full workflow):',
+        '    1. Get node info: command="wiki +node-get" args=["--node-token", "<wiki_token>"]',
+        '    2. Read doc content: command="docs +fetch" args=["--api-version", "v2", "--doc", "<obj_token_from_step1>", "--doc-format", "markdown"]',
+        '    3. If step 2 fails with error 3380002 (old doc type), fallback: command="api" args=["GET", "/open-apis/doc/v2/<obj_token>/raw_content"]. Requires docs:doc:readonly scope (NOT doc:doc:readonly). If api fails with scope 99991672, the app lacks this scope — ask the user to open the wiki page in a browser or copy the content manually.',
         '',
         '## VC (Video Conference)',
         '- Search meetings: command="vc +search" args=["--start", "2025-01-01", "--end", "2025-01-07"]',
@@ -817,6 +823,17 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
 
     if (errMessage.toLowerCase().includes('pending approval')) {
       enrichedHint += `\n\n🔒 CRITICAL INFO FOR USER & AI:\nThe Feishu/Lark application is currently pending approval by your corporate enterprise administrator.\n👉 Action required: Please contact your IT/Feishu administrator to approve this custom app in the Feishu Admin Console (飞书管理后台 - 版本管理与发布) first, then run this command again. Do NOT try other authentication or login commands because they will also be blocked until approved.`;
+    }
+
+    if (
+      errMessage.includes('3380002') ||
+      errMessage.includes('Unsupported document type')
+    ) {
+      enrichedHint += `\n\n💡 This is an old-style 'doc' document (not docx). Fallback: command="api" args=["GET", "/open-apis/doc/v2/<doc_token>/raw_content"]. Requires docs:doc:readonly scope (NOT doc:doc:readonly). If api also fails with 99991672, ask the user to open the wiki page directly.`;
+    }
+
+    if (errMessage.includes('99991672') || errMessage.includes('app_scope_not_applied')) {
+      enrichedHint += `\n\n💡 Missing API scope. The app needs additional permissions. Check: the old doc API (/open-apis/doc/v2/) requires docs:doc:readonly scope (NOT doc:doc:readonly). Apply at https://open.feishu.cn/app/cli_aa9c19096a7c9cc5/auth then re-authenticate.`;
     }
 
     try {
