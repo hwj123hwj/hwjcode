@@ -17,6 +17,12 @@
  *   - "terminal": newSession reports model state, and the prompt emits a Bash
  *     tool whose real output is carried in `_meta.terminal_output.data` plus an
  *     exit code (used by the terminal-output + model-capture tests).
+ *   - "setmodel": newSession reports model state (two models), implements
+ *     `session/set_model` by recording the requested modelId and echoing it back
+ *     in the agent message (used by the set_model integration tests).
+ *   - "replay": on `session/load`, emits an `agent_message_chunk` ("OLD_HISTORY_
+ *     REPLAY") before resolving — emulating the real bridge replaying prior
+ *     conversation history (used by the resume-watermark regression test).
  *
  * Session discovery/resume RPCs are always available: the stub advertises the
  * `loadSession` and `sessionCapabilities.list` capabilities, answers
@@ -27,6 +33,11 @@ import * as acp from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
 
 const MODE = process.env.STUB_MODE || 'normal';
+
+// For STUB_MODE=setmodel: records the last modelId the client requested via
+// `session/set_model`, so the prompt can echo it back for the integration test
+// to observe.
+let lastSetModelId = null;
 
 const stream = acp.ndJsonStream(
   Writable.toWeb(process.stdout),
@@ -59,9 +70,34 @@ new acp.AgentSideConnection(
           },
         };
       }
+      if (MODE === 'setmodel') {
+        // Advertise two models so the client can resolve + switch between them.
+        return {
+          sessionId: 'stub-session-1',
+          models: {
+            currentModelId: 'deepseek-v4-pro',
+            availableModels: [
+              { modelId: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+              { modelId: 'gpt-5-codex', name: 'GPT-5 Codex' },
+            ],
+          },
+        };
+      }
       return { sessionId: 'stub-session-1' };
     },
-    async loadSession() {
+    async loadSession(params) {
+      // For STUB_MODE=replay: emulate the real bridge, which replays the prior
+      // conversation as session updates BEFORE resolving session/load. The
+      // client must not leak this into the resumed turn's answer/transcript.
+      if (MODE === 'replay') {
+        await conn.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'OLD_HISTORY_REPLAY' },
+          },
+        });
+      }
       // Accept the resume; the client then drives prompt() as usual.
       return {};
     },
@@ -86,6 +122,18 @@ new acp.AgentSideConnection(
     async authenticate() {
       return {};
     },
+    // Only advertised/handled in setmodel mode: record the requested modelId so
+    // the prompt can echo it back. In other modes this method is absent, so the
+    // SDK answers `session/set_model` with a "method not found" error — exactly
+    // the bridge-doesn't-support-it path the client must tolerate.
+    ...(MODE === 'setmodel'
+      ? {
+          async unstable_setSessionModel(params) {
+            lastSetModelId = params.modelId;
+            return {};
+          },
+        }
+      : {}),
     async prompt(params) {
       if (MODE === 'hang') {
         // Never resolve — the client is expected to cancel/kill us.
@@ -178,6 +226,18 @@ new acp.AgentSideConnection(
           content: { type: 'text', text: `chose:${chosen}` },
         },
       });
+
+      if (MODE === 'setmodel') {
+        // Echo whatever modelId the client set (or "none" if it never called
+        // set_model), so the integration test can assert on it.
+        await conn.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: ` setmodel:${lastSetModelId ?? 'none'}` },
+          },
+        });
+      }
 
       return { stopReason: 'end_turn' };
     },
