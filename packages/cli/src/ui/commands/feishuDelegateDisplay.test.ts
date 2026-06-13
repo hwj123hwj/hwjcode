@@ -120,6 +120,79 @@ describe('buildDelegateDisplayBox', () => {
     expect(out).not.toContain('当前工具');
     expect(out).not.toContain('计划进度');
   });
+
+  it('renders the latest agent narration as a stable 💬 line', () => {
+    const out = buildDelegateDisplayBox(
+      {
+        label: 'Claude Code',
+        transcript: '',
+        progress: {
+          lastMessage: 'Let me check the auth module first.',
+          toolCallCount: 0,
+          lastActivityAt: 0,
+        },
+      },
+      {},
+      true,
+    );
+    expect(out).toContain('💬 最新');
+    expect(out).toContain('Let me check the auth module first.');
+  });
+
+  it('folds and clamps an overlong narration to a single line', () => {
+    const long = 'A'.repeat(300);
+    const out = buildDelegateDisplayBox(
+      {
+        label: 'Codex',
+        transcript: '',
+        progress: { lastMessage: `multi\nline\n${long}`, toolCallCount: 0, lastActivityAt: 0 },
+      },
+      {},
+      true,
+    );
+    const line = out.split('\n').find((l) => l.includes('💬 最新'));
+    expect(line).toBeDefined();
+    // Newlines were folded away and the text was clamped with an ellipsis.
+    expect(line).toContain('…');
+    expect(line!.length).toBeLessThan(140);
+  });
+
+  it('uses a semantic tool emoji from currentToolKind instead of a hourglass', () => {
+    const out = buildDelegateDisplayBox(
+      {
+        label: 'Claude Code',
+        transcript: '',
+        progress: {
+          currentTool: 'npm test',
+          currentToolKind: 'execute',
+          toolCallCount: 1,
+          lastActivityAt: 0,
+        },
+      },
+      {},
+      true,
+    );
+    expect(out).toContain('当前工具: ⚡ npm test');
+    expect(out).not.toContain('⏳ npm test');
+  });
+
+  it('suppresses the current-tool line when not live (no stale running tool)', () => {
+    const out = buildDelegateDisplayBox(
+      {
+        label: 'Codex',
+        transcript: '',
+        progress: {
+          currentTool: 'Edit foo.ts',
+          currentToolKind: 'edit',
+          toolCallCount: 1,
+          lastActivityAt: 0,
+        },
+      },
+      {},
+      false,
+    );
+    expect(out).not.toContain('当前工具');
+  });
 });
 
 describe('applyDelegateFooterMetrics', () => {
