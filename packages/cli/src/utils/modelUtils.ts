@@ -24,8 +24,8 @@ export const AUTO_MODE_CONFIG = {
   displayName: 'Auto',
   creditsPerRequest: 6.0,
   available: true,
-  maxToken: 200000,
-  highVolumeThreshold: 200000,
+  maxToken: 1000000,
+  highVolumeThreshold: 1000000,
   highVolumeCredits: 12.0
 };
 
