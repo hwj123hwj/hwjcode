@@ -4123,6 +4123,31 @@ async function handleStart(context?: CommandContext): Promise<string> {
     return feishuGetToolShortName(name);
   }
 
+  /**
+   * 将内容安全地包裹在 Markdown 代码块中，防止内容中嵌入的 ``` 撑破外层围栏。
+   *
+   * 策略：检测内容中连续反引号的最长长度 N，外层围栏使用 N+1 个反引号（最少 3 个）。
+   * 这是 GFM（GitHub Flavored Markdown）标准做法，飞书卡片渲染也兼容。
+   */
+  function safeCodeFence(content: string, lang?: string): string {
+    // 找到内容中最长的连续反引号序列
+    let maxBackticks = 0;
+    let current = 0;
+    for (let i = 0; i < content.length; i++) {
+      if (content[i] === '`') {
+        current++;
+        maxBackticks = Math.max(maxBackticks, current);
+      } else {
+        current = 0;
+      }
+    }
+    // 外层围栏至少 3 个，最多不超过 10 个（避免飞书渲染异常）
+    const fenceLen = Math.min(Math.max(3, maxBackticks + 1), 10);
+    const fence = '`'.repeat(fenceLen);
+    const langTag = lang ? lang : '';
+    return `\n${fence}${langTag}\n${content}\n${fence}`;
+  }
+
   function formatToolCallWithBorder(
     toolName: string,
     args: any,
@@ -4365,7 +4390,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           contentBox = `\n${output}`;
         } else {
           const clamped = clampCodeBlock(output, { maxLines: 15, maxChars: 2000 });
-          contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
+          contentBox = safeCodeFence(clamped.text, 'bash');
         }
       }
     } else if (toolName === 'delegate_to_agent') {
@@ -4377,7 +4402,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const lines = output.split('\n');
         const tailLines = lines.length > 30 ? lines.slice(-30) : lines;
         const clamped = clampCodeBlock(tailLines.join('\n'), { maxLines: 30, maxChars: 4000 });
-        contentBox = `\n\`\`\`\n${clamped.text}\n\`\`\``;
+        contentBox = safeCodeFence(clamped.text);
         const totalLines = lines.length;
         const omittedHead = totalLines > 30 ? totalLines - 30 : 0;
         branchLine = (omittedHead > 0 || clamped.truncated)
