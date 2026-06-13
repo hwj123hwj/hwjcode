@@ -53,6 +53,7 @@ import {
   agentDisplayLabel,
 } from '../../services/feishu/delegateDirective.js';
 import { handleSessionsCommand } from '../../services/feishu/sessionsCommand.js';
+import { feishuToolEmoji } from '../../services/feishu/toolEmoji.js';
 import { CreateProjectGroupTool } from '../../services/feishu/createProjectGroupTool.js';
 import {
   detectLocalAgents,
@@ -332,7 +333,7 @@ export function buildSubAgentDisplayBox(
     `• 任务描述: ${desc}`,
     `• 执行轮数: ${subagentData.currentTurn || 0} / ${subagentData.maxTurns || (args && args.max_turns) || 10}`,
     `• 工具调用: 成功 ${stats.successfulToolCalls || 0} 次 / 共 ${stats.totalToolCalls || 0} 次`,
-    executing ? `• 当前工具: ⏳ ${feishuGetToolShortName(executing.toolName)}${executing.description ? ` (${executing.description})` : ''}` : '',
+    executing ? `• 当前工具: ${feishuToolEmoji({ name: executing.toolName })} ${feishuGetToolShortName(executing.toolName)}${executing.description ? ` (${executing.description})` : ''}` : '',
     stats.commandsRun && stats.commandsRun.length > 0 ? `• 运行命令: \`${stats.commandsRun.join(', ')}\`` : '',
     stats.filesCreated && stats.filesCreated.length > 0 ? `• 创建文件: \`${stats.filesCreated.join(', ')}\`` : '',
   ];
@@ -383,8 +384,19 @@ export function buildDelegateDisplayBox(
     `• 执行 Agent: ${label}${progress.model ? `（${progress.model}）` : ''}`,
     `• 状态: **${statusText}**`,
   ];
-  if (progress.currentTool) {
-    lines.push(`• 当前工具: ⏳ ${progress.currentTool}`);
+  // 「最新发言」固定行：外部 Agent 在工具调用之间说的最近一段话（仅 agent_message_chunk，
+  // 不含思考/工具输出）。整段折成一行 + 限 120 字符，每次轮询原地刷新。
+  if (progress.lastMessage) {
+    const say = String(progress.lastMessage).replace(/\s+/g, ' ').trim();
+    if (say) {
+      lines.push(`• 💬 最新: ${say.length > 120 ? say.slice(0, 120) + '…' : say}`);
+    }
+  }
+  // 当前工具：按 ACP kind（优先）/ 标题推断语义 emoji，取代写死的沙漏。仅运行中展示，
+  // 避免「已完成」卡片上残留一个看似仍在执行的工具行。
+  if (isLive && progress.currentTool) {
+    const emoji = feishuToolEmoji({ kind: progress.currentToolKind, name: progress.currentTool });
+    lines.push(`• 当前工具: ${emoji} ${progress.currentTool}`);
   }
   if (typeof progress.toolCallCount === 'number' && progress.toolCallCount > 0) {
     lines.push(`• 工具调用: ${progress.toolCallCount} 次`);

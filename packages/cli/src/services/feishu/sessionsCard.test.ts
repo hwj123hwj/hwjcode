@@ -60,7 +60,7 @@ describe('buildSessionsCardMarkdown', () => {
     expect(md).toContain('🟢 运行中');
     expect(md).toContain('Claude Code');
     expect(md).toContain('implement auth');
-    expect(md).toContain('🔧 Edit auth.ts');
+    expect(md).toContain('✏️ Edit auth.ts');
     expect(md).toContain('📋 2/5');
     expect(md).toContain('🛠️ 4 次工具');
     expect(md).toContain('📊 30%');
