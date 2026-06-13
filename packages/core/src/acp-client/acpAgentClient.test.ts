@@ -111,6 +111,34 @@ describe('runDelegatedTask', () => {
     expect(result.answer).toContain('chose:allow');
   }, 30_000);
 
+  it('does NOT leak session/load replayed history into the resumed turn', async () => {
+    const updates: string[] = [];
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'continue the work',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      resumeSessionId: 'sess-to-resume',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'replay' },
+      },
+      onUpdate: (o) => updates.push(o),
+    });
+
+    expect(result.status).toBe('success');
+    // The new turn's incremental answer is present…
+    expect(result.answer).toContain('chose:allow');
+    // …but the history replayed by session/load (before the prompt) is NOT —
+    // otherwise the caller's head-first truncation would bury the real answer.
+    expect(result.answer).not.toContain('OLD_HISTORY_REPLAY');
+    expect(result.transcript).not.toContain('OLD_HISTORY_REPLAY');
+    // The final streamed transcript is likewise clean of the replay.
+    expect(updates[updates.length - 1] ?? '').not.toContain('OLD_HISTORY_REPLAY');
+  }, 30_000);
+
   it('captures structured progress (tool count, plan, token usage)', async () => {
     const snapshots: Array<{ toolCallCount: number }> = [];
     const result = await runDelegatedTask({

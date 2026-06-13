@@ -430,6 +430,29 @@ class DelegateClient implements acp.Client {
   }
 
   /**
+   * Reset the per-turn accumulators right before the new prompt goes out.
+   *
+   * Per the ACP spec, `session/load` replays the ENTIRE prior conversation as
+   * `session/update` notifications and only resolves AFTER they've all been
+   * delivered. Without this watermark, that replayed history accumulates into
+   * `answer`/`transcript`/`progress`; the caller then truncates `answer`
+   * head-first (`slice(0, 2000|4000)`), so on a resumed turn the main agent
+   * receives the OLD replayed prefix and never sees the real new answer at the
+   * tail. Resetting here means `answer`/`transcript` carry only the current
+   * turn's incremental output.
+   *
+   * The session-level model name (captured during load/new) is intentionally
+   * preserved — it is not turn-scoped.
+   */
+  markTurnStart(): void {
+    this.answer = '';
+    this.transcript = '';
+    this.progress.currentTool = undefined;
+    this.progress.toolCallCount = 0;
+    this.progress.plan = undefined;
+  }
+
+  /**
    * Record the external agent's model name (from the `session/new` |
    * `session/load` response) so the structured progress / Feishu footer can
    * reflect the real model. No-op for an empty name.
@@ -912,6 +935,13 @@ export async function runDelegatedTask(
       savedModels = (session as { models?: unknown }).models;
       handler.noteModel(extractModelName(savedModels));
     }
+
+    // The session is established. For a resumed session, `session/load` has by
+    // now replayed the entire prior conversation into the handler; drop that
+    // (and any startup noise) so the turn's accumulators capture only the new
+    // incremental output. Placed before the model-switch block so the
+    // "已切换模型" / "未找到匹配的模型" notices below remain part of this turn.
+    handler.markTurnStart();
 
     // Honor an optional requested model via the (experimental) ACP
     // `session/set_model`, *before* the prompt. This is best-effort: a bridge

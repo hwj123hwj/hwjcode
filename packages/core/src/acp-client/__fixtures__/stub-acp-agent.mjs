@@ -20,6 +20,9 @@
  *   - "setmodel": newSession reports model state (two models), implements
  *     `session/set_model` by recording the requested modelId and echoing it back
  *     in the agent message (used by the set_model integration tests).
+ *   - "replay": on `session/load`, emits an `agent_message_chunk` ("OLD_HISTORY_
+ *     REPLAY") before resolving — emulating the real bridge replaying prior
+ *     conversation history (used by the resume-watermark regression test).
  *
  * Session discovery/resume RPCs are always available: the stub advertises the
  * `loadSession` and `sessionCapabilities.list` capabilities, answers
@@ -82,7 +85,19 @@ new acp.AgentSideConnection(
       }
       return { sessionId: 'stub-session-1' };
     },
-    async loadSession() {
+    async loadSession(params) {
+      // For STUB_MODE=replay: emulate the real bridge, which replays the prior
+      // conversation as session updates BEFORE resolving session/load. The
+      // client must not leak this into the resumed turn's answer/transcript.
+      if (MODE === 'replay') {
+        await conn.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'OLD_HISTORY_REPLAY' },
+          },
+        });
+      }
       // Accept the resume; the client then drives prompt() as usual.
       return {};
     },
