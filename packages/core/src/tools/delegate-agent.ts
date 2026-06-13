@@ -9,7 +9,7 @@ import { Type } from '@google/genai';
 import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
-import { runDelegatedTask } from '../acp-client/acpAgentClient.js';
+import { runDelegatedTask, type DelegateProgress } from '../acp-client/acpAgentClient.js';
 import {
   EXTERNAL_AGENT_TYPES,
   isExternalAgentType,
@@ -264,13 +264,39 @@ export class DelegateToAgentTool extends BaseTool<
     updateOutput?: (output: string) => void,
   ): Promise<DelegateToAgentResult> {
     const startTime = Date.now();
+
+    // Stream the transcript AND structured progress together as a single
+    // tagged JSON payload (mirrors the task tool's `subagent_update` contract).
+    // The Feishu card recognizes `delegate_update` and renders a structured box
+    // + a footer reflecting the EXTERNAL agent's real model/token, instead of a
+    // flat transcript blob with Easy Code's own metrics. We push faithfully on
+    // every update; throttling is the cli card's responsibility.
+    let latestTranscript = '';
+    let latestProgress: DelegateProgress | undefined;
+    const pushDelegateUpdate = () => {
+      if (!updateOutput) return;
+      updateOutput(
+        JSON.stringify({
+          type: 'delegate_update',
+          data: { agent, label, transcript: latestTranscript, progress: latestProgress },
+        }),
+      );
+    };
+
     try {
       const result = await runDelegatedTask({
         agentType: agent,
         task: params.task,
         cwd,
         signal,
-        onUpdate: updateOutput,
+        onUpdate: (output) => {
+          latestTranscript = output;
+          pushDelegateUpdate();
+        },
+        onProgress: (progress) => {
+          latestProgress = progress;
+          pushDelegateUpdate();
+        },
         autoApprove: true,
         timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
