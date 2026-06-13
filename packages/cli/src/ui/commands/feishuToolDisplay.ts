@@ -91,3 +91,30 @@ export function clampCodeBlock(
 
   return { text: working, truncated, omittedLines };
 }
+
+/**
+ * 用一对「足够长」的反引号围栏包裹代码内容，防止内容里本身含有的连续反引号
+ * 撑破飞书卡片的代码框（feishuCommand 内同名嵌套函数的可复用版本）。
+ *
+ * 外层围栏长度 = max(3, 内容中最长连续反引号 + 1)，并限制不超过 10 个，
+ * 避免飞书渲染异常。返回值带前导换行，便于直接拼接到正文末尾。
+ *
+ * @param content 代码框正文（不含围栏）
+ * @param lang 可选语言标签（如 'bash' / 'console'）
+ */
+export function safeCodeFence(content: string, lang?: string): string {
+  let maxBackticks = 0;
+  let current = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '`') {
+      current++;
+      maxBackticks = Math.max(maxBackticks, current);
+    } else {
+      current = 0;
+    }
+  }
+  const fenceLen = Math.min(Math.max(3, maxBackticks + 1), 10);
+  const fence = '`'.repeat(fenceLen);
+  const langTag = lang ? lang : '';
+  return `\n${fence}${langTag}\n${content}\n${fence}`;
+}
