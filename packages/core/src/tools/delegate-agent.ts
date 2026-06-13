@@ -67,6 +67,14 @@ export interface DelegateToAgentParams {
    * full history before running `task`, so follow-ups keep prior context.
    */
   resumeSessionId?: string;
+  /**
+   * Model the external agent should run, matched against that agent's own
+   * advertised models — by model id, or a case-insensitive substring of the
+   * model name (e.g. "deepseek-v4-pro"). Omit to use the agent's default model.
+   * Agents that don't support runtime model switching ignore this and keep
+   * their default; an unmatched value is also a no-op (default model is kept).
+   */
+  model?: string;
 }
 
 /** Result shape for {@link DelegateToAgentTool}. */
@@ -114,6 +122,7 @@ export class DelegateToAgentTool extends BaseTool<
         '- The agent runs locally in the bound project directory and CAN modify files (permissions are auto-approved).',
         '- It uses the machine\'s own pre-existing login (e.g. `claude login` / `codex login`); no extra credentials are passed.',
         '- Provide a complete, self-contained instruction in `task` — the delegated agent does not see this conversation.',
+        '- Optional `model`: pick which model the external agent runs (by its model id or name, e.g. "deepseek-v4-pro"); omitted or unsupported → the agent keeps its default model.',
       ].join('\n'),
       Icon.Hammer,
       {
@@ -145,6 +154,11 @@ export class DelegateToAgentTool extends BaseTool<
             type: Type.STRING,
             description:
               'Optional. Resume an existing native session of the external agent (a sessionId from the /acp-session list) instead of starting fresh. The agent reloads that conversation before running the task.',
+          },
+          model: {
+            type: Type.STRING,
+            description:
+              'Optional. Which model the external agent should run, matched against that agent\'s own available models — by model id, or a case-insensitive substring of the model name (e.g. "deepseek-v4-pro"). Omit to use the agent\'s default. Agents that don\'t support runtime model switching ignore this and keep their default.',
           },
         },
         required: ['task'],
@@ -180,6 +194,9 @@ export class DelegateToAgentTool extends BaseTool<
     }
     if (params.mode !== undefined && !DELEGATE_MODES.includes(params.mode)) {
       return `Parameter "mode" must be one of: ${DELEGATE_MODES.join(', ')}.`;
+    }
+    if (params.model !== undefined && typeof params.model !== 'string') {
+      return 'Parameter "model" must be a string.';
     }
     return null;
   }
@@ -300,6 +317,7 @@ export class DelegateToAgentTool extends BaseTool<
         autoApprove: true,
         timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
+        model: params.model,
       });
 
       const duration = Math.round((Date.now() - startTime) / 1000);
@@ -396,6 +414,7 @@ export class DelegateToAgentTool extends BaseTool<
         autoApprove: true,
         timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
+        model: params.model,
       });
 
       // Write the final answer + native session id into the task record.
