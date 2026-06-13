@@ -575,7 +575,7 @@ export const EASY_ROUTER_BASE_URL = 'https://llm-endpoint.net/v1';
  * （GLM-5 / Claude Haiku / Kimi 等都是这个量级），
  * 对未知模型来说既不会过度乐观也不会过度保守。
  */
-export const EASY_ROUTER_DEFAULT_MAX_TOKENS = 200_000;
+export const EASY_ROUTER_DEFAULT_MAX_TOKENS = 1_000_000;
 
 /**
  * 用于过滤 EasyRouter /v1/models 列表的关键字。
