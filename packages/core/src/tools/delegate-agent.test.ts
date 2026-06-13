@@ -290,11 +290,17 @@ describe('DelegateToAgentTool', () => {
     expect(res.returnDisplay).toContain('cancelled');
   });
 
-  it('mode="stream": pipes session updates to updateOutput in real time', async () => {
-    // The runDelegatedTask mock invokes its onUpdate as the agent emits.
+  it('mode="stream": pipes session updates to updateOutput as delegate_update JSON', async () => {
+    // The runDelegatedTask mock invokes its onUpdate / onProgress as the agent emits.
     runDelegatedTask.mockImplementation(async (opts: any) => {
       opts.onUpdate?.('📖 Read foo.ts');
       opts.onUpdate?.('🔧 Edit foo.ts');
+      opts.onProgress?.({
+        toolCallCount: 2,
+        currentTool: 'Edit foo.ts',
+        model: 'DeepSeek-V4-Pro',
+        lastActivityAt: Date.now(),
+      });
       opts.onUpdate?.('✅ Tests pass');
       return {
         status: 'success',
@@ -312,7 +318,19 @@ describe('DelegateToAgentTool', () => {
       new AbortController().signal,
       (output) => captured.push(output),
     );
-    expect(captured).toEqual(['📖 Read foo.ts', '🔧 Edit foo.ts', '✅ Tests pass']);
+
+    // Every push is a `delegate_update` JSON carrying agent/label + the
+    // cumulative transcript + structured progress.
+    const parsed = captured.map((c) => JSON.parse(c));
+    expect(parsed.length).toBeGreaterThan(0);
+    expect(parsed.every((p) => p.type === 'delegate_update')).toBe(true);
+    expect(parsed.every((p) => p.data.agent === 'codex' && p.data.label === 'Codex')).toBe(true);
+    // The latest transcript output is surfaced.
+    expect(parsed.map((p) => p.data.transcript)).toContain('✅ Tests pass');
+    // Structured progress (incl. the external model name) is threaded through.
+    const withProgress = parsed.find((p) => p.data.progress);
+    expect(withProgress?.data.progress.model).toBe('DeepSeek-V4-Pro');
+    expect(withProgress?.data.progress.currentTool).toBe('Edit foo.ts');
   });
 
   it('mode defaults to "background" when omitted (preserves legacy behavior)', async () => {

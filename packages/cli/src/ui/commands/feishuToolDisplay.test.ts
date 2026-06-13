@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { clampCodeBlock } from './feishuToolDisplay.js';
+import { clampCodeBlock, safeCodeFence } from './feishuToolDisplay.js';
 
 /**
  * clampCodeBlock — 飞书工具卡片代码框的统一体积裁剪。
@@ -68,5 +68,29 @@ describe('clampCodeBlock', () => {
     expect(out.truncated).toBe(true);
     // 默认行数上限应小于 100，触发裁剪
     expect(out.text.split('\n').length).toBeLessThan(100);
+  });
+});
+
+describe('safeCodeFence', () => {
+  it('wraps plain content in a 3-backtick fence with optional lang tag', () => {
+    const out = safeCodeFence('hello world', 'bash');
+    expect(out).toBe('\n```bash\nhello world\n```');
+  });
+
+  it('omits the lang tag when not provided', () => {
+    const out = safeCodeFence('plain');
+    expect(out).toBe('\n```\nplain\n```');
+  });
+
+  it('widens the fence past the longest inner backtick run', () => {
+    const out = safeCodeFence('a ```` b'); // longest run = 4 → fence must be 5
+    expect(out.startsWith('\n`````')).toBe(true);
+    expect(out.endsWith('`````')).toBe(true);
+  });
+
+  it('caps the fence length at 10 backticks', () => {
+    const out = safeCodeFence('`'.repeat(50));
+    const firstLine = out.split('\n')[1];
+    expect(firstLine).toBe('`'.repeat(10));
   });
 });
