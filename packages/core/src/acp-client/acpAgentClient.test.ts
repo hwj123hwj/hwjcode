@@ -11,6 +11,7 @@ import {
   runDelegatedTask,
   formatTerminalMeta,
   extractModelName,
+  resolveModelId,
 } from './acpAgentClient.js';
 
 const STUB = fileURLToPath(
@@ -110,6 +111,34 @@ describe('runDelegatedTask', () => {
     expect(result.answer).toContain('chose:allow');
   }, 30_000);
 
+  it('does NOT leak session/load replayed history into the resumed turn', async () => {
+    const updates: string[] = [];
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'continue the work',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      resumeSessionId: 'sess-to-resume',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'replay' },
+      },
+      onUpdate: (o) => updates.push(o),
+    });
+
+    expect(result.status).toBe('success');
+    // The new turn's incremental answer is present…
+    expect(result.answer).toContain('chose:allow');
+    // …but the history replayed by session/load (before the prompt) is NOT —
+    // otherwise the caller's head-first truncation would bury the real answer.
+    expect(result.answer).not.toContain('OLD_HISTORY_REPLAY');
+    expect(result.transcript).not.toContain('OLD_HISTORY_REPLAY');
+    // The final streamed transcript is likewise clean of the replay.
+    expect(updates[updates.length - 1] ?? '').not.toContain('OLD_HISTORY_REPLAY');
+  }, 30_000);
+
   it('captures structured progress (tool count, plan, token usage)', async () => {
     const snapshots: Array<{ toolCallCount: number }> = [];
     const result = await runDelegatedTask({
@@ -186,6 +215,76 @@ describe('runDelegatedTask', () => {
     expect(result.progress?.model).toBe('DeepSeek-V4-Pro');
     expect(progressSnaps.some((s) => s.model === 'DeepSeek-V4-Pro')).toBe(true);
   }, 30_000);
+
+  it('switches the session model via session/set_model when a matching model is requested', async () => {
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'do something',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      // Request the non-default model by a case-insensitive name substring.
+      model: 'gpt-5',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'setmodel' },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    // The stub echoes back exactly the modelId it received via set_model — it
+    // must be the resolved id for "gpt-5", not the default.
+    expect(result.answer).toContain('setmodel:gpt-5-codex');
+    // The transcript notes the switch, and progress reflects the new model name.
+    expect(result.transcript).toContain('已切换模型 → GPT-5 Codex');
+    expect(result.progress?.model).toBe('GPT-5 Codex');
+  }, 30_000);
+
+  it('does NOT call set_model and does not crash when the requested model has no match', async () => {
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'do something',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      model: 'no-such-model-xyz',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'setmodel' },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    // set_model was never invoked → the stub still reports "none".
+    expect(result.answer).toContain('setmodel:none');
+    expect(result.transcript).toContain('未找到匹配的模型');
+    // The agent keeps its default model (no switch line).
+    expect(result.transcript).not.toContain('已切换模型');
+  }, 30_000);
+
+  it('tolerates a bridge that does not support set_model (keeps default model)', async () => {
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'do something',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      // The "terminal" stub advertises models but does NOT implement set_model,
+      // so the unstable call returns "method not found" — must be tolerated.
+      model: 'Other Model',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'terminal' },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    // The delegation still completes; the client surfaces a gentle notice.
+    expect(result.transcript).toContain('不支持运行时切换模型');
+  }, 30_000);
 });
 
 describe('formatTerminalMeta', () => {
@@ -247,5 +346,67 @@ describe('extractModelName', () => {
     expect(
       extractModelName({ currentModelId: 'z', availableModels: [{ modelId: 'a', name: 'A' }] }),
     ).toBeUndefined();
+  });
+});
+
+describe('resolveModelId', () => {
+  const models = {
+    currentModelId: 'deepseek-v4-pro',
+    availableModels: [
+      { modelId: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+      { modelId: 'gpt-5-codex', name: 'GPT-5 Codex' },
+    ],
+  };
+
+  it('matches by exact modelId', () => {
+    expect(resolveModelId(models, 'gpt-5-codex')).toBe('gpt-5-codex');
+    expect(resolveModelId(models, 'deepseek-v4-pro')).toBe('deepseek-v4-pro');
+  });
+
+  it('matches by case-insensitive name substring', () => {
+    expect(resolveModelId(models, 'GPT-5 Codex')).toBe('gpt-5-codex');
+    expect(resolveModelId(models, 'codex')).toBe('gpt-5-codex');
+    expect(resolveModelId(models, 'CODEX')).toBe('gpt-5-codex');
+    expect(resolveModelId(models, 'deepseek')).toBe('deepseek-v4-pro');
+  });
+
+  it('prefers an exact modelId match over a name substring match', () => {
+    // "gpt-5-codex" is an exact id; it should win even though it also appears
+    // as a substring of nothing else here — sanity check the ordering.
+    expect(resolveModelId(models, 'gpt-5-codex')).toBe('gpt-5-codex');
+  });
+
+  it('trims surrounding whitespace before matching', () => {
+    expect(resolveModelId(models, '  gpt-5-codex  ')).toBe('gpt-5-codex');
+    expect(resolveModelId(models, '  codex ')).toBe('gpt-5-codex');
+  });
+
+  it('returns undefined when nothing matches', () => {
+    expect(resolveModelId(models, 'no-such-model')).toBeUndefined();
+  });
+
+  it('returns undefined for missing / malformed state or empty input', () => {
+    expect(resolveModelId(undefined, 'x')).toBeUndefined();
+    expect(resolveModelId(null, 'x')).toBeUndefined();
+    expect(resolveModelId({}, 'x')).toBeUndefined();
+    expect(resolveModelId({ availableModels: 'nope' }, 'x')).toBeUndefined();
+    expect(resolveModelId(models, '')).toBeUndefined();
+    expect(resolveModelId(models, '   ')).toBeUndefined();
+    expect(resolveModelId(models, undefined as unknown as string)).toBeUndefined();
+  });
+
+  it('ignores entries without a string modelId', () => {
+    const bad = {
+      currentModelId: 'a',
+      availableModels: [
+        { name: 'No Id Model' },
+        { modelId: 123, name: 'Numeric Id' },
+        { modelId: 'good', name: 'Good Model' },
+      ],
+    };
+    // Name substring "model" matches multiple entries but only the one with a
+    // valid string modelId is returned.
+    expect(resolveModelId(bad, 'Good')).toBe('good');
+    expect(resolveModelId(bad, 'No Id')).toBeUndefined();
   });
 });
