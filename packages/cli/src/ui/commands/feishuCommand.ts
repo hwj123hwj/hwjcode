@@ -4754,9 +4754,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const ownerOpenId = creds.ownerOpenId;
       void (async () => {
         try {
+          const cliVersion = await getVersion().catch(() => 'unknown');
           const projectRoot = (typeof config?.getProjectRoot === 'function' && config.getProjectRoot()) || process.cwd();
           const welcomeLines: string[] = [
-            `👋 你好！我已成功上线，随时为你服务！`,
+            `👋 你好！我是 **Easy Code** \`v${cliVersion}\`，已成功上线，随时为你服务！`,
             ``,
             `📂 当前私聊工作目录："${projectRoot}"`,
             ``,
@@ -4822,7 +4823,33 @@ async function handleStart(context?: CommandContext): Promise<string> {
             dwarn(`[Feishu] Failed to check scopes for welcome message: ${scopeErr.message}`);
           }
 
-          const msgId = await gateway.sendPrivateMessage(ownerOpenId, welcomeLines.join('\n'));
+          const welcomeText = welcomeLines.join('\n');
+          const welcomeCard: Record<string, any> = {
+            schema: '2.0',
+            config: { wide_screen_mode: true },
+            header: {
+              template: 'green',
+              title: {
+                tag: 'plain_text',
+                content: `🎉 Easy Code v${cliVersion} 已上线`,
+              },
+            },
+            body: {
+              elements: [{ tag: 'markdown', content: welcomeText }],
+            },
+          };
+
+          // 优先发交互卡片；卡片接口异常时回退到纯文本私聊，保证通知不丢
+          let msgId = await gateway.sendRawInteractiveCard(
+            ownerOpenId,
+            welcomeCard,
+            undefined,
+            'open_id',
+          );
+          if (!msgId) {
+            dwarn('[Feishu] Welcome card failed, falling back to plain text.');
+            msgId = await gateway.sendPrivateMessage(ownerOpenId, welcomeText);
+          }
           if (msgId) {
             dlog('[Feishu] Welcome private message sent to owner.');
           } else {
