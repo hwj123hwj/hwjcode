@@ -18,8 +18,15 @@
  */
 
 import qrcodeTerminal from 'qrcode-terminal';
-import { createRequire } from 'node:module';
-const requireFn = createRequire(import.meta.url);
+import * as nodeModule from 'node:module';
+// NOTE: 不要用具名导入 `import { createRequire } from 'node:module'`：bundle 时
+// esbuild banner 会在输出顶层注入同名的 `createRequire`，两者重复声明会导致
+// "Identifier 'createRequire' has already been declared" 启动崩溃。改用命名空间
+// 导入（顶层标识符为 `nodeModule`），并惰性创建 requireFn，开发态/bundle 态都安全。
+const getRequireFn = (() => {
+  let cached: NodeJS.Require | undefined;
+  return () => (cached ??= nodeModule.createRequire(import.meta.url));
+})();
 import { CommandKind, SlashCommand, SlashCommandActionReturn, CommandContext } from './types.js';
 import { MessageType } from '../types.js';
 import {
@@ -1215,7 +1222,7 @@ function renderQrCode(text: string): string | null {
 
     // 🎯 2. 兜底尝试使用 requireFn 并以方法调用形式执行
     try {
-      const cjsQt = requireFn('qrcode-terminal');
+      const cjsQt = getRequireFn()('qrcode-terminal');
       if (cjsQt && typeof cjsQt.generate === 'function') {
         cjsQt.generate(text, { small: true }, (qr: string) => {
           output = qr;
