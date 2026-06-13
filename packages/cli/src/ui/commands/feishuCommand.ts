@@ -2014,6 +2014,12 @@ async function handleFeishuCommand(
         // 同时创建新的 session 记录
         const sessionManager = new SessionManager(config?.getProjectRoot() || process.cwd());
         const newSession = await sessionManager.createNewSession(undefined, process.cwd());
+        // 在外部 Agent 绑定群里，/new 还要清除外部 Agent 的 last session 锚点，
+        // 否则下一条消息会落入自动 resume 窗口（SESSION_RESUME_WINDOW_MS），
+        // 让外部 Agent 继续加载旧会话上下文 —— 即「/new 只对我们生效，外部 Agent 还在旧会话」。
+        if (chatId) {
+          await saveProjectRoute(chatId, { lastSessionId: undefined, lastSessionAt: undefined });
+        }
         return `✅ 新会话已创建\n📝 Session ID: ${newSession.sessionId}\n💬 可以开始新的对话了`;
       } catch (err: any) {
         return `❌ 创建新会话失败: ${err.message}`;
