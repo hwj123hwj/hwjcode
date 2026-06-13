@@ -32,20 +32,20 @@ const AUTO_MODE_CONFIG = {
   displayName: 'Auto',
   creditsPerRequest: 6.0,
   available: true,
-  maxToken: 200000,
-  highVolumeThreshold: 200000,
+  maxToken: 1000000,
+  highVolumeThreshold: 1000000,
   highVolumeCredits: 12.0
 };
 
 /**
  * 自定义模型缺 maxTokens 时的兜底值。
  *
- * 跟 AUTO_MODE_CONFIG.maxToken 数值一样但语义不同 — 这个 200K 只为
+ * 跟 AUTO_MODE_CONFIG.maxToken 数值一样但语义不同 — 这个 1M 只为
  * 「用户手填路径漏填 maxTokens」服务（EasyRouter 路径会被 EasyClaw 元数据
- * 覆盖，不会落到这里）。选 200K 是因为现代主流模型 context window 都 ≥ 200K，
- * 比 4K/8K 之类的小默认安全得多，避免触发频繁过早压缩。
+ * 覆盖，不会落到这里）。选 1M 是因为现代主流模型 context window 都 ≥ 1M，
+ * 比 200K 更贴近实际分配的模型能力，减少不必要的过早压缩。
  */
-const CUSTOM_MODEL_FALLBACK_MAX_TOKENS = 200_000;
+const CUSTOM_MODEL_FALLBACK_MAX_TOKENS = 1_000_000;
 
 /**
  * 从Config获取准确的Token限制。
