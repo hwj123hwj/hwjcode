@@ -35,7 +35,7 @@ const AUTO_MODE_CONFIG: ModelInfo = {
   displayName: 'Auto',
   creditsPerRequest: undefined,
   available: true,
-  maxToken: 200000,
+  maxToken: 1000000,
   highVolumeThreshold: undefined,
   highVolumeCredits: undefined
 };
