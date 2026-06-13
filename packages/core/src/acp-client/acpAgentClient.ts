@@ -264,7 +264,7 @@ class DelegateClient implements acp.Client {
   ) {}
 
   /** Record that the agent did something — resets the idle watchdog. */
-  private markActivity(): void {
+  markActivity(): void {
     this.lastActivityAt = Date.now();
     this.progress.lastActivityAt = this.lastActivityAt;
   }
@@ -611,9 +611,9 @@ export async function runDelegatedTask(
   // slow startup is indistinguishable from a hang.
   opts.onUpdate?.(`🚀 ${phase}`);
 
-  // Liveness heartbeat: while the transcript is still empty (or quiet) push an
-  // elapsed-time line plus the tail of the child's stderr (npm/npx download
-  // progress lands here), so the card never looks frozen.
+  // Liveness heartbeat: pushes an elapsed-time status line so the card
+  // never looks frozen. Does NOT reset the idle watchdog — only real
+  // session updates from the agent prove the connection is still healthy.
   const heartbeat = setInterval(() => {
     if (settled || !opts.onUpdate) return;
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
