@@ -218,6 +218,29 @@ describe('DelegateToAgentTool', () => {
     expect(runDelegatedTask).not.toHaveBeenCalled();
   });
 
+  it('rejects a non-string model value', async () => {
+    const tool = makeTool();
+    const res = await tool.execute(
+      { task: 'do x', model: 123 as never },
+      new AbortController().signal,
+    );
+    expect(res.status).toBe('failed');
+    expect(runDelegatedTask).not.toHaveBeenCalled();
+  });
+
+  it('threads model through to runDelegatedTask', async () => {
+    runDelegatedTask.mockReturnValue(new Promise(() => {}));
+    const tool = makeTool('/proj');
+    await tool.execute(
+      { task: 'do x', model: 'deepseek-v4-pro' },
+      new AbortController().signal,
+    );
+    await vi.waitFor(() => {
+      expect(runDelegatedTask).toHaveBeenCalledTimes(1);
+    });
+    expect(runDelegatedTask.mock.calls[0][0].model).toBe('deepseek-v4-pro');
+  });
+
   it('mode="stream": awaits completion and returns the final answer (does NOT register a bg task)', async () => {
     runDelegatedTask.mockResolvedValue({
       status: 'success',
