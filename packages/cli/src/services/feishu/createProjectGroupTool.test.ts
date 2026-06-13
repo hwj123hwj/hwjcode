@@ -31,6 +31,7 @@ function makeGateway(overrides: Partial<FeishuGateway> = {}): FeishuGateway {
   return {
     createGroupChat: vi.fn(async () => 'chat_new_123'),
     sendMessage: vi.fn(async () => undefined),
+    sendRawInteractiveCard: vi.fn(async () => 'card_msg_1'),
     getAppId: () => 'app_id',
     getAppSecret: () => 'app_secret',
     getDomain: () => 'feishu',
@@ -61,6 +62,12 @@ function makeTool(deps: Partial<Parameters<typeof CreateProjectGroupTool['protot
 }
 
 const ABORT = new AbortController().signal;
+
+/** Pull the welcome markdown out of the interactive card the tool sent. */
+function welcomeFromCard(gateway: FeishuGateway): string {
+  const card = (gateway.sendRawInteractiveCard as any).mock.calls[0][1];
+  return card.body.elements[0].content as string;
+}
 
 describe('CreateProjectGroupTool.validateToolParams', () => {
   it('rejects missing project_path', () => {
@@ -129,9 +136,11 @@ describe('CreateProjectGroupTool.execute — agent threading', () => {
 
     // Welcome message must mention the bound Codex agent so the user
     // understands routing has changed.
-    const welcome = (gateway.sendMessage as any).mock.calls[0][1] as string;
+    const welcome = welcomeFromCard(gateway);
     expect(welcome).toContain('本机 Codex');
     expect(welcome).not.toContain('本机 Claude Code');
+    // External-agent group: suggest a cost-effective coordination model.
+    expect(welcome).toContain('/model deepseek-v4-pro');
   });
 
   it('threads agent="claude-code" through to onProjectCreated and welcome message', async () => {
@@ -143,7 +152,7 @@ describe('CreateProjectGroupTool.execute — agent threading', () => {
     expect(res.llmContent).toContain('bound to claude-code');
     expect(onProjectCreated.mock.calls[0][2]).toBe('claude-code');
 
-    const welcome = (gateway.sendMessage as any).mock.calls[0][1] as string;
+    const welcome = welcomeFromCard(gateway);
     expect(welcome).toContain('本机 Claude Code');
     expect(welcome).not.toContain('本机 Codex');
   });
@@ -151,8 +160,10 @@ describe('CreateProjectGroupTool.execute — agent threading', () => {
   it('does not pre-bind an agent in the welcome message when agent is omitted', async () => {
     const { tool, gateway } = makeTool();
     await tool.execute({ project_path: '/proj', group_name: 'Plain' }, ABORT);
-    const welcome = (gateway.sendMessage as any).mock.calls[0][1] as string;
+    const welcome = welcomeFromCard(gateway);
     expect(welcome).not.toContain('默认派发方');
+    // Self-bound group should not nudge a coordination-model switch.
+    expect(welcome).not.toContain('/model deepseek-v4-pro');
   });
 });
 

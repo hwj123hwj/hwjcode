@@ -3242,13 +3242,14 @@ export class FeishuGateway {
     chatId: string,
     card: Record<string, any>,
     replyToMessageId?: string,
+    receiveIdType: 'chat_id' | 'open_id' = 'chat_id',
   ): Promise<string | null> {
     try {
       const token = await this.getTenantToken();
       const contentStr = JSON.stringify(card);
 
-      // 优先直接发送
-      const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
+      // 优先直接发送（receiveIdType 默认 chat_id；open_id 用于私聊卡片）
+      const directUrl = `${this.apiBaseUrl}/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`;
       const res = await fetch(directUrl, {
         method: 'POST',
         headers: {

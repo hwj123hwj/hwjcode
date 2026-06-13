@@ -192,10 +192,32 @@ export class CreateProjectGroupTool extends BaseTool<
       const agentLine = params.agent
         ? `\n🤖 默认派发方：**${agentDisplayLabel(params.agent)}**（本群所有非命令消息都将自动派发到该 agent 执行）。`
         : '';
+      // 外部 agent 群：派发本身由外部 agent 完成，本群模型只做事务协调，
+      // 建议切换到性价比更高的协调模型，避免浪费高阶模型额度。
+      const modelTip = params.agent
+        ? `\n\n💡 为了更好地管理外部 Agent 的工作，建议将本群模型设为性价比良好的模型作为事务协调模型，` +
+          `例如发送 \`/model deepseek-v4-pro\` 将 dsv4pro 设为事务协调模型。`
+        : '';
       const welcomeMsg =
         `👋 您好！本群项目工作目录 \`${absPath}\` 已经成功就绪。${agentLine}\n` +
-        `现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！`;
-      await gateway.sendMessage(newChatId, welcomeMsg);
+        `现在您可以随时在这个专属项目群里直接提问，我将全力为您服务！` +
+        modelTip;
+      // 优先发交互卡片；卡片接口异常时回退到纯文本，保证欢迎消息不丢
+      const welcomeCard: Record<string, any> = {
+        schema: '2.0',
+        config: { wide_screen_mode: true },
+        header: {
+          template: 'green',
+          title: { tag: 'plain_text', content: '🎉 项目群已就绪' },
+        },
+        body: {
+          elements: [{ tag: 'markdown', content: welcomeMsg }],
+        },
+      };
+      const sent = await gateway.sendRawInteractiveCard(newChatId, welcomeCard);
+      if (!sent) {
+        await gateway.sendMessage(newChatId, welcomeMsg);
+      }
 
       // 5. Async scope check + warning DM if the bot lacks group-msg scope.
       const privateChatId = getActiveChatId();
