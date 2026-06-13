@@ -437,11 +437,13 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
           }
         }
 
-        // Always exclude highly sensitive scopes like "im:message.send_as_user"
-        // by default to comply with strict enterprise security policies.
-        const defaultExcludes = ['im:message.send_as_user'];
+        // Project-level scope exclusion: allow per-project customization.
+        // No hardcoded default excludes — scopes must be applicable to the
+        // target domain, otherwise auth login fails (e.g. im:* scopes don't
+        // exist in the base domain). Users can add project-level excludes via
+        // feishu.excludeScopes in .easycode/settings.json.
         const configuredExcludes = feishuSettings?.excludeScopes || [];
-        const uniqueExcludes = Array.from(new Set([...defaultExcludes, ...configuredExcludes]));
+        const uniqueExcludes = [...configuredExcludes];
 
         if (feishuSettings?.recommend && !authCmd.includes('--recommend')) {
           authCmd += ' --recommend';
@@ -500,6 +502,13 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
     // If the app is pending approval by the enterprise admin, automatic takeover
     // will never succeed and will only loop. We must not trigger takeover here.
     if (haystack.includes('pending approval')) {
+      return false;
+    }
+
+    // If the app hasn't applied for the required scopes, automatic auth
+    // takeover will never succeed (re-auth doesn't grant new scopes to the
+    // app — the admin must add them in the developer console).
+    if (haystack.includes('app_scope_not_applied')) {
       return false;
     }
 
@@ -867,7 +876,25 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
     }
 
     if (errMessage.includes('99991672') || errMessage.includes('app_scope_not_applied')) {
-      enrichedHint += `\n\n💡 Missing API scope. The app needs additional permissions. Check: the old doc API (/open-apis/doc/v2/) requires docs:doc:readonly scope (NOT doc:doc:readonly). Apply at https://open.feishu.cn/app/cli_aa9c19096a7c9cc5/auth then re-authenticate.`;
+      // Extract missing scopes and console URL from lark-cli's JSON error
+      try {
+        const parsed = JSON.parse(errMessage);
+        const err = parsed?.error;
+        if (err) {
+          const missingScopes = err.missing_scopes || [];
+          const consoleUrl = err.console_url || '';
+          if (missingScopes.length > 0) {
+            enrichedHint += `\n\n🔐 当前应用缺少以下权限范围 (scope): ${missingScopes.join(', ')}`;
+          }
+          if (consoleUrl) {
+            enrichedHint += `\n👉 请在飞书开发者后台申请权限后重新授权: ${consoleUrl}`;
+          } else if (missingScopes.length > 0) {
+            enrichedHint += `\n👉 请在飞书开发者后台 (https://open.feishu.cn/app/cli_aa9c19096a7c9cc5/auth) 申请权限后重新授权`;
+          }
+        }
+      } catch {
+        enrichedHint += `\n\n💡 缺少 API 权限。请在飞书开发者后台 (https://open.feishu.cn/app/cli_aa9c19096a7c9cc5/auth) 申请所需权限后重新授权。`;
+      }
     }
 
     try {
