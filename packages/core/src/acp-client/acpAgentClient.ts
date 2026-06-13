@@ -134,6 +134,19 @@ export interface DelegatePlanEntry {
 export interface DelegateProgress {
   /** Title of the tool call currently in flight, if any. */
   currentTool?: string;
+  /**
+   * ACP `ToolKind` of the in-flight tool (read/edit/search/execute/…), captured
+   * alongside {@link currentTool}. Lets the UI pick a semantic icon instead of a
+   * generic spinner. Undefined when no tool is running or the kind is unknown.
+   */
+  currentToolKind?: string;
+  /**
+   * The latest thing the agent *said* — the most recent `agent_message_chunk`
+   * narration (NOT thinking/`agent_thought_chunk`, NOT tool output). Reset at
+   * each tool-call boundary so it always reflects the current utterance.
+   * Surfaced as a single stable line on the Feishu card.
+   */
+  lastMessage?: string;
   /** Number of tool calls started so far this turn. */
   toolCallCount: number;
   /** Latest execution plan reported by the agent, if any. */
@@ -413,6 +426,12 @@ class DelegateClient implements acp.Client {
 
   private lastFlush = 0;
   private lastProgressFlush = 0;
+  /**
+   * Accumulates the current `agent_message_chunk` narration block. Reset to ''
+   * when a tool call starts so the next block is a fresh utterance; its trimmed
+   * tail is mirrored into {@link DelegateProgress.lastMessage}.
+   */
+  private currentMessage = '';
 
   constructor(
     private readonly opts: {
@@ -447,7 +466,10 @@ class DelegateClient implements acp.Client {
   markTurnStart(): void {
     this.answer = '';
     this.transcript = '';
+    this.currentMessage = '';
     this.progress.currentTool = undefined;
+    this.progress.currentToolKind = undefined;
+    this.progress.lastMessage = undefined;
     this.progress.toolCallCount = 0;
     this.progress.plan = undefined;
   }
@@ -520,7 +542,15 @@ class DelegateClient implements acp.Client {
         if (t) {
           this.answer += t;
           this.transcript += t;
+          // Mirror the current utterance into structured progress so the card
+          // can show a stable "latest said" line. Collapse whitespace and
+          // head-clamp to bound the payload; the card trims further. Only real
+          // speech feeds this — thoughts (agent_thought_chunk) are excluded.
+          this.currentMessage += t;
+          const say = this.currentMessage.replace(/\s+/g, ' ').trim();
+          this.progress.lastMessage = say.length > 500 ? say.slice(0, 500) : say;
           this.flush();
+          this.flushProgress();
         }
         break;
       }
@@ -550,9 +580,14 @@ class DelegateClient implements acp.Client {
             this.transcript += `${detail}\n`;
           }
         }
-        // Structured progress: track the in-flight tool + a running count.
+        // Structured progress: track the in-flight tool (+ its kind) and a
+        // running count. Reset the utterance buffer so the next narration block
+        // is a fresh "latest said"; keep progress.lastMessage as-is so the card
+        // still shows what the agent said right before this tool.
         this.progress.currentTool = u.title ?? this.progress.currentTool;
+        this.progress.currentToolKind = u.kind ?? this.progress.currentToolKind;
         this.progress.toolCallCount += 1;
+        this.currentMessage = '';
         this.flush();
         this.flushProgress();
         break;
