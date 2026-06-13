@@ -121,6 +121,7 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         '- ROUTING: When the user wants to create a project with a local directory AND a Feishu group chat bound together (e.g. "拉个群 + 项目路径", "create a project group"), use the `create_project_and_group_chat` tool instead — it handles directory creation, group creation, user invitation, and workspace binding in one call. Note: this tool is only available when the Feishu bot is running (/feishu start). If the tool is not listed, fall back to `im +chat-create` for a standalone group chat.',
         '- Authorization is fully automatic: if the CLI is not configured/authorized yet, this tool launches the browser device-flow login itself and streams the verification URL to the user in real time within the same call. Do NOT manually run "lark-cli config init" or "auth login" in a shell.',
         '- Do NOT guess subcommands or flags. If unsure what a command supports, run it with "--help" first (e.g. command="calendar --help"). Error responses include hints with available options — follow them instead of guessing.',
+        '- lark-cli has built-in AI agent skills with domain-specific knowledge. Use `skills list` to see all 27 skills, and `skills read <skill-name>` (e.g. command="skills" args=["read","lark-doc"]) to get version-matched API guides before using an unfamiliar domain.',,
         '',
         'COMMON COMMAND CHEATSHEET (use these patterns to avoid trial-and-error):',
         '',
@@ -225,6 +226,39 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
         '## Approval',
         '- Use API-style: command="approval" (then run --help for subcommands)',
         '',
+        '## Markdown (Drive-native Markdown files)',
+        '- Create Markdown file: command="markdown +create" args=["--file", "<relative-path>", "--title", "My Doc"]',
+        '- Fetch Markdown file: command="markdown +fetch" args=["--file-token", "<token>"]',
+        '- Overwrite Markdown file: command="markdown +overwrite" args=["--file-token", "<token>", "--file", "<relative-path>"]',
+        '- Diff Markdown versions or against local file: command="markdown +diff" args=["--file-token", "<token>"]',
+        '- Patch Markdown file (fetch-edit-overwrite): command="markdown +patch" args=["--file-token", "<token>", "--file", "<relative-path>"]',
+        '',
+        '## Base (Bitable / Multidimensional Table)',
+        '- Create base: command="base +base-create" args=["--name", "My Base"]',
+        '- List tables: command="base +table-list" args=["--base-token", "<token>"]',
+        '- List records: command="base +record-list" args=["--base-token", "<token>", "--table-id", "<id>"]',
+        '- Create record: command="base +record-batch-create" args=["--base-token", "<token>", "--table-id", "<id>", "--records", "[{\\"fields\\":{\\"Name\\":\\"value\\"}}]"]',
+        '- Search records: command="base +record-search" args=["--base-token", "<token>", "--table-id", "<id>", "--query", "keyword"]',
+        '- Delete record: command="base +record-delete" args=["--base-token", "<token>", "--table-id", "<id>", "--record-ids", "id1,id2"]',
+        '  NOTE: Base has 60+ subcommands for tables, fields, records, views, dashboards, workflows, forms, and roles. Always run command="base --help" first or use command="skills" args=["read","lark-base"] to get the full domain guide.',
+        '',
+        '## Skills (Built-in Agent Skills)',
+        '- List all skills: command="skills list"',
+        '- Read a skill guide: command="skills" args=["read", "<skill-name>"]',
+        '  NOTE: lark-cli ships with 27 built-in skills (lark-doc, lark-base, lark-sheets, lark-im, lark-calendar, lark-drive, lark-mail, lark-wiki, lark-markdown, lark-task, lark-vc, lark-minutes, lark-note, lark-whiteboard, lark-okr, lark-contact, lark-slides, lark-approval, lark-apps, lark-event, lark-attendance, etc.). These skills contain version-matched API guides that are more up-to-date than this cheat sheet. Use skills read before working with an unfamiliar domain.',
+        '',
+        '## Note (Meeting Notes)',
+        '- Get note detail: command="note +detail" args=["--note-id", "<id>"]',
+        '- Fetch transcript: command="note +transcript" args=["--note-id", "<id>", "--file", "transcript.txt"]',
+        '',
+        '## Whiteboard',
+        '- Query whiteboard: command="whiteboard +query" args=["--file-token", "<token>"]',
+        '- Update whiteboard: command="whiteboard +update" args=["--file-token", "<token>", "--mermaid", "graph TD; A-->B"]',
+        '',
+        '## Doctor (Health Check)',
+        '- Full health check: command="doctor"',
+        '- Offline check only: command="doctor" args=["--offline"]',
+        '',
         'HELP: Run command="<domain> --help" (e.g. "docs --help", "im --help") for full flag details of any domain.',
       ].join('\n'),
       Icon.Hammer,
@@ -319,7 +353,7 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
       // ignore and fall through to npx
     }
     // Graceful fallback to avoid sudo/permission blocks
-    return 'npx @larksuite/cli@latest';
+    return 'npx @larksuite/cli@1.0.53';
   }
 
   /**
