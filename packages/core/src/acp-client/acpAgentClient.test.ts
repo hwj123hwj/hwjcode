@@ -7,7 +7,11 @@
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
-import { runDelegatedTask } from './acpAgentClient.js';
+import {
+  runDelegatedTask,
+  formatTerminalMeta,
+  extractModelName,
+} from './acpAgentClient.js';
 
 const STUB = fileURLToPath(
   new URL('./__fixtures__/stub-acp-agent.mjs', import.meta.url),
@@ -154,4 +158,94 @@ describe('runDelegatedTask', () => {
     expect(result.error).toBeTruthy();
     expect(result.error).toContain('Claude Code');
   }, 30_000);
+
+  it('surfaces real terminal output (_meta) and the external model name', async () => {
+    const progressSnaps: Array<{ model?: string }> = [];
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'run a command',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'terminal' },
+      },
+      onProgress: (p) => progressSnaps.push({ model: p.model }),
+    });
+
+    expect(result.status).toBe('success');
+    // The real command output (from _meta.terminal_output.data) reaches the
+    // transcript instead of the old dead "[terminal output]" placeholder.
+    expect(result.transcript).toContain('hello from bash');
+    expect(result.transcript).toContain('line two');
+    expect(result.transcript).not.toContain('[terminal output]');
+    expect(result.transcript).toContain('[exit code: 0]');
+    // The external agent's model name is captured into structured progress.
+    expect(result.progress?.model).toBe('DeepSeek-V4-Pro');
+    expect(progressSnaps.some((s) => s.model === 'DeepSeek-V4-Pro')).toBe(true);
+  }, 30_000);
+});
+
+describe('formatTerminalMeta', () => {
+  it('renders a fenced console block with the command output and exit code', () => {
+    const out = formatTerminalMeta({
+      terminal_output: { data: 'hello\nworld' },
+      terminal_exit: { exit_code: 0 },
+    });
+    expect(out).toContain('```console');
+    expect(out).toContain('hello');
+    expect(out).toContain('world');
+    expect(out).toContain('[exit code: 0]');
+  });
+
+  it('returns empty string when there is no terminal output', () => {
+    expect(formatTerminalMeta(undefined)).toBe('');
+    expect(formatTerminalMeta(null)).toBe('');
+    expect(formatTerminalMeta({})).toBe('');
+    expect(formatTerminalMeta({ terminal_output: {} })).toBe('');
+  });
+
+  it('still surfaces a known exit code even with no output data', () => {
+    const out = formatTerminalMeta({ terminal_exit: { exit_code: 137 } });
+    expect(out).toContain('[exit code: 137]');
+  });
+
+  it('tail-clamps overlong output by lines and chars', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
+    const out = formatTerminalMeta({ terminal_output: { data: many } }, {
+      maxLines: 40,
+      maxChars: 2000,
+    });
+    expect(out).toContain('output truncated');
+    // The tail (latest lines) is kept, the head dropped.
+    expect(out).toContain('line 199');
+    expect(out).not.toContain('line 0\n');
+    expect(out.length).toBeLessThan(2200);
+  });
+});
+
+describe('extractModelName', () => {
+  it('returns the name of the current model', () => {
+    expect(
+      extractModelName({
+        currentModelId: 'b',
+        availableModels: [
+          { modelId: 'a', name: 'Alpha' },
+          { modelId: 'b', name: 'Beta' },
+        ],
+      }),
+    ).toBe('Beta');
+  });
+
+  it('returns undefined when model state is missing or malformed', () => {
+    expect(extractModelName(undefined)).toBeUndefined();
+    expect(extractModelName(null)).toBeUndefined();
+    expect(extractModelName({})).toBeUndefined();
+    expect(extractModelName({ currentModelId: 'x', availableModels: [] })).toBeUndefined();
+    expect(
+      extractModelName({ currentModelId: 'z', availableModels: [{ modelId: 'a', name: 'A' }] }),
+    ).toBeUndefined();
+  });
 });

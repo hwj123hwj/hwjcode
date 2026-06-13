@@ -14,6 +14,9 @@
  *   - "hang": never resolves the prompt (used for abort/cancel tests).
  *   - "rich": on prompt, additionally emits plan + usage_update so the client
  *     can capture structured progress (used by the structured-status tests).
+ *   - "terminal": newSession reports model state, and the prompt emits a Bash
+ *     tool whose real output is carried in `_meta.terminal_output.data` plus an
+ *     exit code (used by the terminal-output + model-capture tests).
  *
  * Session discovery/resume RPCs are always available: the stub advertises the
  * `loadSession` and `sessionCapabilities.list` capabilities, answers
@@ -43,6 +46,19 @@ new acp.AgentSideConnection(
       };
     },
     async newSession() {
+      if (MODE === 'terminal') {
+        // Advertise model state so the client can capture the model name.
+        return {
+          sessionId: 'stub-session-1',
+          models: {
+            currentModelId: 'deepseek-v4-pro',
+            availableModels: [
+              { modelId: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+              { modelId: 'other', name: 'Other Model' },
+            ],
+          },
+        };
+      }
       return { sessionId: 'stub-session-1' };
     },
     async loadSession() {
@@ -105,6 +121,37 @@ new acp.AgentSideConnection(
           status: 'in_progress',
         },
       });
+
+      if (MODE === 'terminal') {
+        // Simulate the Claude Code bridge: a Bash tool whose real output is
+        // carried out-of-band in `_meta.terminal_output.data` (the inline
+        // terminal block only references a terminalId), plus an exit code.
+        await conn.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'term-1',
+            title: 'Terminal',
+            kind: 'execute',
+            status: 'in_progress',
+            content: [{ type: 'terminal', terminalId: 'pty-1' }],
+          },
+        });
+        await conn.sessionUpdate({
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'term-1',
+            title: 'Terminal',
+            status: 'completed',
+            content: [{ type: 'terminal', terminalId: 'pty-1' }],
+            _meta: {
+              terminal_output: { data: 'hello from bash\nline two\n' },
+              terminal_exit: { exit_code: 0 },
+            },
+          },
+        });
+      }
 
       if (MODE === 'rich') {
         await conn.sessionUpdate({

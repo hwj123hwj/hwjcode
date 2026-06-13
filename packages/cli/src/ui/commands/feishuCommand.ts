@@ -107,7 +107,7 @@ import {
   type GoalWizardResult,
 } from '../components/GoalWizard.js';
 import { normalizeGoalFields } from './feishuGoalForm.js';
-import { clampCodeBlock } from './feishuToolDisplay.js';
+import { clampCodeBlock, safeCodeFence as safeCodeFenceShared } from './feishuToolDisplay.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
 import { dlog, dwarn, derror } from '../../services/feishu/logger.js';
 import { t, tp } from '../utils/i18n.js';
@@ -339,6 +339,99 @@ export function buildSubAgentDisplayBox(
     statsLines.push(`📝 **最终研究分析报告**:`, `\`\`\`markdown\n${summary}\n\`\`\``);
   }
   return `\n${statsLines.filter(Boolean).join('\n')}`;
+}
+
+/**
+ * 构建「外部 Agent 委派」(delegate_to_agent，stream 实时模式) 在飞书卡片中的
+ * 结构化进度/结果展示框。
+ *
+ * 风格对齐 {@link buildSubAgentDisplayBox}：顶部结构化执行报告（Agent / 模型 /
+ * 状态 / 当前工具 / 工具调用次数 / 计划进度 / token），下方保留「最近输出」滚动区
+ * （取 transcript 尾部，复用 clampCodeBlock + safeCodeFence 防止超长/反引号撑破卡片）。
+ *
+ * @param data 解析自 `delegate_update` 的 `{ agent, label, transcript, progress }`，可能为空
+ * @param args delegate_to_agent 工具调用参数（用于回退推断 label）
+ * @param isLive 是否运行中（true 显示「执行中」，false 显示「已完成」）
+ */
+export function buildDelegateDisplayBox(
+  data: any,
+  args: any,
+  isLive: boolean,
+): string {
+  const fallbackLabel = args?.agent === 'codex' ? 'Codex' : 'Claude Code';
+  const header = `📊 **外部 Agent 执行报告 (Claude Code / Codex)**`;
+
+  if (!data) {
+    // 尚无结构化数据（刚启动）：占位进度。
+    return `\n${header}\n────────────────────────\n• 执行 Agent: ${fallbackLabel}\n• 状态: **🔄 启动中**\n────────────────────────`;
+  }
+
+  const label = data.label || fallbackLabel;
+  const progress = data.progress || {};
+  const statusText = isLive ? '⏳ 执行中' : '✅ 已完成';
+
+  const lines: string[] = [
+    header,
+    `────────────────────────`,
+    `• 执行 Agent: ${label}${progress.model ? `（${progress.model}）` : ''}`,
+    `• 状态: **${statusText}**`,
+  ];
+  if (progress.currentTool) {
+    lines.push(`• 当前工具: ⏳ ${progress.currentTool}`);
+  }
+  if (typeof progress.toolCallCount === 'number' && progress.toolCallCount > 0) {
+    lines.push(`• 工具调用: ${progress.toolCallCount} 次`);
+  }
+  if (Array.isArray(progress.plan) && progress.plan.length > 0) {
+    const done = progress.plan.filter((p: any) => p && p.status === 'completed').length;
+    lines.push(`• 计划进度: ${done} / ${progress.plan.length}`);
+  }
+  if (typeof progress.tokenUsed === 'number') {
+    const size = typeof progress.tokenSize === 'number' ? progress.tokenSize : undefined;
+    const pct = size && size > 0 ? ` (${Math.round((progress.tokenUsed / size) * 100)}%)` : '';
+    lines.push(`• Token: ${progress.tokenUsed}${size ? ` / ${size}` : ''}${pct}`);
+  }
+  lines.push(`────────────────────────`);
+
+  // 最近输出滚动区：取 transcript 尾部（最新进展在尾部），复用统一裁剪 + 安全围栏。
+  const transcript = typeof data.transcript === 'string' ? data.transcript : '';
+  if (transcript.trim()) {
+    const allLines = transcript.split('\n');
+    const tail = allLines.length > 30 ? allLines.slice(-30) : allLines;
+    const clamped = clampCodeBlock(tail.join('\n'), { maxLines: 30, maxChars: 4000 });
+    lines.push(`📜 **最近输出**:`);
+    return `\n${lines.join('\n')}${safeCodeFenceShared(clamped.text)}`;
+  }
+  return `\n${lines.join('\n')}`;
+}
+
+/**
+ * 用外部 Agent 的真实 model / token 覆盖飞书卡片 footer 指标，避免误导性地展示
+ * Easy Code 自己的 model/token。
+ *
+ * - model：优先用 progress.model（如 "DeepSeek-V4-Pro"），否则回退到 Agent label
+ *   （"Claude Code" / "Codex"）——都比展示我们自己的模型名更准确。
+ * - token：用 progress.tokenUsed/tokenSize 覆盖 input token 与上下文占用百分比。
+ *
+ * 原地修改并返回传入的 metrics（与既有 getFeishuStatusMetrics 用法一致）。
+ *
+ * @param metrics 待覆盖的 footer 指标（通常来自 getFeishuStatusMetrics）
+ * @param delegateData 解析自 `delegate_update` 的 `data`，含 label + progress
+ */
+export function applyDelegateFooterMetrics(
+  metrics: FeishuFooterMetrics,
+  delegateData: any,
+): FeishuFooterMetrics {
+  if (!delegateData) return metrics;
+  const progress = delegateData.progress || {};
+  metrics.model = progress.model || delegateData.label || metrics.model;
+  if (typeof progress.tokenUsed === 'number') {
+    metrics.tokens = { input: progress.tokenUsed, output: 0 };
+    if (typeof progress.tokenSize === 'number' && progress.tokenSize > 0) {
+      metrics.contextPercentage = (progress.tokenUsed / progress.tokenSize) * 100;
+    }
+  }
+  return metrics;
 }
 
 /** 当前全局网关实例（进程内单例） */
@@ -2014,6 +2107,12 @@ async function handleFeishuCommand(
         // 同时创建新的 session 记录
         const sessionManager = new SessionManager(config?.getProjectRoot() || process.cwd());
         const newSession = await sessionManager.createNewSession(undefined, process.cwd());
+        // 在外部 Agent 绑定群里，/new 还要清除外部 Agent 的 last session 锚点，
+        // 否则下一条消息会落入自动 resume 窗口（SESSION_RESUME_WINDOW_MS），
+        // 让外部 Agent 继续加载旧会话上下文 —— 即「/new 只对我们生效，外部 Agent 还在旧会话」。
+        if (chatId) {
+          await saveProjectRoute(chatId, { lastSessionId: undefined, lastSessionAt: undefined });
+        }
         return `✅ 新会话已创建\n📝 Session ID: ${newSession.sessionId}\n💬 可以开始新的对话了`;
       } catch (err: any) {
         return `❌ 创建新会话失败: ${err.message}`;
@@ -3814,6 +3913,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
                       const liveProgressMarkdown = formatToolCallWithBorder('delegate_to_agent', req.args, true, output, true);
                       const delegateFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
                       delegateFooterMetrics.status = '外部 Agent 执行中';
+                      // footer 反映外部 Agent 的真实 model/token，而非 Easy Code 自己的。
+                      try {
+                        const parsed = JSON.parse(output);
+                        if (parsed?.type === 'delegate_update' && parsed.data) {
+                          applyDelegateFooterMetrics(delegateFooterMetrics, parsed.data);
+                        }
+                      } catch { /* 非 JSON（旧版纯文本）：保留 Easy Code 自身指标 */ }
                       if (streaming) {
                         await streaming.pushContent(renderCurrentDisplay(blocks, '', liveProgressMarkdown));
                         await streaming.pushFooter(delegateFooterMetrics);
@@ -4123,6 +4229,31 @@ async function handleStart(context?: CommandContext): Promise<string> {
     return feishuGetToolShortName(name);
   }
 
+  /**
+   * 将内容安全地包裹在 Markdown 代码块中，防止内容中嵌入的 ``` 撑破外层围栏。
+   *
+   * 策略：检测内容中连续反引号的最长长度 N，外层围栏使用 N+1 个反引号（最少 3 个）。
+   * 这是 GFM（GitHub Flavored Markdown）标准做法，飞书卡片渲染也兼容。
+   */
+  function safeCodeFence(content: string, lang?: string): string {
+    // 找到内容中最长的连续反引号序列
+    let maxBackticks = 0;
+    let current = 0;
+    for (let i = 0; i < content.length; i++) {
+      if (content[i] === '`') {
+        current++;
+        maxBackticks = Math.max(maxBackticks, current);
+      } else {
+        current = 0;
+      }
+    }
+    // 外层围栏至少 3 个，最多不超过 10 个（避免飞书渲染异常）
+    const fenceLen = Math.min(Math.max(3, maxBackticks + 1), 10);
+    const fence = '`'.repeat(fenceLen);
+    const langTag = lang ? lang : '';
+    return `\n${fence}${langTag}\n${content}\n${fence}`;
+  }
+
   function formatToolCallWithBorder(
     toolName: string,
     args: any,
@@ -4206,6 +4337,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
     let subagentData: any = null;
     let isTodoDisplay = false;
     let todoData: any = null;
+    let isDelegateDisplay = false;
+    let delegateData: any = null;
 
     try {
       if (output) {
@@ -4220,6 +4353,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
           } else if (parsed && parsed.type === 'subagent_display') {
             isSubAgentDisplay = true;
             subagentData = parsed;
+          } else if (parsed && parsed.type === 'delegate_update' && parsed.data) {
+            // 外部 Agent 委派（delegate_to_agent stream 模式）的结构化实时进度。
+            isDelegateDisplay = true;
+            delegateData = parsed.data;
           } else if (parsed && parsed.type === 'todo_display') {
             isTodoDisplay = true;
             todoData = parsed;
@@ -4232,6 +4369,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
           } else if (parsed && parsed.type === 'subagent_display') {
             isSubAgentDisplay = true;
             subagentData = parsed;
+          } else if (parsed && parsed.type === 'delegate_update' && parsed.data) {
+            isDelegateDisplay = true;
+            delegateData = parsed.data;
           } else if (parsed && parsed.agentId && parsed.status && parsed.stats) {
             // 如果直接是 SubAgentDisplay 实体对象 (例如 TaskTool 结尾直接返回的 returnDisplay 属性)
             isSubAgentDisplay = true;
@@ -4365,19 +4505,22 @@ async function handleStart(context?: CommandContext): Promise<string> {
           contentBox = `\n${output}`;
         } else {
           const clamped = clampCodeBlock(output, { maxLines: 15, maxChars: 2000 });
-          contentBox = `\n\`\`\`bash\n${clamped.text}\n\`\`\``;
+          contentBox = safeCodeFence(clamped.text, 'bash');
         }
       }
     } else if (toolName === 'delegate_to_agent') {
-      // 外部 Agent 的 transcript 可能极长（100K+），必须裁剪以防撑爆飞书卡片。
-      // 实时态（isLive=true）：取尾部内容（最新进展更重要）+ 字符硬截断。
-      // 最终态（isLive=false）：仅显示摘要前100字符。
-      if (isLive && output) {
-        // 先按行取尾（最新进展在尾部），再做字符截断
+      // 外部 Agent 委派（stream 模式）：优先用结构化 delegate_update 渲染，
+      // 风格对齐 task 子代理卡片（头部执行报告 + 滚动输出区）。
+      if (isLive && isDelegateDisplay && delegateData) {
+        contentBox = buildDelegateDisplayBox(delegateData, args, true);
+        branchLine = `\n └ ( 外部 Agent 执行中... )`;
+      } else if (isLive && output) {
+        // 向后兼容：旧的纯文本 transcript（无结构化数据）退化到尾部代码块。
+        // 外部 Agent 的 transcript 可能极长（100K+），按行取尾 + 字符硬截断。
         const lines = output.split('\n');
         const tailLines = lines.length > 30 ? lines.slice(-30) : lines;
         const clamped = clampCodeBlock(tailLines.join('\n'), { maxLines: 30, maxChars: 4000 });
-        contentBox = `\n\`\`\`\n${clamped.text}\n\`\`\``;
+        contentBox = safeCodeFence(clamped.text);
         const totalLines = lines.length;
         const omittedHead = totalLines > 30 ? totalLines - 30 : 0;
         branchLine = (omittedHead > 0 || clamped.truncated)
