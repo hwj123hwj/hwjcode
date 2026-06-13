@@ -82,7 +82,7 @@ export interface EasyClawModelMetadata {
 }
 
 export const EASY_ROUTER_BASE_URL = 'https://llm-endpoint.net/v1';
-export const EASY_ROUTER_DEFAULT_MAX_TOKENS = 200_000;
+export const EASY_ROUTER_DEFAULT_MAX_TOKENS = 1_000_000;
 
 /**
  * Validate a single custom-model config. Returns a list of human-readable
