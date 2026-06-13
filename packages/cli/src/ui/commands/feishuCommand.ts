@@ -2164,14 +2164,23 @@ async function handleFeishuCommand(
         }
 
         const targetModelName = parts[1].trim();
-        // 查找最匹配的模型
-        const exactMatch = modelInfos.find((m: any) => m.name.toLowerCase() === targetModelName.toLowerCase() || m.displayName.toLowerCase() === targetModelName.toLowerCase());
+        let actualModelName: string;
+        let displayName: string;
 
-        if (!exactMatch) {
-          return `❌ 未能找到模型 "${targetModelName}"，请通过输入 \`/model\` 查看可用模型列表。`;
+        if (targetModelName.toLowerCase() === 'auto') {
+          actualModelName = 'auto';
+          displayName = 'Auto (智能自动模式)';
+        } else {
+          // 查找最匹配的模型
+          const exactMatch = modelInfos.find((m: any) => m.name.toLowerCase() === targetModelName.toLowerCase() || m.displayName.toLowerCase() === targetModelName.toLowerCase());
+
+          if (!exactMatch) {
+            return `❌ 未能找到模型 "${targetModelName}"，请通过输入 \`/model\` 查看可用模型列表。`;
+          }
+
+          actualModelName = exactMatch.name;
+          displayName = exactMatch.displayName;
         }
-
-        const actualModelName = exactMatch.name;
 
         if (config) {
           const geminiClient = config.getGeminiClient();
@@ -2180,7 +2189,7 @@ async function handleFeishuCommand(
             const switchResult = await geminiClient.switchModel(actualModelName, new AbortController().signal);
 
             if (!switchResult.success) {
-              return `❌ 切换到模型 **${exactMatch.displayName}** 失败: ${switchResult.error || '可能由于上下文压缩失败'}`;
+              return `❌ 切换到模型 **${displayName}** 失败: ${switchResult.error || '可能由于上下文压缩失败'}`;
             }
 
             // switchModel 内部已调用 config.setModel + chat.setSpecifiedModel，切换成功后再持久化
@@ -2189,7 +2198,7 @@ async function handleFeishuCommand(
               await saveProjectRoute(chatId, { model: actualModelName });
             }
 
-            let responseMsg = `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
+            let responseMsg = `✨ 已成功切换 AI 模型为: **${displayName}** (${actualModelName})`;
             if (switchResult.compressionInfo) {
               responseMsg += `\n📦 上下文已自动压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`;
             } else if (switchResult.compressionSkipReason) {
@@ -2207,7 +2216,7 @@ async function handleFeishuCommand(
         if (chatId) {
           await saveProjectRoute(chatId, { model: actualModelName });
         }
-        return `✨ 已成功切换 AI 模型为: **${exactMatch.displayName}** (${actualModelName})`;
+        return `✨ 已成功切换 AI 模型为: **${displayName}** (${actualModelName})`;
       } catch (err: any) {
         return `❌ 切换模型失败: ${err.message}`;
       }
