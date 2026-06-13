@@ -55,7 +55,7 @@ const HEARTBEAT_INTERVAL_MS = 10 * 1000;
  * common stall is an unauthenticated / first-run / offline bridge that emits
  * `available_commands_update` and then goes silent forever.
  */
-const DEFAULT_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 6 * 60 * 1000;
 
 export interface RunTaskOptions {
   /** Which external agent to drive. */
@@ -132,6 +132,14 @@ export interface DelegateProgress {
   tokenUsed?: number;
   /** Context window size, from the latest `usage_update`. */
   tokenSize?: number;
+  /**
+   * Human-readable name of the model the external agent is running (e.g.
+   * "DeepSeek-V4-Pro"), captured from the `session/new` | `session/load`
+   * response's model state when the bridge advertises it. Undefined when the
+   * agent does not report a model. Used by the Feishu footer to reflect the
+   * external agent's real model instead of Easy Code's own.
+   */
+  model?: string;
   /** Epoch ms of the last session activity of any kind. */
   lastActivityAt: number;
 }
@@ -205,11 +213,84 @@ function fmtToolCallContent(items: acp.ToolCallContent[], maxLen = 500): string 
       const preview = item.newText.slice(0, maxLen);
       parts.push(`${diffLabel}\n${preview}${item.newText.length > maxLen ? '…' : ''}`);
     } else if (item.type === 'terminal') {
-      // Terminal content is streamed separately via tool_call_update _meta.
-      parts.push('[terminal output]');
+      // Real terminal/command output now arrives out-of-band via the
+      // tool_call_update `_meta.terminal_output.data` channel (see
+      // {@link formatTerminalMeta}). The inline `terminal` block carries only a
+      // terminalId, so emit nothing here to avoid a dead `[terminal output]`
+      // placeholder on the card.
     }
   }
   return parts.join('\n');
+}
+
+/**
+ * Extract real terminal/command output from a `tool_call_update`'s `_meta`.
+ *
+ * The Claude Code ACP bridge (`@agentclientprotocol/claude-agent-acp`), when the
+ * client advertises `clientCapabilities._meta.terminal_output === true`, sends
+ * Bash/terminal results as a `content:[{type:"terminal"}]` block while putting
+ * the captured command output at `_meta.terminal_output.data` (a string) and the
+ * process exit code at `_meta.terminal_exit.exit_code`. This reads that channel
+ * and renders a fenced ```console block (tail-clamped to keep cards small).
+ *
+ * Returns '' when the update carries no terminal output (the common case for
+ * non-Bash tools, and for the Codex adapter which uses standard content blocks).
+ */
+export function formatTerminalMeta(
+  meta: unknown,
+  opts: { maxChars?: number; maxLines?: number } = {},
+): string {
+  const m = meta as
+    | { terminal_output?: { data?: unknown }; terminal_exit?: { exit_code?: unknown } }
+    | null
+    | undefined;
+  if (!m || typeof m !== 'object') return '';
+
+  const rawData = m.terminal_output?.data;
+  const data = typeof rawData === 'string' ? rawData : '';
+  const exitCode = m.terminal_exit?.exit_code;
+  const hasExit = typeof exitCode === 'number';
+
+  if (!data) {
+    // No output but a known exit code (e.g. a silent command) — still useful.
+    return hasExit ? '```console\n[exit code: ' + exitCode + ']\n```' : '';
+  }
+
+  const maxChars = opts.maxChars ?? 2000;
+  const maxLines = opts.maxLines ?? 40;
+  let text = data;
+  let truncated = false;
+  const lines = text.split('\n');
+  if (lines.length > maxLines) {
+    // Keep the tail — the end of command output (errors, summaries) matters most.
+    text = lines.slice(-maxLines).join('\n');
+    truncated = true;
+  }
+  if (text.length > maxChars) {
+    text = text.slice(text.length - maxChars);
+    truncated = true;
+  }
+  const prefix = truncated ? '…(output truncated)\n' : '';
+  const exitLine = hasExit ? `\n[exit code: ${exitCode}]` : '';
+  return '```console\n' + prefix + text + exitLine + '\n```';
+}
+
+/**
+ * Resolve the current model's human-readable name from an ACP session model
+ * state (the `models` field of a `session/new` | `session/load` response).
+ * Returns undefined when the agent does not report model state.
+ */
+export function extractModelName(models: unknown): string | undefined {
+  const ms = models as
+    | { availableModels?: Array<{ modelId?: string; name?: string }>; currentModelId?: string }
+    | null
+    | undefined;
+  if (!ms || typeof ms !== 'object' || !Array.isArray(ms.availableModels)) {
+    return undefined;
+  }
+  const current = ms.availableModels.find((mo) => mo.modelId === ms.currentModelId);
+  const name = current?.name;
+  return typeof name === 'string' && name ? name : undefined;
 }
 
 /** Pick the most permissive "allow" option from a permission request. */
@@ -264,9 +345,21 @@ class DelegateClient implements acp.Client {
   ) {}
 
   /** Record that the agent did something — resets the idle watchdog. */
-  private markActivity(): void {
+  markActivity(): void {
     this.lastActivityAt = Date.now();
     this.progress.lastActivityAt = this.lastActivityAt;
+  }
+
+  /**
+   * Record the external agent's model name (from the `session/new` |
+   * `session/load` response) so the structured progress / Feishu footer can
+   * reflect the real model. No-op for an empty name.
+   */
+  noteModel(name: string | undefined): void {
+    if (name) {
+      this.progress.model = name;
+      this.flushProgress(true);
+    }
   }
 
   /** Push the structured progress snapshot to the caller, throttled. */
@@ -367,6 +460,9 @@ class DelegateClient implements acp.Client {
       case 'tool_call_update': {
         const title = u.title;
         const status = u.status;
+        // Real Bash/terminal output (Claude Code bridge) arrives here in
+        // `_meta.terminal_output.data`; render it as a ```console block.
+        const terminalBlock = formatTerminalMeta((u as { _meta?: unknown })._meta);
         if (status === 'completed') {
           const label = title ?? 'tool';
           let detail = '';
@@ -374,6 +470,7 @@ class DelegateClient implements acp.Client {
             const formatted = fmtToolCallContent(u.content);
             if (formatted) detail = `\n${formatted}`;
           }
+          if (terminalBlock) detail += `\n${terminalBlock}`;
           this.transcript += `✅ ${label}${detail}\n`;
           this.flush();
         } else if (status === 'in_progress') {
@@ -382,14 +479,22 @@ class DelegateClient implements acp.Client {
             const formatted = fmtToolCallContent(u.content);
             if (formatted) {
               this.transcript += `  ${formatted}\n`;
-              this.flush();
             }
           }
+          if (terminalBlock) {
+            this.transcript += `${terminalBlock}\n`;
+          }
+          if (u.content?.length || terminalBlock) this.flush();
         } else if (status === 'failed') {
-          this.transcript += `\n⚠️ ${title ?? 'tool'} failed\n`;
+          this.transcript += `\n⚠️ ${title ?? 'tool'} failed`;
+          if (terminalBlock) this.transcript += `\n${terminalBlock}`;
+          this.transcript += '\n';
+          this.flush();
+        } else if (terminalBlock) {
+          // status pending/undefined but terminal output present — don't drop it.
+          this.transcript += `${terminalBlock}\n`;
           this.flush();
         }
-        // status === 'pending' → no-op (already shown in tool_call).
         break;
       }
 
@@ -611,9 +716,9 @@ export async function runDelegatedTask(
   // slow startup is indistinguishable from a hang.
   opts.onUpdate?.(`🚀 ${phase}`);
 
-  // Liveness heartbeat: while the transcript is still empty (or quiet) push an
-  // elapsed-time line plus the tail of the child's stderr (npm/npx download
-  // progress lands here), so the card never looks frozen.
+  // Liveness heartbeat: pushes an elapsed-time status line so the card
+  // never looks frozen. Does NOT reset the idle watchdog — only real
+  // session updates from the agent prove the connection is still healthy.
   const heartbeat = setInterval(() => {
     if (settled || !opts.onUpdate) return;
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
@@ -686,7 +791,12 @@ export async function runDelegatedTask(
       protocolVersion: acp.PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
+        // We don't implement a real PTY (top-level `terminal` stays false), but
+        // advertising `_meta.terminal_output` makes the Claude Code bridge put
+        // the real command output into the tool_call_update `_meta` channel
+        // (read in {@link formatTerminalMeta}) instead of dropping it.
         terminal: false,
+        _meta: { terminal_output: true },
       },
     });
 
@@ -697,12 +807,13 @@ export async function runDelegatedTask(
     if (opts.resumeSessionId && canResume) {
       phase = `已连接 ${label}，正在恢复会话 ${opts.resumeSessionId.slice(0, 8)}…`;
       try {
-        await connection.loadSession({
+        const loaded = await connection.loadSession({
           sessionId: opts.resumeSessionId,
           cwd,
           mcpServers: [],
         });
         sessionId = opts.resumeSessionId;
+        handler.noteModel(extractModelName((loaded as { models?: unknown }).models));
       } catch {
         // Resume failed (stale id, bridge quirk) — fall back to a fresh
         // session so the task still runs rather than hard-failing.
@@ -714,6 +825,7 @@ export async function runDelegatedTask(
       phase = `已连接 ${label}，正在创建会话…`;
       const session = await connection.newSession({ cwd, mcpServers: [] });
       sessionId = session.sessionId;
+      handler.noteModel(extractModelName((session as { models?: unknown }).models));
     }
 
     phase = `已连接 ${label}，等待响应…`;
