@@ -19,11 +19,13 @@ import {
   startBrowserLogin,
 } from './auth.js';
 import { gitDiff, listDir, openExternal, pickFolder, readFile } from './workspace.js';
+import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
   ApiKeyLoginResult,
   BrowserLoginResult,
   CreateSessionOptions,
+  CustomModelInput,
   PermissionMode,
   PermissionResponse,
   PromptOptions,
@@ -82,6 +84,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
     hub.setMode(id, mode),
   );
   ipcMain.handle(IpcInvoke.SessionRewind, (_e, id: string, idx: number) => hub.rewind(id, idx));
+
+  // ── custom models ─────────────────────────────────────────────────────────
+  ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());
+  ipcMain.handle(
+    IpcInvoke.ModelsSaveCustom,
+    (_e, model: CustomModelInput, originalDisplayName?: string) =>
+      saveCustomModel(model, originalDisplayName),
+  );
+  ipcMain.handle(IpcInvoke.ModelsDeleteCustom, (_e, displayName: string) =>
+    deleteCustomModel(displayName),
+  );
 
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(

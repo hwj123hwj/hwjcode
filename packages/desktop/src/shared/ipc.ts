@@ -34,6 +34,10 @@ export const IpcInvoke = {
   SessionSetMode: 'session:set-mode',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
+  // custom models
+  ModelsListCustom: 'models:list-custom',
+  ModelsSaveCustom: 'models:save-custom',
+  ModelsDeleteCustom: 'models:delete-custom',
   // permission reply
   PermissionRespond: 'permission:respond',
   // workspace helpers
@@ -89,24 +93,22 @@ export interface BrowserLoginResult {
 // Sessions
 // ──────────────────────────────────────────────────────────────────────────
 
-/** The five Claude-Code-Desktop-style permission modes. */
+/**
+ * The two permission modes, mapped 1:1 onto the backend's real ApprovalMode
+ * values (`default` / `yolo`). The backend has no distinct plan/acceptEdits
+ * behaviour, so we don't surface modes it can't honour.
+ */
 export type PermissionMode =
   | 'default' // ask before each edit/command
-  | 'acceptEdits' // auto-accept edits + safe commands
-  | 'plan' // read-only, propose a plan
-  | 'auto' // run everything (with safety checks)
-  | 'bypassPermissions'; // no prompts
+  | 'yolo'; // auto-accept everything
 
 export const PERMISSION_MODES: {
   id: PermissionMode;
   label: string;
   hint: string;
 }[] = [
-  { id: 'plan', label: 'Plan', hint: '只读探索，先给计划，不改源码' },
-  { id: 'default', label: 'Ask', hint: '每次编辑/命令前询问' },
-  { id: 'acceptEdits', label: 'Auto-accept edits', hint: '自动接受编辑与安全命令' },
-  { id: 'auto', label: 'Auto', hint: '全部自动执行（带安全检查）' },
-  { id: 'bypassPermissions', label: 'Bypass', hint: '不再询问任何权限' },
+  { id: 'default', label: '每次询问', hint: '每次编辑/命令前询问' },
+  { id: 'yolo', label: 'YOLO 自动接受', hint: '自动接受所有编辑与命令，不再询问' },
 ];
 
 export type SessionRunStatus =
@@ -143,6 +145,45 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
   archived: boolean;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Custom models (stored in ~/.easycode-user/custom-models.json, shared w/ CLI)
+// ──────────────────────────────────────────────────────────────────────────
+
+export type CustomModelProvider =
+  | 'openai'
+  | 'openai-responses'
+  | 'anthropic'
+  | 'gemini';
+
+/** The user-editable fields of a custom model. */
+export interface CustomModelInput {
+  /** Display name; also the unique key in the store. */
+  displayName: string;
+  provider: CustomModelProvider;
+  /** API base URL. */
+  baseUrl: string;
+  /** API key (supports ${ENV_VAR} substitution, resolved by the backend). */
+  apiKey: string;
+  /** Actual model id sent to the provider. */
+  modelId: string;
+  /** Optional context-window size. */
+  maxTokens?: number;
+  enabled?: boolean;
+}
+
+/** A stored custom model enriched with its generated id + display label. */
+export interface CustomModelEntry extends CustomModelInput {
+  /** Generated `custom:...` id — the value passed to `sessions.setModel`. */
+  id: string;
+  /** "[Provider] displayName" — what the picker shows. */
+  label: string;
+}
+
+export interface SaveCustomModelResult {
+  ok: boolean;
+  error?: string;
 }
 
 export interface CreateSessionOptions {
@@ -337,6 +378,19 @@ export interface EasycodeBridge {
     rewind(sessionId: string, beforeUserMessageIndex: number): Promise<RewindResult>;
     onEvent(cb: (env: SessionEventEnvelope) => void): () => void;
     onStatus(cb: (env: SessionStatusEnvelope) => void): () => void;
+  };
+  models: {
+    /** List the user's custom models (shared with the CLI). */
+    listCustom(): Promise<CustomModelEntry[]>;
+    /**
+     * Add or update a custom model. Pass `originalDisplayName` when an edit
+     * renamed the model so the old entry is replaced, not orphaned.
+     */
+    saveCustom(
+      model: CustomModelInput,
+      originalDisplayName?: string,
+    ): Promise<SaveCustomModelResult>;
+    deleteCustom(displayName: string): Promise<void>;
   };
   permissions: {
     onRequest(cb: (req: PermissionRequest) => void): () => void;
