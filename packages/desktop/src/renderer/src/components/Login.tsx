@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
+import { Icon } from './Icon';
 
 const api = window.easycode;
 
@@ -39,15 +40,23 @@ export function Login() {
     <div className="login">
       <div className="login-card">
         <h1>
-          <span style={{ width: 18, height: 18, borderRadius: 6, background: 'var(--accent)' }} />
+          <span className="brand-mark" style={{ width: 32, height: 32, borderRadius: 9 }}>
+            <Icon name="sparkle" size={17} />
+          </span>
           Easy Code
         </h1>
         <p className="tagline">登录以开始 — 与 CLI 共享同一登录凭证</p>
 
-        {error && <div className="login-err">{error}</div>}
+        {error && (
+          <div className="login-err">
+            <Icon name="alert" size={15} />
+            {error}
+          </div>
+        )}
 
         <button className="btn primary full" disabled={!!busy} onClick={loginBrowser}>
-          {busy === 'browser' ? <span className="spinner" /> : '🌐'} 浏览器登录
+          {busy === 'browser' ? <span className="spinner" /> : <Icon name="globe" size={15} />}
+          浏览器登录
         </button>
         {busy === 'browser' && (
           <p className="hint">

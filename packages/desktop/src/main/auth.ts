@@ -22,9 +22,44 @@
 // needs. Deep paths are allowed because core ships no "exports" map.
 import { ProxyAuthManager } from 'deepv-code-core/dist/src/core/proxyAuth.js';
 import { AuthServer } from 'deepv-code-core/dist/src/auth/login/authServer.js';
+import { AuthTemplates } from 'deepv-code-core/dist/src/auth/login/templates/index.js';
 import { getUserAgent } from 'deepv-code-core/dist/src/utils/userAgent.js';
 import { shell } from 'electron';
+import { createRequire } from 'node:module';
+import * as path from 'node:path';
 import type { AuthStatus, DesktopUser } from '../shared/ipc.js';
+
+/**
+ * Point core's `AuthTemplates` at the real login page (`authSelectPage.html`)
+ * so the browser login renders Easy Code's branded template instead of the
+ * bare-bones fallback.
+ *
+ * Why this is needed: `AuthTemplates.loadTemplate()` finds the HTML by walking
+ * paths derived from `globalThis.__dirname` (set only by the CLI's esbuild
+ * banner — absent in core's plain `tsc` ESM dist) and `process.cwd()` (the
+ * Electron launch dir, not the repo root). In the desktop main process neither
+ * resolves, so it silently falls back to `generateBasicAuthSelectTemplate()`.
+ *
+ * The templates ship beside the compiled module at
+ * `<core>/dist/src/auth/login/templates/authSelectPage.html`. `setBasePath`
+ * probes `<base>/auth/login/templates/<file>`, so the base is core's
+ * `dist/src` — derived from the resolved location of `authServer.js`
+ * (`dist/src/auth/login/authServer.js`).
+ */
+function configureAuthTemplates(): void {
+  try {
+    const require = createRequire(import.meta.url);
+    const authServerPath = require.resolve(
+      'deepv-code-core/dist/src/auth/login/authServer.js',
+    );
+    // dist/src/auth/login/authServer.js -> dist/src
+    const base = path.join(path.dirname(authServerPath), '..', '..');
+    AuthTemplates.setBasePath(base);
+  } catch (err) {
+    console.warn('[auth] Failed to configure auth templates base path:', err);
+  }
+}
+configureAuthTemplates();
 
 export function getServerUrl(): string {
   return process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai';

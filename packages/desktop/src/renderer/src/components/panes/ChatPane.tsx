@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useStore, type ChatItem, type SessionView } from '../../store';
 import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
+import { Icon } from '../Icon';
 
 export function ChatPane({ view }: { view: SessionView }) {
   const density = view.density;
@@ -19,13 +20,13 @@ export function ChatPane({ view }: { view: SessionView }) {
     <div className="pane-body">
       <div className="transcript">
         {view.transcript.length === 0 && (
-          <div className="empty" style={{ height: 240 }}>
-            <div>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>✦</div>
-              开始与 Easy Code 对话
-              <div className="hint" style={{ marginTop: 6 }}>
-                它会在 {view.meta.cwd} 中工作
-              </div>
+          <div className="empty" style={{ height: 280 }}>
+            <div className="empty-inner">
+              <span className="empty-mark">
+                <Icon name="sparkle" size={24} />
+              </span>
+              <div className="empty-title">开始与 Easy Code 对话</div>
+              <div className="hint">它会在 {view.meta.cwd} 中工作</div>
             </div>
           </div>
         )}
@@ -64,18 +65,19 @@ function ChatItemView({
   switch (item.kind) {
     case 'user':
       return (
-        <div className="msg" style={{ position: 'relative' }}>
-          <div className="msg-user">{item.text}</div>
-          {userIndex !== undefined && (
-            <button
-              className="icon-btn"
-              title="回退到此处（rewind）"
-              style={{ position: 'absolute', top: 4, right: 4 }}
-              onClick={() => onRewind(userIndex)}
-            >
-              ⏪
-            </button>
-          )}
+        <div className="msg">
+          <div className="msg-user">
+            {item.text}
+            {userIndex !== undefined && (
+              <button
+                className="icon-btn rewind-btn"
+                title="回退到此处（rewind）"
+                onClick={() => onRewind(userIndex)}
+              >
+                <Icon name="rewind" size={14} />
+              </button>
+            )}
+          </div>
         </div>
       );
 
@@ -89,7 +91,13 @@ function ChatItemView({
     case 'thought':
       if (density === 'summary') return null;
       return (
-        <div className="msg msg-thought">{item.text}</div>
+        <div className="msg msg-thought">
+          <div className="thought-label">
+            <Icon name="think" size={13} />
+            思考
+          </div>
+          {item.text}
+        </div>
       );
 
     case 'system':
@@ -97,7 +105,12 @@ function ChatItemView({
       return <div className="msg-system">{item.text}</div>;
 
     case 'error':
-      return <div className="msg msg-error">{item.text}</div>;
+      return (
+        <div className="msg msg-error">
+          <Icon name="alert" size={16} />
+          <span>{item.text}</span>
+        </div>
+      );
 
     case 'tool':
       if (density === 'summary') return null;

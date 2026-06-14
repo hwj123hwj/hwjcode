@@ -21,6 +21,7 @@ import {
   REFERENCE_CONTENT_START,
   REFERENCE_CONTENT_END,
   ToolConfirmationOutcome,
+  ApprovalMode,
   coreEvents,
   CoreEvent,
   SessionManager as CoreSessionManager,
@@ -768,34 +769,40 @@ export class Session {
 
     // Confirm if necessary.
     //
-    // ACP mode is agent-to-agent, so the calling agent is the "user". We
-    // split confirmations into three buckets:
+    // Whether the client must approve a tool call depends on the session's
+    // ApprovalMode (set by the client via `session/set_mode`):
     //
-    //   1. Auto-approve (no roundtrip): routine `edit`, `write`, generic
-    //      `exec`, `mcp`, `info`. These are the tools that also auto-run
-    //      under TUI YOLO mode. We just call `onConfirm(ProceedOnce)` so
-    //      the tool's allowlist/state bookkeeping still runs.
+    //   - DEFAULT / AUTO_EDIT: the user explicitly asked to be prompted, so
+    //     we escalate *every* confirmation the tool raises via ACP
+    //     `requestPermission` and let the client present a dialog. (Edits in
+    //     AUTO_EDIT are already filtered out by the tool's own
+    //     `shouldConfirmExecute`, so only the tools that still need approval
+    //     in that mode reach here.) Interactive clients (the desktop app,
+    //     IDEs) show a prompt; headless delegation clients auto-approve in
+    //     their own `requestPermission` handler — either way the *client*
+    //     decides, which is the whole point of the mode.
     //
-    //   2. Escalate to the caller agent via ACP `requestPermission`:
-    //      - `exec` with a `warning` (dangerous-command-detector matched
-    //        things like `rm -rf /`, `sudo`, fork bombs, etc.)
-    //      - `delete` (irreversible)
-    //      - `question` (`ask_user_question` — only the real user, i.e. the
-    //        caller agent's own prompter, can meaningfully answer)
+    //   - YOLO: agent-to-agent autonomy. Auto-approve routine `edit`/`write`/
+    //     generic `exec`/`mcp`/`info` (no roundtrip — just call
+    //     `onConfirm(ProceedOnce)` so allowlist/state bookkeeping still runs),
+    //     and only escalate the hard-stops that even YOLO must not run
+    //     silently: dangerous `exec` (warning matched), `delete`, and
+    //     `question` (only a real user can answer). This is the legacy
+    //     `confirmationRequiresCallerApproval` split.
     //
-    //   3. If `requestPermission` itself fails (old ACP clients don't
-    //      implement it — they return "Permission prompt unavailable in
-    //      non-interactive mode"), we fall back to rejecting the dangerous
-    //      call. Auto-approved tools in bucket 1 never hit that path.
+    // If `requestPermission` itself fails (old ACP clients that don't
+    // implement it), we fall back to rejecting the call rather than silently
+    // running it.
     const confirmation = await tool.shouldConfirmExecute(args, signal);
     if (confirmation) {
-      const needsCallerApproval = confirmationRequiresCallerApproval(
-        confirmation,
-      );
+      const needsCallerApproval =
+        this.config.getApprovalMode() === ApprovalMode.YOLO
+          ? confirmationRequiresCallerApproval(confirmation)
+          : true;
 
       if (!needsCallerApproval) {
-        // Bucket 1: silently proceed. Still invoke `onConfirm` so tools
-        // that track allowlist state (shell's rootCommand allowlist,
+        // YOLO routine tool: silently proceed. Still invoke `onConfirm` so
+        // tools that track allowlist state (shell's rootCommand allowlist,
         // ApprovalMode promotion on ProceedAlways) see the outcome.
         try {
           await confirmation.onConfirm(ToolConfirmationOutcome.ProceedOnce);

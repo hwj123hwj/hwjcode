@@ -39,31 +39,14 @@ export interface BridgeCallbacks {
   log(line: string): void;
 }
 
-/** Claude-style UI mode -> DeepCode core ApprovalMode id (default/autoEdit/yolo). */
+/** UI mode -> DeepCode core ApprovalMode id (default/yolo). */
 function toApprovalModeId(mode: PermissionMode): string {
-  switch (mode) {
-    case 'acceptEdits':
-      return 'autoEdit';
-    case 'auto':
-    case 'bypassPermissions':
-      return 'yolo';
-    case 'plan':
-    case 'default':
-    default:
-      return 'default';
-  }
+  return mode === 'yolo' ? 'yolo' : 'default';
 }
 
-/** DeepCode core ApprovalMode id -> Claude-style UI mode (best-effort reverse). */
+/** DeepCode core ApprovalMode id -> UI mode. autoEdit folds into default. */
 export function fromApprovalModeId(id: string | undefined): PermissionMode {
-  switch (id) {
-    case 'autoEdit':
-      return 'acceptEdits';
-    case 'yolo':
-      return 'auto';
-    default:
-      return 'default';
-  }
+  return id === 'yolo' ? 'yolo' : 'default';
 }
 
 function textOfContent(content: unknown): string {
@@ -313,12 +296,40 @@ export class AcpSessionBridge {
     });
     this.child = child;
 
-    child.stderr?.on('data', (b: Buffer) => this.cb.log(b.toString('utf8')));
+    // Keep a short tail of stderr so a startup crash produces a useful error
+    // instead of a silent hang.
+    let stderrTail = '';
+    let handshakeDone = false;
+    let onEarlyExit: ((err: Error) => void) | undefined;
+    // Rejects if the backend dies before the ACP handshake finishes. Without
+    // this, a crashed backend leaves `connection.initialize()` pending forever
+    // and the UI spins indefinitely (no response ever arrives on the closed
+    // stdout stream).
+    const earlyExit = new Promise<never>((_, reject) => {
+      onEarlyExit = reject;
+    });
+    // Swallow the unhandled-rejection if the handshake wins the race.
+    earlyExit.catch(() => undefined);
+
+    child.stderr?.on('data', (b: Buffer) => {
+      const s = b.toString('utf8');
+      stderrTail = (stderrTail + s).slice(-2000);
+      this.cb.log(s);
+    });
     child.stdin?.on('error', () => undefined);
     child.on('exit', (code) => {
       if (this.disposed) return;
       this.cb.log(`backend exited (code ${code ?? 'null'})`);
       this.cb.setStatus('exited');
+      if (!handshakeDone) {
+        const tail = stderrTail.trim();
+        onEarlyExit?.(
+          new Error(
+            `Easy Code 后端在初始化前退出（code ${code ?? 'null'}）。` +
+              (tail ? `\n后端输出：\n${tail}` : ''),
+          ),
+        );
+      }
     });
 
     if (!child.stdin || !child.stdout) {
@@ -333,35 +344,44 @@ export class AcpSessionBridge {
     const connection = new acp.ClientSideConnection(() => handler, stream);
     this.connection = connection;
 
-    await connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-        terminal: false,
-        _meta: { terminal_output: true },
-      },
-    });
+    // Run the whole ACP handshake as one unit, racing it against an early
+    // backend exit so a crashed/incompatible backend surfaces as an error
+    // rather than an endless spinner.
+    const handshake = async (): Promise<unknown> => {
+      await connection.initialize({
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true },
+          terminal: false,
+          _meta: { terminal_output: true },
+        },
+      });
 
-    // Credentials live in the shared on-disk store the backend reads on
-    // startup, so newSession works without an explicit authenticate round-trip.
-    let resp: unknown;
-    if (resumeSessionId) {
-      try {
-        resp = await connection.loadSession({
-          sessionId: resumeSessionId,
-          cwd: this.cwd,
-          mcpServers: [],
-        });
-        this.acpSessionId = resumeSessionId;
-      } catch (err) {
-        this.cb.log(`loadSession failed, starting fresh: ${String(err)}`);
+      // Credentials live in the shared on-disk store the backend reads on
+      // startup, so newSession works without an explicit authenticate round-trip.
+      let r: unknown;
+      if (resumeSessionId) {
+        try {
+          r = await connection.loadSession({
+            sessionId: resumeSessionId,
+            cwd: this.cwd,
+            mcpServers: [],
+          });
+          this.acpSessionId = resumeSessionId;
+        } catch (err) {
+          this.cb.log(`loadSession failed, starting fresh: ${String(err)}`);
+        }
       }
-    }
-    if (!this.acpSessionId) {
-      const created = await connection.newSession({ cwd: this.cwd, mcpServers: [] });
-      this.acpSessionId = created.sessionId;
-      resp = created;
-    }
+      if (!this.acpSessionId) {
+        const created = await connection.newSession({ cwd: this.cwd, mcpServers: [] });
+        this.acpSessionId = created.sessionId;
+        r = created;
+      }
+      return r;
+    };
+
+    const resp = await Promise.race([handshake(), earlyExit]);
+    handshakeDone = true;
 
     const { available, current } = modelsOf(resp);
     const mode = fromApprovalModeId(modeOf(resp));

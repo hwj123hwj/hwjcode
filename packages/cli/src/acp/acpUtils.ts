@@ -6,6 +6,7 @@
 
 import {
   type Config,
+  type CustomModelConfig,
   type ToolResult,
   type ToolCallConfirmationDetails,
   Kind,
@@ -13,11 +14,53 @@ import {
   ToolConfirmationOutcome,
   proxyAuthManager,
   tokenLimit,
+  generateCustomModelId,
 } from 'deepv-code-core';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import { z } from 'zod';
 import type { LoadedSettings } from '../config/settings.js';
+import { loadCustomModels } from '../config/customModelsStorage.js';
+import { formatCustomModelDisplayName } from '../utils/modelUtils.js';
+
+/**
+ * Collect the user's enabled custom models (from `~/.easycode-user/
+ * custom-models.json`, falling back to whatever `Config` loaded at startup) as
+ * `{ modelId, name }` pairs ready to drop into the ACP model list.
+ *
+ * The interactive CLI surfaces custom models in its `/model` picker
+ * ({@link getAvailableModels}); ACP clients (the desktop app, IDEs) must see
+ * the same set or custom models become unselectable there.
+ */
+function customModelEntries(
+  config: Config,
+): Array<{ modelId: string; name: string }> {
+  let models: CustomModelConfig[] = [];
+  try {
+    models = loadCustomModels();
+  } catch {
+    models = [];
+  }
+  // Fall back to the config snapshot loaded at startup if the file read came
+  // back empty (e.g. permissions) but config still has them.
+  if (models.length === 0) {
+    try {
+      models = config.getCustomModels?.() ?? [];
+    } catch {
+      models = [];
+    }
+  }
+  const entries: Array<{ modelId: string; name: string }> = [];
+  for (const m of models) {
+    if (m?.enabled === false) continue;
+    if (!m?.displayName || !m?.modelId || !m?.baseUrl) continue;
+    entries.push({
+      modelId: generateCustomModelId(m),
+      name: formatCustomModelDisplayName(m),
+    });
+  }
+  return entries;
+}
 
 /**
  * Build the `session/update` payload for `sessionUpdate: 'usage_update'`.
@@ -368,7 +411,15 @@ export function buildAvailableModels(
     models.push({ modelId: m.name, name: m.displayName || m.name });
   }
 
-  // 3) Make sure the currently-selected and preferred ids are visible even
+  // 3) User-configured custom models (~/.easycode-user/custom-models.json),
+  //    so the desktop/IDE model picker can select them just like the CLI.
+  for (const entry of customModelEntries(config)) {
+    if (seen.has(entry.modelId)) continue;
+    seen.add(entry.modelId);
+    models.push(entry);
+  }
+
+  // 4) Make sure the currently-selected and preferred ids are visible even
   //    if they're not in the cloud list (user just switched to one via /model,
   //    cache empty on first run, etc.).
   for (const id of [preferred, current]) {
@@ -446,6 +497,12 @@ export function buildConfigOptionsSnapshot(
       value: m.name,
       name: m.displayName || m.name,
     });
+  }
+  // User-configured custom models (~/.easycode-user/custom-models.json).
+  for (const entry of customModelEntries(config)) {
+    if (seen.has(entry.modelId)) continue;
+    seen.add(entry.modelId);
+    options.push({ value: entry.modelId, name: entry.name });
   }
   // Ensure the currently-selected model is in the list even if it's not
   // marked available (server just rolled it back, user got it via /model,

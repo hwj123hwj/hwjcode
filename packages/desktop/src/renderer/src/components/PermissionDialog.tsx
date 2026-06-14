@@ -1,16 +1,6 @@
 import { useStore } from '../store';
+import { Icon, toolKindIcon } from './Icon';
 import type { PermissionOption } from '@shared/ipc';
-
-const KIND_ICON: Record<string, string> = {
-  read: '📖',
-  edit: '✏️',
-  delete: '🗑️',
-  move: '📦',
-  search: '🔍',
-  execute: '⚡',
-  fetch: '🌐',
-  other: '🔧',
-};
 
 function btnClass(kind: PermissionOption['kind']): string {
   if (kind === 'allow_always' || kind === 'allow_once') return 'btn primary';
@@ -29,9 +19,15 @@ export function PermissionDialog() {
       <div className="modal">
         <div className="modal-head">
           <h3>
-            {KIND_ICON[req.toolKind] ?? '🔧'} 需要你的批准
+            <Icon name="shield" size={17} />
+            需要你的批准
           </h3>
-          <div className="sub">{req.title}</div>
+          <div className="sub">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon name={toolKindIcon(req.toolKind)} size={13} />
+              {req.title}
+            </span>
+          </div>
         </div>
         <div className="modal-body">
           {req.content?.map((c, i) => {
@@ -39,11 +35,12 @@ export function PermissionDialog() {
               const oldLines = (c.diff.oldText ?? '').split('\n');
               const newLines = c.diff.newText.split('\n');
               return (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <div style={{ color: 'var(--text-dim)', marginBottom: 4, fontSize: 12 }}>
+                <div key={i} className="diff-preview">
+                  <div className="diff-preview-head">
+                    <Icon name={c.diff.oldText ? 'edit' : 'file'} size={13} />
                     {c.diff.oldText ? '编辑' : '写入'} {c.diff.path}
                   </div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
+                  <div style={{ overflowX: 'auto' }}>
                     {c.diff.oldText
                       ? oldLines.map((l, j) => (
                           <div key={`o${j}`} className="diff-line del">

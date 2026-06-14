@@ -1,18 +1,6 @@
 import { useState } from 'react';
 import type { AcpToolKind, ToolCallContent, ToolCallStatus, ToolLocation } from '@shared/ipc';
-
-const KIND_ICON: Record<AcpToolKind, string> = {
-  read: '📖',
-  edit: '✏️',
-  delete: '🗑️',
-  move: '📦',
-  search: '🔍',
-  execute: '⚡',
-  think: '💭',
-  fetch: '🌐',
-  switch_mode: '🔄',
-  other: '🔧',
-};
+import { Icon, toolKindIcon } from './Icon';
 
 const STATUS_LABEL: Record<ToolCallStatus, string> = {
   pending: '等待',
@@ -20,6 +8,13 @@ const STATUS_LABEL: Record<ToolCallStatus, string> = {
   completed: '完成',
   failed: '失败',
 };
+
+/** Accent tone applied to the tool icon chip, by kind. */
+function kindTone(kind: AcpToolKind): string {
+  if (kind === 'edit' || kind === 'delete' || kind === 'move') return 'k-edit';
+  if (kind === 'execute') return 'k-execute';
+  return '';
+}
 
 export interface ToolCallProps {
   title: string;
@@ -45,26 +40,37 @@ export function ToolCall({
   const [open, setOpen] = useState(defaultOpen);
   const hasBody =
     content.some((c) => c.text || c.diff) || !!terminalOutput || (locations?.length ?? 0) > 0;
+  const running = status === 'pending' || status === 'in_progress';
 
   return (
     <div className="tool">
       <div className="tool-head" onClick={() => hasBody && setOpen(!open)}>
-        <span className="tool-ico">{KIND_ICON[toolKind] ?? '🔧'}</span>
+        <span className={`tool-ico ${kindTone(toolKind)}`}>
+          <Icon name={toolKindIcon(toolKind)} size={15} />
+        </span>
         <span className="tool-title">{title}</span>
-        {(status === 'pending' || status === 'in_progress') && <span className="spinner" />}
-        <span className={`tool-status ${status}`}>{STATUS_LABEL[status]}</span>
-        {hasBody && <span style={{ color: 'var(--text-faint)' }}>{open ? '▾' : '▸'}</span>}
+        <span className={`tool-status ${status}`}>
+          {running && <Icon name="loader" size={11} spin />}
+          {STATUS_LABEL[status]}
+        </span>
+        {hasBody && (
+          <span className="tool-chevron">
+            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={15} />
+          </span>
+        )}
       </div>
       {open && hasBody && (
         <div className="tool-body">
           {locations && locations.length > 0 && (
-            <div style={{ marginBottom: 6, color: 'var(--text-dim)' }}>
+            <div className="tool-locations">
               {locations.map((l, i) => (
                 <span
                   key={i}
-                  style={{ cursor: onOpenFile ? 'pointer' : 'default', marginRight: 10 }}
+                  className="tool-loc"
+                  style={{ cursor: onOpenFile ? 'pointer' : 'default' }}
                   onClick={() => onOpenFile?.(l.path)}
                 >
+                  <Icon name="file" size={12} />
                   {l.path}
                   {l.line ? `:${l.line}` : ''}
                 </span>
@@ -77,7 +83,7 @@ export function ToolCall({
             }
             if (c.text) {
               return (
-                <div key={i} style={{ marginBottom: 6 }}>
+                <div key={i} className="tool-text">
                   {c.text}
                 </div>
               );
@@ -100,24 +106,28 @@ function DiffPreview({
   oldText?: string | null;
   newText: string;
 }) {
-  const label = oldText ? `编辑 ${path}` : `写入 ${path}`;
   const oldLines = (oldText ?? '').split('\n');
   const newLines = newText.split('\n');
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ color: 'var(--text-dim)', marginBottom: 4 }}>{label}</div>
-      {oldText
-        ? oldLines.map((l, i) => (
-            <div key={`o${i}`} className="diff-line del">
-              <span>- {l}</span>
-            </div>
-          ))
-        : null}
-      {newLines.map((l, i) => (
-        <div key={`n${i}`} className="diff-line add">
-          <span>+ {l}</span>
-        </div>
-      ))}
+    <div className="diff-preview">
+      <div className="diff-preview-head">
+        <Icon name={oldText ? 'edit' : 'file'} size={13} />
+        {oldText ? '编辑' : '写入'} {path}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        {oldText
+          ? oldLines.map((l, i) => (
+              <div key={`o${i}`} className="diff-line del">
+                <span>- {l}</span>
+              </div>
+            ))
+          : null}
+        {newLines.map((l, i) => (
+          <div key={`n${i}`} className="diff-line add">
+            <span>+ {l}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
