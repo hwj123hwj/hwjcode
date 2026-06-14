@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type SessionView } from '../store';
-import { Icon } from './Icon';
-import { PERMISSION_MODES, type DirEntry, type PermissionMode } from '@shared/ipc';
+import { Icon, type IconName } from './Icon';
+import {
+  PERMISSION_MODES,
+  type AgentKind,
+  type DirEntry,
+  type PermissionMode,
+} from '@shared/ipc';
 
 const api = window.easycode;
+
+/** Label + icon for the agent chip shown on external-agent sessions. */
+const AGENT_BADGE: Record<Exclude<AgentKind, 'easy-code'>, { label: string; icon: IconName }> = {
+  'claude-code': { label: 'Claude Code', icon: 'cpu' },
+  codex: { label: 'Codex', icon: 'terminal' },
+};
 
 export function PromptBar({ view }: { view: SessionView }) {
   const sendPrompt = useStore((s) => s.sendPrompt);
@@ -116,6 +127,12 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="folder" size={14} />
             {projectName(meta.cwd)}
           </span>
+          {meta.agentType && meta.agentType !== 'easy-code' && (
+            <span className="chip accent" title="驱动此会话的外部 agent">
+              <Icon name={AGENT_BADGE[meta.agentType].icon} size={14} />
+              {AGENT_BADGE[meta.agentType].label}
+            </span>
+          )}
           <span className="chip">
             <Icon name="cpu" size={14} />
             <select value={meta.model ?? ''} onChange={(e) => void setModel(meta.id, e.target.value)}>
@@ -127,19 +144,23 @@ export function PromptBar({ view }: { view: SessionView }) {
               ))}
             </select>
           </span>
-          <span className="chip accent">
-            <Icon name="shield" size={14} />
-            <select
-              value={meta.permissionMode}
-              onChange={(e) => void setMode(meta.id, e.target.value as PermissionMode)}
-            >
-              {PERMISSION_MODES.map((m) => (
-                <option key={m.id} value={m.id} title={m.hint}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </span>
+          {/* Permission modes are an Easy Code concept; external agents drive
+              their own approval flow (surfaced via the permission dialog). */}
+          {(!meta.agentType || meta.agentType === 'easy-code') && (
+            <span className="chip accent">
+              <Icon name="shield" size={14} />
+              <select
+                value={meta.permissionMode}
+                onChange={(e) => void setMode(meta.id, e.target.value as PermissionMode)}
+              >
+                {PERMISSION_MODES.map((m) => (
+                  <option key={m.id} value={m.id} title={m.hint}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
           {ctxPct != null ? (
             <span className="chip" title="上下文用量">
               <span className="token-bar">

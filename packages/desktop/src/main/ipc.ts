@@ -20,6 +20,7 @@ import {
 } from './auth.js';
 import { gitDiff, listDir, openExternal, pickFolder, readFile } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
+import { detectExternalAgents } from './externalAgents.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
   ApiKeyLoginResult,
@@ -84,6 +85,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
     hub.setMode(id, mode),
   );
   ipcMain.handle(IpcInvoke.SessionRewind, (_e, id: string, idx: number) => hub.rewind(id, idx));
+
+  // ── external agents ───────────────────────────────────────────────────────
+  ipcMain.handle(IpcInvoke.AgentsDetect, () => detectExternalAgents());
 
   // ── custom models ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());

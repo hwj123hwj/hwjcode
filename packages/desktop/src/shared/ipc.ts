@@ -34,6 +34,8 @@ export const IpcInvoke = {
   SessionSetMode: 'session:set-mode',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
+  // external agents
+  AgentsDetect: 'agents:detect',
   // custom models
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
@@ -121,6 +123,25 @@ export type SessionRunStatus =
 
 export type EnvironmentKind = 'local'; // remote/ssh reserved for the future
 
+/**
+ * Which agent backend drives a session.
+ *   - `easy-code`   — the bundled `easycode --acp` backend (default).
+ *   - `claude-code` — the user's local Claude Code, via the
+ *                     `@agentclientprotocol/claude-agent-acp` ACP bridge.
+ *   - `codex`       — the user's local Codex CLI, via `@zed-industries/codex-acp`.
+ * The external agents speak the same ACP protocol, so the desktop drives them
+ * with the identical client — only the spawned command differs.
+ */
+export type AgentKind = 'easy-code' | 'claude-code' | 'codex';
+
+/** Which local external agents were detected on PATH (claude / codex). */
+export interface ExternalAgentAvailability {
+  /** True when `claude` resolves on PATH. */
+  claudeCode: boolean;
+  /** True when `codex` resolves on PATH. */
+  codex: boolean;
+}
+
 export interface ModelInfo {
   modelId: string;
   name: string;
@@ -133,6 +154,8 @@ export interface SessionMeta {
   cwd: string;
   environment: EnvironmentKind;
   status: SessionRunStatus;
+  /** Which agent backend drives this session. */
+  agentType: AgentKind;
   permissionMode: PermissionMode;
   model?: string;
   availableModels: ModelInfo[];
@@ -189,6 +212,8 @@ export interface SaveCustomModelResult {
 export interface CreateSessionOptions {
   cwd: string;
   title?: string;
+  /** Agent backend to drive the session. Defaults to `easy-code`. */
+  agentType?: AgentKind;
   permissionMode?: PermissionMode;
   model?: string;
 }
@@ -391,6 +416,10 @@ export interface EasycodeBridge {
       originalDisplayName?: string,
     ): Promise<SaveCustomModelResult>;
     deleteCustom(displayName: string): Promise<void>;
+  };
+  agents: {
+    /** Detect which external agents (Claude Code / Codex) are installed locally. */
+    detect(): Promise<ExternalAgentAvailability>;
   };
   permissions: {
     onRequest(cb: (req: PermissionRequest) => void): () => void;
