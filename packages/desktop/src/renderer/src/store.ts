@@ -11,6 +11,7 @@
 import { create } from 'zustand';
 import type {
   AcpToolKind,
+  AgentKind,
   AuthStatus,
   GitFileDiff,
   PermissionMode,
@@ -77,7 +78,12 @@ interface StoreState {
   init: () => Promise<void>;
   refreshSessions: () => Promise<void>;
   setActive: (id: string) => void;
-  createSession: (cwd: string, mode: PermissionMode, model?: string) => Promise<void>;
+  createSession: (
+    cwd: string,
+    mode: PermissionMode,
+    agentType?: AgentKind,
+    model?: string,
+  ) => Promise<void>;
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
   sendPrompt: (id: string, text: string, atPaths: string[]) => Promise<void>;
@@ -184,8 +190,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setActive: (id) => set({ activeSessionId: id }),
 
-  createSession: async (cwd, mode, model) => {
-    const meta = await api.sessions.create({ cwd, permissionMode: mode, model });
+  createSession: async (cwd, mode, agentType, model) => {
+    const meta = await api.sessions.create({ cwd, permissionMode: mode, agentType, model });
     set((s) => ({
       sessions: { ...s.sessions, [meta.id]: emptyView(meta) },
       order: [meta.id, ...s.order.filter((x) => x !== meta.id)],

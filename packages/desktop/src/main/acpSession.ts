@@ -20,7 +20,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildBackendSpec } from './backendLocator.js';
+import { buildExternalAgentSpec } from './externalAgents.js';
 import type {
+  AgentKind,
   DesktopSessionEvent,
   ModelInfo,
   PermissionMode,
@@ -281,18 +283,27 @@ export class AcpSessionBridge {
     readonly id: string,
     private readonly cwd: string,
     private readonly cb: BridgeCallbacks,
+    /** Which agent backend to drive. Defaults to the bundled Easy Code. */
+    private readonly agentType: AgentKind = 'easy-code',
   ) {}
 
   /** Spawn the backend, establish the ACP connection, create or resume a session. */
   async start(resumeSessionId?: string): Promise<StartResult> {
     this.cb.setStatus('starting');
-    const spec = buildBackendSpec();
+    // Easy Code runs the bundled backend directly; external agents (Claude
+    // Code / Codex) are driven through their `npx` ACP bridges. Either way the
+    // spawned process speaks ACP over stdio, so everything below is identical.
+    const spec =
+      this.agentType === 'easy-code'
+        ? buildBackendSpec()
+        : buildExternalAgentSpec(this.agentType);
     this.cb.log(`spawn: ${spec.description}`);
 
     const child = spawn(spec.command, spec.args, {
       cwd: this.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...spec.env },
+      shell: spec.shell ?? false,
     });
     this.child = child;
 

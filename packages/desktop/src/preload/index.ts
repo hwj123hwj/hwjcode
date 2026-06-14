@@ -18,6 +18,7 @@ import type {
   CustomModelInput,
   DirEntry,
   EasycodeBridge,
+  ExternalAgentAvailability,
   GitFileDiff,
   PermissionMode,
   PermissionRequest,
@@ -77,6 +78,10 @@ const bridge: EasycodeBridge = {
       ) as Promise<SaveCustomModelResult>,
     deleteCustom: (displayName) =>
       ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
+  },
+  agents: {
+    detect: () =>
+      ipcRenderer.invoke(IpcInvoke.AgentsDetect) as Promise<ExternalAgentAvailability>,
   },
   permissions: {
     onRequest: (cb) => on<PermissionRequest>(IpcEvent.PermissionRequest, cb),
