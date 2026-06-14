@@ -89,3 +89,14 @@ probe-output.jsonl
 .easycode/
 .easycode-bak/
 .easycode-user/
+
+# Desktop (Electron) build artifacts
+packages/desktop/out/
+packages/desktop/release/
+packages/desktop/node_modules/
+packages/desktop/*.tsbuildinfo
+
+# Desktop dev/run logs (local diagnostics)
+desktop-dev.log
+desktop-prod.log
+desktop-prod.log.err
