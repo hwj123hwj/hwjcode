@@ -1,0 +1,5 @@
+out/
+release/
+dist/
+node_modules/
+*.log

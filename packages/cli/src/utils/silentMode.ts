@@ -55,6 +55,58 @@ export function isSilentModeEnabled(): boolean {
 }
 
 /**
+ * Redirect all informational console output to stderr.
+ *
+ * Unlike {@link enableSilentMode} (which drops the output entirely), this keeps
+ * the logs visible — they just no longer touch stdout. This is required for ACP
+ * mode, where stdout is a JSON-RPC wire and ANY stray text corrupts the frames,
+ * but where we still want startup diagnostics ("[SessionManager] ...",
+ * "🔄 Continuing last session...") available on stderr for debugging.
+ *
+ * Both the live `console.*` methods AND the `originalConsole` references are
+ * repointed: `logIfNotSilent` calls the captured originals directly, so patching
+ * only the global `console` would leave those CLI startup logs on stdout. The
+ * global `console` patch additionally covers logs emitted from deep inside core
+ * (which uses raw `console.log`), since `console` is a per-process singleton.
+ *
+ * Idempotent and intentionally not reversible — once stdout is reserved for the
+ * protocol it must stay that way for the lifetime of the process.
+ */
+export function redirectConsoleToStderr(): void {
+  const toStderr = (...args: any[]): void => {
+    try {
+      const msg = args
+        .map((a) =>
+          typeof a === 'string'
+            ? a
+            : (() => {
+                try {
+                  return JSON.stringify(a);
+                } catch {
+                  return String(a);
+                }
+              })(),
+        )
+        .join(' ');
+      process.stderr.write(`${msg}\n`);
+    } catch {
+      // A broken logger must never crash the runtime.
+    }
+  };
+
+  console.log = toStderr;
+  console.info = toStderr;
+  console.warn = toStderr;
+  console.debug = toStderr;
+
+  // Keep `logIfNotSilent` (which uses the captured originals) on stderr too.
+  originalConsole.log = toStderr;
+  originalConsole.info = toStderr;
+  originalConsole.warn = toStderr;
+  originalConsole.debug = toStderr;
+}
+
+/**
  * Logs a message only if silent mode is disabled
  * Use this for optional informational messages
  */

@@ -47,6 +47,7 @@ import { loadEnvironment } from './config/settings.js';
 import { setMaxSizedBoxDebugging } from './ui/components/shared/MaxSizedBox.js';
 import { validateNonInteractiveAuth } from './validateNonInterActiveAuth.js';
 import { enableSilentMode, disableSilentMode, logIfNotSilent } from './utils/silentMode.js';
+import { isAcpMode } from './utils/acpStdoutGuard.js';
 import { setSilentMode } from 'deepv-code-core';
 import { appEvents, AppEvent } from './utils/events.js';
 import { createConfirmationReadlineInterface } from './ui/utils/readlineOptimized.js';
@@ -260,6 +261,11 @@ function processWorkdirParameter(workdirPath: string | undefined): string | null
 }
 
 export async function main() {
+  // In ACP mode stdout is reserved for the JSON-RPC protocol. The console has
+  // already been redirected to stderr at import time (see `acpStdoutGuard`);
+  // `isAcpMode` is reused below to also skip stdout-only UI affordances such as
+  // `console.clear()`.
+
   // 品牌升级：执行历史配置文件夹平滑迁移 (.deepvcode -> .easycode 等)
   try {
     migrateLegacyDirectories(process.cwd(), () => {
@@ -296,8 +302,12 @@ export async function main() {
     lastTime = now;
   };
 
-  // Clear screen at startup for clean interface
-  console.clear();
+  // Clear screen at startup for clean interface.
+  // Skip in ACP mode: console.clear() emits ANSI escape codes to stdout, which
+  // would corrupt the JSON-RPC wire.
+  if (!isAcpMode) {
+    console.clear();
+  }
 
   // 🚀 Instant startup: No loading animation - render UI as fast as possible
   // Technical users prefer seeing the input prompt immediately

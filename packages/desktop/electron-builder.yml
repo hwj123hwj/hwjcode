@@ -1,0 +1,34 @@
+appId: ai.deepvlab.easycode.desktop
+productName: Easy Code
+directories:
+  output: release/${version}
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+# Ship the agent backend the desktop spawns (`easycode --acp`). Built at the
+# repo root with `npm run bundle`; copied into the app under resources/backend.
+extraResources:
+  - from: ../../bundle
+    to: backend
+    filter:
+      - '**/*'
+asarUnpack:
+  - resources/**
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+  category: Development
