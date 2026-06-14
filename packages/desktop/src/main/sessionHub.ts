@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { app } from 'electron';
 import { AcpSessionBridge } from './acpSession.js';
 import type {
+  AgentKind,
   CreateSessionOptions,
   DesktopSessionEvent,
   PermissionMode,
@@ -59,6 +60,8 @@ export class SessionHub {
       for (const rec of arr) {
         // Restored sessions are dormant until explicitly resumed.
         rec.status = 'idle';
+        // Backfill agentType for sessions persisted before this field existed.
+        if (!rec.agentType) rec.agentType = 'easy-code';
         this.records.set(rec.id, rec);
         if (rec.acpSessionId) this.acpIds.set(rec.id, rec.acpSessionId);
       }
@@ -93,16 +96,21 @@ export class SessionHub {
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
-  private makeBridge(id: string, cwd: string): AcpSessionBridge {
-    const bridge = new AcpSessionBridge(id, cwd, {
-      emit: (event) => this.emit.sessionEvent(id, event),
-      setStatus: (status) => {
-        this.touch(id, { status });
-        this.emit.sessionStatus(id, status);
+  private makeBridge(id: string, cwd: string, agentType: AgentKind): AcpSessionBridge {
+    const bridge = new AcpSessionBridge(
+      id,
+      cwd,
+      {
+        emit: (event) => this.emit.sessionEvent(id, event),
+        setStatus: (status) => {
+          this.touch(id, { status });
+          this.emit.sessionStatus(id, status);
+        },
+        requestPermission: (req) => this.askPermission(id, req),
+        log: (line) => this.emit.backendLog(`[${id.slice(0, 8)}] ${line}`),
       },
-      requestPermission: (req) => this.askPermission(id, req),
-      log: (line) => this.emit.backendLog(`[${id.slice(0, 8)}] ${line}`),
-    });
+      agentType,
+    );
     this.bridges.set(id, bridge);
     return bridge;
   }
@@ -110,12 +118,14 @@ export class SessionHub {
   async create(opts: CreateSessionOptions): Promise<SessionMeta> {
     const id = randomUUID();
     const now = Date.now();
+    const agentType: AgentKind = opts.agentType ?? 'easy-code';
     const rec: PersistedSession = {
       id,
       title: opts.title || defaultTitle(opts.cwd),
       cwd: opts.cwd,
       environment: 'local',
       status: 'starting',
+      agentType,
       permissionMode: opts.permissionMode ?? 'default',
       model: opts.model,
       availableModels: [],
@@ -128,7 +138,7 @@ export class SessionHub {
     this.records.set(id, rec);
     this.persist();
 
-    const bridge = this.makeBridge(id, opts.cwd);
+    const bridge = this.makeBridge(id, opts.cwd, agentType);
     const res = await bridge.start();
     this.acpIds.set(id, res.acpSessionId);
     const updated = this.touch(id, {
@@ -139,9 +149,13 @@ export class SessionHub {
       status: 'idle',
     })!;
 
-    // Apply requested mode/model if they differ from the backend default.
-    if (opts.permissionMode && opts.permissionMode !== res.mode) {
-      await bridge.setMode(opts.permissionMode).catch(() => undefined);
+    // Permission modes are an Easy Code concept; external agents manage their
+    // own approval flow (and surface it via ACP requestPermission, which the
+    // desktop already presents). Only reconcile mode/model for Easy Code.
+    if (agentType === 'easy-code') {
+      if (opts.permissionMode && opts.permissionMode !== res.mode) {
+        await bridge.setMode(opts.permissionMode).catch(() => undefined);
+      }
     }
     if (opts.model && opts.model !== res.model) {
       await bridge.setModel(opts.model).catch(() => undefined);
@@ -154,7 +168,7 @@ export class SessionHub {
     if (!rec) throw new Error(`Unknown session: ${id}`);
     if (this.bridges.has(id)) return rec; // already live
 
-    const bridge = this.makeBridge(id, cwd || rec.cwd);
+    const bridge = this.makeBridge(id, cwd || rec.cwd, rec.agentType ?? 'easy-code');
     const res = await bridge.start(this.acpIds.get(id) ?? rec.acpSessionId);
     this.acpIds.set(id, res.acpSessionId);
     return this.touch(id, {

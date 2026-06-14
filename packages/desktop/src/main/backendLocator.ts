@@ -28,6 +28,12 @@ export interface BackendSpec {
   env: Record<string, string>;
   /** Human description for logs. */
   description: string;
+  /**
+   * Spawn through a shell. Needed for external agents launched via `npx`
+   * (resolves to `npx.cmd` on Windows). The bundled backend runs the Electron
+   * binary directly, so it leaves this false/undefined.
+   */
+  shell?: boolean;
 }
 
 /** Walk up from a start dir until a path containing `bundle/easycode.js` is found. */
