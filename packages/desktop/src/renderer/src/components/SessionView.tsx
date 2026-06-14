@@ -4,14 +4,15 @@ import { ChatPane } from './panes/ChatPane';
 import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
+import { Icon, type IconName } from './Icon';
 
-const PANE_LABELS: Record<PaneKind, string> = {
-  chat: '💬 对话',
-  diff: '± 改动',
-  plan: '📋 计划',
-  tasks: '⚙️ 任务',
-  terminal: '▶_ 终端',
-  file: '📄 文件',
+const PANE_META: Record<PaneKind, { icon: IconName; label: string }> = {
+  chat: { icon: 'chat', label: '对话' },
+  diff: { icon: 'diff', label: '改动' },
+  plan: { icon: 'plan', label: '计划' },
+  tasks: { icon: 'tasks', label: '任务' },
+  terminal: { icon: 'terminal', label: '终端' },
+  file: { icon: 'file', label: '文件' },
 };
 
 const STATUS_TEXT: Record<string, string> = {
@@ -35,9 +36,11 @@ export function SessionView() {
     return (
       <main className="main">
         <div className="empty">
-          <div>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✦</div>
-            选择左侧会话，或新建一个会话开始
+          <div className="empty-inner">
+            <span className="empty-mark">
+              <Icon name="sparkle" size={24} />
+            </span>
+            <div className="empty-title">选择左侧会话，或新建一个会话开始</div>
           </div>
         </div>
       </main>
@@ -51,33 +54,40 @@ export function SessionView() {
     <main className="main">
       <div className="toolbar">
         <span className="toolbar-title">{meta.title}</span>
-        <span className="status-dot" style={{ position: 'static' }} />
-        <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+        <span className="toolbar-status">
+          <span className={`status-dot ${meta.status}`} />
           {STATUS_TEXT[meta.status] ?? meta.status}
         </span>
         <span className="grow" />
 
         {dormant && (
-          <button className="btn" style={{ padding: '4px 10px' }} onClick={() => void resume(meta.id)}>
-            ▶ 恢复会话
+          <button className="btn" style={{ padding: '6px 12px' }} onClick={() => void resume(meta.id)}>
+            <Icon name="play" size={14} />
+            恢复会话
           </button>
         )}
 
         <div style={{ position: 'relative' }}>
-          <button className="chip" onClick={() => setViewsOpen((o) => !o)}>
-            ⊞ 视图
+          <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>
+            <Icon name="columns" size={14} />
+            视图
           </button>
           {viewsOpen && (
             <div className="menu-pop" style={{ right: 0, top: '110%' }}>
-              {(Object.keys(PANE_LABELS) as PaneKind[]).map((p) => (
+              {(Object.keys(PANE_META) as PaneKind[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => {
                     togglePane(meta.id, p);
                   }}
                 >
-                  {view.panes.includes(p) ? '✓ ' : '　'}
-                  {PANE_LABELS[p]}
+                  <Icon
+                    name="check"
+                    size={14}
+                    className={view.panes.includes(p) ? undefined : 'placeholder'}
+                  />
+                  <Icon name={PANE_META[p].icon} size={14} />
+                  {PANE_META[p].label}
                 </button>
               ))}
             </div>
@@ -109,7 +119,8 @@ function PaneHost({
     return (
       <div className="pane">
         <div className="pane-head">
-          <span>{PANE_LABELS.chat}</span>
+          <Icon name={PANE_META.chat.icon} size={15} />
+          <span>{PANE_META.chat.label}</span>
           <span className="grow" />
           <div className="views-menu">
             {(['summary', 'normal', 'verbose'] as ViewDensity[]).map((d) => (

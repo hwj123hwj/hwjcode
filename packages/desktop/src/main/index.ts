@@ -7,7 +7,7 @@
  * IPC bridge and ACP session hub wired in.
  */
 
-import { app, BrowserWindow, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
@@ -28,6 +28,10 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1c1e' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     title: 'Easy Code',
+    // The traditional File/Edit/View/Window/Help menu bar is meaningless for
+    // Easy Code — keep it hidden (and Alt won't reveal it since it's removed
+    // entirely on Windows/Linux below).
+    autoHideMenuBar: true,
     webPreferences: {
       // electron-vite emits the preload as ESM (.mjs) — required for an ESM
       // preload under contextIsolation with sandbox disabled.
@@ -57,6 +61,9 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setName('Easy Code');
+  // Drop the default application menu on Windows/Linux entirely. On macOS we
+  // keep it so standard shortcuts (copy/paste/quit) and the app menu survive.
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
   hub = registerIpc(() => mainWindow);
   createWindow();
 

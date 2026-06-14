@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
+import { SettingsDialog } from './SettingsDialog';
+import { Icon } from './Icon';
 import type { SessionMeta } from '@shared/ipc';
 
 const api = window.easycode;
@@ -37,6 +39,7 @@ export function Sidebar() {
   const setFilter = useStore((s) => s.setSidebarFilter);
 
   const [showNew, setShowNew] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const grouped = useMemo(() => {
     const views = order.map((id) => sessions[id]).filter(Boolean) as SessionView[];
@@ -72,11 +75,14 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-head">
         <div className="brand">
-          <span className="dot" />
+          <span className="brand-mark">
+            <Icon name="sparkle" size={15} />
+          </span>
           Easy Code
         </div>
         <button className="btn-new" onClick={() => setShowNew(true)}>
-          ＋ 新建会话
+          <Icon name="plus" size={15} />
+          新建会话
         </button>
       </div>
 
@@ -94,6 +100,7 @@ export function Sidebar() {
         </div>
       </div>
       <div className="sidebar-search">
+        <Icon name="search" size={14} />
         <input
           placeholder="搜索会话…"
           value={filter.query}
@@ -134,7 +141,7 @@ export function Sidebar() {
                       void archive(v.meta.id, !v.meta.archived);
                     }}
                   >
-                    {v.meta.archived ? '↩' : '🗄'}
+                    <Icon name={v.meta.archived ? 'archive-restore' : 'archive'} size={14} />
                   </button>
                 </div>
               </div>
@@ -150,12 +157,16 @@ export function Sidebar() {
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {auth?.user?.name || auth?.user?.email || '已登录'}
         </span>
+        <button className="icon-btn" title="设置" onClick={() => setShowSettings(true)}>
+          <Icon name="settings" size={15} />
+        </button>
         <button className="icon-btn" title="退出登录" onClick={() => void api.auth.logout()}>
-          ⏻
+          <Icon name="power" size={15} />
         </button>
       </div>
 
       {showNew && <NewSessionDialog onClose={() => setShowNew(false)} />}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
     </aside>
   );
 }

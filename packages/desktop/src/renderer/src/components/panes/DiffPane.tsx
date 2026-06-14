@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../../store';
+import { Icon } from '../Icon';
 import type { GitFileDiff } from '@shared/ipc';
 
 interface Comment {
@@ -54,20 +55,22 @@ export function DiffPane({ view }: { view: SessionView }) {
   return (
     <div className="pane">
       <div className="pane-head">
+        <Icon name="diff" size={15} />
         <span>改动</span>
         <span className="diff-chip">
-          <span className="add">+{totals(diffs).added}</span>{' '}
+          <span className="add">+{totals(diffs).added}</span>
           <span className="del">-{totals(diffs).removed}</span>
         </span>
         <span className="grow" />
-        <button className="icon-btn" onClick={() => void refreshDiff(view.meta.id)}>
-          ↻ 刷新
+        <button className="icon-btn" title="刷新" onClick={() => void refreshDiff(view.meta.id)}>
+          <Icon name="refresh" size={15} />
         </button>
-        <button className="icon-btn" onClick={reviewSelf}>
-          🔎 自审
+        <button className="icon-btn" title="自审改动" onClick={reviewSelf}>
+          <Icon name="review" size={15} />
         </button>
         {comments.length > 0 && (
-          <button className="btn primary" style={{ padding: '4px 10px' }} onClick={submitReview}>
+          <button className="btn primary" style={{ padding: '5px 11px' }} onClick={submitReview}>
+            <Icon name="comment" size={14} />
             提交 {comments.length} 条评论
           </button>
         )}
@@ -81,11 +84,13 @@ export function DiffPane({ view }: { view: SessionView }) {
               className={`diff-file ${current?.path === d.path ? 'active' : ''}`}
               onClick={() => setActiveFile(d.path)}
             >
+              <Icon name="file" size={14} />
               <span className="name" title={d.path}>
                 {d.path}
               </span>
               <span className="diff-chip">
-                <span className="add">+{d.added}</span> <span className="del">-{d.removed}</span>
+                <span className="add">+{d.added}</span>
+                <span className="del">-{d.removed}</span>
               </span>
             </div>
           ))}
@@ -161,8 +166,9 @@ function DiffBody({
               <span>{line || ' '}</span>
             </div>
             {lineComments.map((c, ci) => (
-              <div key={ci} className="diff-comment-row" style={{ color: 'var(--text-dim)' }}>
-                💬 {c.body}
+              <div key={ci} className="diff-comment-row">
+                <Icon name="comment" size={14} />
+                {c.body}
               </div>
             ))}
             {draftLine === i && (

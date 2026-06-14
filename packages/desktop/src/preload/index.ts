@@ -14,6 +14,8 @@ import type {
   AuthStatus,
   BrowserLoginResult,
   CreateSessionOptions,
+  CustomModelEntry,
+  CustomModelInput,
   DirEntry,
   EasycodeBridge,
   GitFileDiff,
@@ -22,6 +24,7 @@ import type {
   PermissionResponse,
   PromptOptions,
   RewindResult,
+  SaveCustomModelResult,
   SessionEventEnvelope,
   SessionMeta,
   SessionStatusEnvelope,
@@ -62,6 +65,18 @@ const bridge: EasycodeBridge = {
     rewind: (id, idx) => ipcRenderer.invoke(IpcInvoke.SessionRewind, id, idx) as Promise<RewindResult>,
     onEvent: (cb) => on<SessionEventEnvelope>(IpcEvent.SessionEvent, cb),
     onStatus: (cb) => on<SessionStatusEnvelope>(IpcEvent.SessionStatus, cb),
+  },
+  models: {
+    listCustom: () =>
+      ipcRenderer.invoke(IpcInvoke.ModelsListCustom) as Promise<CustomModelEntry[]>,
+    saveCustom: (model: CustomModelInput, originalDisplayName?: string) =>
+      ipcRenderer.invoke(
+        IpcInvoke.ModelsSaveCustom,
+        model,
+        originalDisplayName,
+      ) as Promise<SaveCustomModelResult>,
+    deleteCustom: (displayName) =>
+      ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
   },
   permissions: {
     onRequest: (cb) => on<PermissionRequest>(IpcEvent.PermissionRequest, cb),
