@@ -164,7 +164,6 @@ export function Sidebar() {
                       {v.meta.title}
                     </span>
                   )}
-                  <span className="agent-badge">{AGENT_LABEL[v.meta.agentType]}</span>
                 </div>
                 <div className="session-row">
                   <span className="session-sub">{relTime(v.meta.updatedAt)}</span>
@@ -173,6 +172,12 @@ export function Sidebar() {
                       <span className="add">+{v.meta.added}</span>{' '}
                       <span className="del">-{v.meta.removed}</span>
                     </span>
+                  )}
+                  {/* Easy Code is the default backend — only badge the others, and
+                      keep the badge on this second row so it never overlaps the
+                      hover edit/archive actions pinned to the card's top-right. */}
+                  {v.meta.agentType !== 'easy-code' && (
+                    <span className="agent-badge">{AGENT_LABEL[v.meta.agentType]}</span>
                   )}
                 </div>
                 <div className="session-actions">

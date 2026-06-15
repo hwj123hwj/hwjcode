@@ -204,6 +204,10 @@ export class AcpSessionManager {
       cwd,
     );
 
+    // A resumed session already carries the title it was named with on first
+    // use — don't let the next prompt re-trigger auto-titling.
+    session.markTitleGenerated();
+
     // Replace any prior in-memory session with the same id.
     const previous = this.sessions.get(req.sessionId);
     if (previous) previous.dispose();
