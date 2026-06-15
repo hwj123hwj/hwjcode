@@ -59,6 +59,10 @@ echo "🔨 构建..."
 cd packages/core && rm -rf dist && npm run build --silent 2>&1 | tail -1
 cd ../cli && rm -rf dist && npm run build --silent 2>&1 | tail -1 && chmod +x dist/index.js
 
+# 推送到自己的 GitLab 远程仓库
+echo "🚀 推送到 GitLab..."
+git push origin master 2>&1 | tail -1
+
 # 恢复本地改动
 if [ "$STASHED" = true ]; then
   echo "📤 恢复本地改动..."
