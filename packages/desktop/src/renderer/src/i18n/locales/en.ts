@@ -102,6 +102,10 @@ export const en = {
   'login.or': 'or',
   'login.apiKeyPlaceholder': 'Paste your API key',
   'login.apiKeyLogin': 'Sign in with API key',
+  'login.useCustomModels': 'Continue with custom models',
+  'login.addCustomModel': 'Add a custom model',
+  'login.customModelHint': 'No sign-in needed — use your own API keys (shared with the CLI).',
+  'login.noCustomModels': 'No usable custom model configured yet — add one first.',
 
   // ── agent backends ─────────────────────────────────────────────────────────────
   'agent.easyCodeHint': 'Built-in Easy Code backend (default)',
@@ -114,7 +118,9 @@ export const en = {
   'newSession.pickDirError': 'Please choose a project directory',
   'newSession.environment': 'Environment',
   'newSession.projectDir': 'Project directory',
+  'newSession.projectDirOptional': 'Project directory (optional)',
   'newSession.pickFolderPlaceholder': 'Choose a folder…',
+  'newSession.pickFolderOptionalPlaceholder': 'Leave empty to just chat, no directory',
   'newSession.browse': 'Browse…',
   'newSession.permissionMode': 'Permission mode',
   'newSession.externalAgentNote':
@@ -129,6 +135,15 @@ export const en = {
 
   // ── permission dialog ────────────────────────────────────────────────────────────
   'permission.title': 'Your approval is needed',
+
+  // ── ask_user_question (multi-choice cards) ───────────────────────────────────────
+  'ask.title': 'Please answer the following',
+  'ask.other': 'Other (custom input)…',
+  'ask.otherPlaceholder': 'Type your answer…',
+  'ask.submit': 'Submit',
+  'ask.skip': 'Skip',
+  'ask.multiHint': 'multiple choice',
+  'ask.preview': 'Preview',
 
   // ── diff (shared edit/write verbs + diff pane) ───────────────────────────────────
   'diff.edit': 'Edit',
@@ -145,13 +160,13 @@ export const en = {
 
   // ── prompt bar ────────────────────────────────────────────────────────────────────
   'prompt.placeholder': 'Type a message — @ to reference files, / for commands…',
-  'prompt.busyPlaceholder': 'Your reply will be read after the current action finishes… (steer as it runs)',
+  'prompt.busyPlaceholder': 'Sending will interrupt the current task and start a new turn…',
   'prompt.externalAgentTitle': 'External agent driving this session',
   'prompt.cwdHint': "A session's working folder is fixed when it's created. To switch, start a new session.",
   'prompt.defaultModel': 'Default model',
   'prompt.contextUsage': 'Context usage',
   'prompt.addAttachment': 'Add attachment / image',
-  'prompt.hint': 'Enter to send · Shift+Enter for a newline · Ctrl+V to paste an image · click the clip to attach',
+  'prompt.hint': 'Enter to send · Shift+Enter for a newline · {paste} to paste an image · click the clip to attach',
 
   // ── settings · general + custom models ─────────────────────────────────────────────
   'settings.title': 'Settings',
@@ -217,6 +232,13 @@ export const en = {
 
   // ── session view ─────────────────────────────────────────────────────────────────────────
   'session.emptyTitle': 'Select a session on the left, or start a new one',
+  'session.emptyPrompt': 'What should we work on?',
+  'session.emptyPlaceholder': 'Just chat, or describe a task…',
+  'session.emptySend': 'Send',
+  'session.emptyHint': 'Type to start — pick a working directory and mode below',
+  'session.emptyChatTarget': 'Just chat',
+  'session.emptyRecent': 'Recent projects',
+  'session.emptyPickFolder': 'Choose a folder…',
   'session.resume': 'Resume session',
   'session.views': 'Views',
 
@@ -233,10 +255,15 @@ export const en = {
   'sidebar.archived': 'Archived',
   'sidebar.searchPlaceholder': 'Search sessions…',
   'sidebar.noSessions': 'No sessions',
+  'sidebar.chats': 'Chats',
+  'sidebar.chatsFolder': 'Chats',
+  'sidebar.projects': 'Projects',
   'sidebar.dblClickRename': 'Double-click to rename',
   'sidebar.archive': 'Archive',
   'sidebar.unarchive': 'Unarchive',
   'sidebar.loggedIn': 'Signed in',
+  'sidebar.customModelMode': 'Custom-model mode',
+  'sidebar.exitCustomModelMode': 'Exit custom-model mode',
   'sidebar.feishu': 'Feishu gateway',
   'sidebar.feishuRunning': 'Feishu gateway (running)',
 

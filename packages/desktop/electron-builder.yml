@@ -25,6 +25,12 @@ mac:
   target:
     - target: dmg
       arch: arm64
+      # No spaces in the DMG filename: a space-bearing name (the default
+      # `${productName}-${version}` → "Easy Code-x.y.z.dmg") needs escaping in
+      # shells/URLs/CI and gets truncated by some tools. Mirror the Windows
+      # artifactName. productName stays "Easy Code" so the app display name and
+      # mounted volume are unchanged.
+      artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
     - target: zip
       arch: arm64
   hardenedRuntime: true

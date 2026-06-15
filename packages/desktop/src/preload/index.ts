@@ -64,12 +64,16 @@ const bridge: EasycodeBridge = {
     list: () => ipcRenderer.invoke(IpcInvoke.SessionList) as Promise<SessionMeta[]>,
     create: (opts: CreateSessionOptions) =>
       ipcRenderer.invoke(IpcInvoke.SessionCreate, opts) as Promise<SessionMeta>,
+    createChat: (opts?: Omit<CreateSessionOptions, 'cwd'>) =>
+      ipcRenderer.invoke(IpcInvoke.SessionCreateChat, opts) as Promise<SessionMeta>,
     resume: (id, cwd) => ipcRenderer.invoke(IpcInvoke.SessionResume, id, cwd) as Promise<SessionMeta>,
     close: (id) => ipcRenderer.invoke(IpcInvoke.SessionClose, id) as Promise<void>,
     archive: (id, archived) =>
       ipcRenderer.invoke(IpcInvoke.SessionArchive, id, archived) as Promise<void>,
     rename: (id, title) =>
       ipcRenderer.invoke(IpcInvoke.SessionRename, id, title) as Promise<SessionMeta>,
+    setTitleProvisional: (id, title) =>
+      ipcRenderer.invoke(IpcInvoke.SessionSetTitleProvisional, id, title) as Promise<SessionMeta>,
     prompt: (opts: PromptOptions) => ipcRenderer.invoke(IpcInvoke.SessionPrompt, opts) as Promise<void>,
     cancel: (id) => ipcRenderer.invoke(IpcInvoke.SessionCancel, id) as Promise<void>,
     setModel: (id, modelId) =>
