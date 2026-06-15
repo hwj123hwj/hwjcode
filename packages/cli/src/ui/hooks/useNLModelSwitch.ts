@@ -70,8 +70,17 @@ export function detectNLModelSwitch(
 
   if (!matchedKeyword || !remainingText) return null;
 
+  // 去掉常见噪音词，让"切换智谱模型" → modelQuery = "智谱"
+  const NOISE_WORDS = ['模型', '的', '一下', '帮我', '给我', '现在', '然后', '那个', '这个'];
+  let cleanText = remainingText;
+  for (const noise of NOISE_WORDS) {
+    cleanText = cleanText.replace(noise, '');
+  }
+  cleanText = cleanText.trim();
+  if (!cleanText) return null;
+
   // 2. 在剩余文本中匹配模型名（仅收藏列表）
-  const modelQuery = remainingText.toLowerCase();
+  const modelQuery = cleanText.toLowerCase();
 
   // 先精确匹配 model name
   for (const fav of favorites) {
