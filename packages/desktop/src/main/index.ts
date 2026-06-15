@@ -12,6 +12,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import type { SessionHub } from './sessionHub.js';
+// Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
+// taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
+// from the packaged .app bundle, so this is harmless there.
+import appIcon from '../../build/icon.png?asset';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +32,7 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1c1e' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     title: 'Easy Code',
+    icon: appIcon,
     // The traditional File/Edit/View/Window/Help menu bar is meaningless for
     // Easy Code — keep it hidden (and Alt won't reveal it since it's removed
     // entirely on Windows/Linux below).

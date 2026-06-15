@@ -17,18 +17,25 @@ asarUnpack:
   - resources/**
 mac:
   category: public.app-category.developer-tools
+  icon: build/icon.png
   target:
     - dmg
     - zip
   hardenedRuntime: true
 win:
+  # electron-builder converts this PNG (>=256x256) into a multi-size .ico used
+  # for the .exe and, by default, the NSIS installer/uninstaller too.
+  icon: build/icon.png
   target:
     - nsis
   artifactName: ${productName}-${version}-setup.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # installerIcon / uninstallerIcon are intentionally omitted: electron-builder
+  # defaults them to the application icon generated from `win.icon` above.
 linux:
+  icon: build/icon.png
   target:
     - AppImage
   category: Development

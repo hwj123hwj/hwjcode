@@ -114,16 +114,47 @@ function modeOf(resp: unknown): string | undefined {
   return typeof modes?.currentModeId === 'string' ? modes.currentModeId : undefined;
 }
 
+/**
+ * Pick the most permissive "allow" option from a permission request, mirroring
+ * the CLI's headless auto-approval (see `pickAllowOption` in
+ * packages/core/src/acp-client/acpAgentClient.ts). Prefers `allow_always`, then
+ * `allow_once`, then any non-reject option.
+ */
+function pickAllowOption(
+  options: acp.PermissionOption[],
+): acp.PermissionOption | undefined {
+  return (
+    options.find((o) => o.kind === 'allow_always') ??
+    options.find((o) => o.kind === 'allow_once') ??
+    options.find((o) => o.kind !== 'reject_once' && o.kind !== 'reject_always')
+  );
+}
+
 /** The ACP Client half: handles agent-initiated requests + session updates. */
 class DesktopAcpClient implements acp.Client {
   constructor(
     private readonly sessionId: () => string,
     private readonly cb: BridgeCallbacks,
+    /** Current session permission mode; consulted on each permission request. */
+    private readonly mode: () => PermissionMode,
   ) {}
 
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
+    // YOLO mode mirrors the CLI's headless `autoApprove: true`: auto-select the
+    // most permissive allow option without bothering the user, exactly like
+    // runDelegatedTask's requestPermission. `default` mode still prompts the UI.
+    if (this.mode() === 'yolo') {
+      const option = pickAllowOption(params.options);
+      if (option) {
+        const title = params.toolCall?.title ?? 'tool call';
+        this.cb.log(`yolo auto-approve: ${title}`);
+        return { outcome: { outcome: 'selected', optionId: option.optionId } };
+      }
+      // No allow option offered — fall through to the interactive flow below.
+    }
+
     this.cb.setStatus('needs_approval');
     const response = await this.cb.requestPermission({
       toolCallId: params.toolCall?.toolCallId ?? '',
@@ -278,6 +309,12 @@ export class AcpSessionBridge {
   private acpSessionId?: string;
   private pendingPromptAbort?: AbortController;
   private disposed = false;
+  /**
+   * Latest permission mode for this session. Read by the ACP client on each
+   * `requestPermission` to decide whether to auto-approve (yolo) or prompt the
+   * UI (default). Kept in sync by {@link start} and {@link setMode}.
+   */
+  private currentMode: PermissionMode = 'default';
 
   constructor(
     readonly id: string,
@@ -351,7 +388,11 @@ export class AcpSessionBridge {
       Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
     );
-    const handler = new DesktopAcpClient(() => this.acpSessionId ?? this.id, this.cb);
+    const handler = new DesktopAcpClient(
+      () => this.acpSessionId ?? this.id,
+      this.cb,
+      () => this.currentMode,
+    );
     const connection = new acp.ClientSideConnection(() => handler, stream);
     this.connection = connection;
 
@@ -396,6 +437,7 @@ export class AcpSessionBridge {
 
     const { available, current } = modelsOf(resp);
     const mode = fromApprovalModeId(modeOf(resp));
+    this.currentMode = mode;
     this.cb.setStatus('idle');
     return {
       acpSessionId: this.acpSessionId!,
@@ -462,6 +504,9 @@ export class AcpSessionBridge {
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
+    // Record locally first so client-side auto-approval (yolo) takes effect even
+    // if the backend ignores setSessionMode (e.g. an external agent bridge).
+    this.currentMode = mode;
     if (!this.connection || !this.acpSessionId) return;
     await this.connection
       .setSessionMode({ sessionId: this.acpSessionId, modeId: toApprovalModeId(mode) })
