@@ -290,6 +290,7 @@ export type DesktopSessionEvent =
   | { kind: 'thought_chunk'; text: string }
   | { kind: 'user_chunk'; text: string }
   | { kind: 'mode_marker'; mode: string } // [MODE_UPDATE]/[Model switched...] markers
+  | { kind: 'title'; title: string } // [TITLE_UPDATE] — auto-generated session title
   | {
       kind: 'tool_call';
       toolCallId: string;
