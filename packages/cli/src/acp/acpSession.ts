@@ -50,6 +50,28 @@ import { getAcpErrorMessage } from './acpErrors.js';
 import type { GenerateContentResponse } from '@google/genai';
 
 /**
+ * Substring identifying the synthetic environment-context block that
+ * `GeminiClient.startChat` prepends as the first (user-role) history entry, and
+ * the fixed model ack that follows it. Kept in sync with `core/src/core/client.ts`
+ * (the `🚀 CRITICAL SYSTEM CONTEXT…` preamble) and `taskPrompts.ts`
+ * (`SUBAGENT_INITIAL_RESPONSE`). Used by {@link Session.streamHistory} to keep
+ * this internal priming out of the rehydrated transcript.
+ */
+const ENV_CONTEXT_MARKER = 'CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant';
+const ENV_CONTEXT_ACK = 'Got it. Thanks for the context!';
+
+/**
+ * True when a persisted history message is the injected environment-context
+ * preamble (the user context block or the model's ack) rather than a real
+ * conversation turn. Such messages are model priming and must not be replayed
+ * as visible chat bubbles on `session/load`.
+ */
+function isInjectedEnvPreamble(role: string | undefined, text: string): boolean {
+  if (role === 'user') return text.includes(ENV_CONTEXT_MARKER);
+  return text.trim() === ENV_CONTEXT_ACK;
+}
+
+/**
  * Slice a persisted `SessionData.history` array (the UI-shape one stored at
  * `<sessionDir>/history.json`) so it ends just before the
  * `keepUserMessageCount`-th user-typed entry.
@@ -534,6 +556,13 @@ export class Session {
           : ''))
         .join('');
       if (!text) continue;
+      // Skip the synthetic environment-context preamble that
+      // `GeminiClient.startChat` prepends to every conversation (a user
+      // "CRITICAL SYSTEM CONTEXT…" block + the model's "Got it. Thanks for the
+      // context!" ack). It is genuine model context, but it is never shown as a
+      // chat bubble in the live turn, so it must not surface as one when an IDE
+      // rehydrates the transcript on session/load either.
+      if (isInjectedEnvPreamble(msg.role, text)) continue;
       await this.sendUpdate(
         msg.role === 'user'
           ? {
