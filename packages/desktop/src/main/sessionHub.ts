@@ -68,6 +68,10 @@ export class SessionHub {
         rec.status = 'idle';
         // Backfill agentType for sessions persisted before this field existed.
         if (!rec.agentType) rec.agentType = 'easy-code';
+        // Backfill availableModels: the renderer maps over it on render, so an
+        // older record without it would crash the session view (white screen)
+        // until the resume round-trip repopulated it.
+        if (!Array.isArray(rec.availableModels)) rec.availableModels = [];
         this.records.set(rec.id, rec);
         if (rec.acpSessionId) this.acpIds.set(rec.id, rec.acpSessionId);
       }

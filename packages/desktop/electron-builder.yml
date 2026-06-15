@@ -28,7 +28,9 @@ win:
   icon: build/icon.png
   target:
     - nsis
-  artifactName: ${productName}-${version}-setup.${ext}
+  # No spaces + a build timestamp so successive installers don't collide.
+  # BUILD_TIME (YYYYMMDDHHMM) is injected by scripts/pack-installer.cjs.
+  artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
