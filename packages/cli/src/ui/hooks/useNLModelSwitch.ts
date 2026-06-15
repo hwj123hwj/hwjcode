@@ -1,9 +1,16 @@
 /**
  * 自然语言模型切换关键词匹配
  * 用户输入 "切换模型xxx" / "用xxx" / "换xxx" 等，直接匹配并切换，不发给AI
+ * 模型从用户的 favoriteModels 收藏列表中匹配，不做全量模糊搜索
  */
 
-import { ModelInfo } from '../../utils/modelUtils.js';
+/**
+ * 收藏模型条目（精简版，只需 name + displayName）
+ */
+export interface FavoriteModelEntry {
+  name: string;
+  displayName: string;
+}
 
 /**
  * 模型切换触发关键词
@@ -31,9 +38,9 @@ export interface NLModelMatch {
  */
 export function detectNLModelSwitch(
   input: string,
-  availableModels: ModelInfo[],
+  favorites: FavoriteModelEntry[],
 ): NLModelMatch | null {
-  if (!input || !availableModels.length) return null;
+  if (!input || !favorites.length) return null;
 
   const trimmed = input.trim();
   if (trimmed.length < 2) return null;
@@ -63,51 +70,43 @@ export function detectNLModelSwitch(
 
   if (!matchedKeyword || !remainingText) return null;
 
-  // 2. 在剩余文本中匹配模型名
+  // 2. 在剩余文本中匹配模型名（仅收藏列表）
   const modelQuery = remainingText.toLowerCase();
 
   // 先精确匹配 model name
-  for (const model of availableModels) {
-    if (model.name.toLowerCase() === modelQuery) {
+  for (const fav of favorites) {
+    if (fav.name.toLowerCase() === modelQuery) {
       return {
-        modelName: model.name,
-        modelDisplayName: model.displayName || model.name,
+        modelName: fav.name,
+        modelDisplayName: fav.displayName || fav.name,
         matchedKeyword,
       };
     }
   }
 
   // 匹配 displayName
-  for (const model of availableModels) {
-    if (model.displayName?.toLowerCase() === modelQuery) {
+  for (const fav of favorites) {
+    if (fav.displayName?.toLowerCase() === modelQuery) {
       return {
-        modelName: model.name,
-        modelDisplayName: model.displayName || model.name,
+        modelName: fav.name,
+        modelDisplayName: fav.displayName || fav.name,
         matchedKeyword,
       };
     }
   }
 
-  // 模糊匹配：关键词包含在模型名中
-  const fuzzyMatches: NLModelMatch[] = [];
-  for (const model of availableModels) {
-    const name = model.name.toLowerCase();
-    const display = (model.displayName || '').toLowerCase();
+  // 模糊匹配：关键词包含在模型名或显示名中
+  for (const fav of favorites) {
+    const name = fav.name.toLowerCase();
+    const display = (fav.displayName || '').toLowerCase();
 
-    // 模型名或显示名包含查询词
     if (name.includes(modelQuery) || display.includes(modelQuery)) {
-      fuzzyMatches.push({
-        modelName: model.name,
-        modelDisplayName: model.displayName || model.name,
+      return {
+        modelName: fav.name,
+        modelDisplayName: fav.displayName || fav.name,
         matchedKeyword,
-      });
+      };
     }
-  }
-
-  if (fuzzyMatches.length === 1) return fuzzyMatches[0];
-  if (fuzzyMatches.length > 1) {
-    // 多个匹配，返回第一个（这是模糊匹配的已知限制，用户需要更精确地输入）
-    return fuzzyMatches[0];
   }
 
   return null;

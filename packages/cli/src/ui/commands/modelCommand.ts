@@ -554,6 +554,97 @@ export async function getAvailableModels(settings?: any, config?: Config): Promi
   }
 }
 
+/**
+ * 处理 /model favorites 子命令
+ * 用法：/model favorites add <modelName> | remove <modelName> | list
+ */
+function handleFavoritesCommand(
+  args: string,
+  settings: any,
+  config: Config | null,
+  context: CommandContext,
+): void {
+  const MAX_FAVORITES = 5;
+  const parts = args.trim().split(/\s+/);
+  const subCmd = parts[1] || 'list';
+  const modelArg = parts.slice(2).join(' ').trim();
+
+  // 读取当前收藏列表
+  const favorites: string[] = settings.merged?.favoriteModels || [];
+
+  const addItem = (type: string, text: string) => {
+    if (context.ui?.addItem) {
+      context.ui.addItem({ type, text } as HistoryItemWithoutId, Date.now());
+    }
+  };
+
+  if (subCmd === 'list') {
+    if (favorites.length === 0) {
+      addItem('info', '📋 当前没有收藏模型。使用 /model favorites add <模型名> 来添加。');
+      return;
+    }
+    let msg = '📋 收藏模型列表：\n';
+    favorites.forEach((id, i) => {
+      const displayName = getModelDisplayName(id, config);
+      msg += `  ${i + 1}. ${displayName}\n`;
+    });
+    msg += `\n使用 "用<名称>" 或 "切换到<名称>" 快速切换。`;
+    addItem('info', msg);
+    return;
+  }
+
+  if (subCmd === 'add') {
+    if (!modelArg) {
+      addItem('error', '请指定模型名称。用法：/model favorites add <模型名>');
+      return;
+    }
+    if (favorites.length >= MAX_FAVORITES) {
+      addItem('error', `最多只能收藏 ${MAX_FAVORITES} 个模型。请先删除一些再添加。`);
+      return;
+    }
+    // 解析模型名（支持 displayName 或 name）
+    const { modelInfos } = getLocalCachedModels(settings).length > 0
+      ? { modelInfos: getLocalCachedModels(settings) }
+      : { modelInfos: [] as ModelInfo[] };
+    const modelId = getModelNameFromDisplayName(modelArg, modelInfos);
+    if (!modelId || modelId === modelArg) {
+      // getModelNameFromDisplayName 如果没有匹配，可能返回原始值
+      // 检查是否在可用列表中
+      const allNames = ['auto', ...modelInfos.map(m => m.name)];
+      if (!allNames.includes(modelId)) {
+        addItem('error', `找不到模型 "${modelArg}"。请使用准确的模型名称。`);
+        return;
+      }
+    }
+    if (favorites.includes(modelId)) {
+      addItem('info', `"${getModelDisplayName(modelId, config)}" 已在收藏列表中。`);
+      return;
+    }
+    favorites.push(modelId);
+    settings.setValue(SettingScope.User, 'favoriteModels', favorites);
+    addItem('info', `✅ 已将 "${getModelDisplayName(modelId, config)}" 加入收藏。`);
+    return;
+  }
+
+  if (subCmd === 'remove') {
+    if (!modelArg) {
+      addItem('error', '请指定要移除的模型。用法：/model favorites remove <模型名>');
+      return;
+    }
+    const idx = favorites.findIndex(f => f === modelArg || getModelDisplayName(f, config) === modelArg);
+    if (idx === -1) {
+      addItem('error', `"${modelArg}" 不在收藏列表中。`);
+      return;
+    }
+    const removed = favorites.splice(idx, 1)[0];
+    settings.setValue(SettingScope.User, 'favoriteModels', favorites);
+    addItem('info', `✅ 已将 "${getModelDisplayName(removed, config)}" 从收藏中移除。`);
+    return;
+  }
+
+  addItem('error', `未知子命令 "${subCmd}"。可用：add, remove, list`);
+}
+
 export const modelCommand: SlashCommand = {
   name: 'model',
   description: t('model.command.description'),
@@ -561,6 +652,12 @@ export const modelCommand: SlashCommand = {
   action: (context: CommandContext, args: string): OpenDialogActionReturn | void => {
     const { settings, config } = context.services;
     const trimmedArgs = args.trim();
+
+    // 🎯 /model favorites 子命令：管理收藏模型列表
+    if (trimmedArgs.startsWith('favorites')) {
+      handleFavoritesCommand(trimmedArgs, settings, config, context);
+      return;
+    }
 
     // 如果没有参数，直接显示模型选择对话框
     if (!trimmedArgs) {

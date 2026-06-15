@@ -125,6 +125,8 @@ export interface Settings {
 
   // Model settings
   preferredModel?: string;
+  /** 收藏模型列表（最多5个），用于自然语言快速切换 */
+  favoriteModels?: string[];
   cloudModels?: Array<{
     name: string;
     displayName: string;
