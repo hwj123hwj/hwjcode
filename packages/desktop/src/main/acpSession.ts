@@ -137,19 +137,31 @@ class DesktopAcpClient implements acp.Client {
     private readonly cb: BridgeCallbacks,
     /** Current session permission mode; consulted on each permission request. */
     private readonly mode: () => PermissionMode,
+    /**
+     * When true, every permission request is auto-approved without prompting the
+     * user — the GUI counterpart of the CLI/Feishu delegate path, which spawns
+     * the very same ACP bridge with `runDelegatedTask({ autoApprove: true })`
+     * (see core/src/tools/delegate-agent.ts). Used for external agents (Claude
+     * Code / Codex): they run their own approval flow and the desktop does not
+     * manage their permission mode (see sessionHub.create), so forwarding their
+     * requestPermission to a dialog would be a UX regression vs. Feishu.
+     */
+    private readonly autoApprove: () => boolean,
   ) {}
 
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
-    // YOLO mode mirrors the CLI's headless `autoApprove: true`: auto-select the
-    // most permissive allow option without bothering the user, exactly like
-    // runDelegatedTask's requestPermission. `default` mode still prompts the UI.
-    if (this.mode() === 'yolo') {
+    // Auto-approve when the backend is configured to always auto-approve
+    // (external agents) or the session is in YOLO mode: select the most
+    // permissive allow option without bothering the user, exactly like the
+    // CLI's headless runDelegatedTask({ autoApprove: true }). `default` mode on
+    // Easy Code still prompts the UI.
+    if (this.autoApprove() || this.mode() === 'yolo') {
       const option = pickAllowOption(params.options);
       if (option) {
         const title = params.toolCall?.title ?? 'tool call';
-        this.cb.log(`yolo auto-approve: ${title}`);
+        this.cb.log(`auto-approve: ${title}`);
         return { outcome: { outcome: 'selected', optionId: option.optionId } };
       }
       // No allow option offered — fall through to the interactive flow below.
@@ -396,6 +408,10 @@ export class AcpSessionBridge {
       () => this.acpSessionId ?? this.id,
       this.cb,
       () => this.currentMode,
+      // External agents (Claude Code / Codex) auto-approve unconditionally,
+      // matching the Feishu/CLI delegate path. Easy Code keeps the interactive
+      // default/yolo gate driven by `currentMode`.
+      () => this.agentType !== 'easy-code',
     );
     const connection = new acp.ClientSideConnection(() => handler, stream);
     this.connection = connection;
