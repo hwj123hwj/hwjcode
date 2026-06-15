@@ -459,6 +459,11 @@ export interface FeishuBinding {
   lastSessionId?: string;
   /** Date.now() when lastSessionId was saved — drives the activity view. */
   lastSessionAt?: number;
+  /**
+   * True when this chat is *currently* running an AI session, per the gateway's
+   * live state. Mirrors the CLI TUI's green "(Active)" indicator.
+   */
+  active?: boolean;
 }
 
 /** Snapshot of the gateway lobby: every bound project↔chat, newest activity first. */
