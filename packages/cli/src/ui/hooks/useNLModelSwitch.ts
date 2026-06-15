@@ -121,6 +121,30 @@ export function detectNLModelSwitch(
     }
   }
 
+  // 厂商别名匹配：用户说"智谱"但模型名是"glm-5.1"不含中文
+  // "智谱" → glm, "深度求索" → deepseek, "谷歌/双子星" → gemini
+  const VENDOR_ALIASES: Record<string, string> = {
+    '智谱': 'glm',
+    'zhipu': 'glm',
+    'chatglm': 'glm',
+    '深度求索': 'deepseek',
+    'ds': 'deepseek',
+    '双子星': 'gemini',
+    '谷歌': 'gemini',
+  };
+  const vendorId = VENDOR_ALIASES[modelQuery];
+  if (vendorId) {
+    for (const fav of favorites) {
+      if (fav.name.toLowerCase().startsWith(vendorId)) {
+        return {
+          modelName: fav.name,
+          modelDisplayName: fav.displayName || fav.name,
+          matchedKeyword,
+        };
+      }
+    }
+  }
+
   return null;
 }
 
