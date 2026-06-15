@@ -30,6 +30,10 @@ if ! git merge upstream/master --no-edit; then
   fi
 fi
 
+# 清理上游遗留的 src/package.json（会污染版本号读取）
+rm -f packages/cli/src/package.json
+rm -f packages/cli/dist/src/package.json
+
 # 获取上游最新 tag 版本号
 git fetch upstream --tags 2>/dev/null || true
 LATEST_TAG=$(git tag -l 'cli-release-*' | sort -V | tail -1 | sed 's/cli-release-v//')
