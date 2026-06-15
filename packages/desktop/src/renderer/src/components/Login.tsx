@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import { Icon } from './Icon';
+import { useT } from '../i18n/useT';
 
 const api = window.easycode;
 
@@ -12,6 +13,7 @@ const api = window.easycode;
  */
 export function Login() {
   const auth = useStore((s) => s.auth);
+  const t = useT();
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState<false | 'apikey' | 'browser'>(false);
   const [error, setError] = useState('');
@@ -21,7 +23,7 @@ export function Login() {
     setError('');
     const res = await api.auth.loginApiKey(apiKey);
     setBusy(false);
-    if (!res.ok) setError(res.error ?? '登录失败');
+    if (!res.ok) setError(res.error ?? t('login.failed'));
     // On success, App re-renders via the auth:changed event.
   };
 
@@ -31,7 +33,7 @@ export function Login() {
     const res = await api.auth.loginBrowser();
     if (!res.ok) {
       setBusy(false);
-      setError(res.error ?? '无法启动浏览器登录');
+      setError(res.error ?? t('login.browserFailed'));
     }
     // Stays "busy" until auth:changed flips us out of the login screen.
   };
@@ -45,7 +47,7 @@ export function Login() {
           </span>
           Easy Code
         </h1>
-        <p className="tagline">登录以开始 — 与 CLI 共享同一登录凭证</p>
+        <p className="tagline">{t('login.tagline')}</p>
 
         {error && (
           <div className="login-err">
@@ -56,11 +58,11 @@ export function Login() {
 
         <button className="btn primary full" disabled={!!busy} onClick={loginBrowser}>
           {busy === 'browser' ? <span className="spinner" /> : <Icon name="globe" size={15} />}
-          浏览器登录
+          {t('login.browser')}
         </button>
         {busy === 'browser' && (
           <p className="hint">
-            已在浏览器打开登录页（{auth?.serverUrl}）。完成后将自动进入。
+            {t('login.browserHint', { url: auth?.serverUrl ?? '' })}
             <button
               className="icon-btn"
               onClick={() => {
@@ -68,23 +70,23 @@ export function Login() {
                 setBusy(false);
               }}
             >
-              取消
+              {t('common.cancel')}
             </button>
           </p>
         )}
 
-        <div className="divider">或</div>
+        <div className="divider">{t('login.or')}</div>
 
         <label>API Key</label>
         <input
           type="password"
-          placeholder="粘贴你的 API Key"
+          placeholder={t('login.apiKeyPlaceholder')}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && apiKey.trim() && loginApiKey()}
         />
         <button className="btn full" disabled={!!busy || !apiKey.trim()} onClick={loginApiKey}>
-          {busy === 'apikey' ? <span className="spinner" /> : '用 API Key 登录'}
+          {busy === 'apikey' ? <span className="spinner" /> : t('login.apiKeyLogin')}
         </button>
       </div>
     </div>
