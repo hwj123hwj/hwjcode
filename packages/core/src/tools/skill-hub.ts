@@ -24,7 +24,7 @@ const REGISTRY_FALLBACK_URL = 'https://raw.githubusercontent.com/hwj123hwj/custo
 const SKILL_URL_TEMPLATE = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/skills/{skillId}/SKILL.md';
 const SKILL_FALLBACK_TEMPLATE = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/skills/{skillId}/SKILL.md';
 const FETCH_TIMEOUT_MS = 10000;
-const MAX_SEARCH_RESULTS = 5;
+const MAX_SEARCH_RESULTS = 20;
 
 interface SkillRegistryItem {
   id: string;
@@ -36,7 +36,7 @@ interface SkillRegistryItem {
 
 interface SkillHubParams {
   /** Action to perform: "search" to find skills, "install" to download and install a skill */
-  action: 'search' | 'install';
+  action: 'search' | 'install' | 'list';
   /** Search query keyword (for search action) */
   query?: string;
   /** Skill ID to install (for install action) */
@@ -60,8 +60,8 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
         properties: {
           action: {
             type: Type.STRING,
-            description: '操作类型: "search" 搜索技能, "install" 安装技能',
-            enum: ['search', 'install'],
+            description: '操作类型: "search" 搜索技能, "install" 安装技能, "list" 列出全部技能',
+            enum: ['search', 'install', 'list'],
           },
           query: {
             type: Type.STRING,
@@ -96,6 +96,9 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
   }
 
   override getDescription(params: SkillHubParams): string {
+    if (params.action === 'list') {
+      return 'Listing all skills in custom-skills registry';
+    }
     if (params.action === 'search') {
       return `Searching custom-skills registry for: "${params.query}"`;
     }
@@ -113,7 +116,7 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
   override async shouldConfirmExecute(
     params: SkillHubParams,
   ): Promise<ToolCallConfirmationDetails | false> {
-    if (params.action === 'search') {
+    if (params.action === 'search' || params.action === 'list') {
       return false; // Read-only, no confirmation needed
     }
 
@@ -139,11 +142,54 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
       };
     }
 
+    if (params.action === 'list') {
+      return this.executeList(signal);
+    }
+
     if (params.action === 'search') {
       return this.executeSearch(params.query!, signal);
     }
 
     return this.executeInstall(params.skillId!, signal);
+  }
+
+  /**
+   * List all skills in the registry
+   */
+  private async executeList(signal: AbortSignal): Promise<ToolResult> {
+    try {
+      const registry = await this.fetchRegistry(signal);
+      if (!registry) {
+        return {
+          llmContent: 'Error: 无法获取技能仓库索引。请检查网络连接。',
+          returnDisplay: 'Registry fetch failed',
+        };
+      }
+
+      const lines: string[] = [
+        `技能市场共有 ${registry.length} 个技能：`,
+        '',
+      ];
+
+      for (const skill of registry) {
+        lines.push(`- **${skill.id}**: ${skill.description}`);
+        lines.push(`  标签: ${skill.tags.join(', ')}`);
+      }
+
+      lines.push('');
+      lines.push('使用 `skill_hub(action="install", skillId="技能ID")` 安装技能。');
+
+      return {
+        llmContent: lines.join('\n'),
+        returnDisplay: `Found ${registry.length} skill(s)`,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        llmContent: `列表获取失败: ${errorMessage}`,
+        returnDisplay: `Error: ${errorMessage}`,
+      };
+    }
   }
 
   /**
