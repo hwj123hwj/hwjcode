@@ -51,6 +51,18 @@ describe('detectNLModelSwitch（收藏列表模式）', () => {
     expect(result!.modelName).toBe('deepseek-v4-flash');
   });
 
+  it('匹配 "切换智谱模型"（噪音词"模型"被过滤）', () => {
+    const result = detectNLModelSwitch('切换智谱模型', mockFavorites);
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('glm-5.1');
+  });
+
+  it('匹配 "切换智谱的模型"（噪音词"的""模型"被过滤）', () => {
+    const result = detectNLModelSwitch('切换智谱的模型', mockFavorites);
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('glm-5.1');
+  });
+
   it('不匹配未收藏的模型（deepseek-v4-pro没有收藏）', () => {
     const result = detectNLModelSwitch('换deepseek-v4-pro', mockFavorites);
     // 收藏列表没有 pro，只能模糊匹配到 flash
