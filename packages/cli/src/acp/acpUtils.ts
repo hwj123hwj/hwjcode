@@ -10,6 +10,7 @@ import {
   type ToolResult,
   type ToolCallConfirmationDetails,
   Kind,
+  Icon,
   ApprovalMode,
   ToolConfirmationOutcome,
   proxyAuthManager,
@@ -314,6 +315,46 @@ export function confirmationRequiresCallerApproval(
  * Several kinds that have no exact ACP counterpart (`Agent`, `Plan`,
  * `Communicate`, `SwitchMode`) are folded into `'other'` / `'think'`.
  */
+/**
+ * Derive the ACP `ToolKind` from a tool's {@link Icon}.
+ *
+ * DeepCode's core tools don't carry a {@link Kind} on the instance (only an
+ * `icon`), so the ACP agent has no semantic kind to forward — every tool would
+ * otherwise fall back to `'other'`, and ACP clients (the desktop app, IDEs)
+ * would render them all with the same generic wrench icon. The `Icon` enum is a
+ * required constructor field on every tool, so it's a reliable proxy for the
+ * tool's intent; map it onto the closest ACP kind so clients can pick a
+ * per-tool icon. Unknown/ambiguous icons fall back to `'other'`.
+ */
+export function iconToAcpKind(icon: Icon | undefined): acp.ToolKind {
+  switch (icon) {
+    case Icon.Pencil:
+    case Icon.Wrench: // LintFix edits files
+      return 'edit' as acp.ToolKind;
+    case Icon.Trash:
+      return 'delete' as acp.ToolKind;
+    case Icon.Terminal:
+      return 'execute' as acp.ToolKind;
+    case Icon.FileSearch:
+    case Icon.Regex:
+    case Icon.Folder:
+      return 'search' as acp.ToolKind;
+    case Icon.Globe:
+      return 'fetch' as acp.ToolKind;
+    case Icon.LightBulb:
+      return 'think' as acp.ToolKind;
+    case Icon.Clipboard: // TodoRead
+    case Icon.List: // ListSkills
+    case Icon.Info: // GetSkillDetails
+      return 'read' as acp.ToolKind;
+    case Icon.Hammer:
+    case Icon.Tasks: // TodoWrite
+    case Icon.Question: // AskUserQuestion
+    default:
+      return 'other' as acp.ToolKind;
+  }
+}
+
 export function toAcpToolKind(kind: Kind): acp.ToolKind {
   switch (kind) {
     case Kind.Read:
