@@ -6,6 +6,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Reserve stdout for the ACP JSON-RPC protocol BEFORE importing the rest of the
+// graph. Some modules (e.g. core's proxyAuth singleton) log at import time; this
+// side-effect import repoints the console to stderr first when `--acp` is set.
+import './src/utils/acpStdoutGuard.js';
 import './src/gemini.js';
 import { main } from './src/gemini.js';
 
