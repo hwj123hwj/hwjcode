@@ -22,6 +22,7 @@ import {
 } from './auth.js';
 import {
   gitDiff,
+  gitBranch,
   listDir,
   openExternal,
   pickFiles,
@@ -32,6 +33,7 @@ import {
   saveClipboardImage,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
+import { getUserSettings, updateUserSettings } from './userSettings.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
@@ -39,6 +41,7 @@ import type {
   BrowserLoginResult,
   CreateSessionOptions,
   CustomModelInput,
+  DesktopUserSettings,
   FeishuDomain,
   FeishuManualInput,
   FeishuQrBegin,
@@ -155,6 +158,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     deleteCustomModel(displayName),
   );
 
+  // ── user settings (shared with CLI's /config) ─────────────────────────────
+  ipcMain.handle(IpcInvoke.SettingsGet, () => getUserSettings());
+  ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
+    updateUserSettings(patch),
+  );
+
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(
     IpcInvoke.PermissionRespond,
@@ -180,6 +189,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     return diffs;
   });
   ipcMain.handle(IpcInvoke.OpenExternal, (_e, url: string) => openExternal(url));
+  ipcMain.handle(IpcInvoke.GitBranch, (_e, cwd: string) => gitBranch(cwd));
   ipcMain.handle(
     IpcInvoke.SaveClipboardImage,
     (_e, cwd: string, mimeType: string, data: string, name?: string) =>

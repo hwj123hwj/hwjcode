@@ -657,7 +657,7 @@ export async function loadCliConfig(
     ideClient,
     silentMode: isNonInteractiveMode,
     hooks: settings.hooks,
-    healthyUse: settings.healthyUse ?? true,
+    healthyUse: settings.healthyUse ?? false,
     preferredLanguage: settings.preferredLanguage,
   });
 

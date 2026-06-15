@@ -104,6 +104,20 @@ export function PromptBar({ view }: { view: SessionView }) {
   );
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  // Current git branch (+ dirty flag) of this session's working folder, shown
+  // after the folder name as "name (branch*)". Re-queried when the cwd changes.
+  const cwd = view.meta.cwd;
+  const [git, setGit] = useState<{ branch: string; dirty: boolean } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void api.workspace.gitBranch(cwd).then((g) => {
+      if (alive) setGit(g);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [cwd]);
+
   const addImageFromUrl = async (url: string, origMime: string, name: string) => {
     const { mimeType, data } = await compressImage(url, origMime);
     if (!data) return;
@@ -282,9 +296,19 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="laptop" size={14} />
             {t('common.local')}
           </span>
-          <span className="chip" title={meta.cwd}>
+          <span
+            className="chip interactive"
+            title={meta.cwd}
+            onClick={() => window.alert(t('prompt.cwdHint'))}
+          >
             <Icon name="folder" size={14} />
             {projectName(meta.cwd)}
+            {git && (
+              <span className="chip-branch">
+                ({git.branch}
+                {git.dirty ? '*' : ''})
+              </span>
+            )}
           </span>
           {meta.agentType && meta.agentType !== 'easy-code' && (
             <span className="chip accent" title={t('prompt.externalAgentTitle')}>
