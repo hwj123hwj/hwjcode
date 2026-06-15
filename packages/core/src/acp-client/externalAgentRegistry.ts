@@ -54,12 +54,17 @@ const OVERRIDE_ENV: Record<ExternalAgentType, string> = {
   'codex': 'EASYCODE_CODEX_ACP_CMD',
 };
 
+// Bridge versions are PINNED: `npx -y <pkg>` (unpinned) re-resolves to the
+// latest published version on every spawn, so a breaking bridge release could
+// silently break a working setup. Bump these deliberately after verifying a new
+// version, and keep them in sync with packages/desktop/src/main/externalAgents.ts.
+// Users can still float to latest / point elsewhere via EASYCODE_*_ACP_CMD.
 const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
   'claude-code': {
     type: 'claude-code',
     label: 'Claude Code',
     command: 'npx',
-    args: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.44.0'],
   },
   'codex': {
     // Codex CLI does not speak ACP natively. We drive it through Zed
@@ -70,7 +75,7 @@ const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
     type: 'codex',
     label: 'Codex',
     command: 'npx',
-    args: ['-y', '@zed-industries/codex-acp'],
+    args: ['-y', '@zed-industries/codex-acp@0.16.0'],
   },
 };
 

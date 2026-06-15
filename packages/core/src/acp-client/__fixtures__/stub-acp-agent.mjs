@@ -20,6 +20,11 @@
  *   - "setmodel": newSession reports model state (two models), implements
  *     `session/set_model` by recording the requested modelId and echoing it back
  *     in the agent message (used by the set_model integration tests).
+ *   - "configmodel": emulates the claude-agent-acp bridge — newSession exposes
+ *     models via `configOptions` (id="model"), has NO top-level `models` field,
+ *     and rejects `session/set_model` (-32601). Implements
+ *     `session/set_config_option` (configId="model") by recording the value and
+ *     echoing it back (used by the configOptions model-switch test).
  *   - "replay": on `session/load`, emits an `agent_message_chunk` ("OLD_HISTORY_
  *     REPLAY") before resolving — emulating the real bridge replaying prior
  *     conversation history (used by the resume-watermark regression test).
@@ -83,6 +88,26 @@ new acp.AgentSideConnection(
           },
         };
       }
+      if (MODE === 'configmodel') {
+        // No top-level `models`; the model list lives in configOptions, exactly
+        // like the real claude-agent-acp bridge.
+        return {
+          sessionId: 'stub-session-1',
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              type: 'select',
+              currentValue: 'default',
+              options: [
+                { value: 'default', name: 'Default (recommended)' },
+                { value: 'sonnet', name: 'Sonnet' },
+                { value: 'haiku', name: 'Haiku' },
+              ],
+            },
+          ],
+        };
+      }
       return { sessionId: 'stub-session-1' };
     },
     async loadSession(params) {
@@ -130,6 +155,18 @@ new acp.AgentSideConnection(
       ? {
           async unstable_setSessionModel(params) {
             lastSetModelId = params.modelId;
+            return {};
+          },
+        }
+      : {}),
+    // Only in configmodel mode: the bridge switches models via
+    // session/set_config_option (configId="model"), NOT session/set_model.
+    // Record the requested value so the prompt can echo it back. Absent in
+    // other modes, so set_config_option there yields "method not found".
+    ...(MODE === 'configmodel'
+      ? {
+          async setSessionConfigOption(params) {
+            if (params.configId === 'model') lastSetModelId = params.value;
             return {};
           },
         }
@@ -227,9 +264,9 @@ new acp.AgentSideConnection(
         },
       });
 
-      if (MODE === 'setmodel') {
-        // Echo whatever modelId the client set (or "none" if it never called
-        // set_model), so the integration test can assert on it.
+      if (MODE === 'setmodel' || MODE === 'configmodel') {
+        // Echo whatever modelId the client set (or "none" if it never switched),
+        // so the integration test can assert on it.
         await conn.sessionUpdate({
           sessionId: params.sessionId,
           update: {
