@@ -10,9 +10,18 @@ export function ChatPane({ view }: { view: SessionView }) {
   const rewindTo = useStore((s) => s.rewindTo);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // The backend reports 'thinking' from prompt submit through turn_end (covering
+  // model streaming and tool runs) and 'starting' while the bridge spins up. In
+  // either state the agent is working, so show the typing indicator.
+  const busy = view.meta.status === 'thinking' || view.meta.status === 'starting';
+  // Once the assistant has started streaming visible text this turn, the bubble
+  // itself shows progress — only show the standalone dots before that.
+  const last = view.transcript[view.transcript.length - 1];
+  const showDots = busy && (!last || last.kind !== 'assistant');
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'auto' });
-  }, [view.transcript]);
+  }, [view.transcript, showDots]);
 
   let userIndex = -1;
 
@@ -43,6 +52,15 @@ export function ChatPane({ view }: { view: SessionView }) {
             />
           );
         })}
+        {showDots && (
+          <div className="msg msg-assistant">
+            <div className="typing-dots" aria-label="AI 正在响应">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>
