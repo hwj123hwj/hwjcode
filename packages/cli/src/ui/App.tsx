@@ -16,7 +16,7 @@ import {
   useInput,
   type Key as InkKeyType,
 } from 'ink';
-import { StreamingState, type HistoryItem, MessageType, ToolCallStatus, type IndividualToolCallDisplay } from './types.js';
+import { StreamingState, type HistoryItem, type HistoryItemWithoutId, MessageType, ToolCallStatus, type IndividualToolCallDisplay } from './types.js';
 import type { PartListUnion } from '@google/genai';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
@@ -30,6 +30,7 @@ import { useTaskCompletionSummary } from './hooks/useTaskCompletionSummary.js';
 import { TaskCompletionSummary } from './components/TaskCompletionSummary.js';
 import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
+import { detectNLModelSwitch, buildSwitchMessage } from './hooks/useNLModelSwitch.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
 import { useDebateWizard } from './hooks/useDebateWizard.js';
 import { useGoalWizard } from './hooks/useGoalWizard.js';
@@ -81,7 +82,7 @@ import { Colors } from './colors.js';
 import { Help } from './components/Help.js';
 import { loadHierarchicalGeminiMemory } from '../config/config.js';
 import { updateWindowTitleIcon } from '../gemini.js';
-import { LoadedSettings } from '../config/settings.js';
+import { LoadedSettings, SettingScope } from '../config/settings.js';
 import { Tips } from './components/Tips.js';
 import { ConsolePatcher } from './utils/ConsolePatcher.js';
 import { registerCleanup } from '../utils/cleanup.js';
@@ -2050,10 +2051,66 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
           // 如果slashCommandResult为false，说明不是有效的slash命令，继续正常处理
         }
 
+        // 🎯 自然语言模型切换检测
+        // 匹配 "切换模型xxx" / "用xxx" / "换xxx" 等模式，直接切换模型，不发给AI
+        const cloudModels = config.getCloudModels();
+        if (cloudModels && cloudModels.length > 0) {
+          const nlMatch = detectNLModelSwitch(trimmedValue, cloudModels);
+          if (nlMatch) {
+            try {
+              const geminiClient = config.getGeminiClient();
+              if (geminiClient) {
+                await geminiClient.waitForChatInitialized();
+                const knownTokenCount = lastTokenUsage?.input_tokens;
+                const switchResult = await geminiClient.switchModel(
+                  nlMatch.modelName,
+                  new AbortController().signal,
+                  knownTokenCount,
+                );
+
+                if (switchResult.success) {
+                  settings.setValue(SettingScope.User, 'preferredModel', nlMatch.modelName);
+                  appEvents.emit(AppEvent.ModelChanged, nlMatch.modelName);
+                  setCurrentModel(nlMatch.modelName);
+
+                  let msg = buildSwitchMessage(nlMatch.modelDisplayName, nlMatch.matchedKeyword);
+                  if (switchResult.compressionInfo) {
+                    msg += `\n📦 上下文压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`;
+                  }
+                  addItem({ type: MessageType.INFO, text: msg } as HistoryItemWithoutId, Date.now());
+                } else {
+                  addItem({
+                    type: MessageType.ERROR,
+                    text: `切换模型失败: ${switchResult.error || '未知错误'}`,
+                  } as HistoryItemWithoutId, Date.now());
+                }
+              } else {
+                // Fallback: 直接修改配置
+                config.setModel(nlMatch.modelName);
+                settings.setValue(SettingScope.User, 'preferredModel', nlMatch.modelName);
+                appEvents.emit(AppEvent.ModelChanged, nlMatch.modelName);
+                setCurrentModel(nlMatch.modelName);
+                addItem({
+                  type: MessageType.INFO,
+                  text: buildSwitchMessage(nlMatch.modelDisplayName, nlMatch.matchedKeyword),
+                } as HistoryItemWithoutId, Date.now());
+              }
+              return;
+            } catch (error) {
+              console.warn('[NL Model Switch] Error:', error);
+              addItem({
+                type: MessageType.ERROR,
+                text: `切换模型出错: ${error instanceof Error ? error.message : String(error)}`,
+              } as HistoryItemWithoutId, Date.now());
+              return;
+            }
+          }
+        }
+
         handlePromptOrQueue(trimmedValue);
       }
     },
-    [handlePromptOrQueue, logoShows, stdout, handleSlashCommand],
+    [handlePromptOrQueue, logoShows, stdout, handleSlashCommand, config, settings, addItem, lastTokenUsage, setCurrentModel],
   );
 
   const buffer = useTextBuffer({
