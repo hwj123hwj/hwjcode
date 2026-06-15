@@ -62,6 +62,7 @@ export const IpcInvoke = {
   ReadFileBase64: 'workspace:read-file-base64',
   ListDir: 'workspace:list-dir',
   GitDiff: 'workspace:git-diff',
+  GitBranch: 'workspace:git-branch',
   OpenExternal: 'workspace:open-external',
   SaveClipboardImage: 'workspace:save-clipboard-image',
   // clipboard
@@ -598,6 +599,8 @@ export interface EasycodeBridge {
     listDir(path: string): Promise<DirEntry[]>;
     /** Pass `sessionId` to also refresh that session's +N/-M chip in the sidebar. */
     gitDiff(cwd: string, sessionId?: string): Promise<GitFileDiff[]>;
+    /** Current git branch + dirty flag for `cwd`, or null if not a git work tree. */
+    gitBranch(cwd: string): Promise<{ branch: string; dirty: boolean } | null>;
     openExternal(url: string): Promise<void>;
     /**
      * Persist an attached/pasted image into `<cwd>/.easycode/clipboard/` with a

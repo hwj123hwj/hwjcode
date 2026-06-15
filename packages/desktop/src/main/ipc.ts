@@ -22,6 +22,7 @@ import {
 } from './auth.js';
 import {
   gitDiff,
+  gitBranch,
   listDir,
   openExternal,
   pickFiles,
@@ -180,6 +181,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     return diffs;
   });
   ipcMain.handle(IpcInvoke.OpenExternal, (_e, url: string) => openExternal(url));
+  ipcMain.handle(IpcInvoke.GitBranch, (_e, cwd: string) => gitBranch(cwd));
   ipcMain.handle(
     IpcInvoke.SaveClipboardImage,
     (_e, cwd: string, mimeType: string, data: string, name?: string) =>

@@ -151,6 +151,29 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+/**
+ * The current git branch of `cwd` (or null if it isn't a git work tree).
+ * `dirty` is true when there are staged/unstaged/untracked changes — surfaced
+ * as a `*` suffix next to the branch name in the prompt bar.
+ */
+export async function gitBranch(
+  cwd: string,
+): Promise<{ branch: string; dirty: boolean } | null> {
+  const inside = (await git(cwd, ['rev-parse', '--is-inside-work-tree'])).trim();
+  if (inside !== 'true') return null;
+
+  let branch = (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+  // Detached HEAD → fall back to the short commit hash.
+  if (!branch || branch === 'HEAD') {
+    const short = (await git(cwd, ['rev-parse', '--short', 'HEAD'])).trim();
+    branch = short ? `(${short})` : '';
+  }
+  if (!branch) return null;
+
+  const status = await git(cwd, ['status', '--porcelain']);
+  return { branch, dirty: status.trim().length > 0 };
+}
+
 function classify(numstatStatus: string): GitFileDiff['status'] {
   if (numstatStatus.startsWith('A')) return 'added';
   if (numstatStatus.startsWith('D')) return 'deleted';

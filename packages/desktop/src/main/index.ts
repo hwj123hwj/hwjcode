@@ -24,6 +24,46 @@ let mainWindow: BrowserWindow | null = null;
 let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
 
+/**
+ * macOS application menu. The first submenu's title is the app name shown in the
+ * menu bar; building it explicitly guarantees "Easy Code" instead of the default
+ * "Electron". Includes the standard Edit/Window items so copy/paste/quit and the
+ * usual shortcuts keep working.
+ */
+function setMacAppMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Easy Code',
+      submenu: [
+        { role: 'about', label: 'About Easy Code' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Hide Easy Code' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Easy Code' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -72,9 +112,15 @@ app.whenReady().then(() => {
   // turn-complete notifications either don't appear or show as an unbranded
   // "electron.app.…" sender. Must match electron-builder.yml's `appId`.
   if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
-  // Drop the default application menu on Windows/Linux entirely. On macOS we
-  // keep it so standard shortcuts (copy/paste/quit) and the app menu survive.
-  if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
+  if (process.platform === 'darwin') {
+    // Build the app menu explicitly so its first item reads "Easy Code" — the
+    // default macOS menu shows "Electron" in dev/unpackaged runs regardless of
+    // app.setName. Keep the standard edit/window shortcuts working.
+    setMacAppMenu();
+  } else {
+    // Drop the default application menu on Windows/Linux entirely.
+    Menu.setApplicationMenu(null);
+  }
   ({ hub, feishu } = registerIpc(() => mainWindow));
   createWindow();
 
