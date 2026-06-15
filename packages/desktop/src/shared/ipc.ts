@@ -53,6 +53,9 @@ export const IpcInvoke = {
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
   ModelsDeleteCustom: 'models:delete-custom',
+  // user settings (shared ~/.easycode-user/settings.json)
+  SettingsGet: 'settings:get',
+  SettingsUpdate: 'settings:update',
   // permission reply
   PermissionRespond: 'permission:respond',
   // workspace helpers
@@ -228,6 +231,32 @@ export interface CustomModelEntry extends CustomModelInput {
 export interface SaveCustomModelResult {
   ok: boolean;
   error?: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// User settings (stored in ~/.easycode-user/settings.json, shared w/ CLI)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Project-memory loading mode — mirrors the CLI's `projectMemoryMode`. */
+export type ProjectMemoryMode = 'all' | 'deepv-only' | 'none';
+
+/**
+ * The subset of the CLI's user settings the desktop exposes in its Settings
+ * dialog. These live in the *same* `~/.easycode-user/settings.json` the CLI's
+ * `/config` command reads and writes, so a change here is honoured by the CLI
+ * and by every `easycode --acp` backend on its next start.
+ *
+ * Terminal-only settings (theme, vim mode, external editor) are intentionally
+ * omitted; the model and permission mode are handled per-session elsewhere in
+ * the desktop UI.
+ */
+export interface DesktopUserSettings {
+  /** Preferred response language, e.g. "English" / "中文". Empty = model default. */
+  preferredLanguage?: string;
+  /** Healthy-use reminders. Undefined is treated as disabled (the default). */
+  healthyUse?: boolean;
+  /** How project memory (DEEPV.md / AGENTS.md) is loaded. Undefined = "all". */
+  projectMemoryMode?: ProjectMemoryMode;
 }
 
 export interface CreateSessionOptions {
@@ -555,6 +584,16 @@ export interface EasycodeBridge {
       originalDisplayName?: string,
     ): Promise<SaveCustomModelResult>;
     deleteCustom(displayName: string): Promise<void>;
+  };
+  settings: {
+    /** Read the shared user settings (the same file the CLI's `/config` edits). */
+    get(): Promise<DesktopUserSettings>;
+    /**
+     * Merge a partial update into the shared settings file, preserving every key
+     * the desktop doesn't manage. Pass `preferredLanguage: ''` to clear the
+     * language back to the model default. Returns the new state.
+     */
+    update(patch: DesktopUserSettings): Promise<DesktopUserSettings>;
   };
   agents: {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */

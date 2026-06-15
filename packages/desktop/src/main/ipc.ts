@@ -32,6 +32,7 @@ import {
   saveClipboardImage,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
+import { getUserSettings, updateUserSettings } from './userSettings.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
@@ -39,6 +40,7 @@ import type {
   BrowserLoginResult,
   CreateSessionOptions,
   CustomModelInput,
+  DesktopUserSettings,
   FeishuDomain,
   FeishuManualInput,
   FeishuQrBegin,
@@ -153,6 +155,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.ModelsDeleteCustom, (_e, displayName: string) =>
     deleteCustomModel(displayName),
+  );
+
+  // ── user settings (shared with CLI's /config) ─────────────────────────────
+  ipcMain.handle(IpcInvoke.SettingsGet, () => getUserSettings());
+  ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
+    updateUserSettings(patch),
   );
 
   // ── permissions ─────────────────────────────────────────────────────────

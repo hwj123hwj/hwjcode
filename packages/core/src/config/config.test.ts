@@ -244,7 +244,7 @@ describe('Server Config (config.ts)', () => {
     expect(config.getHealthyUseEnabled()).toBe(false);
 
     const configDefault = new Config(baseParams);
-    expect(configDefault.getHealthyUseEnabled()).toBe(true);
+    expect(configDefault.getHealthyUseEnabled()).toBe(false);
   });
 
   it('should have a getFileService method that returns FileDiscoveryService', () => {
