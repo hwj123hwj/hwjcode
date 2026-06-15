@@ -385,6 +385,82 @@ function currentModelIdOf(models: unknown): string | undefined {
   return typeof ms.currentModelId === 'string' ? ms.currentModelId : undefined;
 }
 
+/**
+ * Normalized model state extracted from a `session/new` | `session/load`
+ * response, plus the ACP surface it came from. The shape matches what
+ * {@link extractModelName} / {@link resolveModelId} / {@link currentModelIdOf}
+ * expect, so those helpers operate on it directly.
+ */
+interface NormalizedModelState {
+  availableModels: Array<{ modelId: string; name?: string }>;
+  currentModelId?: string;
+  /** Where the list came from — decides how we switch models. */
+  source: 'models' | 'configOptions';
+}
+
+/**
+ * Normalize an agent's model state from a `session/new` | `session/load`
+ * response. ACP agents expose models in one of two (experimental) ways:
+ *   - `source: 'models'` — a top-level `models` field (the easy-code backend),
+ *     switched at runtime via `session/set_model`;
+ *   - `source: 'configOptions'` — a `model` entry inside `configOptions` (the
+ *     `claude-agent-acp` / `codex-acp` bridges, which do NOT emit `models` and
+ *     reject `session/set_model` with -32601), switched via
+ *     `session/set_config_option` with `configId: 'model'`.
+ * Returns undefined when neither surface carries a usable model list.
+ */
+function normalizeModelState(resp: unknown): NormalizedModelState | undefined {
+  const r = resp as { models?: unknown; configOptions?: unknown } | null | undefined;
+  if (!r || typeof r !== 'object') return undefined;
+
+  // Preferred: the experimental top-level `models` field.
+  const ms = r.models as
+    | { availableModels?: unknown; currentModelId?: unknown }
+    | null
+    | undefined;
+  if (ms && typeof ms === 'object' && Array.isArray(ms.availableModels)) {
+    const availableModels = (ms.availableModels as Array<Record<string, unknown>>)
+      .filter((m) => typeof m?.modelId === 'string')
+      .map((m) => ({
+        modelId: m.modelId as string,
+        name: typeof m.name === 'string' ? m.name : undefined,
+      }));
+    if (availableModels.length) {
+      return {
+        availableModels,
+        currentModelId:
+          typeof ms.currentModelId === 'string' ? ms.currentModelId : undefined,
+        source: 'models',
+      };
+    }
+  }
+
+  // Fallback: the `model` entry of configOptions (claude-agent-acp / codex).
+  if (Array.isArray(r.configOptions)) {
+    const modelOpt = r.configOptions.find(
+      (o) => o && typeof o === 'object' && (o as { id?: unknown }).id === 'model',
+    ) as { currentValue?: unknown; options?: unknown } | undefined;
+    if (modelOpt && Array.isArray(modelOpt.options)) {
+      const availableModels = (modelOpt.options as Array<Record<string, unknown>>)
+        .filter((o) => typeof o?.value === 'string')
+        .map((o) => ({
+          modelId: o.value as string,
+          name: typeof o.name === 'string' ? o.name : undefined,
+        }));
+      if (availableModels.length) {
+        return {
+          availableModels,
+          currentModelId:
+            typeof modelOpt.currentValue === 'string' ? modelOpt.currentValue : undefined,
+          source: 'configOptions',
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
 /** Pick the most permissive "allow" option from a permission request. */
 function pickAllowOption(
   options: acp.PermissionOption[],
@@ -943,8 +1019,10 @@ export async function runDelegatedTask(
     const canResume = Boolean(init.agentCapabilities?.loadSession);
     // The session model state from whichever path established the session
     // (resume → loaded, fresh → session). Used to resolve an optional
-    // requested model before the prompt goes out.
-    let savedModels: unknown;
+    // requested model before the prompt goes out. Normalized so it works for
+    // both the easy-code backend (`models` field) and external bridges like
+    // claude-agent-acp (`configOptions[id=model]`).
+    let savedModels: NormalizedModelState | undefined;
     if (opts.resumeSessionId && canResume) {
       phase = `已连接 ${label}，正在恢复会话 ${opts.resumeSessionId.slice(0, 8)}…`;
       try {
@@ -954,7 +1032,7 @@ export async function runDelegatedTask(
           mcpServers: [],
         });
         sessionId = opts.resumeSessionId;
-        savedModels = (loaded as { models?: unknown }).models;
+        savedModels = normalizeModelState(loaded);
         handler.noteModel(extractModelName(savedModels));
       } catch {
         // Resume failed (stale id, bridge quirk) — fall back to a fresh
@@ -967,7 +1045,7 @@ export async function runDelegatedTask(
       phase = `已连接 ${label}，正在创建会话…`;
       const session = await connection.newSession({ cwd, mcpServers: [] });
       sessionId = session.sessionId;
-      savedModels = (session as { models?: unknown }).models;
+      savedModels = normalizeModelState(session);
       handler.noteModel(extractModelName(savedModels));
     }
 
@@ -978,12 +1056,14 @@ export async function runDelegatedTask(
     // "已切换模型" / "未找到匹配的模型" notices below remain part of this turn.
     handler.markTurnStart();
 
-    // Honor an optional requested model via the (experimental) ACP
-    // `session/set_model`, *before* the prompt. This is best-effort: a bridge
-    // that doesn't implement the unstable method returns "method not found",
-    // and a model string that matches nothing is a no-op — neither must ever
-    // fail the delegation. We only call set_model when we resolved a concrete
-    // modelId that differs from the session's current one.
+    // Honor an optional requested model *before* the prompt, using whichever
+    // switch mechanism the agent advertised (see normalizeModelState): external
+    // bridges use `session/set_config_option {configId:'model'}`, the easy-code
+    // backend uses the experimental `session/set_model`. This is best-effort: a
+    // model string that matches nothing is a no-op, and any RPC failure (an
+    // agent that doesn't implement the method, etc.) must never fail the
+    // delegation. We only switch when we resolved a concrete modelId that
+    // differs from the session's current one.
     if (opts.model) {
       const targetId = resolveModelId(savedModels, opts.model);
       if (!targetId) {
@@ -991,7 +1071,15 @@ export async function runDelegatedTask(
         handler.flush();
       } else if (targetId !== currentModelIdOf(savedModels)) {
         try {
-          await connection.unstable_setSessionModel({ sessionId, modelId: targetId });
+          if (savedModels?.source === 'configOptions') {
+            await connection.setSessionConfigOption({
+              sessionId,
+              configId: 'model',
+              value: targetId,
+            });
+          } else {
+            await connection.unstable_setSessionModel({ sessionId, modelId: targetId });
+          }
           const targetName = modelNameById(savedModels, targetId) ?? targetId;
           handler.noteModel(targetName);
           handler.transcript += `🔧 已切换模型 → ${targetName}\n`;
