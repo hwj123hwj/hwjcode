@@ -19,8 +19,17 @@ import type {
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
+  FeishuDomain,
+  FeishuExternalProcess,
+  FeishuManualInput,
+  FeishuQrBegin,
+  FeishuQrBeginResult,
+  FeishuResult,
+  FeishuStatus,
+  FileBase64,
   GitFileDiff,
   PermissionMode,
+  PickedFile,
   PermissionRequest,
   PermissionResponse,
   PromptOptions,
@@ -85,6 +94,23 @@ const bridge: EasycodeBridge = {
     detect: () =>
       ipcRenderer.invoke(IpcInvoke.AgentsDetect) as Promise<ExternalAgentAvailability>,
   },
+  feishu: {
+    status: () => ipcRenderer.invoke(IpcInvoke.FeishuStatus) as Promise<FeishuStatus>,
+    saveManual: (input: FeishuManualInput) =>
+      ipcRenderer.invoke(IpcInvoke.FeishuSaveManual, input) as Promise<FeishuResult>,
+    qrBegin: (domain: FeishuDomain) =>
+      ipcRenderer.invoke(IpcInvoke.FeishuQrBegin, domain) as Promise<FeishuQrBeginResult>,
+    qrPoll: (begin: FeishuQrBegin) =>
+      ipcRenderer.invoke(IpcInvoke.FeishuQrPoll, begin) as Promise<FeishuResult>,
+    qrCancel: () => ipcRenderer.invoke(IpcInvoke.FeishuQrCancel) as Promise<void>,
+    clear: () => ipcRenderer.invoke(IpcInvoke.FeishuClear) as Promise<FeishuStatus>,
+    start: () => ipcRenderer.invoke(IpcInvoke.FeishuStart) as Promise<FeishuResult>,
+    stop: () => ipcRenderer.invoke(IpcInvoke.FeishuStop) as Promise<FeishuStatus>,
+    detectExternal: () =>
+      ipcRenderer.invoke(IpcInvoke.FeishuDetectExternal) as Promise<FeishuExternalProcess[]>,
+    killExternal: () => ipcRenderer.invoke(IpcInvoke.FeishuKillExternal) as Promise<number>,
+    onChanged: (cb) => on<FeishuStatus>(IpcEvent.FeishuChanged, cb),
+  },
   permissions: {
     onRequest: (cb) => on<PermissionRequest>(IpcEvent.PermissionRequest, cb),
     respond: (requestId, response: PermissionResponse) =>
@@ -92,7 +118,10 @@ const bridge: EasycodeBridge = {
   },
   workspace: {
     pickFolder: () => ipcRenderer.invoke(IpcInvoke.PickFolder) as Promise<string | undefined>,
+    pickFiles: () => ipcRenderer.invoke(IpcInvoke.PickFiles) as Promise<PickedFile[]>,
     readFile: (p) => ipcRenderer.invoke(IpcInvoke.ReadFile, p) as Promise<string>,
+    readFileBase64: (p) =>
+      ipcRenderer.invoke(IpcInvoke.ReadFileBase64, p) as Promise<FileBase64 | null>,
     listDir: (p) => ipcRenderer.invoke(IpcInvoke.ListDir, p) as Promise<DirEntry[]>,
     gitDiff: (cwd, sessionId) =>
       ipcRenderer.invoke(IpcInvoke.GitDiff, cwd, sessionId) as Promise<GitFileDiff[]>,

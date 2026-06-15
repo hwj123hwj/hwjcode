@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
+import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import appIcon from '../../../public/app-icon.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
@@ -48,6 +49,7 @@ export function Sidebar() {
 
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFeishu, setShowFeishu] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
@@ -215,6 +217,9 @@ export function Sidebar() {
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {auth?.user?.name || auth?.user?.email || '已登录'}
         </span>
+        <button className="icon-btn" title="飞书网关" onClick={() => setShowFeishu(true)}>
+          <Icon name="feishu" size={15} />
+        </button>
         <button className="icon-btn" title="设置" onClick={() => setShowSettings(true)}>
           <Icon name="settings" size={15} />
         </button>
@@ -225,6 +230,7 @@ export function Sidebar() {
 
       {showNew && <NewSessionDialog onClose={() => setShowNew(false)} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showFeishu && <FeishuDialog onClose={() => setShowFeishu(false)} />}
     </aside>
   );
 }

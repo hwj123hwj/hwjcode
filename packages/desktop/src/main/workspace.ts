@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { dialog, shell, BrowserWindow } from 'electron';
-import type { DirEntry, GitFileDiff } from '../shared/ipc.js';
+import type { DirEntry, FileBase64, GitFileDiff, PickedFile } from '../shared/ipc.js';
 
 const exec = promisify(execFile);
 
@@ -23,6 +23,46 @@ export async function pickFolder(parent?: BrowserWindow): Promise<string | undef
   });
   if (result.canceled || result.filePaths.length === 0) return undefined;
   return result.filePaths[0];
+}
+
+/** Open the native file picker (multi-select) for prompt attachments. */
+export async function pickFiles(parent?: BrowserWindow): Promise<PickedFile[]> {
+  const result = await dialog.showOpenDialog(parent!, {
+    title: '选择附件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled) return [];
+  return result.filePaths.map((p) => ({ path: p, name: path.basename(p) }));
+}
+
+/** Map a file extension to an image mime type (only image types are inlined). */
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+};
+
+/**
+ * Read a file as base64 + detected mime type. Returns null for non-image files
+ * (those should be attached as @-path references, not inlined). Caps at ~20 MB
+ * to avoid blowing up the ACP payload / the model's image budget.
+ */
+export async function readFileBase64(file: string): Promise<FileBase64 | null> {
+  const mimeType = IMAGE_MIME[path.extname(file).toLowerCase()];
+  if (!mimeType) return null;
+  const buf = await fs.readFile(file);
+  if (buf.length > 20 * 1024 * 1024) {
+    throw new Error('图片过大（>20MB），请压缩后再试。');
+  }
+  return { mimeType, data: buf.toString('base64') };
 }
 
 export async function readFile(file: string): Promise<string> {

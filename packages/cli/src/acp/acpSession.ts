@@ -1190,11 +1190,22 @@ export class Session {
       );
     }
 
+    // Inline image blocks (e.g. pasted/attached images from the desktop) must
+    // still reach the model when the prompt ALSO carries @-path references —
+    // the early flatMap branch above only runs when there are no @-paths.
+    const imageParts: Part[] = blocks.flatMap((b) => {
+      if ((b as { type?: string }).type !== 'image') return [];
+      const img = b as unknown as { mimeType?: string; data?: string };
+      return img.mimeType && img.data
+        ? [{ inlineData: { mimeType: img.mimeType, data: img.data } } as Part]
+        : [];
+    });
+
     if (pathSpecsToRead.length === 0) {
-      return [{ text: queryText } as Part];
+      return [{ text: queryText } as Part, ...imageParts];
     }
 
-    const parts: Part[] = [{ text: queryText } as Part];
+    const parts: Part[] = [{ text: queryText } as Part, ...imageParts];
     const toolArgs = { paths: pathSpecsToRead, respectGitIgnore };
     try {
       const result = await readManyFilesTool.execute(toolArgs, signal);

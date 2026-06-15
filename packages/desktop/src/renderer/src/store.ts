@@ -89,7 +89,12 @@ interface StoreState {
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
-  sendPrompt: (id: string, text: string, atPaths: string[]) => Promise<void>;
+  sendPrompt: (
+    id: string,
+    text: string,
+    atPaths: string[],
+    images?: { mimeType: string; data: string }[],
+  ) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   setModel: (id: string, modelId: string) => Promise<void>;
   setMode: (id: string, mode: PermissionMode) => Promise<void>;
@@ -258,12 +263,14 @@ export const useStore = create<StoreState>((set, get) => ({
     patchMeta(set, id, { title: meta.title });
   },
 
-  sendPrompt: async (id, text, atPaths) => {
-    // Optimistically render the user bubble.
+  sendPrompt: async (id, text, atPaths, images) => {
+    // Optimistically render the user bubble. Note any attached images so the
+    // sent message reads coherently even though the transcript is text-only.
+    const suffix = images && images.length ? `\n\n[附带 ${images.length} 张图片]` : '';
     set((s) => {
       const view = s.sessions[id];
       if (!view) return {};
-      const item: ChatItem = { kind: 'user', id: newId(), text };
+      const item: ChatItem = { kind: 'user', id: newId(), text: text + suffix };
       return {
         sessions: {
           ...s.sessions,
@@ -271,7 +278,7 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       };
     });
-    await api.sessions.prompt({ sessionId: id, text, atPaths });
+    await api.sessions.prompt({ sessionId: id, text, atPaths, images });
   },
 
   cancel: async (id) => {
