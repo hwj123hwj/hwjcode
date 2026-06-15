@@ -128,6 +128,8 @@ const bridge: EasycodeBridge = {
     listDir: (p) => ipcRenderer.invoke(IpcInvoke.ListDir, p) as Promise<DirEntry[]>,
     gitDiff: (cwd, sessionId) =>
       ipcRenderer.invoke(IpcInvoke.GitDiff, cwd, sessionId) as Promise<GitFileDiff[]>,
+    gitBranch: (cwd) =>
+      ipcRenderer.invoke(IpcInvoke.GitBranch, cwd) as Promise<{ branch: string; dirty: boolean } | null>,
     openExternal: (url) => ipcRenderer.invoke(IpcInvoke.OpenExternal, url) as Promise<void>,
     saveClipboardImage: (cwd, mimeType, data, name) =>
       ipcRenderer.invoke(

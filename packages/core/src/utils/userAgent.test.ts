@@ -27,6 +27,12 @@ describe('getUserAgent', () => {
     expect(ua).toBe(`EasyCode/VSCode/1.1.0 (${process.platform}; ${process.arch})`);
   });
 
+  it('detects the Desktop client from the "Desktop-" prefix and strips it', () => {
+    process.env.CLI_VERSION = 'Desktop-1.1.16';
+    const ua = getUserAgent();
+    expect(ua).toBe(`EasyCode/Desktop/1.1.16 (${process.platform}; ${process.arch})`);
+  });
+
   it('falls back to "unknown" version when CLI_VERSION is not set', () => {
     delete process.env.CLI_VERSION;
     const ua = getUserAgent();
