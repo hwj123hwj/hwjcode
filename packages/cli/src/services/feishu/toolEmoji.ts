@@ -71,7 +71,6 @@ const NAME_EMOJI: Record<string, string> = {
   use_skill: '🧩', useskill: '🧩',
   // 其它内置
   lsp: '🧭', batch: '📦',
-  ppt_outline: '📊', pptoutline: '📊', ppt_generate: '📊', pptgenerate: '📊',
 };
 
 /** 从自由标题（如 "Bash: npm test" / "Edit src/foo.ts"）取归一化首词。 */

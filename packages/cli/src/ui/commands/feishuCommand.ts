@@ -136,8 +136,6 @@ export function feishuGetToolShortName(name: string): string {
     case 'multiedit': return 'MultiEdit';
     case 'patch': return 'Patch';
     case 'batch': return 'Batch';
-    case 'ppt_outline': return 'PPTOutline';
-    case 'ppt_generate': return 'PPTGenerate';
     case 'codesearch': return 'CodeSearch';
     case 'lsp': return 'LSP';
     case 'glob': return 'Glob';
@@ -3378,6 +3376,16 @@ async function handleStart(context?: CommandContext): Promise<string> {
           }
         }
       }
+
+      // 🔧 自然语言命令分发（新对话、压缩上下文、知识库摄取等）
+      // 匹配自然语言关键词，改写成对应 slash 命令交给后续斜杠命令处理
+      const nlCmd = await import('../hooks/useNLCommandDispatch.js').then(m =>
+        m.detectNLCommand(trimmed),
+      );
+      if (nlCmd) {
+        dlog(`[NL-Cmd] MATCHED "${nlCmd.matchedKeyword}" → ${nlCmd.slashCommand}`);
+        messageText = nlCmd.slashCommand;
+      }
     }
 
     // 🔧 自然语言工具开关触发词（等效于 /tool enable/disable）
@@ -4722,10 +4730,6 @@ async function handleStart(context?: CommandContext): Promise<string> {
     } else if (toolName === 'batch') {
       const callCount = args.tool_calls ? args.tool_calls.length : 0;
       mainArg = callCount > 0 ? `${callCount} independent operations` : 'operations';
-    } else if (toolName === 'ppt_outline') {
-      mainArg = args.action ? `${args.action}${args.topic ? `: ${args.topic}` : ''}` : '';
-    } else if (toolName === 'ppt_generate') {
-      mainArg = 'Generate PPT';
     } else if (toolName === 'codesearch' && args.query) {
       mainArg = args.query;
     } else if (toolName === 'lsp') {

@@ -9,14 +9,10 @@ import { SlashCommand } from '../ui/commands/types.js';
 import { Config } from 'deepv-code-core';
 import { aboutCommand } from '../ui/commands/aboutCommand.js';
 import { authCommand } from '../ui/commands/authCommand.js';
-import { loginCommand } from '../ui/commands/loginCommand.js';
-// import { chatCommand } from '../ui/commands/chatCommand.js'; // 已被 /session 替代
 import { clearCommand } from '../ui/commands/clearCommand.js';
 import { compressCommand } from '../ui/commands/compressCommand.js';
 import { configCommand } from '../ui/commands/configCommand.js';
 import { copyCommand } from '../ui/commands/copyCommand.js';
-// import { corgiCommand } from '../ui/commands/corgiCommand.js'; // 已禁用
-// import { docsCommand } from '../ui/commands/docsCommand.js'; // 已禁用
 import { editorCommand } from '../ui/commands/editorCommand.js';
 import { exportCommand } from '../ui/commands/exportCommand.js';
 import { exportDebugCommand } from '../ui/commands/exportDebugCommand.js';
@@ -25,12 +21,8 @@ import { helpCommand } from '../ui/commands/helpCommand.js';
 import { helpAskCommand } from '../ui/commands/helpAskCommand.js';
 import { ideCommand } from '../ui/commands/ideCommand.js';
 import { initCommand } from '../ui/commands/initCommand.js';
-// import { mcpCommand } from '../ui/commands/mcpCommand.js'; // 已删除
 import { memoryCommand } from '../ui/commands/memoryCommand.js';
 import { modelCommand } from '../ui/commands/modelCommand.js';
-// Deprecated: Use /models > Model Management instead
-// import { addModelCommand } from '../ui/commands/addModelCommand.js';
-// import { privacyCommand } from '../ui/commands/privacyCommand.js'; // 已删除
 import { quitCommand } from '../ui/commands/quitCommand.js';
 import { restoreCommand } from '../ui/commands/restoreCommand.js';
 import { statsCommand } from '../ui/commands/statsCommand.js';
@@ -53,7 +45,6 @@ import { btwCommand } from '../ui/commands/btwCommand.js';
 import { nanoBananaCommand } from '../ui/commands/nanoBananaCommand.js';
 import { skillCommand } from '../ui/commands/skillCommand.js';
 import { pluginCommand } from '../ui/commands/pluginCommand.js';
-import { pptCommand } from '../ui/commands/pptCommand.js';
 import { hooksCommand } from '../ui/commands/hooksCommand.js';
 import { issueCommand } from '../ui/commands/issueCommand.js';
 import { newCommand } from '../ui/commands/newCommand.js';
@@ -128,7 +119,6 @@ export class BuiltinCommandLoader implements ICommandLoader {
       agentStyleCommand,
       thinkingCommand,
       accountCommand,
-      pptCommand,
       wikiCommand,
       debateCommand,
       goalCommand,
