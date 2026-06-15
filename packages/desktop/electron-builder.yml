@@ -18,9 +18,15 @@ asarUnpack:
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # arm64 (Apple Silicon) only. Intel (x64) is intentionally dropped: a
+  # universal build nearly doubles the DMG size (~235MB vs ~152MB) and Intel
+  # Macs are a shrinking share. Switch a target's arch to `universal` (and add
+  # `x64ArchFiles: "**/@vscode/ripgrep/bin/*"`) if Intel support is needed again.
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
