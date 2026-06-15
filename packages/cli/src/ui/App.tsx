@@ -2051,11 +2051,19 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
           // 如果slashCommandResult为false，说明不是有效的slash命令，继续正常处理
         }
 
-        // 🎯 自然语言模型切换检测
+        // 🎯 自然语言模型切换检测（仅匹配收藏列表）
         // 匹配 "切换模型xxx" / "用xxx" / "换xxx" 等模式，直接切换模型，不发给AI
-        const cloudModels = config.getCloudModels();
-        if (cloudModels && cloudModels.length > 0) {
-          const nlMatch = detectNLModelSwitch(trimmedValue, cloudModels);
+        const favoriteModelIds: string[] = settings.merged?.favoriteModels || [];
+        if (favoriteModelIds.length > 0) {
+          const cloudModels = config.getCloudModels() || [];
+          const favorites = favoriteModelIds
+            .map((id) => {
+              const model = cloudModels.find(m => m.name === id);
+              return model ? { name: model.name, displayName: model.displayName } : null;
+            })
+            .filter((f): f is { name: string; displayName: string } => f !== null);
+
+          const nlMatch = detectNLModelSwitch(trimmedValue, favorites);
           if (nlMatch) {
             try {
               const geminiClient = config.getGeminiClient();
