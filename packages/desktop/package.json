@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
-    "deepv-code-core": "file:../core"
+    "deepv-code-core": "file:../core",
+    "qrcode.react": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.9",

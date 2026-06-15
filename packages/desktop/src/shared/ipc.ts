@@ -37,6 +37,17 @@ export const IpcInvoke = {
   SessionRename: 'session:rename',
   // external agents
   AgentsDetect: 'agents:detect',
+  // feishu gateway
+  FeishuStatus: 'feishu:status',
+  FeishuSaveManual: 'feishu:save-manual',
+  FeishuQrBegin: 'feishu:qr-begin',
+  FeishuQrPoll: 'feishu:qr-poll',
+  FeishuQrCancel: 'feishu:qr-cancel',
+  FeishuClear: 'feishu:clear',
+  FeishuStart: 'feishu:start',
+  FeishuStop: 'feishu:stop',
+  FeishuDetectExternal: 'feishu:detect-external',
+  FeishuKillExternal: 'feishu:kill-external',
   // custom models
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
@@ -45,7 +56,9 @@ export const IpcInvoke = {
   PermissionRespond: 'permission:respond',
   // workspace helpers
   PickFolder: 'workspace:pick-folder',
+  PickFiles: 'workspace:pick-files',
   ReadFile: 'workspace:read-file',
+  ReadFileBase64: 'workspace:read-file-base64',
   ListDir: 'workspace:list-dir',
   GitDiff: 'workspace:git-diff',
   OpenExternal: 'workspace:open-external',
@@ -58,6 +71,7 @@ export const IpcEvent = {
   SessionStatus: 'session:status',
   PermissionRequest: 'permission:request',
   BackendLog: 'backend:log',
+  FeishuChanged: 'feishu:changed',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -356,6 +370,68 @@ export type PermissionResponse =
   | { outcome: 'cancelled' };
 
 // ──────────────────────────────────────────────────────────────────────────
+// Feishu / Lark gateway
+// ──────────────────────────────────────────────────────────────────────────
+
+export type FeishuDomain = 'feishu' | 'lark';
+
+/** Snapshot of the Feishu gateway, surfaced in the management dialog. */
+export interface FeishuStatus {
+  /** Whether credentials are configured in the shared store. */
+  credsConfigured: boolean;
+  botName?: string;
+  platform?: FeishuDomain;
+  /** Bot owner's open_id (the user authorized to drive the bot). */
+  ownerOpenId?: string;
+  allowlistCount?: number;
+  /** Whether the desktop-managed gateway child is alive. */
+  running: boolean;
+  pid?: number;
+  startedAt?: number;
+  lastError?: string;
+  /** Tail of the gateway child's output, for diagnostics. */
+  logTail?: string;
+}
+
+/** Manual credential entry (App ID / App Secret / platform). */
+export interface FeishuManualInput {
+  appId: string;
+  appSecret: string;
+  domain: FeishuDomain;
+}
+
+/** Device-code registration handle returned by qrBegin. */
+export interface FeishuQrBegin {
+  deviceCode: string;
+  /** URL to render as a QR (and open in a browser) for scan-to-authorize. */
+  qrUrl: string;
+  userCode: string;
+  interval: number;
+  expireIn: number;
+  domain: FeishuDomain;
+}
+
+export interface FeishuResult {
+  ok: boolean;
+  error?: string;
+  status?: FeishuStatus;
+  /** How many external (CLI-launched) gateways were shut down on start. */
+  killedExternal?: number;
+}
+
+export interface FeishuQrBeginResult {
+  ok: boolean;
+  error?: string;
+  begin?: FeishuQrBegin;
+}
+
+/** A detected `--feishu` gateway process not managed by this desktop app. */
+export interface FeishuExternalProcess {
+  pid: number;
+  cmd: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Workspace helpers
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -363,6 +439,19 @@ export interface DirEntry {
   name: string;
   path: string;
   isDir: boolean;
+}
+
+/** A file chosen via the native open dialog. */
+export interface PickedFile {
+  path: string;
+  name: string;
+}
+
+/** A file read back as base64 with its detected mime type (for inline images). */
+export interface FileBase64 {
+  mimeType: string;
+  /** base64-encoded bytes, WITHOUT the `data:...;base64,` prefix. */
+  data: string;
 }
 
 export interface GitFileDiff {
@@ -425,13 +514,39 @@ export interface EasycodeBridge {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */
     detect(): Promise<ExternalAgentAvailability>;
   };
+  feishu: {
+    status(): Promise<FeishuStatus>;
+    /** Validate + persist manually-entered App ID / App Secret. */
+    saveManual(input: FeishuManualInput): Promise<FeishuResult>;
+    /** Begin QR device-code registration; render `begin.qrUrl` to scan. */
+    qrBegin(domain: FeishuDomain): Promise<FeishuQrBeginResult>;
+    /** Poll until the user scans + approves (long-running); saves creds on success. */
+    qrPoll(begin: FeishuQrBegin): Promise<FeishuResult>;
+    /** Cancel an in-flight qrPoll. */
+    qrCancel(): Promise<void>;
+    /** Forget stored credentials. */
+    clear(): Promise<FeishuStatus>;
+    /** Start the desktop-managed gateway (kills any external one first). */
+    start(): Promise<FeishuResult>;
+    /** Stop the desktop-managed gateway. */
+    stop(): Promise<FeishuStatus>;
+    /** List `--feishu` gateways running outside this app's control. */
+    detectExternal(): Promise<FeishuExternalProcess[]>;
+    /** Kill external gateways; returns how many were terminated. */
+    killExternal(): Promise<number>;
+    onChanged(cb: (status: FeishuStatus) => void): () => void;
+  };
   permissions: {
     onRequest(cb: (req: PermissionRequest) => void): () => void;
     respond(requestId: string, response: PermissionResponse): Promise<void>;
   };
   workspace: {
     pickFolder(): Promise<string | undefined>;
+    /** Open the native file picker (multi-select); returns chosen files. */
+    pickFiles(): Promise<PickedFile[]>;
     readFile(path: string): Promise<string>;
+    /** Read a file as base64 + mime (used to inline picked images). */
+    readFileBase64(path: string): Promise<FileBase64 | null>;
     listDir(path: string): Promise<DirEntry[]>;
     /** Pass `sessionId` to also refresh that session's +N/-M chip in the sidebar. */
     gitDiff(cwd: string, sessionId?: string): Promise<GitFileDiff[]>;
