@@ -539,9 +539,27 @@ export class MarketplaceManager {
     const startTime = Date.now();
 
     try {
-      // 读取 marketplace.json
+      // 读取 marketplace.json（优先），不存在时 fallback 到 plugin.json（Claude Code 格式）
       const configPath = path.join(marketplacePath, MARKETPLACE_CONFIG_FILE);
-      const marketplaceJson = await this.readMarketplaceJson(configPath);
+      let marketplaceJson: MarketplaceJson;
+      let usedConfigPath = configPath;
+
+      if (await fs.pathExists(configPath)) {
+        marketplaceJson = await this.readMarketplaceJson(configPath);
+      } else {
+        // Fallback: 尝试读取 .claude-plugin/plugin.json（Claude Code 格式）
+        const pluginJsonPath = path.join(marketplacePath, '.claude-plugin', 'plugin.json');
+        if (await fs.pathExists(pluginJsonPath)) {
+          marketplaceJson = await this.readPluginJsonAsMarketplace(pluginJsonPath);
+          usedConfigPath = pluginJsonPath;
+        } else {
+          throw new MarketplaceError(
+            `No marketplace.json or plugin.json found in ${marketplacePath}`,
+            SkillErrorCode.FILE_READ_FAILED,
+            { path: marketplacePath },
+          );
+        }
+      }
 
       // 解析 Plugins
       const plugins: Plugin[] = [];
@@ -568,7 +586,7 @@ export class MarketplaceManager {
         url: options.url,
         path: options.path,
         plugins,
-        configPath,
+        configPath: usedConfigPath,
         lastUpdated: new Date(),
         official: marketplaceJson.name.toLowerCase().includes('anthropic'),
       };
@@ -602,6 +620,48 @@ export class MarketplaceManager {
         `Failed to read marketplace.json: ${error instanceof Error ? error.message : String(error)}`,
         SkillErrorCode.FILE_READ_FAILED,
         { path: configPath, originalError: error },
+      );
+    }
+  }
+
+  /**
+   * 读取 Claude Code 格式的 plugin.json 并转换为 MarketplaceJson
+   * plugin.json 格式: { name, skills: ["./skills/tdd", ...] }
+   * 转换为: { name, plugins: [{ name, skills }] }
+   */
+  private async readPluginJsonAsMarketplace(pluginJsonPath: string): Promise<MarketplaceJson> {
+    try {
+      const content = await fs.readFile(pluginJsonPath, 'utf-8');
+      const json = JSON.parse(content);
+
+      if (!json.name) {
+        throw new ValidationError('Invalid plugin.json: missing name field');
+      }
+
+      // 将 plugin.json 的 skills 数组转换为 marketplace.json 的 plugins 格式
+      const skills: string[] = json.skills || [];
+      const marketplaceJson: MarketplaceJson = {
+        name: json.name,
+        owner: json.owner || { name: json.name },
+        metadata: json.metadata || { description: `${json.name} (Claude Code format)`, version: '1.0.0' },
+        plugins: [
+          {
+            name: json.name,
+            description: `${json.name} skills from Claude Code plugin`,
+            source: './',
+            strict: false,
+            skills,
+          },
+        ],
+      };
+
+      return marketplaceJson;
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      throw new MarketplaceError(
+        `Failed to read plugin.json: ${error instanceof Error ? error.message : String(error)}`,
+        SkillErrorCode.FILE_READ_FAILED,
+        { path: pluginJsonPath, originalError: error },
       );
     }
   }
