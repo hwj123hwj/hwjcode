@@ -31,8 +31,7 @@ export function Sidebar() {
   const order = useStore((s) => s.order);
   const sessions = useStore((s) => s.sessions);
   const active = useStore((s) => s.activeSessionId);
-  const setActive = useStore((s) => s.setActive);
-  const resume = useStore((s) => s.resumeSession);
+  const focusSession = useStore((s) => s.focusSession);
   const archive = useStore((s) => s.archiveSession);
   const auth = useStore((s) => s.auth);
   const filter = useStore((s) => s.sidebarFilter);
@@ -61,14 +60,10 @@ export function Sidebar() {
   }, [order, sessions, filter]);
 
   const onClick = (meta: SessionMeta) => {
-    setActive(meta.id);
-    if (meta.status === 'idle' || meta.status === 'exited') {
-      // Ensure a backend is running for dormant/exited sessions.
-      const view = sessions[meta.id];
-      if (view && (meta.status === 'exited' || !view.meta.availableModels.length)) {
-        void resume(meta.id);
-      }
-    }
+    // focusSession resumes (respawns backend + replays history) when the session
+    // has no live bridge this run, and just focuses it when it does. This is
+    // what reconnects a session after the app was closed and reopened.
+    focusSession(meta.id);
   };
 
   return (
