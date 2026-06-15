@@ -3,6 +3,7 @@ import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { Icon } from './Icon';
+import appIcon from '../../../public/app-icon.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
 
 const api = window.easycode;
@@ -90,9 +91,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-head">
         <div className="brand">
-          <span className="brand-mark">
-            <Icon name="sparkle" size={15} />
-          </span>
+          <img className="brand-mark" src={appIcon} alt="Easy Code" />
           Easy Code
         </div>
         <button className="btn-new" onClick={() => setShowNew(true)}>
