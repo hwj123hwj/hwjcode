@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 
 # 0. 暂存本地未提交的改动
 if ! git diff --quiet || ! git diff --cached --quiet; then
-  echo "📦 暂存本地改动..."
-  git stash push -m "auto-stash before sync"
+  echo "📦 暂存本地改动（排除版本文件）..."
+  git stash push -m "auto-stash before sync" -- . ':!packages/cli/package.json' ':!packages/core/package.json'
   STASHED=true
 fi
 
