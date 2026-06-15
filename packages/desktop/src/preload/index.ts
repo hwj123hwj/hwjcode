@@ -16,6 +16,7 @@ import type {
   CreateSessionOptions,
   CustomModelEntry,
   CustomModelInput,
+  DesktopUserSettings,
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
@@ -91,6 +92,11 @@ const bridge: EasycodeBridge = {
       ) as Promise<SaveCustomModelResult>,
     deleteCustom: (displayName) =>
       ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,
+    update: (patch: DesktopUserSettings) =>
+      ipcRenderer.invoke(IpcInvoke.SettingsUpdate, patch) as Promise<DesktopUserSettings>,
   },
   agents: {
     detect: () =>
