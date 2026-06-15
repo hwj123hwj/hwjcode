@@ -1552,6 +1552,18 @@ select {
   cursor: default;
 }
 
+/* Sidebar footer Feishu icon: full color while the gateway runs, grayscale
+   (and dimmed) when it is stopped. */
+.feishu-ic {
+  display: block;
+  object-fit: contain;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+.feishu-ic.off {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
 /* ── feishu gateway dialog ───────────────────────────────────────────────── */
 .feishu-info {
   display: flex;
