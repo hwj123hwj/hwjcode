@@ -11,7 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { dialog, shell, BrowserWindow } from 'electron';
+import { clipboard, dialog, shell, BrowserWindow } from 'electron';
 import type { DirEntry, FileBase64, GitFileDiff, PickedFile } from '../shared/ipc.js';
 
 const exec = promisify(execFile);
@@ -63,6 +63,63 @@ export async function readFileBase64(file: string): Promise<FileBase64 | null> {
     throw new Error('图片过大（>20MB），请压缩后再试。');
   }
   return { mimeType, data: buf.toString('base64') };
+}
+
+/** Reverse of IMAGE_MIME — the canonical extension for a known image mime. */
+const MIME_EXT: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+  'image/svg+xml': '.svg',
+};
+
+/**
+ * Persist an attached/pasted image into `<cwd>/.easycode/clipboard/` with a
+ * real extension, returning the absolute path. This mirrors the vscode
+ * composer's `ensureImageFilePath`: inlined image bytes are also dropped to a
+ * real file so non-multimodal models (and the `image_reader` tool, which keys
+ * off the path's extension) can reach the picture. Returns null on failure.
+ */
+export async function saveClipboardImage(
+  cwd: string,
+  mimeType: string,
+  dataB64: string,
+  name?: string,
+): Promise<string | null> {
+  try {
+    if (!dataB64) return null;
+    const ext =
+      MIME_EXT[mimeType] ||
+      (name && path.extname(name).toLowerCase()) ||
+      '.png';
+    const dir = path.join(cwd, '.easycode', 'clipboard');
+    await fs.mkdir(dir, { recursive: true });
+    const unique = `easycode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const dest = path.join(dir, unique);
+    await fs.writeFile(dest, Buffer.from(dataB64, 'base64'));
+    return dest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a bitmap from the OS clipboard as base64 PNG. Electron's main-process
+ * clipboard is far more reliable than the renderer's `ClipboardEvent` on
+ * Windows, where a "copy image" often exposes no `image/*` DataTransferItem.
+ */
+export function readClipboardImage(): FileBase64 | null {
+  try {
+    const img = clipboard.readImage();
+    if (!img || img.isEmpty()) return null;
+    const png = img.toPNG();
+    if (!png || png.length === 0) return null;
+    return { mimeType: 'image/png', data: png.toString('base64') };
+  } catch {
+    return null;
+  }
 }
 
 export async function readFile(file: string): Promise<string> {
