@@ -97,16 +97,52 @@ export class MarketplaceManager {
     try {
       // 生成 Marketplace ID
       const marketplaceId = name || this.extractRepoName(url);
-      const marketplacePath = path.join(SkillsPaths.MARKETPLACE_ROOT, marketplaceId);
 
-      // 检查是否已存在
-      if (await fs.pathExists(marketplacePath)) {
+      // ============================================================================
+      // 存在性检查（优先检查 settings，再处理文件系统残留）
+      // ============================================================================
+
+      const existingConfigs = await this.settingsManager.getMarketplaces();
+
+      // 1. 检查 ID 是否已在 settings 中注册
+      const existingById = existingConfigs.find((m) => m.id === marketplaceId);
+      if (existingById) {
+        if (existingById.location === url) {
+          // 同 ID + 同 URL → 提示用户使用 update
+          throw new MarketplaceError(
+            `Marketplace "${marketplaceId}" already exists with the same URL.\n` +
+            `Use /skill marketplace update ${marketplaceId} to refresh it.`,
+            SkillErrorCode.ALREADY_EXISTS,
+          );
+        } else {
+          // 同 ID + 不同 URL → 提示用户使用自定义名称
+          throw new MarketplaceError(
+            `Marketplace ID "${marketplaceId}" is already used by ${existingById.location}.\n` +
+            `Use a different name: /skill marketplace add ${url} <custom-name>`,
+            SkillErrorCode.ALREADY_EXISTS,
+          );
+        }
+      }
+
+      // 2. 检查 URL 是否已被其他 ID 注册（URL 去重）
+      const existingByUrl = existingConfigs.find((m) => m.location === url);
+      if (existingByUrl) {
         throw new MarketplaceError(
-          `Marketplace ${marketplaceId} already exists`,
+          `This URL is already registered as marketplace "${existingByUrl.id}".\n` +
+          `Use /skill marketplace update ${existingByUrl.id} to refresh it.`,
           SkillErrorCode.ALREADY_EXISTS,
-          { path: marketplacePath },
         );
       }
+
+      // 3. 处理残留目录：如果 ID 不在 settings 中但目录存在，自动清理
+      const marketplacePath = path.join(SkillsPaths.MARKETPLACE_ROOT, marketplaceId);
+      if (await fs.pathExists(marketplacePath)) {
+        await fs.remove(marketplacePath);
+      }
+
+      // ============================================================================
+      // 克隆仓库并注册
+      // ============================================================================
 
       // 克隆仓库
       await this.cloneRepository(url, marketplacePath);
@@ -130,6 +166,10 @@ export class MarketplaceManager {
 
       return marketplace;
     } catch (error) {
+      if (error instanceof MarketplaceError && error.code === SkillErrorCode.ALREADY_EXISTS) {
+        // 已经是格式化的错误，直接抛出
+        throw error;
+      }
       throw new MarketplaceError(
         `Failed to add Git marketplace: ${error instanceof Error ? error.message : String(error)}`,
         SkillErrorCode.MARKETPLACE_CLONE_FAILED,
@@ -155,6 +195,38 @@ export class MarketplaceManager {
       // 生成 Marketplace ID
       const marketplaceId = name || path.basename(localPath);
 
+      // 存在性检查：先查 settings，再处理其他情况
+      const existingConfigs = await this.settingsManager.getMarketplaces();
+      const existingById = existingConfigs.find((m) => m.id === marketplaceId);
+
+      if (existingById) {
+        if (existingById.location === localPath) {
+          // 同 ID + 同路径 → 建议更新
+          throw new MarketplaceError(
+            `Marketplace "${marketplaceId}" already exists with the same path.\n` +
+            `Use /skill marketplace update ${marketplaceId} to refresh it.`,
+            SkillErrorCode.ALREADY_EXISTS,
+          );
+        } else {
+          // 同 ID + 不同路径 → 建议换名
+          throw new MarketplaceError(
+            `Marketplace ID "${marketplaceId}" is already used by ${existingById.location}.\n` +
+            `Use a different name: /skill marketplace add ${localPath} <custom-name>`,
+            SkillErrorCode.ALREADY_EXISTS,
+          );
+        }
+      }
+
+      // 检查同路径是否已注册为其他 ID
+      const existingByPath = existingConfigs.find((m) => m.location === localPath);
+      if (existingByPath) {
+        throw new MarketplaceError(
+          `This path is already registered as marketplace "${existingByPath.id}".\n` +
+          `Use /skill marketplace update ${existingByPath.id} to refresh it.`,
+          SkillErrorCode.ALREADY_EXISTS,
+        );
+      }
+
       // 扫描 Marketplace 结构
       const marketplace = await this.scanMarketplace(marketplaceId, localPath, {
         source: MarketplaceSource.LOCAL,
@@ -174,6 +246,10 @@ export class MarketplaceManager {
 
       return marketplace;
     } catch (error) {
+      // 如果是 ALREADY_EXISTS 错误，直接抛出（不包装）
+      if (error instanceof MarketplaceError && error.code === SkillErrorCode.ALREADY_EXISTS) {
+        throw error;
+      }
       throw new MarketplaceError(
         `Failed to add local marketplace: ${error instanceof Error ? error.message : String(error)}`,
         SkillErrorCode.MARKETPLACE_PARSE_FAILED,
@@ -421,14 +497,31 @@ export class MarketplaceManager {
   }
 
   /**
-   * 从 Git URL 提取仓库名称
+   * 从 Git URL 提取仓库名称（包含 owner 以保证唯一性）
+   *
+   * 修复：原逻辑只取 repo 名（如 "skills"），导致不同 owner 的同名仓库产生 ID 冲突。
+   * 现改为提取 owner-repo 格式（如 "mattpocock-skills"），保证唯一性。
    */
   private extractRepoName(url: string): string {
-    const match = url.match(/\/([^/]+?)(\.git)?$/);
-    if (!match) {
-      throw new ValidationError(`Invalid Git URL: ${url}`);
+    // 1. HTTPS URL: https://github.com/owner/repo(.git)?
+    const httpsMatch = url.match(/\/([^/]+)\/([^/]+?)(\.git)?$/);
+    if (httpsMatch) {
+      return `${httpsMatch[1]}-${httpsMatch[2]}`;
     }
-    return match[1];
+
+    // 2. SSH URL: git@github.com:owner/repo(.git)?
+    const sshMatch = url.match(/:([^/]+)\/([^/]+?)(\.git)?$/);
+    if (sshMatch) {
+      return `${sshMatch[1]}-${sshMatch[2]}`;
+    }
+
+    // 3. Fallback: 只取最后一段路径名（非标准 URL）
+    const fallbackMatch = url.match(/\/([^/]+?)(\.git)?$/);
+    if (fallbackMatch) {
+      return fallbackMatch[1];
+    }
+
+    throw new ValidationError(`Invalid Git URL: ${url}`);
   }
 
   // ============================================================================
