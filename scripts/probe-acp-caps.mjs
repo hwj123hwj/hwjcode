@@ -11,9 +11,10 @@ import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import os from 'node:os';
 
+// Pinned to match the spawn specs in core/desktop (externalAgentRegistry.ts).
 const BRIDGES = {
-  'claude-code': { command: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] },
-  codex: { command: 'npx', args: ['-y', '@zed-industries/codex-acp'] },
+  'claude-code': { command: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp@0.44.0'] },
+  codex: { command: 'npx', args: ['-y', '@zed-industries/codex-acp@0.16.0'] },
 };
 
 class ProbeClient {
