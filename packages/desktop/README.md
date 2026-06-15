@@ -146,6 +146,35 @@ machine.
   never commit it) and configure the Keychain entry above. It is **not** locked
   to any single machine.
 
+### Entitlements & the "blank window / V8 OOM" trap
+
+Under `hardenedRuntime: true` the entitlements must be exactly right or the app
+launches with **no main window** (only the dock icon and the About menu work).
+The give-away in `Console`/stderr is:
+
+```
+V8 process OOM (Failed to reserve virtual memory for CodeRange)
+```
+
+Two rules, both already encoded in `build/entitlements.mac.plist` and
+`build/entitlements.mac.inherit.plist`:
+
+1. **Enable `com.apple.security.cs.allow-jit`** — V8's JIT needs to reserve
+   executable virtual memory (the CodeRange). On Apple Silicon, missing this
+   crashes the renderer.
+2. **Do *not* enable `com.apple.security.cs.allow-unsigned-executable-memory`** —
+   it is only for patching C code and actively *interferes* with V8's CodeRange
+   reservation under hardened runtime, causing the same OOM.
+
+Crucially, `allow-jit` must be declared in **both** plists. Electron's helper
+processes (Renderer / GPU / Plugin) each spin up their own V8 isolate and
+allocate the CodeRange per-process, and they are signed with the **inherit**
+plist. `com.apple.security.inherit` only inherits *sandbox* permissions, **not**
+code-signing entitlements like `allow-jit` — so it must be repeated in
+`entitlements.mac.inherit.plist`, otherwise the helpers (not the main process)
+are what OOMs. A command-line launch of the main binary may look fine; the crash
+shows up once the fully-signed, hardened bundle runs its helpers.
+
 ### Verify a finished build
 
 ```bash
