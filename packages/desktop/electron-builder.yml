@@ -18,9 +18,21 @@ asarUnpack:
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # universal = 同时支持 Apple Silicon (arm64) 与 Intel (x64)。
+  # 可行性前提（已确认）：本应用无 .node 原生模块，agent 为纯 JS bundle；
+  # 内置的 @vscode/ripgrep 自带全平台二进制并在运行时按 process.arch 动态选取
+  # （Intel 上用 darwin-x64-rg，arm64 上用 darwin-arm64-rg），故 universal 包
+  # 在两种架构上都能正常工作。
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  # @vscode/ripgrep 在 backend 里自带全平台二进制（darwin-arm64-rg / darwin-x64-rg
+  # 等），这些文件在 x64 与 arm64 子构建中字节相同，@electron/universal 合并时会
+  # 因「相同但属单架构二进制」而报错。x64ArchFiles 告诉合并器：这些文件原样保留、
+  # 不做 lipo。运行时 @vscode/ripgrep 会按 process.arch 自行选取对应二进制。
+  x64ArchFiles: "**/@vscode/ripgrep/bin/*"
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
