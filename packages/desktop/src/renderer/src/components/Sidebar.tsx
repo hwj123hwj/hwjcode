@@ -5,7 +5,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import appIcon from '../../../public/app-icon.png';
-import feishuIcon from '../../../public/feishu.svg';
+import feishuIcon from '../../../public/feishu_logo.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
 
 const api = window.easycode;
