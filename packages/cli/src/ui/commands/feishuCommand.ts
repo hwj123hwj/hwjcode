@@ -3358,6 +3358,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const trimmed = messageText.trim();
       const settings = globalCommandContext?.services?.settings;
       const favoriteModelIds: string[] = settings?.merged?.favoriteModels || [];
+      dlog(`[NL-Model] msg="${trimmed}" favorites=[${favoriteModelIds.join(',')}]`);
       if (favoriteModelIds.length > 0) {
         const cloudModels = currentConfig?.getCloudModels?.() || [];
         const favorites = favoriteModelIds
@@ -3372,6 +3373,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
             m.detectNLModelSwitch(trimmed, favorites),
           );
           if (nlMatch) {
+            dlog(`[NL-Model] MATCHED → /model ${nlMatch.modelName}`);
             messageText = `/model ${nlMatch.modelName}`;
           }
         }
