@@ -613,6 +613,134 @@ interface FeishuProjectRoute {
 // 路由文件路径（指向 ~/.deepv/feishu-projects.json）
 const ROUTE_CONFIG_FILE = path.join(os.homedir(), '.easycode-user', 'feishu-projects.json');
 
+// 🔧 可插拔工具定义：支持在绑定的项目群/私聊中开关的非核心工具
+const DISABLED_TOOLS_FILE = path.join(os.homedir(), '.easycode-user', 'disabled-tools.json');
+
+interface ToggleableToolDef {
+  label: string;       // 用户可见的中文名
+  nlEnable: string[];  // 自然语言触发词：开启
+  nlDisable: string[]; // 自然语言触发词：关闭
+  defaultDisabled?: boolean; // 默认关闭（opt-in），用户需显式开启才可用
+}
+
+const TOGGLEABLE_TOOLS: Record<string, ToggleableToolDef> = {
+  nanobanana_generate: {
+    label: 'NanoBanana 生图',
+    nlEnable: ['开启生图', '打开生图', '启用生图'],
+    nlDisable: ['关闭生图', '停用生图', '禁用生图'],
+    defaultDisabled: true, // 生图消耗 credits，默认关闭，用户需显式开启
+  },
+  audio_reader: {
+    label: '音频转文字',
+    nlEnable: ['开启音频', '打开音频', '启用音频'],
+    nlDisable: ['关闭音频', '停用音频', '禁用音频'],
+  },
+};
+
+function loadDisabledTools(): Record<string, string[]> {
+  try {
+    if (fs.existsSync(DISABLED_TOOLS_FILE)) {
+      return JSON.parse(fs.readFileSync(DISABLED_TOOLS_FILE, 'utf-8'));
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+/**
+ * 判断工具是否「实际被禁用」：综合考虑 defaultDisabled 和用户显式操作。
+ * - defaultDisabled=true 且用户从未操作 → 禁用
+ * - defaultDisabled=true 且用户显式 enable → 启用
+ * - defaultDisabled=false 且用户从未操作 → 启用
+ * - defaultDisabled=false 且用户显式 disable → 禁用
+ */
+function isToolEffectivelyDisabled(toolName: string, chatId: string | undefined): boolean {
+  const def = TOGGLEABLE_TOOLS[toolName];
+  if (!def) return false; // 未知工具不干预
+  const key = chatId || '__p2p__';
+  const allDisabled = loadDisabledTools();
+  const disabledList = allDisabled[key] || [];
+  if (disabledList.includes(toolName)) return true; // 用户显式禁用
+  if (def.defaultDisabled) {
+    // defaultDisabled=true：除非用户显式 enable（从 disabledList 中移除），否则禁用
+    // 需要检查用户是否曾经显式操作过（key 存在于 allDisabled 中）
+    // 如果 key 不存在，说明用户从未操作 → 按 defaultDisabled 禁用
+    // 如果 key 存在但 toolName 不在 disabledList 中，说明用户显式 enable → 启用
+    return !allDisabled[key]; // key 不存在 → true(禁用)；key 存在且不在列表 → false(启用)
+  }
+  return false; // defaultDisabled=false 且未显式禁用 → 启用
+}
+
+/**
+ * 获取某个 chatId 下所有「实际被禁用」的工具名列表。
+ */
+function getEffectivelyDisabledToolNames(chatId: string | undefined): string[] {
+  return Object.keys(TOGGLEABLE_TOOLS).filter(name => isToolEffectivelyDisabled(name, chatId));
+}
+
+function saveDisabledTools(data: Record<string, string[]>): void {
+  try {
+    const dir = path.dirname(DISABLED_TOOLS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DISABLED_TOOLS_FILE, JSON.stringify(data, null, 2));
+  } catch { /* ignore */ }
+}
+
+/**
+ * 根据 disabled-tools.json 协调缓存的隔离 session 的工具注册状态。
+ * 在复用缓存的 isolated session 时调用，确保禁用/启用变更立即生效。
+ */
+async function reconcileDisabledToolsForSession(
+  chatId: string | undefined,
+  session: { config: any; geminiClient: any },
+): Promise<void> {
+  const effectivelyDisabled = getEffectivelyDisabledToolNames(chatId);
+  const toolReg = await session.config?.getToolRegistry?.();
+  if (!toolReg) return;
+
+  // 🛡️ 更新 toolRegistry 的输出级排除列表（最可靠的过滤层）
+  toolReg.setExcludedToolNames(effectivelyDisabled);
+
+  let needsSetTools = false;
+
+  // nanobanana_generate
+  if (effectivelyDisabled.includes('nanobanana_generate') && toolReg.getTool('nanobanana_generate')) {
+    toolReg.unregisterTool('nanobanana_generate');
+    needsSetTools = true;
+    dlog(`[Router] Reconciled: unregistered nanobanana_generate for cached session`);
+  } else if (!effectivelyDisabled.includes('nanobanana_generate') && !toolReg.getTool('nanobanana_generate')) {
+    toolReg.registerTool(new NanobananaGenerateTool());
+    needsSetTools = true;
+    dlog(`[Router] Reconciled: re-registered nanobanana_generate for cached session`);
+  }
+
+  // audio_reader
+  if (effectivelyDisabled.includes('audio_reader') && toolReg.getTool('audio_reader')) {
+    toolReg.unregisterTool('audio_reader');
+    needsSetTools = true;
+    dlog(`[Router] Reconciled: unregistered audio_reader for cached session`);
+  } else if (!effectivelyDisabled.includes('audio_reader') && !toolReg.getTool('audio_reader')) {
+    toolReg.registerTool(new AudioReaderTool(session.config));
+    needsSetTools = true;
+    dlog(`[Router] Reconciled: re-registered audio_reader for cached session`);
+  }
+
+  // 🔧 关键修复：即使注册/注销分支都不触发，也需要刷新 chat 工具列表，
+  //    因为 setExcludedToolNames 改变了 getFunctionDeclarations() 的输出，
+  //    但 GeminiChat.generationConfig.tools 还保留着旧快照。
+  if (needsSetTools || effectivelyDisabled.length > 0) {
+    await session.geminiClient.setTools();
+  }
+
+  // 🔧 关键修复：从对话历史中清除被禁用工具的函数调用/响应记录，
+  //    否则模型会从历史中推断出工具存在并尝试调用，浪费 token。
+  if (effectivelyDisabled.length > 0) {
+    const chat = session.geminiClient.getChat();
+    if (chat && typeof chat.purgeFunctionCallsFromHistory === 'function') {
+      chat.purgeFunctionCallsFromHistory(effectivelyDisabled);
+    }
+  }
+}
+
 /**
  * 读取多项目路由表
  */
@@ -1987,6 +2115,7 @@ const FEISHU_SLASH_COMMANDS: Record<string, string> = {
   '/model':            '查看可用模型，或输入 `/model <模型ID>` 切换 AI 模型',
   '/bind':             '绑定本群到本地项目目录，格式：`/bind <项目绝对路径>`；可加 `--agent claude-code` 或 `--agent codex` 设默认派发方（或在消息前加 `@cc` / `@codex` 单条派发）',
   '/goal':             '启动目标驱动模式（`/goal clear` 结束）',
+  '/tool':             '可插拔工具开关 — `/tool list` 查看、`/tool enable/disable <工具名>` 开关（仅主对话可用）',
   '/acp-session':      '查看本机外部 Agent（Claude Code / Codex）的运行任务和历史会话',
   '/feishu restart':   '热重启飞书机器人（AI 卡死时使用）',
   '/help':             '显示此帮助',
@@ -2339,6 +2468,107 @@ async function handleFeishuCommand(
       } catch (err: any) {
         return `❌ 切换模型失败: ${err.message}`;
       }
+    }
+
+    case '/tool': {
+      // 移除主对话限制，允许在任何绑定项目中开关工具
+
+      const parts = messageText.split(/\s+/);
+      const sub = parts[1];
+      const targetTool = parts[2];
+
+      // /tool list — 列出所有可插拔工具及其状态
+      if (sub === 'list') {
+        const effectivelyDisabled = getEffectivelyDisabledToolNames(chatId);
+        const lines = ['🔧 可插拔工具:', ''];
+        for (const [name, def] of Object.entries(TOGGLEABLE_TOOLS)) {
+          const isDisabled = effectivelyDisabled.includes(name);
+          const status = isDisabled ? '❌ 已关闭' : '✅ 已开启';
+          const defaultTag = def.defaultDisabled ? '（默认关闭）' : '';
+          lines.push(`  ${status}  ${name} — ${def.label}${defaultTag}`);
+        }
+        lines.push('');
+        lines.push('用 `/tool enable <工具名>` 或 `/tool disable <工具名>` 开关');
+        lines.push('也可用自然语言：如「开启生图」「关闭音频」');
+        return lines.join('\n');
+      }
+
+      // /tool enable <name>
+      if (sub === 'enable' && targetTool) {
+        if (!TOGGLEABLE_TOOLS[targetTool]) {
+          return `❌ 未知工具: ${targetTool}。可用工具: ${Object.keys(TOGGLEABLE_TOOLS).join(', ')}`;
+        }
+        const allDisabled = loadDisabledTools();
+        const key = chatId || '__p2p__';
+        if (!allDisabled[key]) allDisabled[key] = [];
+        allDisabled[key] = allDisabled[key].filter((t) => t !== targetTool);
+        saveDisabledTools(allDisabled);
+
+        // 🛡️ 立即更新 toolRegistry 的输出级排除列表（综合考虑 defaultDisabled）
+        try {
+          const effectivelyDisabled = getEffectivelyDisabledToolNames(chatId);
+          const toolReg = await config?.getToolRegistry?.();
+          toolReg?.setExcludedToolNames(effectivelyDisabled);
+        } catch { /* best effort */ }
+
+        // 如果当前 session 已存在，立即注册工具
+        if (geminiClient && targetTool === 'nanobanana_generate') {
+          try {
+            const toolReg = await config?.getToolRegistry?.();
+            if (toolReg && !toolReg.getTool(targetTool)) {
+              toolReg.registerTool(new NanobananaGenerateTool());
+              await geminiClient.setTools();
+            }
+          } catch (e: any) { dlog(`[Tool] enable nanobanana failed: ${e?.message || String(e)}`); }
+        }
+        if (geminiClient && targetTool === 'audio_reader') {
+          try {
+            const toolReg = await config?.getToolRegistry?.();
+            if (toolReg && !toolReg.getTool(targetTool)) {
+              toolReg.registerTool(new AudioReaderTool(config));
+              await geminiClient.setTools();
+            }
+          } catch (e: any) { dlog(`[Tool] enable audio_reader failed: ${e?.message || String(e)}`); }
+        }
+
+        return `✅ 已开启 **${TOGGLEABLE_TOOLS[targetTool].label}**（下次对话生效）`;
+      }
+
+      // /tool disable <name>
+      if (sub === 'disable' && targetTool) {
+        if (!TOGGLEABLE_TOOLS[targetTool]) {
+          return `❌ 未知工具: ${targetTool}。可用工具: ${Object.keys(TOGGLEABLE_TOOLS).join(', ')}`;
+        }
+        const allDisabled = loadDisabledTools();
+        const key = chatId || '__p2p__';
+        if (!allDisabled[key]) allDisabled[key] = [];
+        if (!allDisabled[key].includes(targetTool)) {
+          allDisabled[key].push(targetTool);
+        }
+        saveDisabledTools(allDisabled);
+
+        // 🛡️ 立即更新 toolRegistry 的输出级排除列表（综合考虑 defaultDisabled）
+        try {
+          const effectivelyDisabled = getEffectivelyDisabledToolNames(chatId);
+          const toolReg = await config?.getToolRegistry?.();
+          toolReg?.setExcludedToolNames(effectivelyDisabled);
+        } catch { /* best effort */ }
+
+        // 如果当前 session 已存在，立即注销工具
+        if (geminiClient) {
+          try {
+            const toolReg = await config?.getToolRegistry?.();
+            if (toolReg?.getTool(targetTool)) {
+              toolReg.unregisterTool(targetTool);
+              await geminiClient.setTools();
+            }
+          } catch (e: any) { dlog(`[Tool] disable ${targetTool} failed: ${e?.message || String(e)}`); }
+        }
+
+        return `✅ 已关闭 **${TOGGLEABLE_TOOLS[targetTool].label}**（下次对话生效）`;
+      }
+
+      return '用法: /tool list | /tool enable <工具名> | /tool disable <工具名>';
     }
 
     case '/help': {
@@ -2965,13 +3195,23 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }));
 
         // 注册飞书模式专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
-        toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
+        // 🔧 可插拔：检查是否实际被禁用（综合考虑 defaultDisabled 和用户显式操作）
+        const effectivelyDisabled = getEffectivelyDisabledToolNames(msg.chatId);
+        if (!effectivelyDisabled.includes('audio_reader')) {
+          toolRegistry.registerTool(new AudioReaderTool(isolatedConfig));
+        }
 
         // 注册飞书模式专属的自更新重启工具（普通 CLI 模式绝不注册）
         toolRegistry.registerTool(new SelfUpdateTool(isolatedConfig));
 
+        // 🛡️ 设置 toolRegistry 的输出级排除列表，确保 getFunctionDeclarations() 不暴露禁用工具给模型
+        toolRegistry.setExcludedToolNames(effectivelyDisabled);
+
         // 注册飞书模式专属的 NanoBanana 图片生成工具（普通 CLI 模式通过 slash command 使用）
-        toolRegistry.registerTool(new NanobananaGenerateTool());
+        // 🔧 可插拔：检查是否实际被禁用（defaultDisabled=true 时默认不注册）
+        if (!effectivelyDisabled.includes('nanobanana_generate')) {
+          toolRegistry.registerTool(new NanobananaGenerateTool());
+        }
 
         await isolatedClient.setTools();
         dlog(`[Router] Successfully registered session-specific tools for '${msg.chatId}'`);
@@ -3001,6 +3241,12 @@ async function handleStart(context?: CommandContext): Promise<string> {
       }
     } else {
       debugTrail.push(`isolatedCached`);
+      // 🛡️ 协调 disabled-tools：缓存的 session 可能持有已禁用的工具
+      try {
+        await reconcileDisabledToolsForSession(msg.chatId, session!);
+      } catch (e: any) {
+        dwarn(`[Router] Failed to reconcile disabled tools: ${e?.message || String(e)}`);
+      }
     }
 
     if (session) {
@@ -3045,6 +3291,21 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // never entering the chat's message queue.
     if (await handleFeishuBtwCommand(msg, gateway, currentClient, currentConfig, messageText)) {
       return null;
+    }
+
+    // 🔧 自然语言工具开关触发词（等效于 /tool enable/disable）
+    if (!messageText.startsWith('/')) {
+      const trimmed = messageText.trim();
+      for (const [toolName, def] of Object.entries(TOGGLEABLE_TOOLS)) {
+        if (def.nlEnable.includes(trimmed)) {
+          messageText = `/tool enable ${toolName}`;
+          break;
+        }
+        if (def.nlDisable.includes(trimmed)) {
+          messageText = `/tool disable ${toolName}`;
+          break;
+        }
+      }
     }
 
     // 🚀 斜杠命令（/help, /new, /stop, /bind 等）高优先级快速通道拦截：
@@ -4833,8 +5094,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         };
         toolRegistry.registerTool(selfUpdateTool);
 
-        // 注册飞书模式专属的 NanoBanana 图片生成工具
-        toolRegistry.registerTool(new NanobananaGenerateTool());
+        // 注册飞书模式专属的 NanoBanana 图片生成工具（仅 per-message 按需注册，受 disabled-tools 控制）
 
         await geminiClient.setTools();
         dlog('Registered Feishu file-send tool and group-chat tool successfully.');
