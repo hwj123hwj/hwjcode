@@ -12,6 +12,19 @@ import {
 
 const api = window.easycode;
 
+/**
+ * The clipboard-paste shortcut, by platform: ⌘V on macOS, Ctrl+V elsewhere.
+ * Computed once from the user agent (the renderer is a browser context, so
+ * `navigator` is reliable; `data-platform` on <html> is set by preload too but
+ * only consumed by CSS). Used in the prompt hint so the label matches the key
+ * the user actually presses.
+ */
+const PASTE_SHORTCUT = /Mac|iPhone|iPad/i.test(
+  typeof navigator !== 'undefined' ? navigator.userAgent : '',
+)
+  ? '⌘V'
+  : 'Ctrl+V';
+
 /** Label + icon for the agent chip shown on external-agent sessions. */
 const AGENT_BADGE: Record<Exclude<AgentKind, 'easy-code'>, { label: string; icon: IconName }> = {
   'claude-code': { label: 'Claude Code', icon: 'cpu' },
@@ -103,12 +116,23 @@ export function PromptBar({ view }: { view: SessionView }) {
     null,
   );
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // True while an IME (e.g. Chinese pinyin) is composing. Using a ref — not
+  // state — so onKeyDown reads the latest value synchronously without a
+  // re-render race. macOS IMEs fire Enter to "commit" the composition; we must
+  // NOT treat that Enter as a send.
+  const isComposingRef = useRef(false);
 
   // Current git branch (+ dirty flag) of this session's working folder, shown
   // after the folder name as "name (branch*)". Re-queried when the cwd changes.
   const cwd = view.meta.cwd;
+  const isChat = view.meta.kind === 'chat';
   const [git, setGit] = useState<{ branch: string; dirty: boolean } | null>(null);
   useEffect(() => {
+    // Chat sessions have a throwaway, git-less cwd — skip the probe entirely.
+    if (isChat) {
+      setGit(null);
+      return;
+    }
     let alive = true;
     void api.workspace.gitBranch(cwd).then((g) => {
       if (alive) setGit(g);
@@ -116,7 +140,7 @@ export function PromptBar({ view }: { view: SessionView }) {
     return () => {
       alive = false;
     };
-  }, [cwd]);
+  }, [cwd, isChat]);
 
   const addImageFromUrl = async (url: string, origMime: string, name: string) => {
     const { mimeType, data } = await compressImage(url, origMime);
@@ -252,6 +276,17 @@ export function PromptBar({ view }: { view: SessionView }) {
     await sendPrompt(meta.id, finalText, [...mentionPaths, ...filePaths], images);
   };
 
+  /**
+   * Whether this keydown is the IME "commit" Enter rather than a real submit.
+   * Triple-guarded because no single signal is reliable across macOS WebKit:
+   *  - `nativeEvent.isComposing`: the standard, but on macOS it can already be
+   *    false on the very Enter that ends composition.
+   *  - `keyCode === 229`: legacy "in composition" sentinel still emitted here.
+   *  - `isComposingRef`: our own compositionstart/end tracking as a backstop.
+   */
+  const isImeCommit = (e: React.KeyboardEvent<HTMLTextAreaElement>) =>
+    e.nativeEvent.isComposing || e.keyCode === 229 || isComposingRef.current;
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (mention && mention.entries.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -268,6 +303,9 @@ export function PromptBar({ view }: { view: SessionView }) {
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
+        // While composing, Enter commits the IME candidate — don't hijack it to
+        // pick a @-mention. (Tab still selects, IMEs don't use it to commit.)
+        if (e.key === 'Enter' && isImeCommit(e)) return;
         e.preventDefault();
         pickMention(mention.entries[mention.active]);
         return;
@@ -278,6 +316,9 @@ export function PromptBar({ view }: { view: SessionView }) {
       }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Let the IME's commit-Enter fall through to the textarea (upscreen the
+      // candidate) instead of sending a half-typed message.
+      if (isImeCommit(e)) return;
       e.preventDefault();
       void submit();
     }
@@ -296,20 +337,25 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="laptop" size={14} />
             {t('common.local')}
           </span>
-          <span
-            className="chip interactive"
-            title={meta.cwd}
-            onClick={() => window.alert(t('prompt.cwdHint'))}
-          >
-            <Icon name="folder" size={14} />
-            {projectName(meta.cwd)}
-            {git && (
-              <span className="chip-branch">
-                ({git.branch}
-                {git.dirty ? '*' : ''})
-              </span>
-            )}
-          </span>
+          {/* Directory chip is meaningless for directory-less chat sessions
+              (their cwd is an internal ~/.easycode-user/chats/<id> folder), so
+              only show it for project-bound sessions. */}
+          {meta.kind !== 'chat' && (
+            <span
+              className="chip interactive"
+              title={meta.cwd}
+              onClick={() => window.alert(t('prompt.cwdHint'))}
+            >
+              <Icon name="folder" size={14} />
+              {projectName(meta.cwd)}
+              {git && (
+                <span className="chip-branch">
+                  ({git.branch}
+                  {git.dirty ? '*' : ''})
+                </span>
+              )}
+            </span>
+          )}
           {meta.agentType && meta.agentType !== 'easy-code' && (
             <span className="chip accent" title={t('prompt.externalAgentTitle')}>
               <AgentIcon agent={meta.agentType} size={15} />
@@ -411,6 +457,12 @@ export function PromptBar({ view }: { view: SessionView }) {
             value={text}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+            }}
             onPaste={onPaste}
           />
           <button className="btn-attach" title={t('prompt.addAttachment')} onClick={() => void pickAttachments()}>
@@ -430,7 +482,7 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="send" size={16} />
           </button>
         </div>
-        <div className="hint">{t('prompt.hint')}</div>
+        <div className="hint">{t('prompt.hint', { paste: PASTE_SHORTCUT })}</div>
       </div>
     </div>
   );

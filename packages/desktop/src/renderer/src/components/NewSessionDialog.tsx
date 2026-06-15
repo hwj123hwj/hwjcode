@@ -28,6 +28,7 @@ const AGENTS: {
 
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const createSession = useStore((s) => s.createSession);
+  const createChatSession = useStore((s) => s.createChatSession);
   const t = useT();
   const [cwd, setCwd] = useState('');
   const [agent, setAgent] = useState<AgentKind>('easy-code');
@@ -64,14 +65,16 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   };
 
   const start = async () => {
-    if (!cwd) {
-      setError(t('newSession.pickDirError'));
-      return;
-    }
     setBusy(true);
     setError('');
     try {
-      await createSession(cwd, mode, agent);
+      // No directory → a directory-less "just chat" session (Chats section).
+      // With a directory → a project-bound session.
+      if (cwd.trim()) {
+        await createSession(cwd, mode, agent);
+      } else {
+        await createChatSession(mode, agent);
+      }
       onClose();
     } catch (e) {
       setBusy(false);
@@ -120,12 +123,12 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
             ))}
           </div>
 
-          <label className="field-label">{t('newSession.projectDir')}</label>
+          <label className="field-label">{t('newSession.projectDirOptional')}</label>
           <div className="prompt-input-wrap">
             <input
               className="prompt-input"
               style={{ height: 22 }}
-              placeholder={t('newSession.pickFolderPlaceholder')}
+              placeholder={t('newSession.pickFolderOptionalPlaceholder')}
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
             />
