@@ -95,12 +95,15 @@ export function detectNLModelSwitch(
     }
   }
 
-  // 模糊匹配：关键词包含在模型名或显示名中
+  // 模糊匹配：查询词拆成关键词，全部命中才匹配
+  // "deepseek flash" → ["deepseek", "flash"] → 都包含在 "deepseek-v4-flash" 中 ✓
+  const queryKeywords = modelQuery.split(/\s+/).filter((k: string) => k.length > 0);
   for (const fav of favorites) {
     const name = fav.name.toLowerCase();
     const display = (fav.displayName || '').toLowerCase();
+    const combined = `${name} ${display}`;
 
-    if (name.includes(modelQuery) || display.includes(modelQuery)) {
+    if (queryKeywords.every((kw: string) => combined.includes(kw))) {
       return {
         modelName: fav.name,
         modelDisplayName: fav.displayName || fav.name,

@@ -38,6 +38,12 @@ describe('detectNLModelSwitch（收藏列表模式）', () => {
     expect(result!.modelName).toBe('deepseek-v4-flash');
   });
 
+  it('匹配多关键词 "deepseek flash"', () => {
+    const result = detectNLModelSwitch('用deepseek flash', mockFavorites);
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('deepseek-v4-flash');
+  });
+
   it('匹配 "切到" + 模糊关键词', () => {
     const result = detectNLModelSwitch('切到deepseek', mockFavorites);
     expect(result).not.toBeNull();
