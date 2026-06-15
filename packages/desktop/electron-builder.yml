@@ -18,6 +18,10 @@ asarUnpack:
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # Lives at the `mac` root: electron-builder 25.x rejects `artifactName`
+  # inside a target array entry. Mirrors the Windows artifactName; productName
+  # stays "Easy Code" so the app display name and DMG volume are unchanged.
+  artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
   # arm64 (Apple Silicon) only. Intel (x64) is intentionally dropped: a
   # universal build nearly doubles the DMG size (~235MB vs ~152MB) and Intel
   # Macs are a shrinking share. Switch a target's arch to `universal` (and add
@@ -25,12 +29,6 @@ mac:
   target:
     - target: dmg
       arch: arm64
-      # No spaces in the DMG filename: a space-bearing name (the default
-      # `${productName}-${version}` → "Easy Code-x.y.z.dmg") needs escaping in
-      # shells/URLs/CI and gets truncated by some tools. Mirror the Windows
-      # artifactName. productName stays "Easy Code" so the app display name and
-      # mounted volume are unchanged.
-      artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
     - target: zip
       arch: arm64
   hardenedRuntime: true
