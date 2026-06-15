@@ -9,6 +9,7 @@
  */
 
 import { create } from 'zustand';
+import { type Lang, loadStoredLang, persistLang } from './i18n/i18n';
 import type {
   AcpToolKind,
   AgentKind,
@@ -74,6 +75,9 @@ interface StoreState {
   permissionQueue: PermissionRequest[];
   backendLog: string[];
   sidebarFilter: { status: 'all' | 'active' | 'archived'; query: string };
+  /** UI display language; persisted to localStorage, defaults to the OS lang. */
+  lang: Lang;
+  setLang: (lang: Lang) => void;
 
   init: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -155,6 +159,11 @@ export const useStore = create<StoreState>((set, get) => ({
   permissionQueue: [],
   backendLog: [],
   sidebarFilter: { status: 'active', query: '' },
+  lang: loadStoredLang(),
+  setLang: (lang) => {
+    persistLang(lang);
+    set({ lang });
+  },
 
   init: async () => {
     // Idempotent: React StrictMode double-invokes the mount effect, and the App

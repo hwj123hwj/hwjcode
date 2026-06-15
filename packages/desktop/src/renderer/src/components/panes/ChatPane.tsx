@@ -4,11 +4,13 @@ import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
 import { Icon } from '../Icon';
 import { AgentIcon } from '../AgentIcon';
+import { useT, type TFunc } from '../../i18n/useT';
 
 export function ChatPane({ view }: { view: SessionView }) {
   const density = view.density;
   const openFile = useStore((s) => s.openFile);
   const rewindTo = useStore((s) => s.rewindTo);
+  const t = useT();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // The backend reports 'thinking' from prompt submit through turn_end (covering
@@ -35,8 +37,8 @@ export function ChatPane({ view }: { view: SessionView }) {
               <span className="empty-mark">
                 <Icon name="sparkle" size={24} />
               </span>
-              <div className="empty-title">开始与 Easy Code 对话</div>
-              <div className="hint">它会在 {view.meta.cwd} 中工作</div>
+              <div className="empty-title">{t('chat.emptyTitle')}</div>
+              <div className="hint">{t('chat.worksIn', { cwd: view.meta.cwd })}</div>
             </div>
           </div>
         )}
@@ -47,6 +49,7 @@ export function ChatPane({ view }: { view: SessionView }) {
               key={item.id}
               item={item}
               density={density}
+              t={t}
               userIndex={item.kind === 'user' ? userIndex : undefined}
               onOpenFile={(p) => void openFile(view.meta.id, p)}
               onRewind={(idx) => void rewindTo(view.meta.id, idx)}
@@ -58,7 +61,7 @@ export function ChatPane({ view }: { view: SessionView }) {
             {(view.meta.agentType === 'claude-code' || view.meta.agentType === 'codex') && (
               <AgentIcon agent={view.meta.agentType} size={18} className="typing-agent-ic" animated />
             )}
-            <div className="typing-dots" aria-label="AI 正在响应">
+            <div className="typing-dots" aria-label={t('chat.aiResponding')}>
               <span />
               <span />
               <span />
@@ -74,12 +77,14 @@ export function ChatPane({ view }: { view: SessionView }) {
 function ChatItemView({
   item,
   density,
+  t,
   userIndex,
   onOpenFile,
   onRewind,
 }: {
   item: ChatItem;
   density: SessionView['density'];
+  t: TFunc;
   userIndex?: number;
   onOpenFile: (path: string) => void;
   onRewind: (beforeUserMessageIndex: number) => void;
@@ -92,7 +97,7 @@ function ChatItemView({
             {item.images && item.images.length > 0 && (
               <div className="msg-images">
                 {item.images.map((src, i) => (
-                  <img key={i} className="msg-image" src={src} alt="附带图片" />
+                  <img key={i} className="msg-image" src={src} alt={t('chat.attachedImage')} />
                 ))}
               </div>
             )}
@@ -100,7 +105,7 @@ function ChatItemView({
             {userIndex !== undefined && (
               <button
                 className="icon-btn rewind-btn"
-                title="回退到此处（rewind）"
+                title={t('chat.rewindTitle')}
                 onClick={() => onRewind(userIndex)}
               >
                 <Icon name="rewind" size={14} />
@@ -123,7 +128,7 @@ function ChatItemView({
         <div className="msg msg-thought">
           <div className="thought-label">
             <Icon name="think" size={13} />
-            思考
+            {t('chat.thought')}
           </div>
           {item.text}
         </div>

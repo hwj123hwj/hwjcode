@@ -1,5 +1,6 @@
 import { useStore } from '../store';
 import { Icon, toolKindIcon } from './Icon';
+import { useT } from '../i18n/useT';
 import type { PermissionOption } from '@shared/ipc';
 
 function btnClass(kind: PermissionOption['kind']): string {
@@ -11,6 +12,7 @@ function btnClass(kind: PermissionOption['kind']): string {
 export function PermissionDialog() {
   const queue = useStore((s) => s.permissionQueue);
   const respond = useStore((s) => s.respondPermission);
+  const t = useT();
   const req = queue[0];
   if (!req) return null;
 
@@ -20,7 +22,7 @@ export function PermissionDialog() {
         <div className="modal-head">
           <h3>
             <Icon name="shield" size={17} />
-            需要你的批准
+            {t('permission.title')}
           </h3>
           <div className="sub">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -38,7 +40,7 @@ export function PermissionDialog() {
                 <div key={i} className="diff-preview">
                   <div className="diff-preview-head">
                     <Icon name={c.diff.oldText ? 'edit' : 'file'} size={13} />
-                    {c.diff.oldText ? '编辑' : '写入'} {c.diff.path}
+                    {c.diff.oldText ? t('diff.edit') : t('diff.write')} {c.diff.path}
                   </div>
                   <div style={{ overflowX: 'auto' }}>
                     {c.diff.oldText
@@ -66,7 +68,7 @@ export function PermissionDialog() {
         </div>
         <div className="modal-foot">
           <button className="btn" onClick={() => void respond(req.requestId, null)}>
-            取消
+            {t('common.cancel')}
           </button>
           {req.options.map((o) => (
             <button
