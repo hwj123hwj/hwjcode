@@ -4,6 +4,7 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
 
 export function App() {
@@ -34,10 +35,17 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      <Sidebar />
-      <SessionView />
-      <PermissionDialog />
-    </div>
+    <ErrorBoundary label="app">
+      <div className="app">
+        <Sidebar />
+        {/* Isolate the session view: if a transcript item throws while
+            rendering, show an error panel here instead of blanking the whole
+            window, and keep the sidebar usable. */}
+        <ErrorBoundary label="session">
+          <SessionView />
+        </ErrorBoundary>
+        <PermissionDialog />
+      </div>
+    </ErrorBoundary>
   );
 }

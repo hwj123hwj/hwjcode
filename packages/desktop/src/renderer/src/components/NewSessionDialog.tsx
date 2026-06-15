@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { Icon, type IconName } from './Icon';
+import { AgentIcon } from './AgentIcon';
 import {
   PERMISSION_MODES,
   type AgentKind,
@@ -109,7 +110,8 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
                 title={a.hint}
                 onClick={() => setAgent(a.id)}
               >
-                {agent === a.id ? <Icon name="check" size={13} /> : <Icon name={a.icon} size={13} />}
+                {agent === a.id && <Icon name="check" size={13} />}
+                <AgentIcon agent={a.id} size={15} />
                 {a.label}
               </span>
             ))}

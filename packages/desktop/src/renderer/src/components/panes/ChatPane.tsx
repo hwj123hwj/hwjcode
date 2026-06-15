@@ -3,6 +3,7 @@ import { useStore, type ChatItem, type SessionView } from '../../store';
 import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
 import { Icon } from '../Icon';
+import { AgentIcon } from '../AgentIcon';
 
 export function ChatPane({ view }: { view: SessionView }) {
   const density = view.density;
@@ -53,7 +54,10 @@ export function ChatPane({ view }: { view: SessionView }) {
           );
         })}
         {showDots && (
-          <div className="msg msg-assistant">
+          <div className="msg msg-assistant typing-row">
+            {(view.meta.agentType === 'claude-code' || view.meta.agentType === 'codex') && (
+              <AgentIcon agent={view.meta.agentType} size={18} className="typing-agent-ic" animated />
+            )}
             <div className="typing-dots" aria-label="AI 正在响应">
               <span />
               <span />
@@ -85,7 +89,14 @@ function ChatItemView({
       return (
         <div className="msg">
           <div className="msg-user">
-            {item.text}
+            {item.images && item.images.length > 0 && (
+              <div className="msg-images">
+                {item.images.map((src, i) => (
+                  <img key={i} className="msg-image" src={src} alt="附带图片" />
+                ))}
+              </div>
+            )}
+            {item.text && <span className="msg-user-text">{item.text}</span>}
             {userIndex !== undefined && (
               <button
                 className="icon-btn rewind-btn"

@@ -67,15 +67,25 @@ function restoreLink(p) {
   fs.symlinkSync(coreDir, p, process.platform === 'win32' ? 'junction' : 'dir');
 }
 
+/** Local-time build stamp `YYYYMMDDHHMM`, consumed by artifactName's ${env.BUILD_TIME}. */
+function buildStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 function runElectronBuilder() {
   const ebPkgJson = require.resolve('electron-builder/package.json');
   const ebPkg = require(ebPkgJson);
   const binRel =
     typeof ebPkg.bin === 'string' ? ebPkg.bin : ebPkg.bin['electron-builder'];
   const ebBin = path.join(path.dirname(ebPkgJson), binRel);
+  const stamp = buildStamp();
+  console.log(`[pack-installer] BUILD_TIME=${stamp}`);
   execFileSync(process.execPath, [ebBin, ...targets], {
     cwd: desktopDir,
     stdio: 'inherit',
+    env: { ...process.env, BUILD_TIME: stamp },
   });
 }
 

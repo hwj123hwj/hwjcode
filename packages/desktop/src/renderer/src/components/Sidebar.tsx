@@ -4,6 +4,7 @@ import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
+import { AgentIcon } from './AgentIcon';
 import appIcon from '../../../public/app-icon.png';
 import feishuIcon from '../../../public/feishu_logo.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
@@ -189,7 +190,10 @@ export function Sidebar() {
                       keep the badge on this second row so it never overlaps the
                       hover edit/archive actions pinned to the card's top-right. */}
                   {v.meta.agentType !== 'easy-code' && (
-                    <span className="agent-badge">{AGENT_LABEL[v.meta.agentType]}</span>
+                    <span className="agent-badge">
+                      <AgentIcon agent={v.meta.agentType} size={12} />
+                      {AGENT_LABEL[v.meta.agentType]}
+                    </span>
                   )}
                 </div>
                 <div className="session-actions">

@@ -76,6 +76,8 @@ export const IpcEvent = {
   PermissionRequest: 'permission:request',
   BackendLog: 'backend:log',
   FeishuChanged: 'feishu:changed',
+  /** Main asks the renderer to surface a session (e.g. notification clicked). */
+  SessionFocusRequest: 'session:focus-request',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -529,6 +531,12 @@ export interface EasycodeBridge {
     rewind(sessionId: string, beforeUserMessageIndex: number): Promise<RewindResult>;
     onEvent(cb: (env: SessionEventEnvelope) => void): () => void;
     onStatus(cb: (env: SessionStatusEnvelope) => void): () => void;
+    /**
+     * Main -> renderer: bring a session to the foreground. Fired when the user
+     * clicks a turn-complete system notification while the window is in the
+     * background. Payload is the session id to focus.
+     */
+    onFocusRequest(cb: (sessionId: string) => void): () => void;
   };
   models: {
     /** List the user's custom models (shared with the CLI). */

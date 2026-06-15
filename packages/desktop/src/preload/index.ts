@@ -78,6 +78,7 @@ const bridge: EasycodeBridge = {
     rewind: (id, idx) => ipcRenderer.invoke(IpcInvoke.SessionRewind, id, idx) as Promise<RewindResult>,
     onEvent: (cb) => on<SessionEventEnvelope>(IpcEvent.SessionEvent, cb),
     onStatus: (cb) => on<SessionStatusEnvelope>(IpcEvent.SessionStatus, cb),
+    onFocusRequest: (cb) => on<string>(IpcEvent.SessionFocusRequest, cb),
   },
   models: {
     listCustom: () =>

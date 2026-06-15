@@ -1992,3 +1992,85 @@ select {
   background: var(--accent);
   border-radius: 4px;
 }
+
+/* ── error boundary ─────────────────────────────────────────────────────── */
+.error-boundary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  overflow: auto;
+}
+.error-boundary-card {
+  max-width: 680px;
+  width: 100%;
+  background: var(--surface, #1b1b1d);
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  padding: 24px;
+}
+.error-boundary-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.error-boundary-msg {
+  color: var(--text, #eee);
+  font-family: var(--mono, monospace);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 12px;
+}
+.error-boundary-stack {
+  max-height: 240px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint, #999);
+  margin: 0 0 16px;
+}
+
+/* user-attached image thumbnails in the chat bubble */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.msg-images:has(+ .msg-user-text) {
+  margin-bottom: 10px;
+}
+.msg-image {
+  max-width: 260px;
+  max-height: 260px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  display: block;
+}
+.msg-user-text {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* agent brand icon alignment in the session-card badge */
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* typing indicator with the driving agent's icon in front of the dots */
+.typing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.typing-agent-ic {
+  border-radius: 5px;
+}

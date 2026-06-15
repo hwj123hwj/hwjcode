@@ -36,15 +36,22 @@ const OVERRIDE_ENV: Record<'claude-code' | 'codex', string> = {
   codex: 'EASYCODE_CODEX_ACP_CMD',
 };
 
-/** Default `npx` bridge invocations, in sync with the core registry. */
+/**
+ * Default `npx` bridge invocations, in sync with the core registry. The bridge
+ * versions are PINNED on purpose: `npx -y <pkg>` (unpinned) silently pulls the
+ * latest on every spawn, so a breaking bridge release could break a setup that
+ * was working fine. Bump these deliberately after verifying a new version, and
+ * keep them identical to externalAgentRegistry.ts in core. Users can still
+ * override (or float to latest) via the EASYCODE_*_ACP_CMD env vars.
+ */
 const DEFAULT_BRIDGE: Record<'claude-code' | 'codex', { label: string; args: string[] }> = {
   'claude-code': {
     label: 'Claude Code',
-    args: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.44.0'],
   },
   codex: {
     label: 'Codex',
-    args: ['-y', '@zed-industries/codex-acp'],
+    args: ['-y', '@zed-industries/codex-acp@0.16.0'],
   },
 };
 
