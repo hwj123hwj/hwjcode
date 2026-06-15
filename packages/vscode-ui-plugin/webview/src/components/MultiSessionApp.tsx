@@ -672,6 +672,20 @@ export const MultiSessionApp: React.FC = () => {
       setTimeout(() => {
         getGlobalMessageService().requestSessionList();
       }, 100);
+      // 🔧 同步切换回的 session 的模型（deleteSession 内部会更新 currentSessionId）
+      setTimeout(async () => {
+        const newCurrentSessionId = stateRef.current.currentSessionId;
+        if (newCurrentSessionId) {
+          try {
+            const currentModel = await webviewModelService.getCurrentModel(newCurrentSessionId);
+            if (currentModel) {
+              setSelectedModelId(currentModel);
+            }
+          } catch (error) {
+            console.warn('Failed to sync model after session delete:', error);
+          }
+        }
+      }, 0);
     }));
 
     cleanups.push(messageService.onSessionSwitched(({ sessionId, session }) => {
@@ -683,6 +697,17 @@ export const MultiSessionApp: React.FC = () => {
       if (session && existingSession) {
         updateSessionInfo(sessionId, session);
       }
+      // 🔧 同步该 session 的模型
+      (async () => {
+        try {
+          const currentModel = await webviewModelService.getCurrentModel(sessionId);
+          if (currentModel) {
+            setSelectedModelId(currentModel);
+          }
+        } catch (error) {
+          console.warn('Failed to sync model on session switched:', error);
+        }
+      })();
     }));
 
     // 🎯 监听历史列表分页响应
