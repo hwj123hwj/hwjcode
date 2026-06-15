@@ -8,7 +8,7 @@ import path from 'path';
 import os from 'os';
 import { MarketplaceManager } from './marketplace-manager.js';
 import { SettingsManager, SkillsPaths } from './settings-manager.js';
-import { MarketplaceSource } from './skill-types.js';
+import { MarketplaceSource, SkillErrorCode } from './skill-types.js';
 
 describe('MarketplaceManager', () => {
   let manager: MarketplaceManager;
@@ -35,6 +35,9 @@ describe('MarketplaceManager', () => {
     );
     vi.spyOn(SkillsPaths, 'BACKUP_DIR', 'get').mockReturnValue(
       path.join(testRoot, 'skills', 'backups'),
+    );
+    vi.spyOn(SkillsPaths, 'PLUGIN_CACHE_ROOT', 'get').mockReturnValue(
+      path.join(testRoot, 'skills', 'cache'),
     );
 
     settingsManager = new SettingsManager();
@@ -97,6 +100,165 @@ describe('MarketplaceManager', () => {
       '---\nname: skill2\ndescription: Test Skill 2\n---\n\n# Skill 2 Content',
     );
   }
+
+  // ============================================================================
+  // Bug Fix Tests: extractRepoName
+  // ============================================================================
+
+  describe('extractRepoName', () => {
+    it('should include owner in ID for GitHub URLs to avoid name collision', () => {
+      const managerAny = manager as any;
+      // https://github.com/mattpocock/skills.git → "mattpocock-skills"
+      expect(managerAny.extractRepoName('https://github.com/mattpocock/skills.git')).toBe('mattpocock-skills');
+      // https://github.com/anthropics/skills.git → "anthropics-skills" (no collision!)
+      expect(managerAny.extractRepoName('https://github.com/anthropics/skills.git')).toBe('anthropics-skills');
+      // https://github.com/user/repo (no .git suffix) → "user-repo"
+      expect(managerAny.extractRepoName('https://github.com/user/repo')).toBe('user-repo');
+      // URL without .git suffix
+      expect(managerAny.extractRepoName('https://github.com/org/my-repo')).toBe('org-my-repo');
+    });
+
+    it('should handle SSH-style Git URLs', () => {
+      const managerAny = manager as any;
+      // git@github.com:mattpocock/skills.git → "mattpocock-skills"
+      expect(managerAny.extractRepoName('git@github.com:mattpocock/skills.git')).toBe('mattpocock-skills');
+    });
+
+    it('should throw ValidationError for invalid URL', () => {
+      const managerAny = manager as any;
+      expect(() => managerAny.extractRepoName('not-a-url')).toThrow();
+      expect(() => managerAny.extractRepoName('https://github.com/')).toThrow();
+    });
+  });
+
+  // ============================================================================
+  // Bug Fix Tests: addGitMarketplace existence checks
+  // ============================================================================
+
+  describe('addGitMarketplace existence checks', () => {
+    it('should reject same ID already in settings (different URL)', async () => {
+      // Pre-add a marketplace with ID "skills" via local
+      await createTestMarketplace(testMarketplacePath);
+      await manager.addLocalMarketplace(testMarketplacePath, 'skills');
+
+      // Now try to add a Git marketplace with the same ID "skills"
+      const cloneSpy = vi.spyOn(manager as any, 'cloneRepository').mockResolvedValue(undefined);
+      await expect(
+        manager.addGitMarketplace('https://github.com/different/repo.git', 'skills'),
+      ).rejects.toThrow(/already used/);
+
+      cloneSpy.mockRestore();
+    });
+
+    it('should suggest update when same ID and same URL', async () => {
+      // Pre-add a marketplace with a specific URL
+      await createTestMarketplace(testMarketplacePath);
+      const url = 'https://github.com/test/repo.git';
+      await settingsManager.addMarketplace({
+        id: 'test-mp',
+        name: 'Test MP',
+        source: MarketplaceSource.GIT,
+        location: url,
+        enabled: true,
+        addedAt: new Date().toISOString(),
+      });
+
+      // Try to add the same URL with the same ID
+      await expect(
+        manager.addGitMarketplace(url, 'test-mp'),
+      ).rejects.toThrow(/update/);
+    });
+
+    it('should reject duplicate URL under different ID', async () => {
+      // Pre-add a marketplace with a specific URL
+      await createTestMarketplace(testMarketplacePath);
+      const url = 'https://github.com/test/repo.git';
+      await settingsManager.addMarketplace({
+        id: 'mp-a',
+        name: 'MP A',
+        source: MarketplaceSource.GIT,
+        location: url,
+        enabled: true,
+        addedAt: new Date().toISOString(),
+      });
+
+      // Try to add the same URL with a different ID
+      const cloneSpy = vi.spyOn(manager as any, 'cloneRepository').mockResolvedValue(undefined);
+      await expect(
+        manager.addGitMarketplace(url, 'mp-b'),
+      ).rejects.toThrow(/already registered/);
+
+      cloneSpy.mockRestore();
+    });
+
+    it('should auto-cleanup stale directory when ID not in settings', async () => {
+      // Create a stale directory (not registered in settings)
+      const staleDir = path.join(SkillsPaths.MARKETPLACE_ROOT, 'stale-mp');
+      await fs.ensureDir(staleDir);
+      await fs.writeFile(path.join(staleDir, 'junk.txt'), 'stale data');
+
+      // Mock cloneRepository and scanMarketplace
+      const cloneSpy = vi.spyOn(manager as any, 'cloneRepository').mockResolvedValue(undefined);
+      const scanSpy = vi.spyOn(manager as any, 'scanMarketplace').mockResolvedValue({
+        id: 'stale-mp',
+        name: 'Stale MP',
+        plugins: [],
+        source: MarketplaceSource.GIT,
+        url: 'https://github.com/test/stale.git',
+      });
+
+      // Adding should succeed — stale directory should be cleaned up first
+      await manager.addGitMarketplace('https://github.com/test/stale.git', 'stale-mp');
+
+      expect(cloneSpy).toHaveBeenCalled();
+
+      cloneSpy.mockRestore();
+      scanSpy.mockRestore();
+    });
+  });
+
+  // ============================================================================
+  // Bug Fix Tests: addLocalMarketplace existence checks
+  // ============================================================================
+
+  describe('addLocalMarketplace existence checks', () => {
+    it('should reject duplicate ID in settings (different path)', async () => {
+      await createTestMarketplace(testMarketplacePath);
+      await manager.addLocalMarketplace(testMarketplacePath, 'local-mp');
+
+      // Try to add another marketplace with the same ID but different path
+      const testMarketplacePath2 = path.join(testRoot, 'test-marketplace-2');
+      await createTestMarketplace(testMarketplacePath2);
+
+      await expect(
+        manager.addLocalMarketplace(testMarketplacePath2, 'local-mp'),
+      ).rejects.toThrow(/already used/);
+    });
+
+    it('should reject duplicate local path under different ID', async () => {
+      await createTestMarketplace(testMarketplacePath);
+      await manager.addLocalMarketplace(testMarketplacePath, 'mp-a');
+
+      // Try to add the same path with a different ID
+      await expect(
+        manager.addLocalMarketplace(testMarketplacePath, 'mp-b'),
+      ).rejects.toThrow(/already registered/);
+    });
+
+    it('should suggest update when same ID and same path', async () => {
+      await createTestMarketplace(testMarketplacePath);
+      await manager.addLocalMarketplace(testMarketplacePath, 'local-mp');
+
+      // Try to add the same path with the same ID
+      await expect(
+        manager.addLocalMarketplace(testMarketplacePath, 'local-mp'),
+      ).rejects.toThrow(/update/);
+    });
+  });
+
+  // ============================================================================
+  // Existing tests (unchanged)
+  // ============================================================================
 
   describe('addLocalMarketplace', () => {
     it('should add local marketplace successfully', async () => {
