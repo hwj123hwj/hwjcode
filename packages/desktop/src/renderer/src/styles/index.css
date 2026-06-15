@@ -1020,6 +1020,12 @@ select {
 .chip.interactive {
   cursor: pointer;
 }
+.chip-branch {
+  margin-left: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
 .chip select {
   border: none;
   background: transparent;

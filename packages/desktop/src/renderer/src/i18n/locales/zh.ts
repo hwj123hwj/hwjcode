@@ -145,6 +145,7 @@ export const zh = {
   'prompt.placeholder': '输入指令，@ 引用文件，/ 使用命令…',
   'prompt.busyPlaceholder': '回复将在当前动作结束后被读取…（边跑边纠偏）',
   'prompt.externalAgentTitle': '驱动此会话的外部 agent',
+  'prompt.cwdHint': '工作文件夹在会话创建时固定。如需更换，请新建一个会话。',
   'prompt.defaultModel': '默认模型',
   'prompt.contextUsage': '上下文用量',
   'prompt.addAttachment': '添加附件 / 图片',

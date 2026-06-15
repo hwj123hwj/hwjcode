@@ -38,6 +38,17 @@ describe('prompts', () => {
       expect(prompt).toContain('Strict Guidelines for Sending Files & Media');
       expect(prompt).toContain('Prudence & Spam Prevention');
     });
+
+    it('should include Desktop-specific instructions when isDesktop is true', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, undefined, undefined, false, true);
+      expect(prompt).toContain('Easy Code Desktop');
+      expect(prompt).toContain('Environment Awareness');
+    });
+
+    it('should NOT include Desktop instructions when isDesktop is falsy', () => {
+      const prompt = getCoreSystemPrompt(undefined, false);
+      expect(prompt).not.toContain('Easy Code Desktop Context');
+    });
   });
 
   describe('getCoreSystemPrompt - Model Differences', () => {

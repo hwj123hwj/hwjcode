@@ -147,6 +147,7 @@ export const en = {
   'prompt.placeholder': 'Type a message — @ to reference files, / for commands…',
   'prompt.busyPlaceholder': 'Your reply will be read after the current action finishes… (steer as it runs)',
   'prompt.externalAgentTitle': 'External agent driving this session',
+  'prompt.cwdHint': "A session's working folder is fixed when it's created. To switch, start a new session.",
   'prompt.defaultModel': 'Default model',
   'prompt.contextUsage': 'Context usage',
   'prompt.addAttachment': 'Add attachment / image',
