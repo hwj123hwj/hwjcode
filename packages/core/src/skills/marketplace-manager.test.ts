@@ -446,4 +446,83 @@ describe('MarketplaceManager', () => {
       expect(plugin.skillPaths[0].replace(/\\/g, '/')).toContain('skills/my-plugin/commands/cmd1.md');
     });
   });
+
+  // ============================================================================
+  // Fallback Tests: plugin.json compatibility (Claude Code format)
+  // ============================================================================
+
+  describe('plugin.json fallback (Claude Code format)', () => {
+    it('should scan marketplace with plugin.json when marketplace.json does not exist', async () => {
+      // Create a Claude Code style marketplace (plugin.json only, no marketplace.json)
+      const pluginMarketplacePath = path.join(testRoot, 'claude-code-mp');
+      await fs.ensureDir(path.join(pluginMarketplacePath, '.claude-plugin'));
+      await fs.ensureDir(path.join(pluginMarketplacePath, 'skills', 'tdd'));
+      await fs.ensureDir(path.join(pluginMarketplacePath, 'skills', 'triage'));
+
+      const pluginJson = {
+        name: 'mattpocock-skills',
+        skills: ['./skills/tdd', './skills/triage'],
+      };
+      await fs.writeFile(
+        path.join(pluginMarketplacePath, '.claude-plugin', 'plugin.json'),
+        JSON.stringify(pluginJson, null, 2),
+      );
+
+      // Create SKILL.md files
+      await fs.writeFile(
+        path.join(pluginMarketplacePath, 'skills', 'tdd', 'SKILL.md'),
+        '---\nname: tdd\ndescription: TDD skill\n---\n\n# TDD Content',
+      );
+      await fs.writeFile(
+        path.join(pluginMarketplacePath, 'skills', 'triage', 'SKILL.md'),
+        '---\nname: triage\ndescription: Triage skill\n---\n\n# Triage Content',
+      );
+
+      const marketplace = await manager.addLocalMarketplace(pluginMarketplacePath);
+      expect(marketplace.name).toBe('mattpocock-skills');
+      expect(marketplace.plugins.length).toBeGreaterThan(0);
+    });
+
+    it('should prefer marketplace.json over plugin.json when both exist', async () => {
+      const bothPath = path.join(testRoot, 'both-mp');
+      await fs.ensureDir(path.join(bothPath, '.claude-plugin'));
+      await fs.ensureDir(path.join(bothPath, 'test-plugin', 'skill1'));
+
+      // Create marketplace.json (DeepV format)
+      const marketplaceJson = {
+        name: 'deepv-marketplace',
+        owner: { name: 'DeepV' },
+        plugins: [{ name: 'test-plugin', skills: ['./test-plugin/skill1'] }],
+      };
+      await fs.writeFile(
+        path.join(bothPath, '.claude-plugin', 'marketplace.json'),
+        JSON.stringify(marketplaceJson, null, 2),
+      );
+
+      // Also create plugin.json (should be ignored)
+      const pluginJson = {
+        name: 'claude-code-marketplace',
+        skills: ['./other-skill'],
+      };
+      await fs.writeFile(
+        path.join(bothPath, '.claude-plugin', 'plugin.json'),
+        JSON.stringify(pluginJson, null, 2),
+      );
+
+      await fs.writeFile(
+        path.join(bothPath, 'test-plugin', 'skill1', 'SKILL.md'),
+        '---\nname: skill1\ndescription: Test\n---\n\n# Content',
+      );
+
+      const marketplace = await manager.addLocalMarketplace(bothPath);
+      expect(marketplace.name).toBe('deepv-marketplace');
+    });
+
+    it('should throw error when neither marketplace.json nor plugin.json exists', async () => {
+      const emptyPath = path.join(testRoot, 'empty-mp');
+      await fs.ensureDir(path.join(emptyPath, '.claude-plugin'));
+
+      await expect(manager.addLocalMarketplace(emptyPath)).rejects.toThrow();
+    });
+  });
 });
