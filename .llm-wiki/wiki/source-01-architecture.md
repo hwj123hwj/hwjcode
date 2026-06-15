@@ -12,9 +12,9 @@ source: raw/01-architecture.md
 ## Key Facts
 
 - **Project**: easycode-ai v1.0.316, Apache-2.0, TypeScript 5.0+ / ESM
-- **Origin**: Forked from Google Gemini CLI (`google-gemini/gemini-cli`)
+- **Origin**: Originally based on Google Gemini CLI (`google-gemini/gemini-cli`), now independent
 - **Runtime**: Node.js >= 20.0.0
-- **Repository**: github.com/OrionStarAI/EasyCodeCode
+- **Repository**: gitlab.liebaopay.com/huangweijian/DeepVcodeClient
 
 ## Monorepo Structure
 
