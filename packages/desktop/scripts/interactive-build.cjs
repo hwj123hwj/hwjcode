@@ -13,6 +13,8 @@
 
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
+const fs = require('node:fs');
+const path = require('node:path');
 const Writable = require('node:stream').Writable;
 
 // Writable stream to mask password input in terminal
@@ -61,6 +63,30 @@ function readPasswordFromKeychain(appleId) {
   } catch {
     return '';
   }
+}
+
+// 递归扫描 release 目录，返回实际生成的 .dmg 文件路径（相对项目根，按修改时间新→旧）。
+// 不再写死版本号/文件名，以实际产物为准。
+function findDmgFiles(releaseDir) {
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.toLowerCase().endsWith('.dmg')) found.push(full);
+    }
+  };
+  walk(releaseDir);
+  const cwd = process.cwd();
+  return found
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+    .map((f) => path.relative(cwd, f));
 }
 
 async function main() {
@@ -118,7 +144,14 @@ async function main() {
       console.log("-------------------------------------------------------------");
       if (code === 0) {
         console.log("\n🎉 【恭喜】带正规代码签名与苹果官方公证的 DMG 包已全部打包成功！");
-        console.log("📍 DMG 分发路径: packages/desktop/release/1.1.14/Easy Code-1.1.14-arm64.dmg\n");
+        const dmgs = findDmgFiles(path.resolve(__dirname, '..', 'release'));
+        if (dmgs.length > 0) {
+          console.log("📍 DMG 分发路径:");
+          for (const f of dmgs) console.log(`   ${f}`);
+          console.log("");
+        } else {
+          console.log("📍 产物目录: packages/desktop/release/<version>/（未自动定位到 .dmg，请手动查看）\n");
+        }
       } else {
         console.log(`\n❌ 打包或公证失败，退出码: ${code}`);
         console.log("💡 请检查：\n1. 您的 App 专用密码是否正确（并非苹果主密码）\n2. 苹果开发者账号是否过期或被限制\n");
