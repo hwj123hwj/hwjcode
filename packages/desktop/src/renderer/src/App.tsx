@@ -6,15 +6,23 @@ import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
+import { useT } from './i18n/useT';
 
 export function App() {
   const init = useStore((s) => s.init);
   const ready = useStore((s) => s.ready);
   const auth = useStore((s) => s.auth);
+  const lang = useStore((s) => s.lang);
+  const t = useT();
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Keep <html lang> in sync for correct font hinting / accessibility.
+  useEffect(() => {
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }, [lang]);
 
   if (!ready || !auth) {
     return (
@@ -24,7 +32,7 @@ export function App() {
             <Icon name="sparkle" size={20} />
           </span>
           <span className="spinner" />
-          <span>正在启动 Easy Code…</span>
+          <span>{t('app.booting')}</span>
         </div>
       </div>
     );

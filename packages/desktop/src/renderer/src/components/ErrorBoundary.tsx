@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { useT } from '../i18n/useT';
 
 interface Props {
   children: ReactNode;
@@ -35,17 +36,34 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     const { error, info } = this.state;
     if (!error) return this.props.children;
-    return (
-      <div className="error-boundary">
-        <div className="error-boundary-card">
-          <div className="error-boundary-title">界面出错了</div>
-          <div className="error-boundary-msg">{error.message || String(error)}</div>
-          {info ? <pre className="error-boundary-stack">{info.trim()}</pre> : null}
-          <button className="btn primary" onClick={this.reset}>
-            重试
-          </button>
-        </div>
-      </div>
-    );
+    return <ErrorCard message={error.message || String(error)} stack={info} onReset={this.reset} />;
   }
+}
+
+/**
+ * Functional card so the (class) boundary's fallback can pull localized strings
+ * via `useT()` and re-render when the language changes.
+ */
+function ErrorCard({
+  message,
+  stack,
+  onReset,
+}: {
+  message: string;
+  stack: string;
+  onReset: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="error-boundary">
+      <div className="error-boundary-card">
+        <div className="error-boundary-title">{t('error.boundaryTitle')}</div>
+        <div className="error-boundary-msg">{message}</div>
+        {stack ? <pre className="error-boundary-stack">{stack.trim()}</pre> : null}
+        <button className="btn primary" onClick={onReset}>
+          {t('error.retry')}
+        </button>
+      </div>
+    </div>
+  );
 }

@@ -1,13 +1,15 @@
 import { useStore, type SessionView } from '../../store';
 import { Icon, type IconName } from '../Icon';
+import { useT } from '../../i18n/useT';
 
 /** Plan pane — the agent's current execution plan / TODO list. */
 export function PlanPane({ view }: { view: SessionView }) {
+  const t = useT();
   return (
     <div className="pane">
       <div className="pane-head">
         <Icon name="plan" size={15} />
-        <span>计划</span>
+        <span>{t('pane.plan')}</span>
         <span className="grow" />
         <span style={{ color: 'var(--text-faint)' }}>
           {view.plan.filter((p) => p.status === 'completed').length}/{view.plan.length}
@@ -15,7 +17,7 @@ export function PlanPane({ view }: { view: SessionView }) {
       </div>
       <div className="pane-body">
         {view.plan.length === 0 ? (
-          <div className="empty">尚无计划</div>
+          <div className="empty">{t('plan.empty')}</div>
         ) : (
           <div className="plan-list">
             {view.plan.map((e, i) => (
@@ -43,6 +45,7 @@ function PlanMark({ status }: { status: string }) {
 
 /** Tasks pane — in-flight + recent tool calls (the session's "background work"). */
 export function TasksPane({ view }: { view: SessionView }) {
+  const t = useT();
   const tools = view.transcript.filter((t) => t.kind === 'tool') as Extract<
     SessionView['transcript'][number],
     { kind: 'tool' }
@@ -52,15 +55,15 @@ export function TasksPane({ view }: { view: SessionView }) {
     <div className="pane">
       <div className="pane-head">
         <Icon name="tasks" size={15} />
-        <span>任务</span>
+        <span>{t('pane.tasks')}</span>
         <span className="grow" />
         <span style={{ color: 'var(--text-faint)' }}>
-          {running.length} 进行中 / {tools.length} 总计
+          {t('tasks.summary', { running: running.length, total: tools.length })}
         </span>
       </div>
       <div className="pane-body">
         {tools.length === 0 ? (
-          <div className="empty">暂无工具调用</div>
+          <div className="empty">{t('tasks.empty')}</div>
         ) : (
           <div className="plan-list">
             {tools
@@ -97,6 +100,7 @@ export function TasksPane({ view }: { view: SessionView }) {
 
 /** Terminal pane — aggregated command output across the session + backend log. */
 export function TerminalPane({ view }: { view: SessionView }) {
+  const t = useT();
   const log = useStore((s) => s.backendLog);
   const outputs = (
     view.transcript.filter((t) => t.kind === 'tool') as Extract<
@@ -112,18 +116,18 @@ export function TerminalPane({ view }: { view: SessionView }) {
     <div className="pane">
       <div className="pane-head">
         <Icon name="terminal" size={15} />
-        <span>终端</span>
+        <span>{t('pane.terminal')}</span>
       </div>
       <div className="pane-body">
         <div className="console" style={{ margin: 14, minHeight: 120 }}>
-          {outputs || '（暂无命令输出）'}
+          {outputs || t('terminal.noOutput')}
         </div>
         <div className="pane-head" style={{ borderTop: '1px solid var(--border)' }}>
           <Icon name="terminal" size={14} />
-          <span>后端日志</span>
+          <span>{t('terminal.backendLog')}</span>
         </div>
         <div className="console" style={{ margin: 14, color: 'var(--text-faint)' }}>
-          {log.slice(-60).join('') || '（无）'}
+          {log.slice(-60).join('') || t('terminal.none')}
         </div>
       </div>
     </div>
@@ -132,12 +136,13 @@ export function TerminalPane({ view }: { view: SessionView }) {
 
 /** File pane — read-only viewer for a file opened from a tool location. */
 export function FilePane({ view }: { view: SessionView }) {
+  const t = useT();
   const open = view.openFile;
   return (
     <div className="pane">
       <div className="pane-head">
         <Icon name="file" size={15} />
-        <span style={{ fontFamily: 'var(--mono)' }}>{open?.path ?? '文件'}</span>
+        <span style={{ fontFamily: 'var(--mono)' }}>{open?.path ?? t('pane.file')}</span>
       </div>
       <div className="pane-body">
         {open ? (
@@ -145,7 +150,7 @@ export function FilePane({ view }: { view: SessionView }) {
             {open.content}
           </pre>
         ) : (
-          <div className="empty">点击工具调用中的文件路径以查看</div>
+          <div className="empty">{t('file.empty')}</div>
         )}
       </div>
     </div>
