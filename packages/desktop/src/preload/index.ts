@@ -21,6 +21,7 @@ import type {
   ExternalAgentAvailability,
   FeishuDomain,
   FeishuExternalProcess,
+  FeishuLobby,
   FeishuManualInput,
   FeishuQrBegin,
   FeishuQrBeginResult,
@@ -109,6 +110,7 @@ const bridge: EasycodeBridge = {
     detectExternal: () =>
       ipcRenderer.invoke(IpcInvoke.FeishuDetectExternal) as Promise<FeishuExternalProcess[]>,
     killExternal: () => ipcRenderer.invoke(IpcInvoke.FeishuKillExternal) as Promise<number>,
+    lobby: () => ipcRenderer.invoke(IpcInvoke.FeishuLobby) as Promise<FeishuLobby>,
     onChanged: (cb) => on<FeishuStatus>(IpcEvent.FeishuChanged, cb),
   },
   permissions: {
@@ -126,6 +128,17 @@ const bridge: EasycodeBridge = {
     gitDiff: (cwd, sessionId) =>
       ipcRenderer.invoke(IpcInvoke.GitDiff, cwd, sessionId) as Promise<GitFileDiff[]>,
     openExternal: (url) => ipcRenderer.invoke(IpcInvoke.OpenExternal, url) as Promise<void>,
+    saveClipboardImage: (cwd, mimeType, data, name) =>
+      ipcRenderer.invoke(
+        IpcInvoke.SaveClipboardImage,
+        cwd,
+        mimeType,
+        data,
+        name,
+      ) as Promise<string | null>,
+  },
+  clipboard: {
+    readImage: () => ipcRenderer.invoke(IpcInvoke.ReadClipboardImage) as Promise<FileBase64 | null>,
   },
   backend: {
     onLog: (cb) => on<string>(IpcEvent.BackendLog, cb),

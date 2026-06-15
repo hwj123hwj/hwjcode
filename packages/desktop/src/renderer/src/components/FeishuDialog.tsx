@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Icon } from './Icon';
 import type {
+  FeishuBinding,
   FeishuDomain,
   FeishuExternalProcess,
   FeishuQrBegin,
@@ -19,6 +20,47 @@ function uptime(startedAt?: number): string {
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分钟`;
 }
 
+/** A chat counts as "active" if it ran a session within this window. */
+const ACTIVE_WINDOW_MS = 3 * 60 * 1000;
+
+function relTime(ts?: number): string {
+  if (!ts) return '从未';
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return '刚刚';
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  return `${Math.floor(h / 24)} 天前`;
+}
+
+/** Label for a binding's backing agent. */
+function agentLabel(agent?: string): string {
+  switch (agent) {
+    case 'claude-code':
+      return 'Claude Code';
+    case 'codex':
+      return 'Codex';
+    default:
+      return 'Easy Code';
+  }
+}
+
+/** Friendly chat label: group name → P2P → trimmed chatId. */
+function chatLabel(b: FeishuBinding): string {
+  if (b.chatName) return b.chatName;
+  if (b.isP2p) return '与机器人的私聊';
+  const id = b.chatId || '';
+  return id.length > 12 ? `…${id.slice(-8)}` : id || '未知会话';
+}
+
+/** Last two path segments of a project root, for a compact display. */
+function shortProject(root?: string): string {
+  if (!root) return '未绑定项目';
+  const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+  return parts.length <= 2 ? root : `…/${parts.slice(-2).join('/')}`;
+}
+
 /**
  * Feishu/Lark gateway management. The desktop app runs the gateway itself
  * (a bundled `--feishu` child); this dialog drives credential setup (QR scan or
@@ -30,6 +72,7 @@ function uptime(startedAt?: number): string {
 export function FeishuDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<FeishuStatus | null>(null);
   const [external, setExternal] = useState<FeishuExternalProcess[]>([]);
+  const [bindings, setBindings] = useState<FeishuBinding[]>([]);
   const [mode, setMode] = useState<'idle' | 'manual' | 'qr'>('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -45,16 +88,23 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
   const refreshExternal = () =>
     api.feishu.detectExternal().then(setExternal).catch(() => setExternal([]));
+  const refreshLobby = () =>
+    api.feishu.lobby().then((l) => setBindings(l.bindings)).catch(() => undefined);
 
   useEffect(() => {
     void api.feishu.status().then(setStatus);
     void refreshExternal();
+    void refreshLobby();
     const off = api.feishu.onChanged((s) => {
       setStatus(s);
       void refreshExternal();
+      void refreshLobby();
     });
+    // Poll the lobby so "active" badges + relative times stay fresh while open.
+    const timer = window.setInterval(refreshLobby, 5000);
     return () => {
       off();
+      window.clearInterval(timer);
       // Abort any in-flight QR poll if the dialog is dismissed mid-scan.
       void api.feishu.qrCancel();
     };
@@ -235,6 +285,50 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
+
+          {/* Lobby: project↔group bindings + recent activity (GUI counterpart
+              of the CLI's TUI dashboard). Shown once configured. */}
+          {configured && mode === 'idle' && (
+            <div className="feishu-lobby">
+              <div className="feishu-lobby-head">
+                <Icon name="chat" size={14} />
+                <span>项目 / 群绑定</span>
+                <span className="feishu-lobby-count">{bindings.length}</span>
+              </div>
+              {bindings.length === 0 ? (
+                <div className="feishu-lobby-empty">
+                  暂无绑定。在飞书中 @ 机器人并发送消息，即可把当前群与一个项目自动绑定。
+                </div>
+              ) : (
+                <div className="feishu-lobby-list">
+                  {bindings.map((b) => {
+                    const active = !!b.lastSessionAt && Date.now() - b.lastSessionAt < ACTIVE_WINDOW_MS;
+                    return (
+                      <div key={b.chatId} className={`feishu-bind ${active ? 'active' : ''}`}>
+                        <div className="feishu-bind-row">
+                          <span className={`status-dot ${active ? 'idle' : 'exited'}`} />
+                          <span className="feishu-bind-name" title={b.chatId}>
+                            {chatLabel(b)}
+                          </span>
+                          {b.isP2p && <span className="feishu-bind-tag">私聊</span>}
+                          {active && <span className="feishu-bind-tag live">活跃</span>}
+                          <span className="feishu-bind-time">{relTime(b.lastSessionAt)}</span>
+                        </div>
+                        <div className="feishu-bind-row sub">
+                          <span className="feishu-bind-proj" title={b.projectRoot}>
+                            <Icon name="folder" size={12} />
+                            {shortProject(b.projectRoot)}
+                          </span>
+                          <span className="feishu-bind-chip">{agentLabel(b.agent)}</span>
+                          {b.model && <span className="feishu-bind-chip">{b.model}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Primary actions. */}
           {configured && mode === 'idle' && (
