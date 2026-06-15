@@ -10,6 +10,8 @@ import {
   type GeminiChat,
   type ToolResult,
   type ToolCallConfirmationDetails,
+  type Kind,
+  type Icon,
   convertToFunctionResponse,
   logToolCall,
   isNodeError,
@@ -46,6 +48,7 @@ import {
   toToolCallContent,
   toPermissionOptions,
   toAcpToolKind,
+  iconToAcpKind,
 } from './acpUtils.js';
 import { getAcpErrorMessage } from './acpErrors.js';
 import type { GenerateContentResponse } from '@google/genai';
@@ -889,10 +892,14 @@ export class Session {
     }
 
     const toolCallId = callId;
-    const toolKind = toAcpToolKind(
-      ((tool as unknown as { kind?: unknown }).kind as never) ??
-        ('other' as never),
-    );
+    // Core tools don't carry a semantic `Kind` on the instance — only an
+    // `icon` — so derive the ACP kind from that (falling back to a real `kind`
+    // if a tool ever sets one). Without this every tool reports `other` and ACP
+    // clients render them all with the same generic icon.
+    const rawKind = (tool as unknown as { kind?: Kind }).kind;
+    const toolKind = rawKind
+      ? toAcpToolKind(rawKind)
+      : iconToAcpKind((tool as unknown as { icon?: Icon }).icon);
 
     // Announce the tool call to the IDE.
     await this.sendUpdate({
