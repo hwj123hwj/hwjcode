@@ -191,6 +191,26 @@ describe('Server Config (config.ts)', () => {
     expect(configWithoutFeishu.getFeishuMode()).toBe(false);
   });
 
+  it('Config constructor should store desktopMode correctly', () => {
+    const saved = process.env.EASYCODE_DESKTOP;
+    delete process.env.EASYCODE_DESKTOP;
+    try {
+      const explicit = new Config({ ...baseParams, desktopMode: true });
+      expect(explicit.getDesktopMode()).toBe(true);
+
+      const none = new Config({ ...baseParams });
+      expect(none.getDesktopMode()).toBe(false);
+
+      // Inferred from the env flag the desktop app sets.
+      process.env.EASYCODE_DESKTOP = '1';
+      const fromEnv = new Config({ ...baseParams });
+      expect(fromEnv.getDesktopMode()).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.EASYCODE_DESKTOP;
+      else process.env.EASYCODE_DESKTOP = saved;
+    }
+  });
+
   it('Config constructor should default userMemory to empty string if not provided', () => {
     const paramsWithoutMemory: ConfigParameters = { ...baseParams };
     delete paramsWithoutMemory.userMemory;
@@ -243,8 +263,14 @@ describe('Server Config (config.ts)', () => {
     const config = new Config({ ...baseParams, healthyUse: false });
     expect(config.getHealthyUseEnabled()).toBe(false);
 
-    const configDefault = new Config(baseParams);
-    expect(configDefault.getHealthyUseEnabled()).toBe(true);
+    const configEnabled = new Config({ ...baseParams, healthyUse: true });
+    expect(configEnabled.getHealthyUseEnabled()).toBe(true);
+
+    // Default (param omitted) is off. baseParams sets it explicitly, so drop it.
+    const defaultParams = { ...baseParams };
+    delete defaultParams.healthyUse;
+    const configDefault = new Config(defaultParams);
+    expect(configDefault.getHealthyUseEnabled()).toBe(false);
   });
 
   it('should have a getFileService method that returns FileDiscoveryService', () => {

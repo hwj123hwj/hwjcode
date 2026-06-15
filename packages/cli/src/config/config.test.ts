@@ -296,12 +296,12 @@ describe('loadCliConfig', () => {
     expect(config.getHealthyUseEnabled()).toBe(false);
   });
 
-  it('should default healthyUse to true when not present in settings', async () => {
+  it('should default healthyUse to false when not present in settings', async () => {
     process.argv = ['node', 'script.js'];
     const argv = await parseArguments();
     const settings: Settings = {};
     const config = await loadCliConfig(settings, [], 'test-session', argv);
-    expect(config.getHealthyUseEnabled()).toBe(true);
+    expect(config.getHealthyUseEnabled()).toBe(false);
   });
 });
 
