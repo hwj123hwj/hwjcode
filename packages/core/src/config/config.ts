@@ -397,7 +397,7 @@ export class Config {
     this.vsCodePluginMode = params.vsCodePluginMode ?? false;
     this.feishuMode = params.feishuMode ?? false;
     this.hooks = params.hooks ?? {};
-    this.healthyUse = params.healthyUse ?? true;
+    this.healthyUse = params.healthyUse ?? false;
     this.preferredLanguage = params.preferredLanguage;
 
     if (params.contextFileName) {
