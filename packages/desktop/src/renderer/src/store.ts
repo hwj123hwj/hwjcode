@@ -88,6 +88,7 @@ interface StoreState {
   ) => Promise<void>;
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
   sendPrompt: (id: string, text: string, atPaths: string[]) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   setModel: (id: string, modelId: string) => Promise<void>;
@@ -250,6 +251,11 @@ export const useStore = create<StoreState>((set, get) => ({
   archiveSession: async (id, archived) => {
     await api.sessions.archive(id, archived);
     await get().refreshSessions();
+  },
+
+  renameSession: async (id, title) => {
+    const meta = await api.sessions.rename(id, title);
+    patchMeta(set, id, { title: meta.title });
   },
 
   sendPrompt: async (id, text, atPaths) => {
