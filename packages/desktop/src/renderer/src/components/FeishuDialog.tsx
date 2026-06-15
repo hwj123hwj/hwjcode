@@ -20,10 +20,10 @@ function uptime(startedAt?: number): string {
 }
 
 /**
- * Feishu/Lark gateway management. The gateway itself is run by the CLI
- * (`easycode --feishu`); this dialog just drives credential setup (QR scan or
+ * Feishu/Lark gateway management. The desktop app runs the gateway itself
+ * (a bundled `--feishu` child); this dialog drives credential setup (QR scan or
  * manual entry, written to the shared `~/.easycode-user` store) and the
- * start/stop of the desktop-managed gateway child. It also detects a gateway
+ * start/stop of that desktop-managed gateway child. It also detects a gateway
  * launched independently by the CLI and offers to take it over — a machine must
  * run exactly one gateway.
  */
@@ -176,7 +176,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
             飞书 / Lark 网关
           </h3>
           <div className="sub">
-            网关由本机 CLI（<code>easycode --feishu</code>）提供，桌面版负责配置凭证与启停管理。
+            桌面版内置飞书网关，负责配置凭证与启停管理。
           </div>
         </div>
 
