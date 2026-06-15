@@ -1,0 +1,313 @@
+/**
+ * Skill Hub Tool
+ *
+ * Search and install skills from the custom-skills registry (hwj123hwj/custom-skills).
+ * Uses jsdelivr CDN for China network acceleration, with GitHub raw as fallback.
+ */
+
+import {
+  BaseTool,
+  Icon,
+  type ToolResult,
+  type ToolCallConfirmationDetails,
+  type ToolLocation,
+} from './tools.js';
+import { Type } from '@google/genai';
+import { Config } from '../config/config.js';
+import { fetchWithTimeout } from '../utils/fetch.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+const REGISTRY_URL = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/registry/skills.json';
+const REGISTRY_FALLBACK_URL = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/registry/skills.json';
+const SKILL_URL_TEMPLATE = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/skills/{skillId}/SKILL.md';
+const SKILL_FALLBACK_TEMPLATE = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/skills/{skillId}/SKILL.md';
+const FETCH_TIMEOUT_MS = 10000;
+const MAX_SEARCH_RESULTS = 5;
+
+interface SkillRegistryItem {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  lastUpdated?: string;
+}
+
+interface SkillHubParams {
+  /** Action to perform: "search" to find skills, "install" to download and install a skill */
+  action: 'search' | 'install';
+  /** Search query keyword (for search action) */
+  query?: string;
+  /** Skill ID to install (for install action) */
+  skillId?: string;
+}
+
+/**
+ * SkillHubTool - Search and install skills from custom-skills registry
+ */
+export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
+  static readonly Name: string = 'skill_hub';
+
+  constructor(private readonly config: Config) {
+    super(
+      SkillHubTool.Name,
+      'SkillHub',
+      '从 custom-skills 仓库搜索并按需安装技能。覆盖 51 个精选技能：图像、视频、音频、文档、学术搜索、开发工具等。使用 jsdelivr CDN 加速国内访问。action="search" 搜索技能，action="install" 安装技能到本地。',
+      Icon.List,
+      {
+        type: Type.OBJECT,
+        properties: {
+          action: {
+            type: Type.STRING,
+            description: '操作类型: "search" 搜索技能, "install" 安装技能',
+            enum: ['search', 'install'],
+          },
+          query: {
+            type: Type.STRING,
+            description: '搜索关键词（用于 search 操作），如 "生图"、"OCR"、"视频剪辑"',
+          },
+          skillId: {
+            type: Type.STRING,
+            description: '要安装的技能 ID（用于 install 操作），如 "image-provider"、"paddleocr-text-recognition"',
+          },
+        },
+        required: ['action'],
+      },
+      false, // isOutputMarkdown
+      false, // canUpdateOutput
+    );
+  }
+
+  override validateToolParams(params: SkillHubParams): string | null {
+    if (!params.action) {
+      return 'Missing required parameter: action';
+    }
+    if (params.action !== 'search' && params.action !== 'install') {
+      return `Invalid action: "${params.action}". Must be "search" or "install".`;
+    }
+    if (params.action === 'search' && !params.query) {
+      return 'Search action requires a "query" parameter.';
+    }
+    if (params.action === 'install' && !params.skillId) {
+      return 'Install action requires a "skillId" parameter.';
+    }
+    return null;
+  }
+
+  override getDescription(params: SkillHubParams): string {
+    if (params.action === 'search') {
+      return `Searching custom-skills registry for: "${params.query}"`;
+    }
+    return `Installing skill: "${params.skillId}" from custom-skills registry`;
+  }
+
+  override toolLocations(params: SkillHubParams): ToolLocation[] {
+    if (params.action === 'install') {
+      const userSkillsDir = path.join(os.homedir(), '.easycode-user', 'skills');
+      return [{ path: path.join(userSkillsDir, params.skillId!, 'SKILL.md') }];
+    }
+    return [];
+  }
+
+  override async shouldConfirmExecute(
+    params: SkillHubParams,
+  ): Promise<ToolCallConfirmationDetails | false> {
+    if (params.action === 'search') {
+      return false; // Read-only, no confirmation needed
+    }
+
+    // Install action: confirm before writing files
+    return {
+      type: 'info',
+      title: `Install Skill: ${params.skillId}`,
+      prompt: `将安装技能 "${params.skillId}" 到 ~/.easycode-user/skills/${params.skillId}/。安装后重启会话即可使用。`,
+      urls: [SKILL_URL_TEMPLATE.replace('{skillId}', params.skillId!)],
+      onConfirm: async () => {},
+    };
+  }
+
+  override async execute(
+    params: SkillHubParams,
+    signal: AbortSignal,
+  ): Promise<ToolResult> {
+    const validationError = this.validateToolParams(params);
+    if (validationError) {
+      return {
+        llmContent: `Error: ${validationError}`,
+        returnDisplay: validationError,
+      };
+    }
+
+    if (params.action === 'search') {
+      return this.executeSearch(params.query!, signal);
+    }
+
+    return this.executeInstall(params.skillId!, signal);
+  }
+
+  /**
+   * Search skills by keyword
+   */
+  private async executeSearch(query: string, signal: AbortSignal): Promise<ToolResult> {
+    try {
+      const registry = await this.fetchRegistry(signal);
+      if (!registry) {
+        return {
+          llmContent: 'Error: 无法获取技能仓库索引。请检查网络连接。',
+          returnDisplay: 'Registry fetch failed',
+        };
+      }
+
+      const lowerQuery = query.toLowerCase();
+      const matches: SkillRegistryItem[] = [];
+
+      for (const skill of registry) {
+        const nameMatch = skill.name.toLowerCase().includes(lowerQuery);
+        const descMatch = skill.description.toLowerCase().includes(lowerQuery);
+        const tagMatch = skill.tags.some(t => t.toLowerCase().includes(lowerQuery));
+        const idMatch = skill.id.toLowerCase().includes(lowerQuery);
+
+        if (nameMatch || descMatch || tagMatch || idMatch) {
+          matches.push(skill);
+        }
+      }
+
+      if (matches.length === 0) {
+        return {
+          llmContent: `未找到匹配 "${query}" 的技能。尝试使用不同的关键词，或使用 action="search" query="list" 查看所有技能。`,
+          returnDisplay: `No matches for "${query}"`,
+        };
+      }
+
+      // Limit results
+      const results = matches.slice(0, MAX_SEARCH_RESULTS);
+
+      const lines: string[] = [
+        `找到 ${results.length} 个匹配 "${query}" 的技能：`,
+        '',
+      ];
+
+      for (const skill of results) {
+        lines.push(`- **${skill.id}**: ${skill.description}`);
+        lines.push(`  标签: ${skill.tags.join(', ')}`);
+        lines.push('');
+      }
+
+      if (matches.length > MAX_SEARCH_RESULTS) {
+        lines.push(`(还有 ${matches.length - MAX_SEARCH_RESULTS} 个结果未显示)`);
+      }
+
+      lines.push('使用 `skill_hub(action="install", skillId="技能ID")` 安装技能。');
+
+      return {
+        llmContent: lines.join('\n'),
+        returnDisplay: `Found ${results.length} skill(s) matching "${query}"`,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        llmContent: `搜索失败: ${errorMessage}`,
+        returnDisplay: `Error: ${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * Install a skill by downloading SKILL.md from CDN
+   */
+  private async executeInstall(skillId: string, signal: AbortSignal): Promise<ToolResult> {
+    const userSkillsDir = path.join(os.homedir(), '.easycode-user', 'skills');
+    const targetDir = path.join(userSkillsDir, skillId);
+    const targetSkillMd = path.join(targetDir, 'SKILL.md');
+
+    // Check if already installed
+    if (fs.existsSync(targetSkillMd)) {
+      return {
+        llmContent: `技能 "${skillId}" 已安装。路径: ${targetSkillMd}\n重启会话后 SkillLoader 会自动发现此技能，使用 use_skill("${skillId}") 加载。`,
+        returnDisplay: `Skill "${skillId}" already installed`,
+      };
+    }
+
+    try {
+      // Fetch SKILL.md content
+      const skillUrl = SKILL_URL_TEMPLATE.replace('{skillId}', skillId);
+      const fallbackUrl = SKILL_FALLBACK_TEMPLATE.replace('{skillId}', skillId);
+
+      let content: string | null = null;
+
+      // Try jsdelivr CDN first
+      try {
+        const response = await fetchWithTimeout(skillUrl, FETCH_TIMEOUT_MS);
+        if (response.ok) {
+          content = await response.text();
+        }
+      } catch {
+        // CDN failed, try fallback
+      }
+
+      // Fallback to GitHub raw
+      if (!content) {
+        try {
+          const response = await fetchWithTimeout(fallbackUrl, FETCH_TIMEOUT_MS);
+          if (response.ok) {
+            content = await response.text();
+          }
+        } catch {
+          // Both failed
+        }
+      }
+
+      if (!content) {
+        return {
+          llmContent: `无法下载技能 "${skillId}"。jsdelivr CDN 和 GitHub raw 均失败。请检查网络连接或确认技能 ID 是否正确。`,
+          returnDisplay: `Download failed for "${skillId}"`,
+        };
+      }
+
+      // Write to local directory
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(targetSkillMd, content, 'utf-8');
+
+      return {
+        llmContent: `技能 "${skillId}" 已成功安装到 ${targetSkillMd}。\n\n重启会话后 SkillLoader 会自动发现此技能，使用 use_skill("${skillId}") 加载并使用。`,
+        returnDisplay: `Skill "${skillId}" installed successfully`,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        llmContent: `安装失败: ${errorMessage}`,
+        returnDisplay: `Error: ${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * Fetch registry JSON from CDN (with fallback)
+   */
+  private async fetchRegistry(signal: AbortSignal): Promise<SkillRegistryItem[] | null> {
+    // Try jsdelivr CDN first
+    try {
+      const response = await fetchWithTimeout(REGISTRY_URL, FETCH_TIMEOUT_MS);
+      if (response.ok) {
+        const json = await response.json();
+        return json as SkillRegistryItem[];
+      }
+    } catch {
+      // CDN failed
+    }
+
+    // Fallback to GitHub raw
+    try {
+      const response = await fetchWithTimeout(REGISTRY_FALLBACK_URL, FETCH_TIMEOUT_MS);
+      if (response.ok) {
+        const json = await response.json();
+        return json as SkillRegistryItem[];
+      }
+    } catch {
+      // Both failed
+    }
+
+    return null;
+  }
+}
