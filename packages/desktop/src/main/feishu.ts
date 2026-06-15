@@ -30,8 +30,10 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { resolveBackendEntry } from './backendLocator.js';
 import type {
+  FeishuBinding,
   FeishuDomain,
   FeishuExternalProcess,
+  FeishuLobby,
   FeishuManualInput,
   FeishuQrBegin,
   FeishuQrBeginResult,
@@ -118,6 +120,82 @@ async function saveCredentials(creds: StoredCredentials): Promise<void> {
 
 async function clearCredentialsFile(): Promise<void> {
   await fs.unlink(path.join(credDir(), CRED_FILE)).catch(() => undefined);
+}
+
+// ── project↔chat route table + chat-name resolution (for the lobby panel) ────
+
+const ROUTES_FILE = 'feishu-projects.json';
+
+/** A route record as the CLI gateway writes it (we read a permissive subset). */
+interface StoredRoute {
+  projectRoot?: string;
+  model?: string;
+  agent?: string;
+  lastSessionId?: string;
+  lastSessionAt?: number;
+}
+
+/** Read the shared `feishu-projects.json` (chatId → route), tolerating absence. */
+async function loadProjectRoutes(): Promise<Record<string, StoredRoute>> {
+  try {
+    const raw = await fs.readFile(path.join(credDir(), ROUTES_FILE), 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, StoredRoute>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Resolved chat name / mode, cached so the lobby doesn't re-hit the API every
+// refresh. Mirrors gateway.ts#fetchAndCacheChatInfo (one GET fills both).
+const chatInfoCache = new Map<string, { name?: string; mode?: string }>();
+let tokenCache: { token: string; expiresAt: number } | null = null;
+
+async function tenantAccessToken(creds: StoredCredentials): Promise<string | null> {
+  if (tokenCache && tokenCache.expiresAt > Date.now() + 30_000) return tokenCache.token;
+  const openBase = openBaseFor(creds.domain);
+  try {
+    const res = await fetch(`${openBase}/open-apis/auth/v3/tenant_access_token/internal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
+    });
+    const data: any = await res.json();
+    const token: string | undefined = data.tenant_access_token;
+    if (!token) return null;
+    tokenCache = { token, expiresAt: Date.now() + (Number(data.expire) || 3600) * 1000 };
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve names/modes for any not-yet-cached chatIds (best effort, parallel). */
+async function resolveChatInfo(chatIds: string[], creds: StoredCredentials): Promise<void> {
+  const missing = chatIds.filter((id) => id && !chatInfoCache.has(id));
+  if (missing.length === 0) return;
+  const token = await tenantAccessToken(creds);
+  if (!token) return;
+  const openBase = openBaseFor(creds.domain);
+  await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const res = await fetch(`${openBase}/open-apis/im/v1/chats/${encodeURIComponent(id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data: any = await res.json();
+        if (data.code !== 0) {
+          chatInfoCache.set(id, {});
+          return;
+        }
+        const name = typeof data.data?.name === 'string' ? data.data.name.trim() : '';
+        const mode = typeof data.data?.chat_mode === 'string' ? data.data.chat_mode.trim() : '';
+        chatInfoCache.set(id, { name: name || undefined, mode: mode || undefined });
+      } catch {
+        /* leave unresolved so a later refresh can retry */
+      }
+    }),
+  );
 }
 
 // ── Feishu registration / probe (mirrors registration.ts, plain fetch) ──────
@@ -450,6 +528,36 @@ export class FeishuManager {
 
   detectExternal(): Promise<FeishuExternalProcess[]> {
     return findFeishuProcesses(this.child?.pid);
+  }
+
+  /**
+   * Build the lobby view: every project↔chat binding from the shared route
+   * table, enriched with resolved chat names, newest activity first. The GUI
+   * counterpart of the CLI's `FeishuStatusDashboard`.
+   */
+  async getLobby(): Promise<FeishuLobby> {
+    const routes = await loadProjectRoutes();
+    const chatIds = Object.keys(routes);
+    if (chatIds.length > 0) {
+      const creds = await loadCredentials();
+      if (creds) await resolveChatInfo(chatIds, creds).catch(() => undefined);
+    }
+    const bindings: FeishuBinding[] = chatIds.map((chatId) => {
+      const r = routes[chatId] ?? {};
+      const info = chatInfoCache.get(chatId) ?? {};
+      return {
+        chatId,
+        chatName: info.name,
+        isP2p: info.mode === 'p2p',
+        projectRoot: r.projectRoot,
+        agent: r.agent,
+        model: r.model,
+        lastSessionId: r.lastSessionId,
+        lastSessionAt: r.lastSessionAt,
+      };
+    });
+    bindings.sort((a, b) => (b.lastSessionAt ?? 0) - (a.lastSessionAt ?? 0));
+    return { bindings };
   }
 
   async killExternal(): Promise<number> {

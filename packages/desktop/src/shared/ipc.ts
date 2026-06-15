@@ -48,6 +48,7 @@ export const IpcInvoke = {
   FeishuStop: 'feishu:stop',
   FeishuDetectExternal: 'feishu:detect-external',
   FeishuKillExternal: 'feishu:kill-external',
+  FeishuLobby: 'feishu:lobby',
   // custom models
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
@@ -62,6 +63,9 @@ export const IpcInvoke = {
   ListDir: 'workspace:list-dir',
   GitDiff: 'workspace:git-diff',
   OpenExternal: 'workspace:open-external',
+  SaveClipboardImage: 'workspace:save-clipboard-image',
+  // clipboard
+  ReadClipboardImage: 'clipboard:read-image',
 } as const;
 
 /** Main -> renderer, push events (webContents.send / ipcRenderer.on). */
@@ -431,6 +435,35 @@ export interface FeishuExternalProcess {
   cmd: string;
 }
 
+/**
+ * One project↔chat binding from the shared `feishu-projects.json` route table,
+ * enriched with the resolved chat name / type. Powers the desktop's gateway
+ * lobby panel (the GUI counterpart of the CLI's `FeishuStatusDashboard`).
+ */
+export interface FeishuBinding {
+  /** Feishu chat id (`oc_…`). */
+  chatId: string;
+  /** Resolved group name, when the bot can read it. */
+  chatName?: string;
+  /** True when this is a 1:1 chat with the bot (chat_mode = 'p2p'). */
+  isP2p?: boolean;
+  /** Absolute project root this chat is bound to. */
+  projectRoot?: string;
+  /** Backing agent: 'self' (Easy Code) | 'claude-code' | 'codex'. */
+  agent?: string;
+  /** Pinned model for this chat, if any. */
+  model?: string;
+  /** Native session id of the chat's last completed run. */
+  lastSessionId?: string;
+  /** Date.now() when lastSessionId was saved — drives the activity view. */
+  lastSessionAt?: number;
+}
+
+/** Snapshot of the gateway lobby: every bound project↔chat, newest activity first. */
+export interface FeishuLobby {
+  bindings: FeishuBinding[];
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Workspace helpers
 // ──────────────────────────────────────────────────────────────────────────
@@ -534,6 +567,8 @@ export interface EasycodeBridge {
     detectExternal(): Promise<FeishuExternalProcess[]>;
     /** Kill external gateways; returns how many were terminated. */
     killExternal(): Promise<number>;
+    /** Read the project↔chat bindings (+ resolved chat names) for the lobby panel. */
+    lobby(): Promise<FeishuLobby>;
     onChanged(cb: (status: FeishuStatus) => void): () => void;
   };
   permissions: {
@@ -551,6 +586,21 @@ export interface EasycodeBridge {
     /** Pass `sessionId` to also refresh that session's +N/-M chip in the sidebar. */
     gitDiff(cwd: string, sessionId?: string): Promise<GitFileDiff[]>;
     openExternal(url: string): Promise<void>;
+    /**
+     * Persist an attached/pasted image into `<cwd>/.easycode/clipboard/` with a
+     * real extension and return its absolute path. Lets non-multimodal models
+     * (and the image_reader tool) reach the image by path. Returns null on failure.
+     */
+    saveClipboardImage(
+      cwd: string,
+      mimeType: string,
+      data: string,
+      name?: string,
+    ): Promise<string | null>;
+  };
+  clipboard: {
+    /** Read a bitmap from the OS clipboard as base64 PNG (null when empty). */
+    readImage(): Promise<FileBase64 | null>;
   };
   backend: {
     onLog(cb: (line: string) => void): () => void;

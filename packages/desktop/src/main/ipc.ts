@@ -25,8 +25,10 @@ import {
   openExternal,
   pickFiles,
   pickFolder,
+  readClipboardImage,
   readFile,
   readFileBase64,
+  saveClipboardImage,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { detectExternalAgents } from './externalAgents.js';
@@ -127,6 +129,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.FeishuStop, () => feishu.stop());
   ipcMain.handle(IpcInvoke.FeishuDetectExternal, () => feishu.detectExternal());
   ipcMain.handle(IpcInvoke.FeishuKillExternal, () => feishu.killExternal());
+  ipcMain.handle(IpcInvoke.FeishuLobby, () => feishu.getLobby());
 
   // ── custom models ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());
@@ -164,6 +167,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     return diffs;
   });
   ipcMain.handle(IpcInvoke.OpenExternal, (_e, url: string) => openExternal(url));
+  ipcMain.handle(
+    IpcInvoke.SaveClipboardImage,
+    (_e, cwd: string, mimeType: string, data: string, name?: string) =>
+      saveClipboardImage(cwd, mimeType, data, name),
+  );
+
+  // ── clipboard ─────────────────────────────────────────────────────────
+  ipcMain.handle(IpcInvoke.ReadClipboardImage, () => readClipboardImage());
 
   return { hub, feishu };
 }

@@ -99,16 +99,28 @@ export function PromptBar({ view }: { view: SessionView }) {
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const images = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'));
-    if (images.length === 0) return; // plain-text paste — default behaviour
-    e.preventDefault();
-    for (const it of images) {
-      const file = it.getAsFile();
-      if (!file) continue;
-      const url = URL.createObjectURL(file);
-      void addImageFromUrl(url, file.type, file.name || 'pasted-image.png').finally(() =>
-        URL.revokeObjectURL(url),
-      );
+    if (images.length > 0) {
+      e.preventDefault();
+      for (const it of images) {
+        const file = it.getAsFile();
+        if (!file) continue;
+        const url = URL.createObjectURL(file);
+        void addImageFromUrl(url, file.type, file.name || 'pasted-image.png').finally(() =>
+          URL.revokeObjectURL(url),
+        );
+      }
+      return;
     }
+    // No image DataTransferItem. If there's real text, this is a normal text
+    // paste — let it through. Otherwise the clipboard may hold a bitmap that
+    // Windows doesn't expose as an item; consult the main-process clipboard.
+    if (e.clipboardData?.getData('text/plain')) return;
+    e.preventDefault();
+    void api.clipboard.readImage().then((img) => {
+      if (img?.data) {
+        void addImageFromUrl(`data:${img.mimeType};base64,${img.data}`, img.mimeType, 'pasted-image.png');
+      }
+    });
   };
 
   /** Attach button: native file picker. Images inline; other files ride @-paths. */
@@ -180,14 +192,32 @@ export function PromptBar({ view }: { view: SessionView }) {
     const filePaths = attachments
       .filter((a): a is Extract<Attachment, { kind: 'file' }> => a.kind === 'file')
       .map((a) => a.path);
-    const images = attachments
-      .filter((a): a is Extract<Attachment, { kind: 'image' }> => a.kind === 'image')
-      .map((a) => ({ mimeType: a.mimeType, data: a.data }));
+    const imageAtts = attachments.filter(
+      (a): a is Extract<Attachment, { kind: 'image' }> => a.kind === 'image',
+    );
     setText('');
     setAtPaths({});
     setMention(null);
     setAttachments([]);
-    await sendPrompt(meta.id, trimmed, [...mentionPaths, ...filePaths], images);
+
+    // Inline the (compressed) bytes for multimodal models …
+    const images = imageAtts.map((a) => ({ mimeType: a.mimeType, data: a.data }));
+    // … and also drop each image to a real file under the workspace, surfacing
+    // its absolute path in the text. Text-only models can then reach it via the
+    // image_reader tool — which keys off the path's extension, so persisting
+    // with a proper suffix is what fixes "Unsupported image extension """.
+    const hints: string[] = [];
+    for (const a of imageAtts) {
+      const saved = await api.workspace
+        .saveClipboardImage(meta.cwd, a.mimeType, a.data, a.name)
+        .catch(() => null);
+      if (saved) hints.push(`[IMAGE: ${a.name} (${saved})]`);
+    }
+    const finalText = hints.length
+      ? `${trimmed}${trimmed ? '\n\n' : ''}${hints.join('\n')}`
+      : trimmed;
+
+    await sendPrompt(meta.id, finalText, [...mentionPaths, ...filePaths], images);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
