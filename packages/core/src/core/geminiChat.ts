@@ -186,6 +186,30 @@ export class GeminiChat {
     return JSON.stringify(contents);
   }
 
+  /**
+   * 从对话历史中清除指定工具名的函数调用和响应记录。
+   * 用于 Feishu 模式的 /tool disable 功能：禁用工具后，
+   * 历史中的函数调用记录会让模型推断出工具存在并尝试调用，
+   * 清除这些记录可以彻底阻止模型感知已禁用的工具。
+   */
+  purgeFunctionCallsFromHistory(toolNames: string[]): void {
+    if (!toolNames.length) return;
+    const nameSet = new Set(toolNames);
+    this.history = this.history.filter((content) => {
+      if (!content.parts) return true;
+      const hasDisabledCall = content.parts.some(
+        (p) =>
+          p.functionCall && p.functionCall.name && nameSet.has(p.functionCall.name),
+      );
+      const hasDisabledResponse = content.parts.some(
+        (p) =>
+          p.functionResponse && p.functionResponse.name && nameSet.has(p.functionResponse.name),
+      );
+      // 如果这条消息包含被禁用工具的调用或响应，整条移除
+      return !hasDisabledCall && !hasDisabledResponse;
+    });
+  }
+
   setSpecifiedModel(model: string): void {
     this.specifiedModel = model;
   }
