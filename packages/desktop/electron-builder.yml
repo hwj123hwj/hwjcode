@@ -1,4 +1,4 @@
-appId: ai.deepvlab.easycode.desktop
+appId: com.bot.easycode.desktop
 productName: Easy Code
 directories:
   output: release/${version}
@@ -22,6 +22,16 @@ mac:
     - dmg
     - zip
   hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # 自 electron-builder v24.0.0+ 引入，支持基于内置 notarytool 自动进行公证。
+  # notarize: true 表示走环境变量自动模式，需在环境变量中提供：
+  #   APPLE_ID                     —— 开发者账号邮箱
+  #   APPLE_APP_SPECIFIC_PASSWORD  —— App 专用密码（注意变量名，不是 APPLE_ID_PASSWORD）
+  #   APPLE_TEAM_ID                —— 团队 ID
+  # 当未提供这些环境变量时，公证步骤会自动跳过，保证未配置公证的普通本地构建也能完成。
+  notarize: true
 win:
   # electron-builder converts this PNG (>=256x256) into a multi-size .ico used
   # for the .exe and, by default, the NSIS installer/uninstaller too.
