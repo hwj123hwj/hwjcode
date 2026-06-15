@@ -19,7 +19,7 @@ Easy Code 是一款 AI 驱动的智能编程助手，通过深度整合人工智
 - **License:** Apache-2.0
 - **Runtime:** Node.js >= 20.0.0
 - **Language:** TypeScript 5.0+
-- **Repository:** github.com/OrionStarAI/EasyCodeCode
+- **Repository:** gitlab.liebaopay.com/huangweijian/DeepVcodeClient
 - **Author:** Easy Code Team
 
 ## Monorepo Structure
