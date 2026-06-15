@@ -26,6 +26,7 @@ export const IpcInvoke = {
   // sessions
   SessionList: 'session:list',
   SessionCreate: 'session:create',
+  SessionCreateChat: 'session:create-chat',
   SessionResume: 'session:resume',
   SessionClose: 'session:close',
   SessionPrompt: 'session:prompt',
@@ -35,6 +36,7 @@ export const IpcInvoke = {
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
   SessionRename: 'session:rename',
+  SessionSetTitleProvisional: 'session:set-title-provisional',
   // external agents
   AgentsDetect: 'agents:detect',
   // feishu gateway
@@ -159,6 +161,16 @@ export type EnvironmentKind = 'local'; // remote/ssh reserved for the future
  */
 export type AgentKind = 'easy-code' | 'claude-code' | 'codex';
 
+/**
+ * How the desktop shell groups a session in the sidebar. Purely a front-end
+ * organizational concept — the agent backend neither knows nor cares about it.
+ * - `project`: bound to a real working directory the user picked; grouped under
+ *   that project in the sidebar.
+ * - `chat`: a directory-less "just chat" session. Its cwd is a throwaway folder
+ *   under `~/.easycode-user/chats/<id>`; listed flat in the Chats section.
+ */
+export type SessionKind = 'project' | 'chat';
+
 /** Which local external agents were detected on PATH (claude / codex). */
 export interface ExternalAgentAvailability {
   /** True when `claude` resolves on PATH. */
@@ -181,6 +193,13 @@ export interface SessionMeta {
   status: SessionRunStatus;
   /** Which agent backend drives this session. */
   agentType: AgentKind;
+  /**
+   * Sidebar grouping bucket (front-end only). `project` = grouped under its
+   * working directory; `chat` = directory-less, listed flat in Chats. Older
+   * records without this field are backfilled on load (cwd under the chats dir
+   * → `chat`, otherwise `project`).
+   */
+  kind: SessionKind;
   permissionMode: PermissionMode;
   model?: string;
   availableModels: ModelInfo[];
@@ -265,6 +284,8 @@ export interface CreateSessionOptions {
   title?: string;
   /** Agent backend to drive the session. Defaults to `easy-code`. */
   agentType?: AgentKind;
+  /** Sidebar grouping bucket. Defaults to `project`. */
+  kind?: SessionKind;
   permissionMode?: PermissionMode;
   model?: string;
 }
@@ -390,6 +411,38 @@ export interface PermissionOption {
   kind: PermissionOptionKind;
 }
 
+// ── ask_user_question (multi-choice cards) ─────────────────────────────────
+//
+// Mirrors the core `AskUserQuestion*` types (packages/core/src/tools/tools.ts).
+// Duplicated here (not imported) so the renderer never pulls in `deepv-code-core`.
+// Carried out-of-band on a permission request via `_meta.dvcode.askUserQuestion`
+// because the base ACP requestPermission contract only models Allow/Reject.
+
+/** One selectable option for an AskUserQuestion question. */
+export interface AskQuestionOption {
+  label: string;
+  description?: string;
+  /** Optional markdown preview rendered beside the option (single-select only). */
+  preview?: string;
+}
+
+/** A single question inside an ask_user_question prompt. */
+export interface AskQuestion {
+  question: string;
+  header: string;
+  options: AskQuestionOption[];
+  multiSelect?: boolean;
+}
+
+/** The collected answers the renderer returns for an ask_user_question prompt. */
+export interface AskAnswersPayload {
+  /** Keyed by question text → selected label(s) (comma-joined for multi-select). */
+  answers?: Record<string, string>;
+  annotations?: Record<string, { preview?: string; notes?: string }>;
+  /** Free-form feedback (e.g. "chat about this") that overrides answers. */
+  feedback?: string;
+}
+
 export interface PermissionRequest {
   requestId: string;
   sessionId: string;
@@ -399,10 +452,21 @@ export interface PermissionRequest {
   options: PermissionOption[];
   /** Optional diff/content preview to render in the approval dialog. */
   content?: ToolCallContent[];
+  /**
+   * Present only for `ask_user_question`: the multi-choice questions to render.
+   * When set, the dialog shows the Ask card UI instead of plain Allow/Reject
+   * buttons, and replies via {@link PermissionResponse.answers}.
+   */
+  questions?: AskQuestion[];
 }
 
 export type PermissionResponse =
-  | { outcome: 'selected'; optionId: string }
+  | {
+      outcome: 'selected';
+      optionId: string;
+      /** ask_user_question only: the collected answers, forwarded to the backend. */
+      answers?: AskAnswersPayload;
+    }
   | { outcome: 'cancelled' };
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -554,11 +618,22 @@ export interface EasycodeBridge {
   sessions: {
     list(): Promise<SessionMeta[]>;
     create(opts: CreateSessionOptions): Promise<SessionMeta>;
+    /**
+     * Start a directory-less "just chat" session. The hub picks a throwaway cwd
+     * under `~/.easycode-user/chats/<id>` and tags it `kind: 'chat'`.
+     */
+    createChat(opts?: Omit<CreateSessionOptions, 'cwd'>): Promise<SessionMeta>;
     resume(sessionId: string, cwd: string): Promise<SessionMeta>;
     close(sessionId: string): Promise<void>;
     archive(sessionId: string, archived: boolean): Promise<void>;
     /** Rename a session's display title. Empty title falls back to the folder name. */
     rename(sessionId: string, title: string): Promise<SessionMeta>;
+    /**
+     * Set a provisional display title (e.g. derived from the first user message)
+     * WITHOUT locking it — a later backend `[TITLE_UPDATE]` may still override.
+     * No-ops if the user has already manually renamed (titleLocked).
+     */
+    setTitleProvisional(sessionId: string, title: string): Promise<SessionMeta>;
     prompt(opts: PromptOptions): Promise<void>;
     cancel(sessionId: string): Promise<void>;
     setModel(sessionId: string, modelId: string): Promise<void>;

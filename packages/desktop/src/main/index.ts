@@ -11,6 +11,7 @@ import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
+import { ensurePathFromLoginShell } from './shellPath.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
@@ -108,6 +109,13 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setName('Easy Code');
+  // GUI launches on macOS/Linux (Finder/Dock/launcher) bypass the login shell
+  // and inherit only a minimal PATH (e.g. /usr/bin:/bin:/usr/sbin:/sbin),
+  // missing /usr/local/bin, /opt/homebrew/bin, nvm shims, etc. Restore the real
+  // PATH from the login shell BEFORE registerIpc()/createWindow() so external
+  // agent detection (claude/codex) and the `npx` ACP bridge spawns can find
+  // their binaries. No-op on Windows.
+  ensurePathFromLoginShell();
   // Windows shows toast notifications under this AppUserModelID; without it the
   // turn-complete notifications either don't appear or show as an unbranded
   // "electron.app.…" sender. Must match electron-builder.yml's `appId`.
