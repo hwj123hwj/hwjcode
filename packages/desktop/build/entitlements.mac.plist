@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- 允许 JIT 编译，这是 Electron 的 V8 引擎或部分原生模块必需的 -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- 允许加载第三方未签名或签名失效的动态链接库 -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- 允许加载外部未签名的 frameworks 或者是 dynamic libraries -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- 允许客户端访问网络 -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- 允许作为本地服务器运行并监听端口 (以便 ACP 连接) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+  </dict>
+</plist>
