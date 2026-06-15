@@ -10,6 +10,7 @@
 
 import { ipcMain, BrowserWindow } from 'electron';
 import { SessionHub } from './sessionHub.js';
+import { FeishuManager } from './feishu.js';
 import {
   cancelBrowserLogin,
   getAuthStatus,
@@ -18,7 +19,15 @@ import {
   onAuthChanged,
   startBrowserLogin,
 } from './auth.js';
-import { gitDiff, listDir, openExternal, pickFolder, readFile } from './workspace.js';
+import {
+  gitDiff,
+  listDir,
+  openExternal,
+  pickFiles,
+  pickFolder,
+  readFile,
+  readFileBase64,
+} from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
@@ -27,12 +36,21 @@ import type {
   BrowserLoginResult,
   CreateSessionOptions,
   CustomModelInput,
+  FeishuDomain,
+  FeishuManualInput,
+  FeishuQrBegin,
   PermissionMode,
   PermissionResponse,
   PromptOptions,
 } from '../shared/ipc.js';
 
-export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
+/** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
+export interface IpcServices {
+  hub: SessionHub;
+  feishu: FeishuManager;
+}
+
+export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
   const send = (channel: string, payload: unknown) => {
     const win = getWindow();
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -92,6 +110,24 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
   // ── external agents ───────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.AgentsDetect, () => detectExternalAgents());
 
+  // ── feishu gateway ────────────────────────────────────────────────────────
+  const feishu = new FeishuManager(
+    (status) => send(IpcEvent.FeishuChanged, status),
+    (line) => send(IpcEvent.BackendLog, `[feishu] ${line}`),
+  );
+  ipcMain.handle(IpcInvoke.FeishuStatus, () => feishu.getStatus());
+  ipcMain.handle(IpcInvoke.FeishuSaveManual, (_e, input: FeishuManualInput) =>
+    feishu.saveManualCredentials(input),
+  );
+  ipcMain.handle(IpcInvoke.FeishuQrBegin, (_e, domain: FeishuDomain) => feishu.qrBegin(domain));
+  ipcMain.handle(IpcInvoke.FeishuQrPoll, (_e, begin: FeishuQrBegin) => feishu.qrPoll(begin));
+  ipcMain.handle(IpcInvoke.FeishuQrCancel, () => feishu.qrCancel());
+  ipcMain.handle(IpcInvoke.FeishuClear, () => feishu.clearCredentials());
+  ipcMain.handle(IpcInvoke.FeishuStart, () => feishu.start());
+  ipcMain.handle(IpcInvoke.FeishuStop, () => feishu.stop());
+  ipcMain.handle(IpcInvoke.FeishuDetectExternal, () => feishu.detectExternal());
+  ipcMain.handle(IpcInvoke.FeishuKillExternal, () => feishu.killExternal());
+
   // ── custom models ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());
   ipcMain.handle(
@@ -112,7 +148,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
 
   // ── workspace ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.PickFolder, () => pickFolder(getWindow() ?? undefined));
+  ipcMain.handle(IpcInvoke.PickFiles, () => pickFiles(getWindow() ?? undefined));
   ipcMain.handle(IpcInvoke.ReadFile, (_e, p: string) => readFile(p));
+  ipcMain.handle(IpcInvoke.ReadFileBase64, (_e, p: string) => readFileBase64(p));
   ipcMain.handle(IpcInvoke.ListDir, (_e, p: string) => listDir(p));
   ipcMain.handle(IpcInvoke.GitDiff, async (_e, cwd: string, sessionId?: string) => {
     const diffs = await gitDiff(cwd);
@@ -127,5 +165,5 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
   });
   ipcMain.handle(IpcInvoke.OpenExternal, (_e, url: string) => openExternal(url));
 
-  return hub;
+  return { hub, feishu };
 }

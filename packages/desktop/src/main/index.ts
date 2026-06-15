@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import type { SessionHub } from './sessionHub.js';
+import type { FeishuManager } from './feishu.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
 // taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
 // from the packaged .app bundle, so this is harmless there.
@@ -21,6 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
 let hub: SessionHub | null = null;
+let feishu: FeishuManager | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -69,7 +71,7 @@ app.whenReady().then(() => {
   // Drop the default application menu on Windows/Linux entirely. On macOS we
   // keep it so standard shortcuts (copy/paste/quit) and the app menu survive.
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
-  hub = registerIpc(() => mainWindow);
+  ({ hub, feishu } = registerIpc(() => mainWindow));
   createWindow();
 
   app.on('activate', () => {
@@ -83,4 +85,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   hub?.disposeAll();
+  // Tear down the desktop-managed Feishu gateway so we never leave an orphan
+  // gateway behind (which the next launch would otherwise detect + kill).
+  feishu?.dispose();
 });

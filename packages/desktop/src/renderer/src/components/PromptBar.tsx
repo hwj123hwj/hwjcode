@@ -16,6 +16,62 @@ const AGENT_BADGE: Record<Exclude<AgentKind, 'easy-code'>, { label: string; icon
   codex: { label: 'Codex', icon: 'terminal' },
 };
 
+/**
+ * A prompt attachment. Images are inlined as base64 (sent through ACP as image
+ * content blocks); non-image files ride the existing @-path mechanism so the
+ * backend reads their content.
+ */
+type Attachment =
+  | { id: string; kind: 'image'; name: string; mimeType: string; data: string; url: string }
+  | { id: string; kind: 'file'; name: string; path: string };
+
+let attachSeq = 0;
+const nextAttachId = () => `att-${Date.now().toString(36)}-${(attachSeq++).toString(36)}`;
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+/**
+ * Downscale + re-encode an image to JPEG (max 1920×1080, quality ~0.82) via an
+ * offscreen canvas, mirroring the vscode-ui-plugin composer. Keeps payloads
+ * small for the model. SVGs and any failure fall back to the original bytes.
+ * Returns base64 WITHOUT the `data:` prefix.
+ */
+async function compressImage(
+  srcUrl: string,
+  origMime: string,
+): Promise<{ mimeType: string; data: string }> {
+  const stripPrefix = (u: string) => u.slice(u.indexOf(',') + 1);
+  if (origMime === 'image/svg+xml') {
+    return { mimeType: origMime, data: srcUrl.startsWith('data:') ? stripPrefix(srcUrl) : '' };
+  }
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = srcUrl;
+    });
+    const maxW = 1920;
+    const maxH = 1080;
+    let { width, height } = img;
+    const scale = Math.min(1, maxW / width, maxH / height);
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(img, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+    return { mimeType: 'image/jpeg', data: stripPrefix(dataUrl) };
+  } catch {
+    // Fall back to the original bytes if the canvas path fails.
+    if (srcUrl.startsWith('data:')) return { mimeType: origMime, data: stripPrefix(srcUrl) };
+    return { mimeType: origMime, data: '' };
+  }
+}
+
 export function PromptBar({ view }: { view: SessionView }) {
   const sendPrompt = useStore((s) => s.sendPrompt);
   const cancel = useStore((s) => s.cancel);
@@ -24,10 +80,57 @@ export function PromptBar({ view }: { view: SessionView }) {
 
   const [text, setText] = useState('');
   const [atPaths, setAtPaths] = useState<Record<string, string>>({}); // name -> abs path
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [mention, setMention] = useState<{ token: string; entries: DirEntry[]; active: number } | null>(
     null,
   );
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const addImageFromUrl = async (url: string, origMime: string, name: string) => {
+    const { mimeType, data } = await compressImage(url, origMime);
+    if (!data) return;
+    setAttachments((a) => [
+      ...a,
+      { id: nextAttachId(), kind: 'image', name, mimeType, data, url: `data:${mimeType};base64,${data}` },
+    ]);
+  };
+
+  /** Ctrl+V image paste: intercept image clipboard items, leave text alone. */
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const images = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'));
+    if (images.length === 0) return; // plain-text paste — default behaviour
+    e.preventDefault();
+    for (const it of images) {
+      const file = it.getAsFile();
+      if (!file) continue;
+      const url = URL.createObjectURL(file);
+      void addImageFromUrl(url, file.type, file.name || 'pasted-image.png').finally(() =>
+        URL.revokeObjectURL(url),
+      );
+    }
+  };
+
+  /** Attach button: native file picker. Images inline; other files ride @-paths. */
+  const pickAttachments = async () => {
+    const files = await api.workspace.pickFiles().catch(() => []);
+    for (const f of files) {
+      if (IMAGE_EXT.test(f.name)) {
+        const b64 = await api.workspace.readFileBase64(f.path).catch(() => null);
+        if (b64) {
+          await addImageFromUrl(`data:${b64.mimeType};base64,${b64.data}`, b64.mimeType, f.name);
+          continue;
+        }
+      }
+      setAttachments((a) =>
+        a.some((x) => x.kind === 'file' && x.path === f.path)
+          ? a
+          : [...a, { id: nextAttachId(), kind: 'file', name: f.name, path: f.path }],
+      );
+    }
+  };
+
+  const removeAttachment = (id: string) => setAttachments((a) => a.filter((x) => x.id !== id));
 
   const meta = view.meta;
   const busy = meta.status === 'thinking' || meta.status === 'starting' || meta.status === 'needs_approval';
@@ -68,15 +171,23 @@ export function PromptBar({ view }: { view: SessionView }) {
 
   const submit = async () => {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    // Resolve @names that match selected mentions to absolute paths.
-    const used = Object.entries(atPaths)
+    if (!trimmed && attachments.length === 0) return;
+    // Resolve @names that match selected mentions to absolute paths, plus any
+    // non-image file attachments (the backend reads them as @-references).
+    const mentionPaths = Object.entries(atPaths)
       .filter(([name]) => trimmed.includes(`@${name}`))
       .map(([, p]) => p);
+    const filePaths = attachments
+      .filter((a): a is Extract<Attachment, { kind: 'file' }> => a.kind === 'file')
+      .map((a) => a.path);
+    const images = attachments
+      .filter((a): a is Extract<Attachment, { kind: 'image' }> => a.kind === 'image')
+      .map((a) => ({ mimeType: a.mimeType, data: a.data }));
     setText('');
     setAtPaths({});
     setMention(null);
-    await sendPrompt(meta.id, trimmed, used);
+    setAttachments([]);
+    await sendPrompt(meta.id, trimmed, [...mentionPaths, ...filePaths], images);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -171,6 +282,37 @@ export function PromptBar({ view }: { view: SessionView }) {
           ) : null}
         </div>
 
+        {attachments.length > 0 && (
+          <div className="prompt-attachments">
+            {attachments.map((a) =>
+              a.kind === 'image' ? (
+                <div key={a.id} className="attach-thumb" title={a.name}>
+                  <img src={a.url} alt={a.name} />
+                  <button
+                    className="attach-remove"
+                    title="移除"
+                    onClick={() => removeAttachment(a.id)}
+                  >
+                    <Icon name="x" size={11} />
+                  </button>
+                </div>
+              ) : (
+                <div key={a.id} className="attach-chip" title={a.path}>
+                  <Icon name="file" size={13} />
+                  <span className="attach-name">{a.name}</span>
+                  <button
+                    className="attach-remove inline"
+                    title="移除"
+                    onClick={() => removeAttachment(a.id)}
+                  >
+                    <Icon name="x" size={11} />
+                  </button>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+
         <div className="prompt-input-wrap" style={{ position: 'relative' }}>
           {mention && mention.entries.length > 0 && (
             <div className="mention-pop">
@@ -197,18 +339,26 @@ export function PromptBar({ view }: { view: SessionView }) {
             value={text}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
           />
+          <button className="btn-attach" title="添加附件 / 图片" onClick={() => void pickAttachments()}>
+            <Icon name="paperclip" size={16} />
+          </button>
           {busy ? (
             <button className="btn-stop" onClick={() => void cancel(meta.id)}>
               <Icon name="stop" size={14} />
               停止
             </button>
           ) : null}
-          <button className="btn-send" disabled={!text.trim()} onClick={() => void submit()}>
+          <button
+            className="btn-send"
+            disabled={!text.trim() && attachments.length === 0}
+            onClick={() => void submit()}
+          >
             <Icon name="send" size={16} />
           </button>
         </div>
-        <div className="hint">Enter 发送 · Shift+Enter 换行 · 运行中输入可“边跑边纠偏”</div>
+        <div className="hint">Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴图片 · 点击回形针添加附件</div>
       </div>
     </div>
   );

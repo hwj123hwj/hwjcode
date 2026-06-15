@@ -59,7 +59,10 @@ export type IconName =
   | 'think'
   | 'fetch'
   | 'switch'
-  | 'wrench';
+  | 'wrench'
+  | 'paperclip'
+  | 'image'
+  | 'feishu';
 
 /** Path/shape markup for each icon, drawn on a 24×24 canvas. */
 const PATHS: Record<IconName, string> = {
@@ -134,6 +137,12 @@ const PATHS: Record<IconName, string> = {
     '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   wrench:
     '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  paperclip:
+    '<path d="M13.234 20.252 21 12.3a4.55 4.55 0 0 0-6.4-6.45L5.4 15.05a2.73 2.73 0 0 0 3.86 3.86l8.39-8.4a.91.91 0 0 0-1.29-1.29L8 17.6"/>',
+  image:
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.81.01L6 21"/>',
+  feishu:
+    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/>',
 };
 
 export interface IconProps {
