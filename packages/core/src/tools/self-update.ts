@@ -420,6 +420,22 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
     params: SelfUpdateParams,
     _signal: AbortSignal,
   ): Promise<ToolResult> {
+    // 桌面版托管场景：网关进程由 Electron 桌面端 spawn（带 EASYCODE_DESKTOP_MANAGED
+    // 标记）。self_update 的「npm 安装 + 外挂脚本重启 easycode --feishu」流程在这里
+    // 不适用——它会拉起一个脱离桌面端管理的 CLI 独立网关。桌面版的更新/重启应由应用
+    // 自身负责。直接短路返回不支持，并明确告知 AI 不要重试。
+    if (process.env.EASYCODE_DESKTOP_MANAGED === '1') {
+      return {
+        llmContent:
+          'self_update is NOT supported in the Easy Code Desktop app. The desktop app manages ' +
+          'its own gateway lifecycle (update & restart) through its UI, not via npm self-update. ' +
+          'Do NOT retry this tool. Tell the user that updating/restarting is handled by the ' +
+          'desktop app itself.',
+        returnDisplay: '⚠️ 当前是桌面版，不支持此功能（更新与重启由桌面应用自身处理）。',
+        summary: 'self_update disabled on Desktop',
+      };
+    }
+
     const validationError = this.validateToolParams(params);
     if (validationError) {
       return {
