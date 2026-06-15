@@ -183,9 +183,19 @@ Signal: Signal number or \`(none)\` if no signal was received.
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
   private config: Config;
+  private excludedToolNames: Set<string> = new Set();
 
   constructor(config: Config) {
     this.config = config;
+  }
+
+  /**
+   * 设置需要从 getFunctionDeclarations() 中排除的工具名列表。
+   * 用于 Feishu 模式的 /tool disable 功能：即使 tool 仍在 registry 中，
+   * 也不会暴露给模型。
+   */
+  setExcludedToolNames(names: string[]): void {
+    this.excludedToolNames = new Set(names);
   }
 
   /**
@@ -502,6 +512,11 @@ export class ToolRegistry {
 
     this.tools.forEach((tool) => {
       try {
+        // 🔧 排除列表过滤：被禁用的工具不暴露给模型
+        if (this.excludedToolNames.has(tool.name)) {
+          return;
+        }
+
         const schema = { ...tool.schema };
 
         // Validate and sanitize tool name
