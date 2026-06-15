@@ -116,3 +116,4 @@ Easy Code (Monorepo)
 ## DeepV Code Added Memories
 - Easy Code 发版 tag 版本号对齐规则：CLI 和 VSCode 的 release tag 版本号必须对齐（如 cli-release-v1.1.15 和 vscode-release-v1.1.15），package.json 中的版本号必须严格低于 tag 版本号。
 - 演示了工具调用能力，用户要求尽可能多地展示可用工具
+- 独立 GitLab仓库: `https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient`（项目ID: 9774），Personal Access Token: `[REDACTED]`（全局），可用 GitLab API 创建/合并 MR。上游仓库: `https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient`。开发规范见 `.llm-wiki/wiki/development-workflow.md`，同步脚本见 `scripts/sync-upstream.sh`。
