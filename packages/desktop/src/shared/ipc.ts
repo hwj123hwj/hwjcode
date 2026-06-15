@@ -34,6 +34,7 @@ export const IpcInvoke = {
   SessionSetMode: 'session:set-mode',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
+  SessionRename: 'session:rename',
   // external agents
   AgentsDetect: 'agents:detect',
   // custom models
@@ -396,6 +397,8 @@ export interface EasycodeBridge {
     resume(sessionId: string, cwd: string): Promise<SessionMeta>;
     close(sessionId: string): Promise<void>;
     archive(sessionId: string, archived: boolean): Promise<void>;
+    /** Rename a session's display title. Empty title falls back to the folder name. */
+    rename(sessionId: string, title: string): Promise<SessionMeta>;
     prompt(opts: PromptOptions): Promise<void>;
     cancel(sessionId: string): Promise<void>;
     setModel(sessionId: string, modelId: string): Promise<void>;

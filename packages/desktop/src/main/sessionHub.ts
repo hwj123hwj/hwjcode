@@ -194,6 +194,14 @@ export class SessionHub {
     this.touch(id, { archived });
   }
 
+  /** Rename a session's display title. Empty/blank falls back to the cwd name. */
+  rename(id: string, title: string): SessionMeta {
+    const rec = this.records.get(id);
+    if (!rec) throw new Error(`Unknown session: ${id}`);
+    const next = title.trim() || defaultTitle(rec.cwd);
+    return this.touch(id, { title: next })!;
+  }
+
   // ── prompting ─────────────────────────────────────────────────────────────
 
   private liveBridge(id: string): AcpSessionBridge {

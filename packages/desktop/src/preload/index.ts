@@ -57,6 +57,8 @@ const bridge: EasycodeBridge = {
     close: (id) => ipcRenderer.invoke(IpcInvoke.SessionClose, id) as Promise<void>,
     archive: (id, archived) =>
       ipcRenderer.invoke(IpcInvoke.SessionArchive, id, archived) as Promise<void>,
+    rename: (id, title) =>
+      ipcRenderer.invoke(IpcInvoke.SessionRename, id, title) as Promise<SessionMeta>,
     prompt: (opts: PromptOptions) => ipcRenderer.invoke(IpcInvoke.SessionPrompt, opts) as Promise<void>,
     cancel: (id) => ipcRenderer.invoke(IpcInvoke.SessionCancel, id) as Promise<void>,
     setModel: (id, modelId) =>

@@ -74,6 +74,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): SessionHub {
   ipcMain.handle(IpcInvoke.SessionArchive, (_e, id: string, archived: boolean) =>
     hub.archive(id, archived),
   );
+  ipcMain.handle(IpcInvoke.SessionRename, (_e, id: string, title: string) =>
+    hub.rename(id, title),
+  );
   ipcMain.handle(IpcInvoke.SessionPrompt, (_e, opts: PromptOptions) =>
     hub.prompt(opts.sessionId, opts.text, opts.atPaths, opts.images),
   );

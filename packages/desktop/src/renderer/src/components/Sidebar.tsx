@@ -3,9 +3,16 @@ import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { Icon } from './Icon';
-import type { SessionMeta } from '@shared/ipc';
+import type { AgentKind, SessionMeta } from '@shared/ipc';
 
 const api = window.easycode;
+
+/** Short text badge shown on each session card, by agent backend. */
+const AGENT_LABEL: Record<AgentKind, string> = {
+  'easy-code': 'Easy Code',
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+};
 
 function initials(name?: string): string {
   if (!name) return '?';
@@ -33,12 +40,25 @@ export function Sidebar() {
   const active = useStore((s) => s.activeSessionId);
   const focusSession = useStore((s) => s.focusSession);
   const archive = useStore((s) => s.archiveSession);
+  const rename = useStore((s) => s.renameSession);
   const auth = useStore((s) => s.auth);
   const filter = useStore((s) => s.sidebarFilter);
   const setFilter = useStore((s) => s.setSidebarFilter);
 
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const startEdit = (meta: SessionMeta) => {
+    setEditingId(meta.id);
+    setDraft(meta.title);
+  };
+  const commitEdit = (id: string) => {
+    const title = draft.trim();
+    setEditingId(null);
+    if (title) void rename(id, title);
+  };
 
   const grouped = useMemo(() => {
     const views = order.map((id) => sessions[id]).filter(Boolean) as SessionView[];
@@ -116,7 +136,36 @@ export function Sidebar() {
               >
                 <div className="session-row">
                   <span className={`status-dot ${v.meta.status}`} />
-                  <span className="session-title">{v.meta.title}</span>
+                  {editingId === v.meta.id ? (
+                    <input
+                      className="session-title-edit"
+                      value={draft}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => commitEdit(v.meta.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitEdit(v.meta.id);
+                        } else if (e.key === 'Escape') {
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="session-title"
+                      title="双击重命名"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startEdit(v.meta);
+                      }}
+                    >
+                      {v.meta.title}
+                    </span>
+                  )}
+                  <span className="agent-badge">{AGENT_LABEL[v.meta.agentType]}</span>
                 </div>
                 <div className="session-row">
                   <span className="session-sub">{relTime(v.meta.updatedAt)}</span>
@@ -128,6 +177,16 @@ export function Sidebar() {
                   )}
                 </div>
                 <div className="session-actions">
+                  <button
+                    className="icon-btn"
+                    title="重命名"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEdit(v.meta);
+                    }}
+                  >
+                    <Icon name="edit" size={14} />
+                  </button>
                   <button
                     className="icon-btn"
                     title={v.meta.archived ? '取消归档' : '归档'}
