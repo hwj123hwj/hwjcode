@@ -263,7 +263,13 @@ describe('Server Config (config.ts)', () => {
     const config = new Config({ ...baseParams, healthyUse: false });
     expect(config.getHealthyUseEnabled()).toBe(false);
 
-    const configDefault = new Config(baseParams);
+    const configEnabled = new Config({ ...baseParams, healthyUse: true });
+    expect(configEnabled.getHealthyUseEnabled()).toBe(true);
+
+    // Default (param omitted) is off. baseParams sets it explicitly, so drop it.
+    const defaultParams = { ...baseParams };
+    delete defaultParams.healthyUse;
+    const configDefault = new Config(defaultParams);
     expect(configDefault.getHealthyUseEnabled()).toBe(false);
   });
 
