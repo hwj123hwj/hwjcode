@@ -26,7 +26,10 @@ import path from 'path';
 const sourceDir = path.join('src');
 const targetDir = path.join('dist', 'src');
 
-const extensionsToCopy = ['.md', '.json', '.sb', '.html', '.css', '.js', '.ico', '.txt', '.map', '.wav']; // Keep map files for debugging in dev environment, add audio file support
+// Resource files only. tsc emits .js/.js.map/.d.ts itself — copying '.js' from src/
+// would overwrite freshly-compiled dist output with stale src/ artifacts (e.g. when
+// an old compiled .js leaks into src/), silently breaking ESM exports at runtime.
+const extensionsToCopy = ['.md', '.json', '.sb', '.html', '.css', '.ico', '.txt', '.map', '.wav']; // Keep map files for debugging in dev environment, add audio file support
 
 function copyFilesRecursive(source, target) {
   if (!fs.existsSync(target)) {
