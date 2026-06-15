@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore, type PaneKind, type SessionView as SV, type ViewDensity } from '../store';
 import { ChatPane } from './panes/ChatPane';
 import { DiffPane } from './panes/DiffPane';
@@ -31,6 +31,24 @@ export function SessionView() {
   const togglePane = useStore((s) => s.togglePane);
   const resume = useStore((s) => s.resumeSession);
   const [viewsOpen, setViewsOpen] = useState(false);
+  const viewsRef = useRef<HTMLDivElement>(null);
+
+  // Dismiss the "视图" dropdown when clicking anywhere outside it, or on Escape.
+  useEffect(() => {
+    if (!viewsOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!viewsRef.current?.contains(e.target as Node)) setViewsOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewsOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [viewsOpen]);
 
   if (!view) {
     return (
@@ -67,7 +85,7 @@ export function SessionView() {
           </button>
         )}
 
-        <div style={{ position: 'relative' }}>
+        <div ref={viewsRef} style={{ position: 'relative' }}>
           <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>
             <Icon name="columns" size={14} />
             视图
