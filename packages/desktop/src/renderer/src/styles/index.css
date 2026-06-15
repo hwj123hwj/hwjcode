@@ -180,6 +180,13 @@ select {
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
+/* macOS uses titleBarStyle:'hiddenInset', so the red/yellow/green traffic-light
+   buttons float over the top-left of the sidebar. Push the header content down
+   so the logo/brand clears them. ~22px extra lands the brand just below the
+   controls; the draggable header still lets users move the window. */
+[data-platform='darwin'] .sidebar-head {
+  padding-top: 36px;
+}
 .brand {
   display: flex;
   align-items: center;
@@ -196,6 +203,17 @@ select {
   object-fit: cover;
   box-shadow: var(--shadow-sm);
   flex: none;
+}
+.brand-version {
+  margin-top: -8px;
+  /* Align with the "Easy Code" wordmark: .brand padding-left (4) + logo (26)
+     + flex gap (9) = 39px, so the version sits flush under the product name. */
+  padding: 0 4px 8px 39px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  -webkit-app-region: no-drag;
 }
 .btn-new {
   -webkit-app-region: no-drag;

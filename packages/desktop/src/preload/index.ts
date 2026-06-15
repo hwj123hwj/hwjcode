@@ -147,3 +147,25 @@ const bridge: EasycodeBridge = {
 };
 
 contextBridge.exposeInMainWorld('easycode', bridge);
+
+// Tag the document root with the OS so the renderer's CSS can adapt platform
+// chrome — e.g. reserve space for macOS' traffic-light window controls under
+// `hiddenInset` so they don't overlap the sidebar logo. (`tsconfig.node.json`
+// has no DOM lib, so describe the tiny surface we touch with a local type.)
+{
+  type MinimalDoc = {
+    readyState: string;
+    documentElement: { setAttribute(name: string, value: string): void };
+    addEventListener(type: string, cb: () => void, opts?: { once?: boolean }): void;
+  };
+  const doc = (globalThis as { document?: MinimalDoc }).document;
+  if (doc) {
+    const setPlatform = () =>
+      doc.documentElement.setAttribute('data-platform', process.platform);
+    if (doc.readyState === 'loading') {
+      doc.addEventListener('DOMContentLoaded', setPlatform, { once: true });
+    } else {
+      setPlatform();
+    }
+  }
+}
