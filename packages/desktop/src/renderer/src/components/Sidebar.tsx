@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import appIcon from '../../../public/app-icon.png';
+import feishuIcon from '../../../public/feishu.svg';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
 
 const api = window.easycode;
@@ -50,8 +51,17 @@ export function Sidebar() {
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showFeishu, setShowFeishu] = useState(false);
+  const [feishuRunning, setFeishuRunning] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+
+  // Keep the footer Feishu icon in sync with the gateway: grayscale when
+  // stopped, full color while it runs.
+  useEffect(() => {
+    void api.feishu.status().then((s) => setFeishuRunning(!!s.running));
+    const off = api.feishu.onChanged((s) => setFeishuRunning(!!s.running));
+    return () => off();
+  }, []);
 
   const startEdit = (meta: SessionMeta) => {
     setEditingId(meta.id);
@@ -217,8 +227,18 @@ export function Sidebar() {
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {auth?.user?.name || auth?.user?.email || '已登录'}
         </span>
-        <button className="icon-btn" title="飞书网关" onClick={() => setShowFeishu(true)}>
-          <Icon name="feishu" size={15} />
+        <button
+          className="icon-btn"
+          title={feishuRunning ? '飞书网关（运行中）' : '飞书网关'}
+          onClick={() => setShowFeishu(true)}
+        >
+          <img
+            className={`feishu-ic${feishuRunning ? '' : ' off'}`}
+            src={feishuIcon}
+            alt="飞书"
+            width={16}
+            height={16}
+          />
         </button>
         <button className="icon-btn" title="设置" onClick={() => setShowSettings(true)}>
           <Icon name="settings" size={15} />

@@ -259,13 +259,31 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '');
 }
 
-/** Find live `--feishu` gateway processes, excluding our own managed child. */
+/** The gateway flag, assembled at runtime so the literal never appears verbatim
+ * in our own detection command line (otherwise the PowerShell/ps helper that
+ * runs the query would match itself — a false positive). */
+const FEISHU_FLAG = '--fei' + 'shu';
+
+/**
+ * A real gateway is `easycode --feishu` — the flag must be a standalone token,
+ * not just a substring (so a path like `C:\--feishu-notes\x` never matches).
+ */
+function isFeishuGatewayCmd(cmd: string): boolean {
+  return new RegExp(`(?:^|\\s)${FEISHU_FLAG}(?:\\s|$)`).test(cmd);
+}
+
+/** Find live `--feishu` gateway processes, excluding our own managed child and
+ * this desktop process. */
 async function findFeishuProcesses(excludePid?: number): Promise<FeishuExternalProcess[]> {
   const out: FeishuExternalProcess[] = [];
   try {
     if (process.platform === 'win32') {
+      // Build the `-like` pattern from pieces so this query's own PowerShell
+      // command line does not contain a contiguous `--feishu` — that prevents
+      // the helper process from matching (and reporting) itself.
       const psScript =
-        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--feishu*' } " +
+        `$pat = '*' + '${FEISHU_FLAG}' + '*'; ` +
+        'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like $pat } ' +
         '| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress';
       const { stdout } = await execFileP(
         'powershell.exe',
@@ -286,7 +304,7 @@ async function findFeishuProcesses(excludePid?: number): Promise<FeishuExternalP
         maxBuffer: 8 * 1024 * 1024,
       });
       for (const line of stdout.split('\n')) {
-        if (!line.includes('--feishu')) continue;
+        if (!line.includes(FEISHU_FLAG)) continue;
         const m = line.trim().match(/^(\d+)\s+(.*)$/);
         if (m) out.push({ pid: Number(m[1]), cmd: m[2] });
       }
@@ -294,8 +312,11 @@ async function findFeishuProcesses(excludePid?: number): Promise<FeishuExternalP
   } catch {
     /* best effort — detection failing must not block start/stop */
   }
-  // Never report our own managed gateway or the desktop process itself.
-  return out.filter((p) => p.pid !== excludePid && p.pid !== process.pid);
+  // Only count processes that genuinely carry the `--feishu` flag as a token,
+  // and never our own managed gateway or this desktop process.
+  return out.filter(
+    (p) => p.pid !== excludePid && p.pid !== process.pid && isFeishuGatewayCmd(p.cmd),
+  );
 }
 
 async function killPid(pid: number): Promise<void> {
