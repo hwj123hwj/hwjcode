@@ -18,7 +18,7 @@
 // limitations under the License.
 
 import { execSync } from 'child_process';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, copyFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, copyFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import ora from 'ora';
 import chalk from 'chalk';
@@ -57,7 +57,7 @@ try {
 }
 
 // Finalize CLI if applicable
-if (packageName === 'deepv-code-cli') {
+if (packageName === 'easycode-cli' || packageName === 'deepv-code-cli') {
   const finalizeSpinner = ora({
     text: chalk.blue('Finalizing CLI distribution...'),
     spinner: 'dots12'
@@ -71,6 +71,18 @@ if (packageName === 'deepv-code-cli') {
     finalizeSpinner.fail(chalk.red('Failed to finalize CLI distribution.'));
     console.error(error.message);
     process.exit(1);
+  }
+
+  // Restore the executable bit on the bin entry. tsc resets file permissions to
+  // 0644 on every emit, but the global `easycode` symlink points straight at
+  // dist/index.js — without +x the shell reports "permission denied".
+  const binEntry = join(process.cwd(), 'dist', 'index.js');
+  if (existsSync(binEntry)) {
+    try {
+      chmodSync(binEntry, 0o755);
+    } catch (error) {
+      console.warn(chalk.yellow(`Failed to chmod bin entry: ${error.message}`));
+    }
   }
 }
 
@@ -89,8 +101,8 @@ try {
   process.exit(1);
 }
 
-// Special handling for deepv-code-core templates: sync to bundle directory for dev mode
-if (packageName === 'deepv-code-core') {
+// Special handling for easycode-core templates: sync to bundle directory for dev mode
+if (packageName === 'easycode-core' || packageName === 'deepv-code-core') {
   const templateSpinner = ora({
     text: chalk.blue('Syncing templates to bundle (dev mode)...'),
     spinner: 'dots12'
