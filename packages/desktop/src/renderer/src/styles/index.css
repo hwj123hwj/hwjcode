@@ -180,6 +180,13 @@ select {
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
+/* macOS uses titleBarStyle:'hiddenInset', so the red/yellow/green traffic-light
+   buttons float over the top-left of the sidebar. Push the header content down
+   so the logo/brand clears them. ~22px extra lands the brand just below the
+   controls; the draggable header still lets users move the window. */
+[data-platform='darwin'] .sidebar-head {
+  padding-top: 36px;
+}
 .brand {
   display: flex;
   align-items: center;
