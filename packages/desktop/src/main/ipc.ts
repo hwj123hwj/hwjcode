@@ -105,6 +105,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   // ── sessions ────────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.SessionList, () => hub.list());
   ipcMain.handle(IpcInvoke.SessionCreate, (_e, opts: CreateSessionOptions) => hub.create(opts));
+  ipcMain.handle(IpcInvoke.SessionCreateChat, (_e, opts?: Omit<CreateSessionOptions, 'cwd'>) =>
+    hub.createChat(opts),
+  );
   ipcMain.handle(IpcInvoke.SessionResume, (_e, id: string, cwd: string) => hub.resume(id, cwd));
   ipcMain.handle(IpcInvoke.SessionClose, (_e, id: string) => hub.close(id));
   ipcMain.handle(IpcInvoke.SessionArchive, (_e, id: string, archived: boolean) =>
@@ -112,6 +115,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.SessionRename, (_e, id: string, title: string) =>
     hub.rename(id, title),
+  );
+  ipcMain.handle(IpcInvoke.SessionSetTitleProvisional, (_e, id: string, title: string) =>
+    hub.setTitleProvisional(id, title),
   );
   ipcMain.handle(IpcInvoke.SessionPrompt, (_e, opts: PromptOptions) =>
     hub.prompt(opts.sessionId, opts.text, opts.atPaths, opts.images),
