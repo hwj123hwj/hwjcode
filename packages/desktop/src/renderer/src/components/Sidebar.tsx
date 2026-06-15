@@ -5,6 +5,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
+import { useT, type TFunc } from '../i18n/useT';
 import appIcon from '../../../public/app-icon.png';
 import feishuIcon from '../../../public/feishu_logo.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
@@ -23,14 +24,14 @@ function initials(name?: string): string {
   return name.trim().slice(0, 1).toUpperCase();
 }
 
-function relTime(ts: number): string {
+function relTime(t: TFunc, ts: number): string {
   const diff = Date.now() - ts;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return '刚刚';
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 1) return t('time.justNow');
+  if (m < 60) return t('time.minutesAgo', { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  return `${Math.floor(h / 24)} 天前`;
+  if (h < 24) return t('time.hoursAgo', { h });
+  return t('time.daysAgo', { d: Math.floor(h / 24) });
 }
 
 function projectName(cwd: string): string {
@@ -48,6 +49,7 @@ export function Sidebar() {
   const auth = useStore((s) => s.auth);
   const filter = useStore((s) => s.sidebarFilter);
   const setFilter = useStore((s) => s.setSidebarFilter);
+  const t = useT();
 
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -110,7 +112,7 @@ export function Sidebar() {
         <div className="brand-version">v{__APP_VERSION__}</div>
         <button className="btn-new" onClick={() => setShowNew(true)}>
           <Icon name="plus" size={15} />
-          新建会话
+          {t('sidebar.newSession')}
         </button>
       </div>
 
@@ -122,7 +124,7 @@ export function Sidebar() {
               className={filter.status === st ? 'active' : ''}
               onClick={() => setFilter({ status: st })}
             >
-              {st === 'active' ? '进行中' : st === 'all' ? '全部' : '已归档'}
+              {t(`sidebar.${st}`)}
             </button>
           ))}
         </div>
@@ -130,14 +132,14 @@ export function Sidebar() {
       <div className="sidebar-search">
         <Icon name="search" size={14} />
         <input
-          placeholder="搜索会话…"
+          placeholder={t('sidebar.searchPlaceholder')}
           value={filter.query}
           onChange={(e) => setFilter({ query: e.target.value })}
         />
       </div>
 
       <div className="session-list">
-        {grouped.length === 0 && <div className="group-label">暂无会话</div>}
+        {grouped.length === 0 && <div className="group-label">{t('sidebar.noSessions')}</div>}
         {grouped.map(([project, views]) => (
           <div key={project}>
             <div className="group-label">{project}</div>
@@ -169,7 +171,7 @@ export function Sidebar() {
                   ) : (
                     <span
                       className="session-title"
-                      title="双击重命名"
+                      title={t('sidebar.dblClickRename')}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         startEdit(v.meta);
@@ -180,7 +182,7 @@ export function Sidebar() {
                   )}
                 </div>
                 <div className="session-row">
-                  <span className="session-sub">{relTime(v.meta.updatedAt)}</span>
+                  <span className="session-sub">{relTime(t, v.meta.updatedAt)}</span>
                   {(v.meta.added > 0 || v.meta.removed > 0) && (
                     <span className="diff-chip">
                       <span className="add">+{v.meta.added}</span>{' '}
@@ -200,7 +202,7 @@ export function Sidebar() {
                 <div className="session-actions">
                   <button
                     className="icon-btn"
-                    title="重命名"
+                    title={t('common.rename')}
                     onClick={(e) => {
                       e.stopPropagation();
                       startEdit(v.meta);
@@ -210,7 +212,7 @@ export function Sidebar() {
                   </button>
                   <button
                     className="icon-btn"
-                    title={v.meta.archived ? '取消归档' : '归档'}
+                    title={v.meta.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
                     onClick={(e) => {
                       e.stopPropagation();
                       void archive(v.meta.id, !v.meta.archived);
@@ -230,25 +232,25 @@ export function Sidebar() {
           {auth?.user?.avatar ? <img src={auth.user.avatar} alt="" /> : initials(auth?.user?.name)}
         </span>
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {auth?.user?.name || auth?.user?.email || '已登录'}
+          {auth?.user?.name || auth?.user?.email || t('sidebar.loggedIn')}
         </span>
         <button
           className="icon-btn"
-          title={feishuRunning ? '飞书网关（运行中）' : '飞书网关'}
+          title={feishuRunning ? t('sidebar.feishuRunning') : t('sidebar.feishu')}
           onClick={() => setShowFeishu(true)}
         >
           <img
             className={`feishu-ic${feishuRunning ? '' : ' off'}`}
             src={feishuIcon}
-            alt="飞书"
+            alt={t('feishu.platformFeishu')}
             width={16}
             height={16}
           />
         </button>
-        <button className="icon-btn" title="设置" onClick={() => setShowSettings(true)}>
+        <button className="icon-btn" title={t('common.settings')} onClick={() => setShowSettings(true)}>
           <Icon name="settings" size={15} />
         </button>
-        <button className="icon-btn" title="退出登录" onClick={() => void api.auth.logout()}>
+        <button className="icon-btn" title={t('common.logout')} onClick={() => void api.auth.logout()}>
           <Icon name="power" size={15} />
         </button>
       </div>

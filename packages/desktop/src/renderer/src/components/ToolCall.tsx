@@ -1,13 +1,7 @@
 import { useState } from 'react';
 import type { AcpToolKind, ToolCallContent, ToolCallStatus, ToolLocation } from '@shared/ipc';
 import { Icon, toolKindIcon } from './Icon';
-
-const STATUS_LABEL: Record<ToolCallStatus, string> = {
-  pending: '等待',
-  in_progress: '执行中',
-  completed: '完成',
-  failed: '失败',
-};
+import { useT } from '../i18n/useT';
 
 /** Accent tone applied to the tool icon chip, by kind. */
 function kindTone(kind: AcpToolKind): string {
@@ -38,6 +32,7 @@ export function ToolCall({
   onOpenFile,
 }: ToolCallProps) {
   const [open, setOpen] = useState(defaultOpen);
+  const t = useT();
   const hasBody =
     content.some((c) => c.text || c.diff) || !!terminalOutput || (locations?.length ?? 0) > 0;
   const running = status === 'pending' || status === 'in_progress';
@@ -51,7 +46,7 @@ export function ToolCall({
         <span className="tool-title">{title}</span>
         <span className={`tool-status ${status}`}>
           {running && <Icon name="loader" size={11} spin />}
-          {STATUS_LABEL[status]}
+          {t(`tool.status.${status}`)}
         </span>
         {hasBody && (
           <span className="tool-chevron">
@@ -106,13 +101,14 @@ function DiffPreview({
   oldText?: string | null;
   newText: string;
 }) {
+  const t = useT();
   const oldLines = (oldText ?? '').split('\n');
   const newLines = newText.split('\n');
   return (
     <div className="diff-preview">
       <div className="diff-preview-head">
         <Icon name={oldText ? 'edit' : 'file'} size={13} />
-        {oldText ? '编辑' : '写入'} {path}
+        {oldText ? t('diff.edit') : t('diff.write')} {path}
       </div>
       <div style={{ overflowX: 'auto' }}>
         {oldText

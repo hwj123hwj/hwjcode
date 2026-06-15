@@ -1,0 +1,242 @@
+/**
+ * @license
+ * Copyright 2026 Easy Code team
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * English catalog. MUST mirror the exact key set of `zh.ts` (the authoritative
+ * source). Strings aim for idiomatic, concise UI English.
+ */
+
+export const en = {
+  // ── common ────────────────────────────────────────────────────────────────
+  'common.cancel': 'Cancel',
+  'common.close': 'Close',
+  'common.back': 'Back',
+  'common.save': 'Save',
+  'common.edit': 'Edit',
+  'common.delete': 'Delete',
+  'common.remove': 'Remove',
+  'common.rename': 'Rename',
+  'common.refresh': 'Refresh',
+  'common.settings': 'Settings',
+  'common.local': 'Local',
+  'common.stop': 'Stop',
+  'common.loading': 'Loading…',
+  'common.logout': 'Log out',
+
+  // ── app boot ───────────────────────────────────────────────────────────────
+  'app.booting': 'Starting Easy Code…',
+
+  // ── error boundary ──────────────────────────────────────────────────────────
+  'error.boundaryTitle': 'Something went wrong',
+  'error.retry': 'Retry',
+
+  // ── relative / duration time ─────────────────────────────────────────────────
+  'time.never': 'Never',
+  'time.justNow': 'Just now',
+  'time.seconds': '{s}s',
+  'time.minutes': '{m}m',
+  'time.hoursMinutes': '{h}h {m}m',
+  'time.minutesAgo': '{m} min ago',
+  'time.hoursAgo': '{h} h ago',
+  'time.daysAgo': '{d} d ago',
+
+  // ── Feishu / Lark gateway ────────────────────────────────────────────────────
+  'feishu.title': 'Feishu / Lark Gateway',
+  'feishu.subtitle':
+    'The desktop app runs the built-in Feishu gateway — configure credentials and manage start/stop here.',
+  'feishu.fillAppIdSecret': 'Please enter both App ID and App Secret.',
+  'feishu.saveFailed': 'Save failed',
+  'feishu.credsSaved': 'Credentials verified and saved.',
+  'feishu.qrStartFailed': 'Failed to start QR login',
+  'feishu.qrFailed': 'QR login failed',
+  'feishu.qrSuccess': 'QR login succeeded; credentials saved.',
+  'feishu.startFailed': 'Start failed',
+  'feishu.takeoverStarted': 'Taken over: closed {n} external gateway(s) and started the desktop gateway.',
+  'feishu.gatewayStarted': 'Feishu gateway started.',
+  'feishu.gatewayStopped': 'Feishu gateway stopped.',
+  'feishu.externalKilled':
+    'Closed {n} external gateway process(es); the desktop app can now start and manage it.',
+  'feishu.credsCleared': 'Feishu credentials cleared.',
+  'feishu.externalWarn':
+    'Detected {n} Feishu gateway(s) started independently by the CLI. A machine can run only one gateway, otherwise message routing breaks. We recommend closing them and letting the desktop app manage it.',
+  'feishu.takeover': 'Close & take over',
+  'feishu.gatewayRunning': 'Gateway running',
+  'feishu.gatewayStoppedStatus': 'Gateway stopped',
+  'feishu.notConfigured': 'Not configured',
+  'feishu.uptime': 'Up {time}',
+  'feishu.bot': 'Bot: {name}',
+  'feishu.platform': 'Platform: {name}',
+  'feishu.platformFeishu': 'Feishu',
+  'feishu.platformLabel': 'Platform',
+  'feishu.owner': 'Owner: {id}…',
+  'feishu.allowlist': 'Allowlist: {n}',
+  'feishu.bindings': 'Project / group bindings',
+  'feishu.noBindings':
+    'No bindings yet. In Feishu, @ the bot and send a message to auto-bind the current group to a project.',
+  'feishu.p2pChat': 'Direct chat with the bot',
+  'feishu.unknownChat': 'Unknown chat',
+  'feishu.noProject': 'No project bound',
+  'feishu.p2pTag': 'Direct',
+  'feishu.activeTag': 'Active',
+  'feishu.runningTag': 'Running',
+  'feishu.stopGateway': 'Stop gateway',
+  'feishu.startGateway': 'Start gateway',
+  'feishu.reconfigure': 'Reconfigure',
+  'feishu.qrLogin': 'QR login (auto-create app)',
+  'feishu.manualEntry': 'Enter credentials manually',
+  'feishu.qrHint': 'Scan the QR code with {platform} and authorize app creation.',
+  'feishu.verifyCode': 'Code',
+  'feishu.openInBrowser': 'Open in browser',
+  'feishu.qrStarting': 'Starting QR login…',
+  'feishu.appSecretPlaceholder': 'App secret',
+  'feishu.verifyAndSave': 'Verify & save',
+  'feishu.lastError': 'Last error: {msg}',
+
+  // ── login ────────────────────────────────────────────────────────────────────
+  'login.failed': 'Login failed',
+  'login.browserFailed': 'Couldn’t start browser login',
+  'login.tagline': 'Sign in to get started — shares the same credentials as the CLI',
+  'login.browser': 'Sign in with browser',
+  'login.browserHint': 'Opened the sign-in page in your browser ({url}). You’ll continue automatically when done.',
+  'login.or': 'or',
+  'login.apiKeyPlaceholder': 'Paste your API key',
+  'login.apiKeyLogin': 'Sign in with API key',
+
+  // ── agent backends ─────────────────────────────────────────────────────────────
+  'agent.easyCodeHint': 'Built-in Easy Code backend (default)',
+  'agent.claudeCodeHint': 'Drives your locally installed Claude Code (claude)',
+  'agent.codexHint': 'Drives your locally installed Codex (codex)',
+
+  // ── new session dialog ──────────────────────────────────────────────────────────
+  'newSession.title': 'New session',
+  'newSession.subtitle': 'Each session has its own working directory and context, and can run in parallel.',
+  'newSession.pickDirError': 'Please choose a project directory',
+  'newSession.environment': 'Environment',
+  'newSession.projectDir': 'Project directory',
+  'newSession.pickFolderPlaceholder': 'Choose a folder…',
+  'newSession.browse': 'Browse…',
+  'newSession.permissionMode': 'Permission mode',
+  'newSession.externalAgentNote':
+    '{agent} runs with its own permission policy; you’ll be prompted when it needs approval.',
+  'newSession.start': 'Start session',
+
+  // ── permission modes (mirrors PERMISSION_MODES ids) ──────────────────────────────
+  'permMode.default': 'Ask every time',
+  'permMode.default.hint': 'Ask before each edit/command',
+  'permMode.yolo': 'YOLO auto-accept',
+  'permMode.yolo.hint': 'Auto-accept all edits and commands without asking',
+
+  // ── permission dialog ────────────────────────────────────────────────────────────
+  'permission.title': 'Your approval is needed',
+
+  // ── diff (shared edit/write verbs + diff pane) ───────────────────────────────────
+  'diff.edit': 'Edit',
+  'diff.write': 'Write',
+  'diff.reviewPrompt': 'Please address the following code-review comments on the current changes:\n\n',
+  'diff.selfReviewPrompt':
+    'Review the current uncommitted changes for compile errors, logic errors, security issues, or obvious bugs (ignore style/lint), and fix them directly.',
+  'diff.selfReviewTitle': 'Self-review changes',
+  'diff.submitComments': 'Submit {n} comment(s)',
+  'diff.noChanges': 'No uncommitted changes',
+  'diff.pickFile': 'Select a file to view its diff',
+  'diff.commentPlaceholder': 'Write a review comment, press Enter to submit…',
+  'diff.addCommentTitle': 'Click a line to add a comment',
+
+  // ── prompt bar ────────────────────────────────────────────────────────────────────
+  'prompt.placeholder': 'Type a message — @ to reference files, / for commands…',
+  'prompt.busyPlaceholder': 'Your reply will be read after the current action finishes… (steer as it runs)',
+  'prompt.externalAgentTitle': 'External agent driving this session',
+  'prompt.defaultModel': 'Default model',
+  'prompt.contextUsage': 'Context usage',
+  'prompt.addAttachment': 'Add attachment / image',
+  'prompt.hint': 'Enter to send · Shift+Enter for a newline · Ctrl+V to paste an image · click the clip to attach',
+
+  // ── settings · custom models ───────────────────────────────────────────────────────
+  'settings.title': 'Settings · Custom models',
+  'settings.language': 'Display language',
+  'settings.langZh': '简体中文',
+  'settings.langEn': 'English',
+  'settings.subtitlePre': 'Custom models are shared with the CLI via ',
+  'settings.subtitlePost': '. Changes take effect on your next new session.',
+  'settings.errName': 'Please enter a name',
+  'settings.errBaseUrl': 'Please enter a Base URL',
+  'settings.errApiKey': 'Please enter an API key',
+  'settings.errModelId': 'Please enter a model ID',
+  'settings.saveFailed': 'Save failed',
+  'settings.noModels': 'No custom models yet',
+  'settings.disabled': 'Disabled',
+  'settings.addModel': 'Add custom model',
+  'settings.name': 'Name',
+  'settings.namePlaceholder': 'e.g. My GPT-4o',
+  'settings.provider': 'Protocol',
+  'settings.apiKeyPlaceholder': 'sk-… or ${ENV_VAR}',
+  'settings.modelId': 'Model ID',
+  'settings.contextWindow': 'Context window (optional, tokens)',
+  'settings.contextWindowPlaceholder': 'e.g. 200000',
+  'settings.enableModel': 'Enable this model',
+
+  // ── tool call status ─────────────────────────────────────────────────────────────────
+  'tool.status.pending': 'Pending',
+  'tool.status.in_progress': 'Running',
+  'tool.status.completed': 'Done',
+  'tool.status.failed': 'Failed',
+
+  // ── panes ──────────────────────────────────────────────────────────────────────────────
+  'pane.chat': 'Chat',
+  'pane.diff': 'Changes',
+  'pane.plan': 'Plan',
+  'pane.tasks': 'Tasks',
+  'pane.terminal': 'Terminal',
+  'pane.file': 'File',
+
+  // ── session run status ───────────────────────────────────────────────────────────────────
+  'status.idle': 'Idle',
+  'status.starting': 'Starting',
+  'status.thinking': 'Thinking',
+  'status.needs_approval': 'Awaiting approval',
+  'status.error': 'Error',
+  'status.exited': 'Exited',
+
+  // ── session view ─────────────────────────────────────────────────────────────────────────
+  'session.emptyTitle': 'Select a session on the left, or start a new one',
+  'session.resume': 'Resume session',
+  'session.views': 'Views',
+
+  // ── chat density ──────────────────────────────────────────────────────────────────────────
+  'density.title': 'View density',
+  'density.summary': 'Summary',
+  'density.normal': 'Normal',
+  'density.verbose': 'Verbose',
+
+  // ── sidebar ────────────────────────────────────────────────────────────────────────────────
+  'sidebar.newSession': 'New session',
+  'sidebar.active': 'Active',
+  'sidebar.all': 'All',
+  'sidebar.archived': 'Archived',
+  'sidebar.searchPlaceholder': 'Search sessions…',
+  'sidebar.noSessions': 'No sessions',
+  'sidebar.dblClickRename': 'Double-click to rename',
+  'sidebar.archive': 'Archive',
+  'sidebar.unarchive': 'Unarchive',
+  'sidebar.loggedIn': 'Signed in',
+  'sidebar.feishu': 'Feishu gateway',
+  'sidebar.feishuRunning': 'Feishu gateway (running)',
+
+  // ── chat pane ───────────────────────────────────────────────────────────────────────────────
+  'chat.emptyTitle': 'Start a conversation with Easy Code',
+  'chat.worksIn': 'It works in {cwd}',
+  'chat.aiResponding': 'AI is responding',
+  'chat.attachedImage': 'Attached image',
+  'chat.thought': 'Thinking',
+  'chat.rewindTitle': 'Rewind to here',
+
+  // ── plan / tasks / terminal / file panes ───────────────────────────────────────────────────────
+  'plan.empty': 'No plan yet',
+  'tasks.summary': '{running} running / {total} total',
+  'tasks.empty': 'No tool calls yet',
+  'terminal.noOutput': '(no command output yet)',
+  'terminal.backendLog': 'Backend log',
+  'terminal.none': '(none)',
+  'file.empty': 'Click a file path in a tool call to view it',
+};
