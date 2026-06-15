@@ -11,6 +11,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
+import { TurnNotifier } from './notifications.js';
 import {
   cancelBrowserLogin,
   getAuthStatus,
@@ -59,12 +60,24 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   };
 
   const hub = new SessionHub({
-    sessionEvent: (sessionId, event) =>
-      send(IpcEvent.SessionEvent, { sessionId, event }),
+    sessionEvent: (sessionId, event) => {
+      // Maybe raise a turn-complete system notification (no-op while focused),
+      // then forward the event to the renderer as usual.
+      notifier.handle(sessionId, event);
+      send(IpcEvent.SessionEvent, { sessionId, event });
+    },
     sessionStatus: (sessionId, status, meta) =>
       send(IpcEvent.SessionStatus, { sessionId, status, meta }),
     permissionRequest: (req) => send(IpcEvent.PermissionRequest, req),
     backendLog: (line) => send(IpcEvent.BackendLog, line),
+  });
+
+  // Surfaces a system notification when a turn finishes while the window is in
+  // the background; clicking it restores the window and selects the session.
+  const notifier = new TurnNotifier({
+    getWindow,
+    getTitle: (id) => hub.list().find((s) => s.id === id)?.title,
+    focusSession: (id) => send(IpcEvent.SessionFocusRequest, id),
   });
 
   const pushAuth = () => send(IpcEvent.AuthChanged, getAuthStatus());

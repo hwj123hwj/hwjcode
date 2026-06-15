@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { Icon, type IconName } from './Icon';
+import { AgentIcon } from './AgentIcon';
 import {
   PERMISSION_MODES,
   type AgentKind,
@@ -29,6 +30,21 @@ let attachSeq = 0;
 const nextAttachId = () => `att-${Date.now().toString(36)}-${(attachSeq++).toString(36)}`;
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
+/**
+ * Read a File (pasted/dropped) as a `data:` URL. We deliberately avoid
+ * `URL.createObjectURL` here: the renderer CSP allows `img-src data:` but NOT
+ * `blob:`, so loading a blob URL into the `<img>`/canvas inside compressImage
+ * failed silently and pasting an image did nothing.
+ */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'));
+    reader.readAsDataURL(file);
+  });
+}
 
 /**
  * Downscale + re-encode an image to JPEG (max 1920×1080, quality ~0.82) via an
@@ -104,10 +120,10 @@ export function PromptBar({ view }: { view: SessionView }) {
       for (const it of images) {
         const file = it.getAsFile();
         if (!file) continue;
-        const url = URL.createObjectURL(file);
-        void addImageFromUrl(url, file.type, file.name || 'pasted-image.png').finally(() =>
-          URL.revokeObjectURL(url),
-        );
+        // data: URL (not blob:) so the CSP lets compressImage load it.
+        void fileToDataUrl(file)
+          .then((dataUrl) => addImageFromUrl(dataUrl, file.type, file.name || 'pasted-image.png'))
+          .catch(() => undefined);
       }
       return;
     }
@@ -270,7 +286,7 @@ export function PromptBar({ view }: { view: SessionView }) {
           </span>
           {meta.agentType && meta.agentType !== 'easy-code' && (
             <span className="chip accent" title="驱动此会话的外部 agent">
-              <Icon name={AGENT_BADGE[meta.agentType].icon} size={14} />
+              <AgentIcon agent={meta.agentType} size={15} />
               {AGENT_BADGE[meta.agentType].label}
             </span>
           )}
@@ -278,7 +294,7 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="cpu" size={14} />
             <select value={meta.model ?? ''} onChange={(e) => void setModel(meta.id, e.target.value)}>
               {!meta.model && <option value="">默认模型</option>}
-              {meta.availableModels.map((m) => (
+              {(meta.availableModels ?? []).map((m) => (
                 <option key={m.modelId} value={m.modelId}>
                   {m.name}
                 </option>

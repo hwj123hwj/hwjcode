@@ -68,6 +68,10 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setName('Easy Code');
+  // Windows shows toast notifications under this AppUserModelID; without it the
+  // turn-complete notifications either don't appear or show as an unbranded
+  // "electron.app.…" sender. Must match electron-builder.yml's `appId`.
+  if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
   // Drop the default application menu on Windows/Linux entirely. On macOS we
   // keep it so standard shortcuts (copy/paste/quit) and the app menu survive.
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);

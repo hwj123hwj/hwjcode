@@ -33,7 +33,7 @@ export type ViewDensity = 'normal' | 'verbose' | 'summary';
 export type PaneKind = 'chat' | 'diff' | 'plan' | 'tasks' | 'terminal' | 'file';
 
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; images?: string[] }
   | { kind: 'assistant'; id: string; text: string }
   | { kind: 'thought'; id: string; text: string }
   | { kind: 'system'; id: string; text: string }
@@ -121,6 +121,14 @@ let initialized = false;
  */
 const liveSessions = new Set<string>();
 
+/**
+ * Sessions whose resume (backend spawn + history replay) is currently in flight.
+ * Resuming the SAME session twice would spawn a second backend that replays the
+ * whole history again — doubling the event flood that already strains the
+ * renderer. Guard so rapid re-clicks while a resume is pending are no-ops.
+ */
+const resumingSessions = new Set<string>();
+
 const newId = (() => {
   let n = 0;
   return () => `r${Date.now().toString(36)}-${(n++).toString(36)}`;
@@ -180,12 +188,25 @@ export const useStore = create<StoreState>((set, get) => ({
       });
     });
 
+    // Coalesce streamed session events. On resume the backend replays the FULL
+    // prior conversation as a burst of session updates; applying each one with
+    // its own `set` re-rendered the entire transcript (and the sidebar) once per
+    // event — O(n²) over a long history, which pinned the renderer thread and
+    // showed as a frozen white screen after clicking a session. We now buffer
+    // events and flush them in a single `set` per ~frame, so a replay of N
+    // events costs a handful of renders instead of N.
     api.sessions.onEvent(({ sessionId, event }) => {
-      applyEvent(set, get, sessionId, event);
+      bufferEvent(set, get, sessionId, event);
     });
 
     api.permissions.onRequest((req) => {
       set((s) => ({ permissionQueue: [...s.permissionQueue, req] }));
+    });
+
+    // A turn-complete notification was clicked: bring that session to the front
+    // (resuming its backend if it isn't live), exactly like a sidebar click.
+    api.sessions.onFocusRequest((sessionId) => {
+      get().focusSession(sessionId);
     });
 
     api.backend.onLog((line) => {
@@ -215,8 +236,9 @@ export const useStore = create<StoreState>((set, get) => ({
     get().setActive(id);
     // Restored (or crashed) sessions have no live bridge in the main process —
     // resume to (re)spawn the backend and replay history. resumeSession is the
-    // single resume path (it also resets the transcript before replay).
-    if (!liveSessions.has(id)) void get().resumeSession(id);
+    // single resume path (it also resets the transcript before replay). Skip if
+    // a resume for this session is already in flight (rapid re-clicks).
+    if (!liveSessions.has(id) && !resumingSessions.has(id)) void get().resumeSession(id);
   },
 
   createSession: async (cwd, mode, agentType, model) => {
@@ -230,9 +252,14 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   resumeSession: async (id) => {
+    if (resumingSessions.has(id)) return; // already resuming — avoid a double spawn/replay
+    resumingSessions.add(id);
     // loadSession replays the FULL prior conversation via session updates, so
     // clear the transcript/plan first — otherwise a re-resume (e.g. after the
     // backend exited) would append a second copy on top of the existing one.
+    // Also drop any buffered events for this id so a stale replay tail can't
+    // land on the freshly-cleared transcript.
+    pendingEvents.delete(id);
     set((s) => {
       const v = s.sessions[id];
       if (!v) return { activeSessionId: id };
@@ -244,13 +271,17 @@ export const useStore = create<StoreState>((set, get) => ({
         activeSessionId: id,
       };
     });
-    const view = get().sessions[id];
-    const meta = await api.sessions.resume(id, view?.meta.cwd ?? '');
-    liveSessions.add(id);
-    set((s) => ({
-      sessions: { ...s.sessions, [id]: { ...(s.sessions[id] ?? emptyView(meta)), meta } },
-      activeSessionId: id,
-    }));
+    try {
+      const view = get().sessions[id];
+      const meta = await api.sessions.resume(id, view?.meta.cwd ?? '');
+      liveSessions.add(id);
+      set((s) => ({
+        sessions: { ...s.sessions, [id]: { ...(s.sessions[id] ?? emptyView(meta)), meta } },
+        activeSessionId: id,
+      }));
+    } finally {
+      resumingSessions.delete(id);
+    }
   },
 
   archiveSession: async (id, archived) => {
@@ -264,13 +295,20 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   sendPrompt: async (id, text, atPaths, images) => {
-    // Optimistically render the user bubble. Note any attached images so the
-    // sent message reads coherently even though the transcript is text-only.
-    const suffix = images && images.length ? `\n\n[附带 ${images.length} 张图片]` : '';
+    // Optimistically render the user bubble. We send `text` (which may carry the
+    // backend-only "[IMAGE: name (path)]" hints for image_reader) to the backend
+    // verbatim, but the bubble shows the user's words with those hints stripped
+    // plus the real image thumbnails (inlined as data URLs from `images`).
     set((s) => {
       const view = s.sessions[id];
       if (!view) return {};
-      const item: ChatItem = { kind: 'user', id: newId(), text: text + suffix };
+      const displayImages = (images ?? []).map((im) => `data:${im.mimeType};base64,${im.data}`);
+      const item: ChatItem = {
+        kind: 'user',
+        id: newId(),
+        text: stripImageHints(text),
+        images: displayImages.length ? displayImages : undefined,
+      };
       return {
         sessions: {
           ...s.sessions,
@@ -373,40 +411,90 @@ function updateView(set: SetFn, id: string, fn: (v: SessionView) => SessionView)
   });
 }
 
+/**
+ * Strip the "[IMAGE: name (path)]" hints we append to a prompt for the backend's
+ * image_reader tool, so the chat bubble shows clean user text rather than the
+ * raw on-disk path. Used both for the optimistic bubble and replayed history.
+ */
+function stripImageHints(text: string): string {
+  return text.replace(/\n*\[IMAGE:[^\]]*\][ \t]*/g, '').trim();
+}
+
 function patchMeta(set: SetFn, id: string, patch: Partial<SessionMeta>): void {
   updateView(set, id, (v) => ({ ...v, meta: { ...v.meta, ...patch } }));
 }
 
-function applyEvent(
+type DesktopSessionEvent = import('@shared/ipc').DesktopSessionEvent;
+
+// ── streamed-event buffering ───────────────────────────────────────────────
+//
+// Backend session updates (live streaming AND the full-history replay on
+// resume) are buffered here and flushed in a single `set` per ~frame. This
+// keeps a replay of thousands of events from re-rendering the whole transcript
+// once per event — the cause of the post-click freeze/white screen.
+
+const pendingEvents = new Map<string, DesktopSessionEvent[]>();
+let flushHandle: ReturnType<typeof setTimeout> | null = null;
+
+function bufferEvent(
   set: SetFn,
   get: () => StoreState,
   sessionId: string,
-  event: import('@shared/ipc').DesktopSessionEvent,
+  event: DesktopSessionEvent,
 ): void {
-  const view = get().sessions[sessionId];
-  if (!view) return;
+  let arr = pendingEvents.get(sessionId);
+  if (!arr) {
+    arr = [];
+    pendingEvents.set(sessionId, arr);
+  }
+  arr.push(event);
+  if (flushHandle == null) {
+    flushHandle = setTimeout(() => {
+      flushHandle = null;
+      const batch = [...pendingEvents.entries()];
+      pendingEvents.clear();
+      for (const [sid, events] of batch) flushEvents(set, get, sid, events);
+    }, 16);
+  }
+}
 
-  const update = (next: Partial<SessionView>) =>
-    set((s) => ({
-      sessions: { ...(s as StoreState).sessions, [sessionId]: { ...(s as StoreState).sessions[sessionId], ...next } },
-    }));
+/** Apply a batch of buffered events for one session in a single store update. */
+function flushEvents(
+  set: SetFn,
+  get: () => StoreState,
+  sessionId: string,
+  events: DesktopSessionEvent[],
+): void {
+  let needsDiffRefresh = false;
+  set((s) => {
+    const cur = (s as StoreState).sessions[sessionId];
+    if (!cur) return {};
+    let view = cur;
+    for (const event of events) {
+      view = reduceEvent(view, event);
+      if (event.kind === 'turn_end') needsDiffRefresh = true;
+    }
+    return { sessions: { ...(s as StoreState).sessions, [sessionId]: view } };
+  });
+  // Refresh diff stats lazily after the turn(s) settle — once per flush.
+  if (needsDiffRefresh) void get().refreshDiff(sessionId);
+}
 
+/** Pure-ish reducer: fold one streamed event into a session view. */
+function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView {
   switch (event.kind) {
     case 'turn_start':
-      update({ draftAssistantId: undefined });
-      break;
+      return { ...view, draftAssistantId: undefined };
 
     case 'message_chunk': {
       const t = [...view.transcript];
       const last = t[t.length - 1];
       if (view.draftAssistantId && last && last.kind === 'assistant' && last.id === view.draftAssistantId) {
         t[t.length - 1] = { ...last, text: last.text + event.text };
-        update({ transcript: t });
-      } else {
-        const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text };
-        update({ transcript: [...t, item], draftAssistantId: item.id });
+        return { ...view, transcript: t };
       }
-      break;
+      const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text };
+      return { ...view, transcript: [...t, item], draftAssistantId: item.id };
     }
 
     case 'thought_chunk': {
@@ -417,19 +505,23 @@ function applyEvent(
       } else {
         t.push({ kind: 'thought', id: newId(), text: event.text });
       }
-      update({ transcript: t });
-      break;
+      return { ...view, transcript: t };
     }
 
     case 'user_chunk':
-      update({ transcript: [...view.transcript, { kind: 'user', id: newId(), text: event.text }] });
-      break;
+      return {
+        ...view,
+        transcript: [
+          ...view.transcript,
+          { kind: 'user', id: newId(), text: stripImageHints(event.text) },
+        ],
+      };
 
     case 'mode_marker':
-      update({
+      return {
+        ...view,
         transcript: [...view.transcript, { kind: 'system', id: newId(), text: event.mode }],
-      });
-      break;
+      };
 
     case 'tool_call': {
       const item: ChatItem = {
@@ -442,8 +534,7 @@ function applyEvent(
         locations: event.locations,
         content: event.content ?? [],
       };
-      update({ transcript: [...view.transcript, item], draftAssistantId: undefined });
-      break;
+      return { ...view, transcript: [...view.transcript, item], draftAssistantId: undefined };
     }
 
     case 'tool_update': {
@@ -453,37 +544,36 @@ function applyEvent(
           ...it,
           status: event.status ?? it.status,
           title: event.title ?? it.title,
-          content: event.content && event.content.length ? mergeContent(it.content, event.content) : it.content,
+          content:
+            event.content && event.content.length ? mergeContent(it.content, event.content) : it.content,
           terminalOutput: event.terminalOutput
             ? (it.terminalOutput ?? '') + event.terminalOutput
             : it.terminalOutput,
         };
       });
-      update({ transcript: t });
-      break;
+      return { ...view, transcript: t };
     }
 
     case 'plan':
-      update({ plan: event.entries });
-      break;
+      return { ...view, plan: event.entries };
 
     case 'usage':
-      patchMeta(set, sessionId, { tokenUsed: event.used, tokenSize: event.size });
-      break;
+      return { ...view, meta: { ...view.meta, tokenUsed: event.used, tokenSize: event.size } };
 
     case 'commands':
-      update({ commands: event.commands });
-      break;
+      return { ...view, commands: event.commands };
 
     case 'error':
-      update({ transcript: [...view.transcript, { kind: 'error', id: newId(), text: event.message }] });
-      break;
+      return {
+        ...view,
+        transcript: [...view.transcript, { kind: 'error', id: newId(), text: event.message }],
+      };
 
     case 'turn_end':
-      update({ draftAssistantId: undefined });
-      // Refresh diff stats lazily after the turn settles.
-      void get().refreshDiff(sessionId);
-      break;
+      return { ...view, draftAssistantId: undefined };
+
+    default:
+      return view;
   }
 }
 
