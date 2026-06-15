@@ -3293,6 +3293,32 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return null;
     }
 
+    // 🔧 自然语言模型切换（仅飞书场景）
+    // 匹配 "切换/用 + 模型名"，改写成 /model <name> 交给后续斜杠命令处理
+    if (!messageText.startsWith('/')) {
+      const trimmed = messageText.trim();
+      const settings = globalCommandContext?.services?.settings;
+      const favoriteModelIds: string[] = settings?.merged?.favoriteModels || [];
+      if (favoriteModelIds.length > 0) {
+        const cloudModels = currentConfig?.getCloudModels?.() || [];
+        const favorites = favoriteModelIds
+          .map((id) => {
+            const model = cloudModels.find((m: any) => m.name === id);
+            return model ? { name: model.name, displayName: model.displayName } : null;
+          })
+          .filter((f): f is { name: string; displayName: string } => f !== null);
+
+        if (favorites.length > 0) {
+          const nlMatch = await import('../hooks/useNLModelSwitch.js').then(m =>
+            m.detectNLModelSwitch(trimmed, favorites),
+          );
+          if (nlMatch) {
+            messageText = `/model ${nlMatch.modelName}`;
+          }
+        }
+      }
+    }
+
     // 🔧 自然语言工具开关触发词（等效于 /tool enable/disable）
     if (!messageText.startsWith('/')) {
       const trimmed = messageText.trim();
