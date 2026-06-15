@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
+import { useT } from '../i18n/useT';
+import { useStore } from '../store';
 import type {
   CustomModelEntry,
   CustomModelInput,
@@ -39,6 +41,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [editingName, setEditingName] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const t = useT();
+  const lang = useStore((s) => s.lang);
+  const setLang = useStore((s) => s.setLang);
 
   const refresh = async () => {
     setLoading(true);
@@ -78,16 +83,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   const save = async () => {
     if (!form) return;
-    if (!form.displayName.trim()) return setError('请填写名称');
-    if (!form.baseUrl.trim()) return setError('请填写 Base URL');
-    if (!form.apiKey.trim()) return setError('请填写 API Key');
-    if (!form.modelId.trim()) return setError('请填写模型 ID');
+    if (!form.displayName.trim()) return setError(t('settings.errName'));
+    if (!form.baseUrl.trim()) return setError(t('settings.errBaseUrl'));
+    if (!form.apiKey.trim()) return setError(t('settings.errApiKey'));
+    if (!form.modelId.trim()) return setError(t('settings.errModelId'));
     setBusy(true);
     setError('');
     const res = await api.models.saveCustom(form, editingName);
     setBusy(false);
     if (!res.ok) {
-      setError(res.error ?? '保存失败');
+      setError(res.error ?? t('settings.saveFailed'));
       return;
     }
     setForm(null);
@@ -104,11 +109,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <div className="modal-head">
           <h3>
             <Icon name="settings" size={17} />
-            设置 · 自定义模型
+            {t('settings.title')}
           </h3>
           <div className="sub">
-            自定义模型与 CLI 共用 <code>~/.easycode-user/custom-models.json</code>
-            。新增或修改后，将在下次新建会话时生效。
+            {t('settings.subtitlePre')}<code>~/.easycode-user/custom-models.json</code>{t('settings.subtitlePost')}
           </div>
         </div>
 
@@ -121,15 +125,33 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           )}
 
           {!form && (
+            <div className="settings-lang">
+              <label className="field-label">{t('settings.language')}</label>
+              <div className="prompt-config">
+                {(['zh', 'en'] as const).map((l) => (
+                  <span
+                    key={l}
+                    className={`chip interactive ${lang === l ? 'accent' : ''}`}
+                    onClick={() => setLang(l)}
+                  >
+                    {lang === l && <Icon name="check" size={13} />}
+                    {l === 'zh' ? t('settings.langZh') : t('settings.langEn')}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!form && (
             <>
               <div className="cm-list">
                 {loading && (
                   <div className="cm-empty">
-                    <span className="spinner" /> 加载中…
+                    <span className="spinner" /> {t('common.loading')}
                   </div>
                 )}
                 {!loading && models.length === 0 && (
-                  <div className="cm-empty">还没有自定义模型</div>
+                  <div className="cm-empty">{t('settings.noModels')}</div>
                 )}
                 {models.map((m) => (
                   <div className="cm-row" key={m.id}>
@@ -138,16 +160,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <span className="cm-badge">
                         {PROVIDERS.find((p) => p.id === m.provider)?.label ?? m.provider}
                       </span>
-                      {m.enabled === false && <span className="cm-badge muted">已禁用</span>}
+                      {m.enabled === false && <span className="cm-badge muted">{t('settings.disabled')}</span>}
                     </div>
                     <div className="cm-row-sub">
                       {m.modelId} · {m.baseUrl}
                     </div>
                     <div className="cm-actions">
-                      <button className="icon-btn" title="编辑" onClick={() => startEdit(m)}>
+                      <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(m)}>
                         <Icon name="edit" size={14} />
                       </button>
-                      <button className="icon-btn" title="删除" onClick={() => void remove(m)}>
+                      <button className="icon-btn" title={t('common.delete')} onClick={() => void remove(m)}>
                         <Icon name="delete" size={14} />
                       </button>
                     </div>
@@ -156,22 +178,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               </div>
               <button className="btn" onClick={startAdd}>
                 <Icon name="plus" size={14} />
-                添加自定义模型
+                {t('settings.addModel')}
               </button>
             </>
           )}
 
           {form && (
             <div className="cm-form">
-              <label className="field-label">名称</label>
+              <label className="field-label">{t('settings.name')}</label>
               <input
                 className="prompt-input cm-input"
-                placeholder="例如 My GPT-4o"
+                placeholder={t('settings.namePlaceholder')}
                 value={form.displayName}
                 onChange={(e) => patch({ displayName: e.target.value })}
               />
 
-              <label className="field-label">协议</label>
+              <label className="field-label">{t('settings.provider')}</label>
               <div className="prompt-config">
                 {PROVIDERS.map((p) => (
                   <span
@@ -197,12 +219,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               <input
                 className="prompt-input cm-input"
                 type="password"
-                placeholder="sk-… 或 ${ENV_VAR}"
+                placeholder={t('settings.apiKeyPlaceholder')}
                 value={form.apiKey}
                 onChange={(e) => patch({ apiKey: e.target.value })}
               />
 
-              <label className="field-label">模型 ID</label>
+              <label className="field-label">{t('settings.modelId')}</label>
               <input
                 className="prompt-input cm-input"
                 placeholder="gpt-4o / claude-3-5-sonnet / …"
@@ -210,11 +232,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 onChange={(e) => patch({ modelId: e.target.value })}
               />
 
-              <label className="field-label">上下文窗口（可选，tokens）</label>
+              <label className="field-label">{t('settings.contextWindow')}</label>
               <input
                 className="prompt-input cm-input"
                 type="number"
-                placeholder="例如 200000"
+                placeholder={t('settings.contextWindowPlaceholder')}
                 value={form.maxTokens ?? ''}
                 onChange={(e) =>
                   patch({
@@ -229,7 +251,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   checked={form.enabled !== false}
                   onChange={(e) => patch({ enabled: e.target.checked })}
                 />
-                启用此模型
+                {t('settings.enableModel')}
               </label>
             </div>
           )}
@@ -239,16 +261,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {form ? (
             <>
               <button className="btn" onClick={() => setForm(null)}>
-                返回
+                {t('common.back')}
               </button>
               <button className="btn primary" disabled={busy} onClick={save}>
                 {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
-                保存
+                {t('common.save')}
               </button>
             </>
           ) : (
             <button className="btn" onClick={onClose}>
-              关闭
+              {t('common.close')}
             </button>
           )}
         </div>
