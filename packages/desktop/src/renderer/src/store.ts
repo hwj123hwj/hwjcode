@@ -78,6 +78,8 @@ interface StoreState {
   init: () => Promise<void>;
   refreshSessions: () => Promise<void>;
   setActive: (id: string) => void;
+  /** Focus a session, transparently resuming its backend if it isn't live. */
+  focusSession: (id: string) => void;
   createSession: (
     cwd: string,
     mode: PermissionMode,
@@ -102,6 +104,16 @@ interface StoreState {
 
 /** One-time guard so `init()` wires backend IPC listeners exactly once. */
 let initialized = false;
+
+/**
+ * Session ids that currently have a live backend bridge in the main process
+ * THIS app run. Sessions restored from disk on startup are NOT here until the
+ * user opens them (which resumes them). Used to decide whether a click should
+ * resume (spawn the backend + replay history) or just focus an already-running
+ * session. A module-level set (not store state) since it is per-renderer-run and
+ * never rendered. Cleared naturally on app restart.
+ */
+const liveSessions = new Set<string>();
 
 const newId = (() => {
   let n = 0;
@@ -144,6 +156,9 @@ export const useStore = create<StoreState>((set, get) => ({
     api.auth.onChanged((status) => set({ auth: status }));
 
     api.sessions.onStatus(({ sessionId, status, meta }) => {
+      // A backend that exited no longer has a live bridge — drop it so the next
+      // click resumes (respawns + replays) instead of just focusing.
+      if (status === 'exited') liveSessions.delete(sessionId);
       set((s) => {
         const view = s.sessions[sessionId];
         if (!view) return {};
@@ -190,8 +205,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setActive: (id) => set({ activeSessionId: id }),
 
+  focusSession: (id) => {
+    get().setActive(id);
+    // Restored (or crashed) sessions have no live bridge in the main process —
+    // resume to (re)spawn the backend and replay history. resumeSession is the
+    // single resume path (it also resets the transcript before replay).
+    if (!liveSessions.has(id)) void get().resumeSession(id);
+  },
+
   createSession: async (cwd, mode, agentType, model) => {
     const meta = await api.sessions.create({ cwd, permissionMode: mode, agentType, model });
+    liveSessions.add(meta.id);
     set((s) => ({
       sessions: { ...s.sessions, [meta.id]: emptyView(meta) },
       order: [meta.id, ...s.order.filter((x) => x !== meta.id)],
@@ -200,8 +224,23 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   resumeSession: async (id) => {
+    // loadSession replays the FULL prior conversation via session updates, so
+    // clear the transcript/plan first — otherwise a re-resume (e.g. after the
+    // backend exited) would append a second copy on top of the existing one.
+    set((s) => {
+      const v = s.sessions[id];
+      if (!v) return { activeSessionId: id };
+      return {
+        sessions: {
+          ...s.sessions,
+          [id]: { ...v, transcript: [], plan: [], draftAssistantId: undefined },
+        },
+        activeSessionId: id,
+      };
+    });
     const view = get().sessions[id];
     const meta = await api.sessions.resume(id, view?.meta.cwd ?? '');
+    liveSessions.add(id);
     set((s) => ({
       sessions: { ...s.sessions, [id]: { ...(s.sessions[id] ?? emptyView(meta)), meta } },
       activeSessionId: id,

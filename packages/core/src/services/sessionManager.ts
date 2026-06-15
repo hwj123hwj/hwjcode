@@ -78,6 +78,27 @@ export class SessionManager {
   }
 
   /**
+   * 判断 history.json 是否包含真实的用户消息。
+   *
+   * 兼容两种持久化形状：
+   *   - Ink TUI 写入的 UI 形状：`{ type: 'user', text }`
+   *   - ACP 后端（acpSession.persistHistory）写入的 Content 形状：`{ role: 'user', parts }`
+   *
+   * 早期只检查 `item.type === 'user'`，导致 ACP 会话(只有 `role`)被误判为“空会话”，
+   * 进而在启动清理 {@link cleanupEmptySessions} 中被删除——这正是“桌面端重开后会话
+   * 无法恢复”的根因。两种形状都要识别。
+   */
+  static historyHasUserMessage(history: unknown[]): boolean {
+    return history.some(
+      (item) =>
+        !!item &&
+        typeof item === 'object' &&
+        ((item as { type?: unknown }).type === 'user' ||
+          (item as { role?: unknown }).role === 'user'),
+    );
+  }
+
+  /**
    * 计算workdir的hash值
    */
   private getWorkdirHash(workdir?: string): string {
@@ -142,8 +163,8 @@ export class SessionManager {
         const historyContent = await fs.readFile(historyFile, 'utf-8');
         const history = JSON.parse(historyContent);
 
-        // 检查是否有用户消息（type为'user'）
-        if (Array.isArray(history) && history.some(item => item.type === 'user')) {
+        // 检查是否有用户消息
+        if (Array.isArray(history) && SessionManager.historyHasUserMessage(history)) {
           return session.sessionId;
         }
       } catch {
@@ -780,9 +801,9 @@ export class SessionManager {
           const historyContent = await fs.readFile(historyFile, 'utf-8');
           const history = JSON.parse(historyContent);
 
-          // 检查是否有用户消息（type为'user'）
+          // 检查是否有用户消息
           if (Array.isArray(history)) {
-            hasRealConversation = history.some(item => item.type === 'user');
+            hasRealConversation = SessionManager.historyHasUserMessage(history);
           }
         } catch {
           // history文件不存在或无法读取，视为空session
