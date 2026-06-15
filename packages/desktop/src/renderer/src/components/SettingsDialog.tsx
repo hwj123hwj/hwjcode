@@ -46,8 +46,14 @@ type Tab = 'general' | 'models';
  *   - 通用       → `settings.json` (the file the CLI's `/config` edits)
  *   - 自定义模型 → `custom-models.json`
  */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('general');
+export function SettingsDialog({
+  onClose,
+  initialTab = 'general',
+}: {
+  onClose: () => void;
+  initialTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const t = useT();
 
   return (

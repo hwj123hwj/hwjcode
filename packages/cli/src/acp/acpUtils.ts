@@ -9,6 +9,7 @@ import {
   type CustomModelConfig,
   type ToolResult,
   type ToolCallConfirmationDetails,
+  type ToolConfirmationPayload,
   Kind,
   Icon,
   ApprovalMode,
@@ -113,9 +114,35 @@ export function hasMeta(
 }
 
 /**
+ * The answer payload an interactive ACP client (the desktop app) returns for
+ * an {@link AskUserQuestionTool} prompt, carried inside the `_meta.dvcode`
+ * channel of the {@link acp.Client.requestPermission} response (the base ACP
+ * `requestPermission` contract only models `optionId`, so there is no first-
+ * class field for free-form answers). Mirrors {@link ToolConfirmationPayload}.
+ */
+const AskAnswersMetaSchema = z
+  .object({
+    answers: z.record(z.string()).optional(),
+    annotations: z
+      .record(
+        z.object({
+          preview: z.string().optional(),
+          notes: z.string().optional(),
+        }),
+      )
+      .optional(),
+    feedback: z.string().optional(),
+  })
+  .optional();
+
+/**
  * Zod schema for the response to {@link acp.Client.requestPermission}.
  * ACP clients reply with either `{outcome: 'cancelled'}` or
  * `{outcome: 'selected', optionId: '...'}`.
+ *
+ * For `ask_user_question` the client additionally tucks the collected answers
+ * into `_meta.dvcode` (see {@link AskAnswersMetaSchema}); we parse it
+ * leniently so non-question tools (which never send it) are unaffected.
  */
 export const RequestPermissionResponseSchema = z.object({
   outcome: z.discriminatedUnion('outcome', [
@@ -125,7 +152,31 @@ export const RequestPermissionResponseSchema = z.object({
       optionId: z.string(),
     }),
   ]),
+  _meta: z
+    .object({ dvcode: AskAnswersMetaSchema })
+    .passthrough()
+    .optional(),
 });
+
+/**
+ * Pull the AskUserQuestion answer payload out of a parsed
+ * {@link RequestPermissionResponseSchema} result. Returns `undefined` for
+ * ordinary tool approvals (no answers attached), so callers can pass it
+ * straight through to `confirmation.onConfirm(outcome, payload)`.
+ */
+export function extractAskAnswers(
+  parsed: z.infer<typeof RequestPermissionResponseSchema>,
+): ToolConfirmationPayload | undefined {
+  const dvcode = parsed._meta?.dvcode;
+  if (!dvcode) return undefined;
+  const { answers, annotations, feedback } = dvcode;
+  if (!answers && !annotations && !feedback) return undefined;
+  return {
+    ...(answers ? { answers } : {}),
+    ...(annotations ? { annotations } : {}),
+    ...(feedback ? { feedback } : {}),
+  };
+}
 
 /**
  * Map an internal {@link ToolResult} to the wire shape expected in
@@ -269,6 +320,28 @@ export function toPermissionOptions(
   }
   options.push(...basicPermissionOptions);
   return options;
+}
+
+/**
+ * Build the `_meta.dvcode` payload to attach to a `requestPermission` request
+ * for an {@link AskUserQuestionTool} prompt. The base ACP `requestPermission`
+ * contract only carries Allow/Reject options, so the actual questions (with
+ * their options/previews/multiSelect) are forwarded out-of-band here for
+ * interactive clients (the desktop app) to render. Returns `undefined` for any
+ * non-question confirmation so ordinary tool approvals stay untouched.
+ */
+export function questionMetaFor(
+  confirmation: ToolCallConfirmationDetails,
+): Record<string, unknown> | undefined {
+  if (confirmation.type !== 'question') return undefined;
+  return {
+    dvcode: {
+      askUserQuestion: {
+        questions: confirmation.questions,
+        ...(confirmation.metadata ? { metadata: confirmation.metadata } : {}),
+      },
+    },
+  };
 }
 
 /**

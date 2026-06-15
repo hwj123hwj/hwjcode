@@ -12,6 +12,7 @@ export function App() {
   const init = useStore((s) => s.init);
   const ready = useStore((s) => s.ready);
   const auth = useStore((s) => s.auth);
+  const customModelOnly = useStore((s) => s.customModelOnly);
   const lang = useStore((s) => s.lang);
   const t = useT();
 
@@ -38,7 +39,10 @@ export function App() {
     );
   }
 
-  if (!auth.loggedIn) {
+  // Auth gate: signed-in users pass, and so do users who opted into
+  // custom-model-only mode (their own API keys, no sign-in needed). Everyone
+  // else gets the login screen — where they can also enter custom-model mode.
+  if (!auth.loggedIn && !customModelOnly) {
     return <Login />;
   }
 

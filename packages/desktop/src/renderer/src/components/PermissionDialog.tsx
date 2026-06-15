@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import { Icon, toolKindIcon } from './Icon';
 import { useT } from '../i18n/useT';
+import { AskQuestionCard } from './AskQuestionCard';
 import type { PermissionOption } from '@shared/ipc';
 
 function btnClass(kind: PermissionOption['kind']): string {
@@ -15,6 +16,26 @@ export function PermissionDialog() {
   const t = useT();
   const req = queue[0];
   if (!req) return null;
+
+  // ask_user_question: the backend forwarded the multi-choice questions on the
+  // request. Render the dedicated card instead of the plain Allow/Reject dialog.
+  // Submitting picks the "allow" option (so the backend proceeds with
+  // ProceedOnce) and carries the collected answers back in the response _meta.
+  if (req.questions && req.questions.length > 0) {
+    const allow =
+      req.options.find((o) => o.kind === 'allow_once') ??
+      req.options.find((o) => o.kind === 'allow_always') ??
+      req.options.find((o) => o.kind !== 'reject_once' && o.kind !== 'reject_always');
+    return (
+      <AskQuestionCard
+        questions={req.questions}
+        onSubmit={(answers) =>
+          void respond(req.requestId, allow?.optionId ?? null, answers)
+        }
+        onCancel={() => void respond(req.requestId, null)}
+      />
+    );
+  }
 
   return (
     <div className="modal-backdrop">
