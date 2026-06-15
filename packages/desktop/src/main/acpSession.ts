@@ -182,9 +182,13 @@ class DesktopAcpClient implements acp.Client {
       case 'agent_message_chunk': {
         const t = textOfContent(u.content);
         if (!t) break;
-        // Core encodes mode/model switches as markers inside message chunks.
+        // Core encodes mode/model switches and the auto-generated session title
+        // as markers inside message chunks (see acpSession.ts in the backend).
         if (t.startsWith('[MODE_UPDATE]') || t.startsWith('[Model switched')) {
           this.cb.emit({ kind: 'mode_marker', mode: t });
+        } else if (t.startsWith('[TITLE_UPDATE]')) {
+          const title = t.slice('[TITLE_UPDATE]'.length).trim();
+          if (title) this.cb.emit({ kind: 'title', title });
         } else {
           this.cb.emit({ kind: 'message_chunk', text: t });
         }

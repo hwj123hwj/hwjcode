@@ -18,6 +18,7 @@ import {
   getErrorStatus,
   MESSAGE_ROLES,
   SceneType,
+  SceneManager,
   REFERENCE_CONTENT_START,
   REFERENCE_CONTENT_END,
   ToolConfirmationOutcome,
@@ -61,6 +62,15 @@ const ENV_CONTEXT_MARKER = 'CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant';
 const ENV_CONTEXT_ACK = 'Got it. Thanks for the context!';
 
 /**
+ * Prefix of the synthetic `agent_message_chunk` the backend emits to push an
+ * auto-generated session title to the client (same channel-marker trick as
+ * `[MODE_UPDATE]`). The desktop bridge strips the prefix and updates the
+ * session card's title instead of rendering it as a chat bubble. Kept in sync
+ * with `packages/desktop/src/main/acpSession.ts`.
+ */
+const TITLE_UPDATE_MARKER = '[TITLE_UPDATE]';
+
+/**
  * True when a persisted history message is the injected environment-context
  * preamble (the user context block or the model's ack) rather than a real
  * conversation turn. Such messages are model priming and must not be replayed
@@ -69,6 +79,34 @@ const ENV_CONTEXT_ACK = 'Got it. Thanks for the context!';
 function isInjectedEnvPreamble(role: string | undefined, text: string): boolean {
   if (role === 'user') return text.includes(ENV_CONTEXT_MARKER);
   return text.trim() === ENV_CONTEXT_ACK;
+}
+
+/** Concatenate the text parts of a model response (no `getResponseText` in the barrel). */
+function responseText(resp: GenerateContentResponse | undefined): string {
+  const parts = resp?.candidates?.[0]?.content?.parts ?? [];
+  return parts
+    .map((p) => (typeof (p as { text?: string }).text === 'string'
+      ? (p as { text: string }).text
+      : ''))
+    .join('');
+}
+
+/**
+ * Turn a raw model title into a clean one-line label: first non-empty line,
+ * surrounding quotes/brackets stripped, trailing punctuation removed, clamped
+ * to a sane length. Returns '' if nothing usable remains.
+ */
+function sanitizeTitle(raw: string): string {
+  let title = (raw ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0) ?? '';
+  // Strip wrapping quotes / brackets the model sometimes adds.
+  title = title.replace(/^["'`《》「」“”‘’\[\]]+|["'`《》「」“”‘’\[\]]+$/g, '').trim();
+  // Drop a trailing sentence-ending punctuation mark.
+  title = title.replace(/[。．.!！?？,，;；:：]+$/u, '').trim();
+  if (title.length > 60) title = title.slice(0, 60).trim();
+  return title;
 }
 
 /**
@@ -131,6 +169,12 @@ export function truncateUiHistoryByUserMessageCount(
 export class Session {
   private pendingAbort?: AbortController;
   private readonly approvalModeUnsubscribe: () => void;
+  /**
+   * Set once we've kicked off auto-title generation for this session so a
+   * second prompt never re-summarizes. Loaded (resumed) sessions start `true`
+   * because they already carry a title the user chose / generated earlier.
+   */
+  private titleGenerated = false;
   /**
    * Runtime cache of session/set_config_option values. Used to answer
    * subsequent `set_config_option` responses with the `currentValue` the
@@ -373,6 +417,15 @@ export class Session {
     } catch (err) {
       this.debug(`persistHistory failed: ${getAcpErrorMessage(err)}`);
     }
+  }
+
+  /**
+   * Mark this session as already-titled so the next prompt does not auto-name
+   * it. Called by the session manager right after `session/load`, since a
+   * resumed session already has the title it was given on first use.
+   */
+  markTitleGenerated(): void {
+    this.titleGenerated = true;
   }
 
   setMode(modeId: string): void {
@@ -644,6 +697,19 @@ export class Session {
     this.pendingAbort?.abort();
     const abort = new AbortController();
     this.pendingAbort = abort;
+
+    // The very first real user message names the session. Fire-and-forget so
+    // the cheap summarizer model never blocks (or is blocked by) the main
+    // response stream. Guarded by `titleGenerated` + a history check so it runs
+    // exactly once and never on a resumed/already-populated conversation.
+    if (
+      !this.titleGenerated &&
+      textChunks.length > 0 &&
+      this.countRealUserMessages() === 0
+    ) {
+      this.titleGenerated = true;
+      void this.generateTitle(textChunks);
+    }
 
     const promptId = Math.random().toString(16).slice(2);
     const parts = await this.resolvePrompt(req, abort.signal);
@@ -1156,6 +1222,96 @@ export class Session {
       );
     }
     return parts;
+  }
+
+  /**
+   * Count the real, user-typed text turns currently in the chat history —
+   * i.e. `role:'user'` entries that are neither the injected env-context
+   * preamble nor a tool `functionResponse`. Returns 0 for a brand-new chat
+   * (which holds only the env preamble), which is exactly the signal that the
+   * incoming prompt is the session's first message.
+   */
+  private countRealUserMessages(): number {
+    let count = 0;
+    for (const entry of this.chat.getHistory(false)) {
+      if (entry.role !== MESSAGE_ROLES.USER) continue;
+      const parts = entry.parts ?? [];
+      if (parts.some((p) => (p as { functionResponse?: unknown }).functionResponse)) {
+        continue;
+      }
+      const text = parts
+        .map((p) => (typeof (p as { text?: string }).text === 'string'
+          ? (p as { text: string }).text
+          : ''))
+        .join('');
+      if (isInjectedEnvPreamble(MESSAGE_ROLES.USER, text)) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * Summarize the first user message into a short session title with a cheap,
+   * fast model (the `CONTENT_SUMMARY` scene → `gemini-2.5-flash-lite`) and push
+   * it to the client via the `[TITLE_UPDATE]` marker. Mirrors the CLI's use of
+   * `createTemporaryChat` for side-channel summarization: a throwaway chat with
+   * no system prompt, fully isolated from the session's own `GeminiChat`, so it
+   * never pollutes the conversation history or context window.
+   *
+   * Best-effort: any failure is swallowed (the session simply keeps its
+   * folder-name default title). Runs with its own short-lived AbortController so
+   * cancelling the user's turn doesn't kill the title, and vice-versa.
+   */
+  private async generateTitle(userText: string): Promise<void> {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 20_000);
+    try {
+      const client = this.config.getGeminiClient?.() as
+        | {
+            createTemporaryChat?: (
+              scene: SceneType,
+              model?: string,
+              agentContext?: unknown,
+              options?: { disableSystemPrompt?: boolean },
+            ) => Promise<GeminiChat>;
+          }
+        | undefined;
+      if (!client?.createTemporaryChat) return;
+
+      const tempChat = await client.createTemporaryChat(
+        SceneType.CONTENT_SUMMARY,
+        SceneManager.getModelForScene(SceneType.CONTENT_SUMMARY),
+        { type: 'sub', agentId: 'TitleGen' },
+        { disableSystemPrompt: true },
+      );
+
+      const prompt =
+        'Generate a concise title (at most 6 words) summarizing the following ' +
+        'user request, so it can label a chat session in a sidebar. Reply with ' +
+        'ONLY the title text — no quotes, no punctuation at the end, and in the ' +
+        'same language as the request.\n\nUser request:\n' +
+        userText.slice(0, 2000);
+
+      const response = (await tempChat.sendMessage(
+        {
+          message: prompt,
+          config: { maxOutputTokens: 40, abortSignal: abort.signal },
+        },
+        `title-${Date.now()}`,
+        SceneType.CONTENT_SUMMARY,
+      )) as GenerateContentResponse;
+
+      const title = sanitizeTitle(responseText(response));
+      if (!title) return;
+      await this.sendUpdate({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: `${TITLE_UPDATE_MARKER} ${title}` },
+      });
+    } catch (err) {
+      this.debug(`generateTitle failed: ${getAcpErrorMessage(err)}`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private debug(msg: string): void {

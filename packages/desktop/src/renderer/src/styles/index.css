@@ -354,11 +354,17 @@ select {
   white-space: nowrap;
 }
 .session-sub {
+  flex: 1;
   font-size: 11.5px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* On the meta row the badge trails the timestamp/diff-chip, pushed to the far
+   right by .session-sub growing to fill the row. */
+.session-row .agent-badge {
+  margin-left: auto;
 }
 .status-dot {
   width: 7px;

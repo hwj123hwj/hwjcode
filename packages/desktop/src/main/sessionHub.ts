@@ -27,6 +27,12 @@ import type {
 interface PersistedSession extends SessionMeta {
   /** Backend (core) session id, used to resume via ACP session/load. */
   acpSessionId?: string;
+  /**
+   * True once the user has manually renamed the session. Suppresses the
+   * backend's auto-generated `[TITLE_UPDATE]` so a hand-picked title is never
+   * overwritten.
+   */
+  titleLocked?: boolean;
 }
 
 export interface HubEmitters {
@@ -101,7 +107,22 @@ export class SessionHub {
       id,
       cwd,
       {
-        emit: (event) => this.emit.sessionEvent(id, event),
+        emit: (event) => {
+          // The auto-generated title is metadata, not a transcript bubble:
+          // fold it into the session record (unless the user renamed it) and
+          // push it to the renderer as a meta patch via sessionStatus.
+          if (event.kind === 'title') {
+            const rec = this.records.get(id);
+            if (rec && !rec.titleLocked && event.title) {
+              const updated = this.touch(id, { title: event.title });
+              if (updated) {
+                this.emit.sessionStatus(id, updated.status, { title: updated.title });
+              }
+            }
+            return;
+          }
+          this.emit.sessionEvent(id, event);
+        },
         setStatus: (status) => {
           this.touch(id, { status });
           this.emit.sessionStatus(id, status);
@@ -199,7 +220,8 @@ export class SessionHub {
     const rec = this.records.get(id);
     if (!rec) throw new Error(`Unknown session: ${id}`);
     const next = title.trim() || defaultTitle(rec.cwd);
-    return this.touch(id, { title: next })!;
+    // A manual rename pins the title against the backend's auto-titling.
+    return this.touch(id, { title: next, titleLocked: true })!;
   }
 
   // ── prompting ─────────────────────────────────────────────────────────────
