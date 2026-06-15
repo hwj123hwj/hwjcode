@@ -398,6 +398,23 @@ if (existsSync(fixPermissionsScript)) {
   console.warn('⚠️  fix-binary-permissions.js not found, skipping copy');
 }
 
+// Emit a package.json that marks the bundle as ESM.
+//
+// esbuild emits `easycode.js` (and `fix-binary-permissions.js`) as ES modules
+// — they use top-level `import`. Node decides a `.js` file's module type from
+// the nearest package.json walking up the tree. When the bundle runs in-repo
+// (e.g. `desktop:dev`), it inherits `"type": "module"` from the repo-root
+// package.json. But once the bundle is copied OUT of the repo — e.g. the
+// desktop app ships it under `resources/backend/` — there is no such ancestor,
+// so Node defaults to CommonJS and `import` throws
+// "Cannot use import statement outside a module", crashing the backend on
+// spawn. Ship a self-describing package.json so the bundle is ESM everywhere.
+// Written via JSON.stringify + writeFileSync (no BOM) — the CLI parses this
+// file at startup and a BOM would make its JSON parser throw.
+const bundlePkgJson = join(bundleDir, 'package.json');
+writeFileSync(bundlePkgJson, JSON.stringify({ type: 'module' }, null, 2) + '\n', 'utf8');
+console.log('✅ Wrote bundle/package.json ({ "type": "module" })');
+
 // Copy authentication templates from packages/core to bundle
 const templatesSourceDir = join(root, 'packages', 'core', 'src', 'auth', 'login', 'templates');
 const templatesBundleDir = join(bundleDir, 'login', 'templates');

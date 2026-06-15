@@ -1,0 +1,45 @@
+{
+  "name": "easycode-desktop",
+  "version": "1.1.14",
+  "description": "Easy Code Desktop - a Claude Code Desktop-style GUI driving the same agent core via ACP",
+  "type": "module",
+  "main": "out/main/index.js",
+  "author": "Easy Code Team",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "pack:dir": "electron-vite build && node scripts/pack-installer.cjs --dir",
+    "pack:win": "electron-vite build && node scripts/pack-installer.cjs --win",
+    "pack:mac": "electron-vite build && node scripts/pack-installer.cjs --mac",
+    "pack:linux": "electron-vite build && node scripts/pack-installer.cjs --linux",
+    "pack:all": "electron-vite build && node scripts/pack-installer.cjs --win --mac --linux",
+    "lint": "eslint . --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.16.1",
+    "deepv-code-core": "file:../core",
+    "qrcode.react": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.9",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "5.9.3",
+    "vite": "^5.4.11",
+    "zustand": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
