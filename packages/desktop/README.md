@@ -45,6 +45,23 @@ npm run desktop:dev         # builds the agent bundle (dev) + launches Electron
 `desktop:dev` runs `bundle:dev` first so `bundle/easycode.js` exists for the
 backend to spawn. To point at a custom backend, set `EASYCODE_BACKEND_JS`.
 
+### Running a production backend locally
+
+`npm run start` (Electron preview) does **not** rebuild the bundle — it just
+spawns whatever `bundle/easycode.js` already exists. That file's environment
+(dev vs prod) is whatever the *last* bundle command produced, so a bare
+`start`/`desktop:dev` leaves you on a **dev** bundle. To preview the desktop on a
+guaranteed **production** backend:
+
+```bash
+npm run desktop:start:prod  # BUILD_ENV=production npm run bundle  +  start
+```
+
+This rebuilds `bundle/easycode.js` with `BUILD_ENV=production` (minified, baked
+to the live `api-code.deepvlab.ai` server) and then launches the preview against
+it. Note it leaves the repo's `bundle/` in prod form; run `desktop:dev` again to
+return to a dev bundle.
+
 Useful env (mirrors the CLI):
 
 - `DEEPX_SERVER_URL` — proxy/auth server (default `https://api-code.deepvlab.ai`)
