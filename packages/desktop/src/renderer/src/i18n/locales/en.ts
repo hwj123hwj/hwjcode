@@ -256,6 +256,7 @@ export const en = {
   'sidebar.searchPlaceholder': 'Search sessions…',
   'sidebar.noSessions': 'No sessions',
   'sidebar.chats': 'Chats',
+  'sidebar.chatsFolder': 'Chats',
   'sidebar.projects': 'Projects',
   'sidebar.dblClickRename': 'Double-click to rename',
   'sidebar.archive': 'Archive',

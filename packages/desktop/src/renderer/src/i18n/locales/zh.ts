@@ -254,6 +254,7 @@ export const zh = {
   'sidebar.searchPlaceholder': '搜索会话…',
   'sidebar.noSessions': '暂无会话',
   'sidebar.chats': '闲聊',
+  'sidebar.chatsFolder': '闲聊',
   'sidebar.projects': '项目',
   'sidebar.dblClickRename': '双击重命名',
   'sidebar.archive': '归档',

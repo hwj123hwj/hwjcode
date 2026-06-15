@@ -46,6 +46,9 @@ interface ProjectGroup {
   views: SessionView[];
 }
 
+/** Collapse-state key for the single Chats folder group (never a real cwd). */
+const CHATS_GROUP_KEY = '__chats__';
+
 export function Sidebar() {
   const order = useStore((s) => s.order);
   const sessions = useStore((s) => s.sessions);
@@ -258,7 +261,23 @@ export function Sidebar() {
         {chats.length > 0 && (
           <div className="sidebar-section">
             <div className="group-label">{t('sidebar.chats')}</div>
-            {chats.map((v) => renderCard(v, false))}
+            {(() => {
+              const isCollapsed = collapsed.has(CHATS_GROUP_KEY);
+              return (
+                <div className="project-group">
+                  <button
+                    className="project-header"
+                    onClick={() => toggleCollapse(CHATS_GROUP_KEY)}
+                  >
+                    <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={14} />
+                    <Icon name="folder" size={14} />
+                    <span className="project-name">{t('sidebar.chatsFolder')}</span>
+                    <span className="project-count">{chats.length}</span>
+                  </button>
+                  {!isCollapsed && chats.map((v) => renderCard(v, true))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
