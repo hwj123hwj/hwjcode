@@ -104,8 +104,6 @@ Easy Code (Monorepo)
 - `EasyCode_Code_Whitepaper.md` - 项目白皮书
 - `EASYCODE.md` - 本文件（AI记忆文件）
 - `docs/index.md` - 文档总索引
-- ls-dev 是用户的常驻开发分支，提 MR 时绝对不要加 --remove-source-branch。
-- EasyCode 项目发布规则（CI）：package.json 里的版本号无所谓（CI 发布时会自动注入真实版本号），但 **package.json 的版本号必须严格低于 release tag 的版本号**，否则 CI 会失败。例如 release tag 为 cli-release-v1.0.334 时，package.json 版本必须 < 1.0.334（例如 1.0.319 就满足）。打 tag 前务必确认版本号关系。
 - Easy Code 项目目录命名约定（极易搞错，务必记住）：全局配置目录是 `~/.easycode-user/`（用户家目录下），项目级配置目录是 `<projectRoot>/.easycode/`（项目根目录下）。两个目录名前缀不同是为了规避命名冲突，绝不能混用：项目里出现 `.easycode-user` 是错误，全局出现 `.easycode` 也是错误。`PROJECT_DIR_PREFIX = '.easycode'` 定义在 `packages/core/src/utils/paths.ts`。例如飞书凭证只走全局，固定写入 `~/.easycode-user/feishu-credentials.json`，不接受 projectRoot 参数。
 - 用户要求交流时：1) 不使用浮夸的赞美和认同；2) 保持独立思辨能力，对用户的说法进行批判性判断，不盲从（用户说的不一定都对）；3) 用词严谨专业，不使用网络用语。
 - 始终使用中文进行交流。
@@ -114,6 +112,6 @@ Easy Code (Monorepo)
 - Easy Code/Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。
 
 ## DeepV Code Added Memories
-- Easy Code 发版 tag 版本号对齐规则：CLI 和 VSCode 的 release tag 版本号必须对齐（如 cli-release-v1.1.15 和 vscode-release-v1.1.15），package.json 中的版本号必须严格低于 tag 版本号。
+- 本仓库是上游 Easy Code 项目的个人 fork，不走上游 CI 发版流程。版本号与上游 release tag 完全一致（同步脚本 `scripts/sync-upstream.sh` 会自动对齐），不存在「版本号必须严格低于 tag」的约束。
 - 演示了工具调用能力，用户要求尽可能多地展示可用工具
 - 独立 GitLab仓库: `https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient`（项目ID: 9774），Personal Access Token: `glpat-myrVXWAg5e7HF-RGRYFv`（全局），可用 GitLab API 创建/合并 MR。上游仓库: `https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient`。开发规范见 `.llm-wiki/wiki/development-workflow.md`，同步脚本见 `scripts/sync-upstream.sh`。

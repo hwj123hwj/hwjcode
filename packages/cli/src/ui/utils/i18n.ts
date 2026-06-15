@@ -357,12 +357,6 @@ export const translations = {
 
     // Tool Names
     'tool.edit': 'Edit',
-    'tool.ppt_generate': 'PPT Generate',
-    'tool.ppt_generate.description': 'Submit PPT outline and start generation task.\n\nThis tool will perform the following operations:\n1. Submit the current outline to the server\n2. Start the PPT generation task\n3. Automatically open browser to the PPT editing preview page\n4. Exit PPT editing mode\n\nMake sure to set the outline content (topic, page count, outline text) via ppt_outline tool before calling.',
-    'ppt_generate.param.confirm': 'Confirm submission (default true)',
-    'tool.ppt_outline': 'PPT Outline',
-    'tool.ppt_outline.description': 'Manage PPT outline content. Supports the following actions:\n- init: Initialize PPT editing mode, start creating new PPT\n- update: Update outline content (topic, page count, outline text)\n- view: View current outline state\n- clear: Clear current outline and exit PPT mode',
-
     // Web Search
     'websearch.results.returned': 'Search results for "{query}" returned.{truncated}',
     'websearch.results.truncated': ' (Content truncated)',
@@ -967,9 +961,6 @@ export const translations = {
   'healthy.reminder.agentRunning': "Agent is working in the background and won't be affected.",
   'healthy.reminder.waiting': 'Please wait {{seconds}}s to confirm...',
   'healthy.reminder.dismiss': ' Press [Enter] or [Space] to remind later ',
-    'command.ppt.description': 'Create PowerPoint presentations with AI-assisted outline design',
-    'command.ppt.prompt': 'What topic would you like to create a PPT for?\n\nExamples:\n  /ppt "AI in Education"\n  /ppt "2025 Annual Summary" --pages 15',
-    'command.ppt.expected_pages': '\n\nExpected pages: {count}',
     'command.session.description': 'Session management - list, select and create conversation sessions',
     'command.trim.description': 'Manage automatic trailing space removal configuration (for C++, Python, etc.)',
     'command.myplan.description': 'Quick access to user information page',
@@ -2035,12 +2026,6 @@ export const translations = {
 
     // Tool Names
     'tool.edit': '编辑',
-    'tool.ppt_generate': 'PPT生成',
-    'tool.ppt_generate.description': '提交PPT大纲并启动生成任务。\n\n此工具会执行以下操作：\n1. 将当前大纲提交到服务端\n2. 启动PPT生成任务\n3. 自动打开浏览器跳转到PPT编辑预览页面\n4. 退出PPT编辑模式\n\n调用前请确保已通过 ppt_outline 工具设置好大纲内容（主题、页数、大纲文本）。',
-    'ppt_generate.param.confirm': '确认提交（默认true）',
-    'tool.ppt_outline': 'PPT大纲',
-    'tool.ppt_outline.description': '管理PPT大纲内容。支持以下操作：\n- init: 初始化PPT编辑模式，开始创建新PPT\n- update: 更新大纲内容（主题、页数、大纲文本）\n- view: 查看当前大纲状态\n- clear: 清除当前大纲并退出PPT模式',
-
     // Web Search
     'websearch.results.returned': '"{query}"的搜索结果已返回。{truncated}',
     'websearch.results.truncated': '（内容已截断）',
@@ -2644,9 +2629,6 @@ export const translations = {
   'healthy.reminder.agentRunning': 'Agent 正在后台处理任务，不会受此提醒影响。',
   'healthy.reminder.waiting': '请在 {{seconds}} 秒后尝试确认...',
   'healthy.reminder.dismiss': ' 按 [回车] 或 [空格] 稍后提醒 ',
-    'command.ppt.description': '通过AI辅助的大纲设计创建PowerPoint演示文稿',
-    'command.ppt.prompt': '请告诉我你想创建的PPT主题是什么？\n\n示例:\n  /ppt "AI在教育中的应用"\n  /ppt "2025年度总结" --pages 15',
-    'command.ppt.expected_pages': '\n\n预期页数: {count}页',
     'command.session.description': '会话管理 - 列出、选择和创建对话会话',
     'command.trim.description': '管理自动删除行末空格配置（适用于C++、Python等源代码）',
     'command.myplan.description': '快速打开用户信息页面',

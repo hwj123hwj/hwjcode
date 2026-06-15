@@ -180,9 +180,6 @@ export * from './tools/todo-store.js';
 // NanoBanana image generation tool
 export * from './tools/nanobanana-generate.js';
 
-// PPT tools
-export * from './tools/ppt/index.js';
-
 // MCP OAuth
 export { MCPOAuthProvider } from './mcp/oauth-provider.js';
 export {

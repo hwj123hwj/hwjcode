@@ -43,8 +43,6 @@ import { GetSkillDetailsTool } from '../tools/get-skill-details.js';
 import { SkillHubTool } from '../tools/skill-hub.js';
 // Old LSP tools imports removed
 
-import { PptOutlineTool } from '../tools/ppt/pptOutlineTool.js';
-import { PptGenerateTool } from '../tools/ppt/pptGenerateTool.js';
 import { CodeSearchTool } from '../tools/codesearch.js';
 import { LspTool } from '../tools/lsp.js';
 import { MultiEditTool } from '../tools/multiedit.js';
@@ -1132,8 +1130,6 @@ export class Config {
 
     // Old individual LSP tools registration removed in favor of unified LspTool
 
-    registerCoreTool(PptOutlineTool, this);
-    registerCoreTool(PptGenerateTool, this);
     registerCoreTool(CodeSearchTool, this);
     registerCoreTool(LspTool, this);
     registerCoreTool(MultiEditTool, this);
