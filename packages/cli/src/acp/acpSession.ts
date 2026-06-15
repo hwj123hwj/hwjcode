@@ -315,6 +315,44 @@ export class Session {
     }
   }
 
+  /**
+   * Persist the current conversation to disk so a later `session/load` (e.g.
+   * the desktop app reopening this session after the app — and the backend
+   * process — has been restarted) can rehydrate the transcript and the model's
+   * context.
+   *
+   * The interactive Ink CLI does this through its `useSessionAutoSave` hook; the
+   * pure-ACP path has no equivalent, so without this the conversation lives only
+   * in the in-memory {@link GeminiChat} and is lost the moment the backend exits
+   * — `loadSession` then finds nothing in the session index and falls back to a
+   * fresh session, which is exactly the "history not restored" bug.
+   *
+   * Best-effort: a failed write must never break the prompt turn. We first
+   * `loadSession` (which lazily creates `metadata.json` and registers the id in
+   * the on-disk session index, so `resolveSession` can find it later), then
+   * overwrite `history.json` + `context.json` with the current curated history —
+   * the same `Content[]` shape that {@link streamHistory} and
+   * `convertSessionToClientHistory` both consume on the way back in.
+   */
+  private async persistHistory(): Promise<void> {
+    const projectRoot = this.cwd ?? this.config.getProjectRoot?.();
+    if (!projectRoot) {
+      this.debug('persistHistory skipped: no projectRoot');
+      return;
+    }
+    try {
+      const history = this.chat.getHistory(false);
+      if (history.length === 0) return;
+      const mgr = new CoreSessionManager(projectRoot);
+      // Ensures metadata.json exists and the id is in the session index, so a
+      // later resolveSession(this.id) can locate it.
+      await mgr.loadSession(this.id);
+      await mgr.saveSessionHistory(this.id, history, history);
+    } catch (err) {
+      this.debug(`persistHistory failed: ${getAcpErrorMessage(err)}`);
+    }
+  }
+
   setMode(modeId: string): void {
     // DeepCode's ApprovalMode uses upper-case ids; ACP clients send back the
     // same ids we advertised via `buildAvailableModes`, so we coerce in place
@@ -667,6 +705,10 @@ export class Session {
       return { stopReason: 'end_turn' };
     } finally {
       if (this.pendingAbort === abort) this.pendingAbort = undefined;
+      // Save the turn's result (and the model context) to disk so the session
+      // survives a backend/app restart. Runs on normal completion, cancel, and
+      // error alike — best-effort and self-contained, never throws.
+      await this.persistHistory();
     }
   }
 
