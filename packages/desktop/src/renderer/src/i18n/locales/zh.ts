@@ -101,6 +101,10 @@ export const zh = {
   'login.or': '或',
   'login.apiKeyPlaceholder': '粘贴你的 API Key',
   'login.apiKeyLogin': '用 API Key 登录',
+  'login.useCustomModels': '使用自定义模型继续',
+  'login.addCustomModel': '添加自定义模型',
+  'login.customModelHint': '无需登录，使用你自己的 API Key（与 CLI 共享配置）。',
+  'login.noCustomModels': '尚未配置可用的自定义模型，请先添加一个。',
 
   // ── agent backends ─────────────────────────────────────────────────────────────
   'agent.easyCodeHint': '内置 Easy Code 后端（默认）',
@@ -113,7 +117,9 @@ export const zh = {
   'newSession.pickDirError': '请选择项目目录',
   'newSession.environment': '环境',
   'newSession.projectDir': '项目目录',
+  'newSession.projectDirOptional': '项目目录（可选）',
   'newSession.pickFolderPlaceholder': '选择一个文件夹…',
+  'newSession.pickFolderOptionalPlaceholder': '留空则直接闲聊，不绑定目录',
   'newSession.browse': '浏览…',
   'newSession.permissionMode': '权限模式',
   'newSession.externalAgentNote': '{agent} 将以其自身的权限策略运行；需要确认时会弹出授权请求。',
@@ -127,6 +133,15 @@ export const zh = {
 
   // ── permission dialog ────────────────────────────────────────────────────────────
   'permission.title': '需要你的批准',
+
+  // ── ask_user_question (multi-choice cards) ───────────────────────────────────────
+  'ask.title': '请回答以下问题',
+  'ask.other': '其他（自定义输入）…',
+  'ask.otherPlaceholder': '输入你的回答…',
+  'ask.submit': '提交',
+  'ask.skip': '跳过',
+  'ask.multiHint': '可多选',
+  'ask.preview': '预览',
 
   // ── diff (shared edit/write verbs + diff pane) ───────────────────────────────────
   'diff.edit': '编辑',
@@ -143,13 +158,13 @@ export const zh = {
 
   // ── prompt bar ────────────────────────────────────────────────────────────────────
   'prompt.placeholder': '输入指令，@ 引用文件，/ 使用命令…',
-  'prompt.busyPlaceholder': '回复将在当前动作结束后被读取…（边跑边纠偏）',
+  'prompt.busyPlaceholder': '发送将打断当前任务并开始新对话…',
   'prompt.externalAgentTitle': '驱动此会话的外部 agent',
   'prompt.cwdHint': '工作文件夹在会话创建时固定。如需更换，请新建一个会话。',
   'prompt.defaultModel': '默认模型',
   'prompt.contextUsage': '上下文用量',
   'prompt.addAttachment': '添加附件 / 图片',
-  'prompt.hint': 'Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴图片 · 点击回形针添加附件',
+  'prompt.hint': 'Enter 发送 · Shift+Enter 换行 · {paste} 粘贴图片 · 点击回形针添加附件',
 
   // ── settings · general + custom models ─────────────────────────────────────────────
   'settings.title': '设置',
@@ -215,6 +230,13 @@ export const zh = {
 
   // ── session view ─────────────────────────────────────────────────────────────────────────
   'session.emptyTitle': '选择左侧会话，或新建一个会话开始',
+  'session.emptyPrompt': '我们来做点什么？',
+  'session.emptyPlaceholder': '随便聊聊，或描述一个任务…',
+  'session.emptySend': '发送',
+  'session.emptyHint': '直接输入即可开始，可在下方选择工作目录与权限模式',
+  'session.emptyChatTarget': '直接闲聊',
+  'session.emptyRecent': '最近的项目',
+  'session.emptyPickFolder': '选择文件夹…',
   'session.resume': '恢复会话',
   'session.views': '视图',
 
@@ -231,10 +253,14 @@ export const zh = {
   'sidebar.archived': '已归档',
   'sidebar.searchPlaceholder': '搜索会话…',
   'sidebar.noSessions': '暂无会话',
+  'sidebar.chats': '闲聊',
+  'sidebar.projects': '项目',
   'sidebar.dblClickRename': '双击重命名',
   'sidebar.archive': '归档',
   'sidebar.unarchive': '取消归档',
   'sidebar.loggedIn': '已登录',
+  'sidebar.customModelMode': '自定义模型模式',
+  'sidebar.exitCustomModelMode': '退出自定义模型模式',
   'sidebar.feishu': '飞书网关',
   'sidebar.feishuRunning': '飞书网关（运行中）',
 

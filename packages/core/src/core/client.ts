@@ -741,9 +741,14 @@ export class GeminiClient {
       fileIncludePattern: /\.(ts|js|tsx|jsx|json|md|py|go|rs|java|cpp|c|h|yml|yaml|toml)$/i, // 只显示重要文件类型
     });
 
+    const clientLabel = this.config.getDesktopMode()
+      ? 'Easy Code Desktop (a native desktop GUI app)'
+      : this.config.getVsCodePluginMode()
+        ? 'the Easy Code VS Code extension'
+        : 'the Easy Code CLI';
     const context = `
 🚀 **CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant** 🚀
-This is the Easy Code CLI with enhanced environment awareness.
+This is ${clientLabel} with enhanced environment awareness.
 **Date:** ${today}
 **Platform:** ${environmentInfo}
 **🎯 CRITICAL: Always use ${process.platform}-appropriate commands!**

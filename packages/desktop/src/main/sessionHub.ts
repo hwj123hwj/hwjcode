@@ -9,6 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { app } from 'electron';
 import { AcpSessionBridge } from './acpSession.js';
@@ -68,6 +69,9 @@ export class SessionHub {
         rec.status = 'idle';
         // Backfill agentType for sessions persisted before this field existed.
         if (!rec.agentType) rec.agentType = 'easy-code';
+        // Backfill kind for sessions persisted before sidebar grouping existed:
+        // a cwd under the chats root is a chat, everything else a project.
+        if (!rec.kind) rec.kind = isChatCwd(rec.cwd) ? 'chat' : 'project';
         // Backfill availableModels: the renderer maps over it on render, so an
         // older record without it would crash the session view (white screen)
         // until the resume round-trip repopulated it.
@@ -151,6 +155,7 @@ export class SessionHub {
       environment: 'local',
       status: 'starting',
       agentType,
+      kind: opts.kind ?? 'project',
       permissionMode: opts.permissionMode ?? 'default',
       model: opts.model,
       availableModels: [],
@@ -185,6 +190,36 @@ export class SessionHub {
     if (opts.model && opts.model !== res.model) {
       await bridge.setModel(opts.model).catch(() => undefined);
     }
+    return updated;
+  }
+
+  /**
+   * Start a directory-less "just chat" session. We mint a throwaway working
+   * directory under `~/.easycode-user/chats/<id>` so the agent has a real,
+   * isolated cwd to operate in without touching the user's home or projects.
+   */
+  async createChat(
+    opts: Omit<CreateSessionOptions, 'cwd'> = {},
+  ): Promise<SessionMeta> {
+    const id = randomUUID();
+    const cwd = path.join(chatsRoot(), id);
+    fs.mkdirSync(cwd, { recursive: true });
+    return this.create({ ...opts, cwd, kind: 'chat' });
+  }
+
+  /**
+   * Set a provisional title (e.g. first user message) WITHOUT locking it, so a
+   * later backend `[TITLE_UPDATE]` can still refine it. No-ops once the user has
+   * manually renamed (titleLocked).
+   */
+  setTitleProvisional(id: string, title: string): SessionMeta | undefined {
+    const rec = this.records.get(id);
+    if (!rec) return undefined;
+    if (rec.titleLocked) return rec; // respect manual rename
+    const next = title.trim();
+    if (!next) return rec;
+    const updated = this.touch(id, { title: next });
+    if (updated) this.emit.sessionStatus(id, updated.status, { title: updated.title });
     return updated;
   }
 
@@ -303,4 +338,20 @@ export class SessionHub {
 function defaultTitle(cwd: string): string {
   const base = path.basename(cwd) || cwd;
   return base;
+}
+
+/**
+ * Root folder for directory-less "just chat" sessions. Lives in the GLOBAL
+ * user config dir (`~/.easycode-user/chats`), NOT the project-level `.easycode`
+ * and NOT Electron's userData — matching where the CLI keeps shared user state.
+ */
+function chatsRoot(): string {
+  return path.join(os.homedir(), '.easycode-user', 'chats');
+}
+
+/** True if a cwd points inside the chats root (used to backfill `kind`). */
+function isChatCwd(cwd: string): boolean {
+  const root = chatsRoot();
+  const norm = path.resolve(cwd);
+  return norm === root || norm.startsWith(root + path.sep);
 }

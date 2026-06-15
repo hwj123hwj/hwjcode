@@ -47,6 +47,8 @@ import {
   hasMeta,
   toToolCallContent,
   toPermissionOptions,
+  questionMetaFor,
+  extractAskAnswers,
   toAcpToolKind,
   iconToAcpKind,
 } from './acpUtils.js';
@@ -955,6 +957,7 @@ export class Session {
         }
       } else {
         const options = toPermissionOptions(confirmation, this.config);
+        const questionMeta = questionMetaFor(confirmation);
         try {
           const rawResp = await this.connection.requestPermission({
             sessionId: this.id,
@@ -962,6 +965,7 @@ export class Session {
               toolCallId,
               title: tool.getDescription?.(args) ?? fc.name,
               kind: toolKind,
+              ...(questionMeta ? { _meta: questionMeta } : {}),
             },
             options,
           });
@@ -988,7 +992,12 @@ export class Session {
               new Error(`Tool "${fc.name}" not allowed to run by the user.`),
             );
           }
-          await confirmation.onConfirm(outcome);
+          // For ask_user_question the interactive client returns the collected
+          // answers in `_meta.dvcode`; forward them as the confirmation payload
+          // so the tool's execute() can format them for the LLM. Non-question
+          // tools yield `undefined` here and behave exactly as before.
+          const answerPayload = extractAskAnswers(parsed);
+          await confirmation.onConfirm(outcome, answerPayload);
         } catch (err) {
           // The ACP client couldn't/wouldn't surface the prompt. For
           // dangerous operations we must refuse — never silently run.
