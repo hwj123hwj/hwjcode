@@ -402,7 +402,7 @@ export class Config {
     // EASYCODE_DESKTOP=1 env the desktop app sets when spawning the backend.
     this.desktopMode = params.desktopMode ?? process.env.EASYCODE_DESKTOP === '1';
     this.hooks = params.hooks ?? {};
-    this.healthyUse = params.healthyUse ?? true;
+    this.healthyUse = params.healthyUse ?? false;
     this.preferredLanguage = params.preferredLanguage;
 
     if (params.contextFileName) {
