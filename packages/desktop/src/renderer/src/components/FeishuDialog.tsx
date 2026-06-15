@@ -20,9 +20,6 @@ function uptime(startedAt?: number): string {
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分钟`;
 }
 
-/** A chat counts as "active" if it ran a session within this window. */
-const ACTIVE_WINDOW_MS = 3 * 60 * 1000;
-
 function relTime(ts?: number): string {
   if (!ts) return '从未';
   const diff = Date.now() - ts;
@@ -302,7 +299,9 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               ) : (
                 <div className="feishu-lobby-list">
                   {bindings.map((b) => {
-                    const active = !!b.lastSessionAt && Date.now() - b.lastSessionAt < ACTIVE_WINDOW_MS;
+                    // Live "currently running a session" from the gateway, matching
+                    // the CLI TUI's green "(Active)" indicator.
+                    const active = !!b.active;
                     return (
                       <div key={b.chatId} className={`feishu-bind ${active ? 'active' : ''}`}>
                         <div className="feishu-bind-row">
@@ -312,7 +311,9 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                           </span>
                           {b.isP2p && <span className="feishu-bind-tag">私聊</span>}
                           {active && <span className="feishu-bind-tag live">活跃</span>}
-                          <span className="feishu-bind-time">{relTime(b.lastSessionAt)}</span>
+                          <span className="feishu-bind-time">
+                            {active ? '运行中' : relTime(b.lastSessionAt)}
+                          </span>
                         </div>
                         <div className="feishu-bind-row sub">
                           <span className="feishu-bind-proj" title={b.projectRoot}>

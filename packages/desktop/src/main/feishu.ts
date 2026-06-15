@@ -146,6 +146,33 @@ async function loadProjectRoutes(): Promise<Record<string, StoredRoute>> {
   }
 }
 
+// ── live "currently running" session state (written by the gateway child) ────
+
+/**
+ * The gateway writes `feishu-active.json` whenever its set of in-flight chats
+ * changes: `{ pid, updatedAt, chatIds }`. We read it to mark which bindings are
+ * *currently running a session* — the GUI counterpart of the CLI TUI's green
+ * "(Active)" indicator. `pid` lets us ignore stale state left by a previous
+ * gateway process (see resolveActiveChatIds).
+ */
+const ACTIVE_FILE = 'feishu-active.json';
+
+interface ActiveState {
+  pid?: number;
+  updatedAt?: number;
+  chatIds?: string[];
+}
+
+async function loadActiveChats(): Promise<ActiveState> {
+  try {
+    const raw = await fs.readFile(path.join(credDir(), ACTIVE_FILE), 'utf8');
+    const parsed = JSON.parse(raw) as ActiveState;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 // Resolved chat name / mode, cached so the lobby doesn't re-hit the API every
 // refresh. Mirrors gateway.ts#fetchAndCacheChatInfo (one GET fills both).
 const chatInfoCache = new Map<string, { name?: string; mode?: string }>();
@@ -412,6 +439,16 @@ async function killPid(pid: number): Promise<void> {
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * Sentinel exit code a desktop-managed gateway uses to ask us (its parent) to
+ * restart it, instead of self-spawning a standalone CLI gateway via the relaunch
+ * helper. Set when the user runs `/feishu restart` inside Feishu.
+ *
+ * Must match FEISHU_DESKTOP_RESTART_EXIT_CODE in
+ * packages/cli/src/ui/commands/feishuCommand.ts.
+ */
+const FEISHU_RESTART_EXIT_CODE = 97;
+
 // ── the manager ──────────────────────────────────────────────────────────────
 
 export class FeishuManager {
@@ -542,6 +579,7 @@ export class FeishuManager {
       const creds = await loadCredentials();
       if (creds) await resolveChatInfo(chatIds, creds).catch(() => undefined);
     }
+    const activeChatIds = await this.resolveActiveChatIds();
     const bindings: FeishuBinding[] = chatIds.map((chatId) => {
       const r = routes[chatId] ?? {};
       const info = chatInfoCache.get(chatId) ?? {};
@@ -554,10 +592,30 @@ export class FeishuManager {
         model: r.model,
         lastSessionId: r.lastSessionId,
         lastSessionAt: r.lastSessionAt,
+        active: activeChatIds.has(chatId),
       };
     });
-    bindings.sort((a, b) => (b.lastSessionAt ?? 0) - (a.lastSessionAt ?? 0));
+    // Running sessions first, then most-recent activity.
+    bindings.sort(
+      (a, b) =>
+        Number(b.active ?? false) - Number(a.active ?? false) ||
+        (b.lastSessionAt ?? 0) - (a.lastSessionAt ?? 0),
+    );
     return { bindings };
+  }
+
+  /**
+   * The set of chats currently running a session, per the gateway's live
+   * `feishu-active.json`. Trusted only when *our* gateway child is running and
+   * the file's pid matches it — otherwise it's stale state from a prior process.
+   */
+  private async resolveActiveChatIds(): Promise<Set<string>> {
+    if (!this.running) return new Set();
+    const state = await loadActiveChats();
+    if (state.pid && this.child?.pid && state.pid !== this.child.pid) {
+      return new Set();
+    }
+    return new Set(state.chatIds ?? []);
   }
 
   async killExternal(): Promise<number> {
@@ -584,6 +642,11 @@ export class FeishuManager {
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: '1',
+          // Mark this gateway as desktop-managed. The CLI's `/feishu restart`
+          // handler reads this to restart *under desktop* (exit with the
+          // sentinel code below) instead of self-spawning a standalone CLI
+          // gateway that would escape our management.
+          EASYCODE_DESKTOP_MANAGED: '1',
           ...(process.env.DEEPX_SERVER_URL ? { DEEPX_SERVER_URL: process.env.DEEPX_SERVER_URL } : {}),
           ...(process.env.DEEPX_WEB_URL ? { DEEPX_WEB_URL: process.env.DEEPX_WEB_URL } : {}),
         },
@@ -604,11 +667,24 @@ export class FeishuManager {
       });
       child.on('exit', (code) => {
         const wasStopping = this.stopping;
+        const restartRequested = code === FEISHU_RESTART_EXIT_CODE;
         this.log(`飞书网关已退出 (code ${code ?? 'null'})`);
-        if (!wasStopping && code && code !== 0) this.lastError = `网关进程异常退出 (code ${code})`;
+        if (!wasStopping && !restartRequested && code && code !== 0) {
+          this.lastError = `网关进程异常退出 (code ${code})`;
+        }
         this.child = undefined;
         this.startedAt = undefined;
         this.emitChange();
+
+        // In-Feishu `/feishu restart`: the gateway asked us to restart it rather
+        // than self-spawning a standalone CLI gateway. Honor it so the restart
+        // stays desktop-managed.
+        if (restartRequested && !wasStopping) {
+          this.log('收到飞书重启指令，正在由桌面端重启网关…');
+          setTimeout(() => {
+            void this.start().catch((e) => this.log(`重启网关失败: ${errMsg(e)}`));
+          }, 500);
+        }
       });
 
       // Surface an immediate crash (bad bundle, missing-creds blow-up, etc.).
