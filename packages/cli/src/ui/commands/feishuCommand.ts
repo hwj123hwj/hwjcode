@@ -462,11 +462,44 @@ let activeProcessingCount = 0;
 /** 当前正在处理的群组 Chat ID 集合 */
 const processingChatIds = new Set<string>();
 
+/**
+ * 实时活跃会话状态文件（与 feishu-projects.json 同目录）。
+ *
+ * 网关进程（无论 CLI 独立版还是桌面版托管的子进程）每当正在处理的群集合变化时，
+ * 都把当前集合 + 自身 pid 写入此文件。桌面版主进程读取它，从而在飞书配置界面里
+ * 标识出"哪个绑定正在跑会话"（绿点 / 活跃标签），与 CLI TUI 仪表板对齐。
+ *
+ * pid 用于让桌面版校验该状态确实出自它当前托管的网关子进程，避免读到上一个已退出
+ * 进程残留的陈旧状态。
+ */
+const ACTIVE_STATE_FILE = path.join(
+  os.homedir(),
+  '.easycode-user',
+  'feishu-active.json',
+);
+
+/** 把当前活跃群集合落盘，供桌面版读取（best-effort，失败不影响主流程）。 */
+function persistActiveChats(): void {
+  try {
+    const dir = path.dirname(ACTIVE_STATE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const payload = {
+      pid: process.pid,
+      updatedAt: Date.now(),
+      chatIds: Array.from(processingChatIds),
+    };
+    fs.writeFileSync(ACTIVE_STATE_FILE, JSON.stringify(payload));
+  } catch {
+    /* 活跃指示器是非关键信息，落盘失败直接忽略 */
+  }
+}
+
 function incrementProcessingCount(chatId?: string) {
   activeProcessingCount++;
   if (chatId && !processingChatIds.has(chatId)) {
     processingChatIds.add(chatId);
     appEvents.emit(AppEvent.FeishuGroupProcessingStart, chatId);
+    persistActiveChats();
   }
   if (activeProcessingCount === 1) {
     appEvents.emit(AppEvent.FeishuBotProcessingStart);
@@ -478,6 +511,7 @@ function decrementProcessingCount(chatId?: string) {
   if (chatId && processingChatIds.has(chatId)) {
     processingChatIds.delete(chatId);
     appEvents.emit(AppEvent.FeishuGroupProcessingEnd, chatId);
+    persistActiveChats();
   }
   if (activeProcessingCount === 0) {
     appEvents.emit(AppEvent.FeishuBotProcessingEnd);
@@ -493,6 +527,7 @@ function resetProcessingCount() {
     processingChatIds.clear();
     activeProcessingCount = 0;
     appEvents.emit(AppEvent.FeishuBotProcessingEnd);
+    persistActiveChats();
   }
 }
 
@@ -1120,6 +1155,14 @@ function clearMessageQueue() {
 }
 
 /**
+ * 退出码：桌面版托管的网关用它请求父进程（Electron 桌面端）重启自己，
+ * 而非自行 spawn 外挂脚本拉起独立 CLI 网关。
+ *
+ * 必须与 packages/desktop/src/main/feishu.ts 中的 FEISHU_RESTART_EXIT_CODE 保持一致。
+ */
+const FEISHU_DESKTOP_RESTART_EXIT_CODE = 97;
+
+/**
  * 优雅重启：中止 AI → 清理队列 → 断开 WS → spawn 外挂 → 延迟退出。
  * 统一 /feishu restart 和 self_update 的退出流程，确保飞书 SDK 有充足时间
  * 完成 { code:0 } 确认，避免消息被飞书服务端重推。
@@ -1138,6 +1181,18 @@ async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<vo
   if (activeGateway) {
     try { await activeGateway.disconnect(); } catch { /* ignore */ }
     activeGateway = null;
+  }
+
+  // 桌面版托管场景：本网关进程由 Electron 桌面端 spawn（带 EASYCODE_DESKTOP_MANAGED
+  // 标记）。此时绝不能自行 spawn 外挂脚本拉起一个独立的 CLI 网关——那会脱离桌面端
+  // 管理，导致"在飞书里发 /feishu restart，结果起来的却是 CLI 独立版网关"的分裂。
+  // 改为以约定退出码退出，由桌面端的 child-exit 处理器重新拉起本进程（仍由桌面托管）。
+  // 仅纯重启（install.type === 'none'）走此路径；带安装的自更新仍交给外挂脚本。
+  if (process.env.EASYCODE_DESKTOP_MANAGED === '1' && install.type === 'none') {
+    setTimeout(() => {
+      process.exit(FEISHU_DESKTOP_RESTART_EXIT_CODE);
+    }, 1500).unref?.();
+    return;
   }
 
   // 4) spawn 外挂脚本（等父进程退出后接管重启）
@@ -2669,6 +2724,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
       try {
         // 优雅重启：中止 AI → 断开 WS → spawn 外挂 → 延迟退出
         gracefulRestartThenExit({ type: 'none' });
+        // 桌面版托管：由桌面端重启，无需后台进程提示。
+        if (process.env.EASYCODE_DESKTOP_MANAGED === '1') {
+          return '🔄 收到重启指令，正在由桌面端热重启飞书机器人（不更新版本），稍候我就回来。';
+        }
         return process.platform === 'win32'
           ? '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。'
           : '🔄 收到重启指令，正在热重启飞书机器人（不更新版本）。根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。';
