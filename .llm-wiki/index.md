@@ -75,6 +75,7 @@
 | Page | Description |
 |------|-------------|
 | [adding-builtin-tool-checklist](wiki/adding-builtin-tool-checklist.md) | Checklist & pitfalls when adding a built-in tool to `core/src/tools/` (derived from `local_time` debugging) |
+| [development-workflow](wiki/development-workflow.md) | 独立仓库开发工作流规范 —分支、MR、提交格式、红线 |
 
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->
