@@ -67,6 +67,8 @@
     "pack:desktop:linux": "cross-env BUILD_ENV=production npm run bundle && npm run pack:linux --workspace=packages/desktop",
     "desktop:pack:win": "npm run pack:desktop:win",
     "desktop:pack:mac": "npm run pack:desktop:mac",
+    "desktop:pack:mac:notarize": "node packages/desktop/scripts/interactive-build.cjs",
+    "pack:mac:dmg": "node packages/desktop/scripts/interactive-build.cjs",
     "package": "npm run package --workspace=packages/vscode-ui-plugin",
     "pack:vscode": "npm run package --workspace=packages/vscode-ui-plugin && copy packages\\vscode-ui-plugin\\*.vsix .",
     "test": "npm run test --workspaces",
