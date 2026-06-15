@@ -107,6 +107,7 @@ export function Sidebar() {
           <img className="brand-mark" src={appIcon} alt="Easy Code" />
           Easy Code
         </div>
+        <div className="brand-version">v{__APP_VERSION__}</div>
         <button className="btn-new" onClick={() => setShowNew(true)}>
           <Icon name="plus" size={15} />
           新建会话
