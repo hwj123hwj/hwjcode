@@ -40,6 +40,7 @@ import { WorkflowTool } from '../tools/workflow.js';
 import { UseSkillTool } from '../tools/use-skill.js';
 import { ListSkillsTool } from '../tools/list-skills.js';
 import { GetSkillDetailsTool } from '../tools/get-skill-details.js';
+import { SkillHubTool } from '../tools/skill-hub.js';
 // Old LSP tools imports removed
 
 import { PptOutlineTool } from '../tools/ppt/pptOutlineTool.js';
@@ -1127,6 +1128,7 @@ export class Config {
     registerCoreTool(UseSkillTool, this);
     registerCoreTool(ListSkillsTool, this);
     registerCoreTool(GetSkillDetailsTool, this);
+    registerCoreTool(SkillHubTool, this);
 
     // Old individual LSP tools registration removed in favor of unified LspTool
 
