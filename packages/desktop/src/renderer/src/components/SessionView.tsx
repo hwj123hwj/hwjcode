@@ -5,23 +5,15 @@ import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
 import { Icon, type IconName } from './Icon';
+import { useT, type TFunc } from '../i18n/useT';
 
-const PANE_META: Record<PaneKind, { icon: IconName; label: string }> = {
-  chat: { icon: 'chat', label: '对话' },
-  diff: { icon: 'diff', label: '改动' },
-  plan: { icon: 'plan', label: '计划' },
-  tasks: { icon: 'tasks', label: '任务' },
-  terminal: { icon: 'terminal', label: '终端' },
-  file: { icon: 'file', label: '文件' },
-};
-
-const STATUS_TEXT: Record<string, string> = {
-  idle: '空闲',
-  starting: '启动中',
-  thinking: '思考中',
-  needs_approval: '等待批准',
-  error: '错误',
-  exited: '已退出',
+const PANE_ICON: Record<PaneKind, IconName> = {
+  chat: 'chat',
+  diff: 'diff',
+  plan: 'plan',
+  tasks: 'tasks',
+  terminal: 'terminal',
+  file: 'file',
 };
 
 export function SessionView() {
@@ -30,10 +22,11 @@ export function SessionView() {
   const setDensity = useStore((s) => s.setDensity);
   const togglePane = useStore((s) => s.togglePane);
   const resume = useStore((s) => s.resumeSession);
+  const t = useT();
   const [viewsOpen, setViewsOpen] = useState(false);
   const viewsRef = useRef<HTMLDivElement>(null);
 
-  // Dismiss the "视图" dropdown when clicking anywhere outside it, or on Escape.
+  // Dismiss the "Views" dropdown when clicking anywhere outside it, or on Escape.
   useEffect(() => {
     if (!viewsOpen) return;
     const onPointerDown = (e: MouseEvent) => {
@@ -58,7 +51,7 @@ export function SessionView() {
             <span className="empty-mark">
               <Icon name="sparkle" size={24} />
             </span>
-            <div className="empty-title">选择左侧会话，或新建一个会话开始</div>
+            <div className="empty-title">{t('session.emptyTitle')}</div>
           </div>
         </div>
       </main>
@@ -74,25 +67,25 @@ export function SessionView() {
         <span className="toolbar-title">{meta.title}</span>
         <span className="toolbar-status">
           <span className={`status-dot ${meta.status}`} />
-          {STATUS_TEXT[meta.status] ?? meta.status}
+          {t(`status.${meta.status}`)}
         </span>
         <span className="grow" />
 
         {dormant && (
           <button className="btn" style={{ padding: '6px 12px' }} onClick={() => void resume(meta.id)}>
             <Icon name="play" size={14} />
-            恢复会话
+            {t('session.resume')}
           </button>
         )}
 
         <div ref={viewsRef} style={{ position: 'relative' }}>
           <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>
             <Icon name="columns" size={14} />
-            视图
+            {t('session.views')}
           </button>
           {viewsOpen && (
             <div className="menu-pop" style={{ right: 0, top: '110%' }}>
-              {(Object.keys(PANE_META) as PaneKind[]).map((p) => (
+              {(Object.keys(PANE_ICON) as PaneKind[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => {
@@ -104,8 +97,8 @@ export function SessionView() {
                     size={14}
                     className={view.panes.includes(p) ? undefined : 'placeholder'}
                   />
-                  <Icon name={PANE_META[p].icon} size={14} />
-                  {PANE_META[p].label}
+                  <Icon name={PANE_ICON[p]} size={14} />
+                  {t(`pane.${p}`)}
                 </button>
               ))}
             </div>
@@ -115,7 +108,7 @@ export function SessionView() {
 
       <div className="workspace">
         {view.panes.map((p) => (
-          <PaneHost key={p} kind={p} view={view} onDensity={(d) => setDensity(meta.id, d)} />
+          <PaneHost key={p} kind={p} view={view} t={t} onDensity={(d) => setDensity(meta.id, d)} />
         ))}
       </div>
 
@@ -127,18 +120,20 @@ export function SessionView() {
 function PaneHost({
   kind,
   view,
+  t,
   onDensity,
 }: {
   kind: PaneKind;
   view: SV;
+  t: TFunc;
   onDensity: (d: ViewDensity) => void;
 }) {
   if (kind === 'chat') {
     return (
       <div className="pane">
         <div className="pane-head">
-          <Icon name={PANE_META.chat.icon} size={15} />
-          <span>{PANE_META.chat.label}</span>
+          <Icon name={PANE_ICON.chat} size={15} />
+          <span>{t('pane.chat')}</span>
           <span className="grow" />
           <div className="views-menu">
             {(['summary', 'normal', 'verbose'] as ViewDensity[]).map((d) => (
@@ -146,9 +141,9 @@ function PaneHost({
                 key={d}
                 className={view.density === d ? 'active' : ''}
                 onClick={() => onDensity(d)}
-                title="视图密度"
+                title={t('density.title')}
               >
-                {d === 'summary' ? '摘要' : d === 'normal' ? '正常' : '详细'}
+                {t(`density.${d}`)}
               </button>
             ))}
           </div>

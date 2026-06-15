@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { Icon, type IconName } from './Icon';
 import { AgentIcon } from './AgentIcon';
+import { useT } from '../i18n/useT';
 import {
   PERMISSION_MODES,
   type AgentKind,
@@ -93,6 +94,7 @@ export function PromptBar({ view }: { view: SessionView }) {
   const cancel = useStore((s) => s.cancel);
   const setMode = useStore((s) => s.setMode);
   const setModel = useStore((s) => s.setModel);
+  const t = useT();
 
   const [text, setText] = useState('');
   const [atPaths, setAtPaths] = useState<Record<string, string>>({}); // name -> abs path
@@ -278,14 +280,14 @@ export function PromptBar({ view }: { view: SessionView }) {
         <div className="prompt-config">
           <span className="chip">
             <Icon name="laptop" size={14} />
-            本地
+            {t('common.local')}
           </span>
           <span className="chip" title={meta.cwd}>
             <Icon name="folder" size={14} />
             {projectName(meta.cwd)}
           </span>
           {meta.agentType && meta.agentType !== 'easy-code' && (
-            <span className="chip accent" title="驱动此会话的外部 agent">
+            <span className="chip accent" title={t('prompt.externalAgentTitle')}>
               <AgentIcon agent={meta.agentType} size={15} />
               {AGENT_BADGE[meta.agentType].label}
             </span>
@@ -293,7 +295,7 @@ export function PromptBar({ view }: { view: SessionView }) {
           <span className="chip">
             <Icon name="cpu" size={14} />
             <select value={meta.model ?? ''} onChange={(e) => void setModel(meta.id, e.target.value)}>
-              {!meta.model && <option value="">默认模型</option>}
+              {!meta.model && <option value="">{t('prompt.defaultModel')}</option>}
               {(meta.availableModels ?? []).map((m) => (
                 <option key={m.modelId} value={m.modelId}>
                   {m.name}
@@ -311,15 +313,15 @@ export function PromptBar({ view }: { view: SessionView }) {
                 onChange={(e) => void setMode(meta.id, e.target.value as PermissionMode)}
               >
                 {PERMISSION_MODES.map((m) => (
-                  <option key={m.id} value={m.id} title={m.hint}>
-                    {m.label}
+                  <option key={m.id} value={m.id} title={t(`permMode.${m.id}.hint`)}>
+                    {t(`permMode.${m.id}`)}
                   </option>
                 ))}
               </select>
             </span>
           )}
           {ctxPct != null ? (
-            <span className="chip" title="上下文用量">
+            <span className="chip" title={t('prompt.contextUsage')}>
               <span className="token-bar">
                 <div style={{ width: `${Math.min(100, ctxPct)}%` }} />
               </span>
@@ -336,7 +338,7 @@ export function PromptBar({ view }: { view: SessionView }) {
                   <img src={a.url} alt={a.name} />
                   <button
                     className="attach-remove"
-                    title="移除"
+                    title={t('common.remove')}
                     onClick={() => removeAttachment(a.id)}
                   >
                     <Icon name="x" size={11} />
@@ -348,7 +350,7 @@ export function PromptBar({ view }: { view: SessionView }) {
                   <span className="attach-name">{a.name}</span>
                   <button
                     className="attach-remove inline"
-                    title="移除"
+                    title={t('common.remove')}
                     onClick={() => removeAttachment(a.id)}
                   >
                     <Icon name="x" size={11} />
@@ -381,19 +383,19 @@ export function PromptBar({ view }: { view: SessionView }) {
             ref={taRef}
             className="prompt-input"
             rows={1}
-            placeholder={busy ? '回复将在当前动作结束后被读取…（边跑边纠偏）' : '输入指令，@ 引用文件，/ 使用命令…'}
+            placeholder={busy ? t('prompt.busyPlaceholder') : t('prompt.placeholder')}
             value={text}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
           />
-          <button className="btn-attach" title="添加附件 / 图片" onClick={() => void pickAttachments()}>
+          <button className="btn-attach" title={t('prompt.addAttachment')} onClick={() => void pickAttachments()}>
             <Icon name="paperclip" size={16} />
           </button>
           {busy ? (
             <button className="btn-stop" onClick={() => void cancel(meta.id)}>
               <Icon name="stop" size={14} />
-              停止
+              {t('common.stop')}
             </button>
           ) : null}
           <button
@@ -404,7 +406,7 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="send" size={16} />
           </button>
         </div>
-        <div className="hint">Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴图片 · 点击回形针添加附件</div>
+        <div className="hint">{t('prompt.hint')}</div>
       </div>
     </div>
   );
