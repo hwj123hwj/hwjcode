@@ -93,20 +93,56 @@ function terminalFromMeta(meta: unknown): string | undefined {
   return typeof exit === 'number' ? `${data}\n[exit code: ${exit}]` : data;
 }
 
+/**
+ * Extract the model list from a `session/new` | `session/load` response. ACP
+ * agents expose it two ways and we support both:
+ *   - `source: 'models'` — the experimental top-level `models` field (the
+ *     easy-code backend), switched via `session/set_model`;
+ *   - `source: 'configOptions'` — a `model` entry inside `configOptions` (the
+ *     claude-agent-acp / codex-acp bridges, which do NOT emit `models` and
+ *     reject `session/set_model` with -32601), switched via
+ *     `session/set_config_option` with `configId: 'model'`.
+ */
 function modelsOf(resp: unknown): {
   available: ModelInfo[];
   current?: string;
+  source: 'models' | 'configOptions';
 } {
+  // Preferred: the experimental top-level `models` field.
   const ms = (resp as { models?: { availableModels?: unknown; currentModelId?: unknown } }).models;
-  const availableRaw = Array.isArray(ms?.availableModels) ? ms!.availableModels : [];
-  const available: ModelInfo[] = [];
-  for (const m of availableRaw as Array<Record<string, unknown>>) {
-    if (typeof m.modelId === 'string') {
-      available.push({ modelId: m.modelId, name: typeof m.name === 'string' ? m.name : m.modelId });
+  if (ms && Array.isArray(ms.availableModels)) {
+    const available: ModelInfo[] = [];
+    for (const m of ms.availableModels as Array<Record<string, unknown>>) {
+      if (typeof m.modelId === 'string') {
+        available.push({ modelId: m.modelId, name: typeof m.name === 'string' ? m.name : m.modelId });
+      }
+    }
+    if (available.length) {
+      const current = typeof ms.currentModelId === 'string' ? ms.currentModelId : undefined;
+      return { available, current, source: 'models' };
     }
   }
-  const current = typeof ms?.currentModelId === 'string' ? ms.currentModelId : undefined;
-  return { available, current };
+  // Fallback: the `model` entry of configOptions (claude-agent-acp / codex).
+  const cfg = (resp as { configOptions?: unknown }).configOptions;
+  if (Array.isArray(cfg)) {
+    const modelOpt = cfg.find(
+      (o) => o && typeof o === 'object' && (o as { id?: unknown }).id === 'model',
+    ) as { currentValue?: unknown; options?: unknown } | undefined;
+    if (modelOpt && Array.isArray(modelOpt.options)) {
+      const available: ModelInfo[] = [];
+      for (const o of modelOpt.options as Array<Record<string, unknown>>) {
+        if (typeof o.value === 'string') {
+          available.push({ modelId: o.value, name: typeof o.name === 'string' ? o.name : o.value });
+        }
+      }
+      if (available.length) {
+        const current =
+          typeof modelOpt.currentValue === 'string' ? modelOpt.currentValue : undefined;
+        return { available, current, source: 'configOptions' };
+      }
+    }
+  }
+  return { available: [], current: undefined, source: 'models' };
 }
 
 function modeOf(resp: unknown): string | undefined {
@@ -331,6 +367,11 @@ export class AcpSessionBridge {
    * UI (default). Kept in sync by {@link start} and {@link setMode}.
    */
   private currentMode: PermissionMode = 'default';
+  /**
+   * Which ACP surface this agent advertised its models on (see {@link modelsOf}).
+   * Read by {@link setModel} to pick the right switch RPC. Set in {@link start}.
+   */
+  private modelSource: 'models' | 'configOptions' = 'models';
 
   constructor(
     readonly id: string,
@@ -455,7 +496,8 @@ export class AcpSessionBridge {
     const resp = await Promise.race([handshake(), earlyExit]);
     handshakeDone = true;
 
-    const { available, current } = modelsOf(resp);
+    const { available, current, source } = modelsOf(resp);
+    this.modelSource = source;
     const mode = fromApprovalModeId(modeOf(resp));
     this.currentMode = mode;
     this.cb.setStatus('idle');
@@ -520,7 +562,20 @@ export class AcpSessionBridge {
 
   async setModel(modelId: string): Promise<void> {
     if (!this.connection || !this.acpSessionId) return;
-    await this.connection.unstable_setSessionModel({ sessionId: this.acpSessionId, modelId });
+    if (this.modelSource === 'configOptions') {
+      // claude-agent-acp / codex expose models via configOptions and reject
+      // session/set_model (-32601); switch via session/set_config_option.
+      await this.connection.setSessionConfigOption({
+        sessionId: this.acpSessionId,
+        configId: 'model',
+        value: modelId,
+      });
+    } else {
+      await this.connection.unstable_setSessionModel({
+        sessionId: this.acpSessionId,
+        modelId,
+      });
+    }
   }
 
   async setMode(mode: PermissionMode): Promise<void> {
