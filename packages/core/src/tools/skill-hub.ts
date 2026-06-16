@@ -23,8 +23,32 @@ const REGISTRY_URL = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/r
 const REGISTRY_FALLBACK_URL = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/registry/skills.json';
 const SKILL_URL_TEMPLATE = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/skills/{skillId}/SKILL.md';
 const SKILL_FALLBACK_TEMPLATE = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/skills/{skillId}/SKILL.md';
+const SKILL_FILE_URL_TEMPLATE = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/skills/{skillId}/{filePath}';
+const SKILL_FILE_FALLBACK_TEMPLATE = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/skills/{skillId}/{filePath}';
+const GIT_TREE_API_URL = 'https://api.github.com/repos/hwj123hwj/custom-skills/git/trees/main?recursive=1';
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_SEARCH_RESULTS = 20;
+
+// File patterns to skip during install (build artifacts, metadata)
+const SKIP_FILE_PATTERNS = [
+  /^\.git/,
+  /^\.github\//,
+  /^\.claude/,
+  /^\.claude-plugin/,
+  /^src\//,
+  /^cli\//,
+  /^docs\//,
+  /^preview\//,
+  /^screenshots\//,
+  /^LICENSE$/,
+  /^README\.md$/,
+  /^README\.en\.md$/,
+  /^CONTRIBUTING\.md$/,
+  /^\.gitignore$/,
+  /^skill\.json$/,
+  /^project-introduction\.md$/,
+  /^wechat-promo\.md$/,
+];
 
 interface SkillRegistryItem {
   id: string;
@@ -83,7 +107,7 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
     if (!params.action) {
       return 'Missing required parameter: action';
     }
-    if (params.action !== 'search' && params.action !== 'install') {
+    if (params.action !== 'search' && params.action !== 'install' && params.action !== 'list') {
       return `Invalid action: "${params.action}". Must be "search" or "install".`;
     }
     if (params.action === 'search' && !params.query) {
@@ -125,7 +149,7 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
       type: 'info',
       title: `Install Skill: ${params.skillId}`,
       prompt: `将安装技能 "${params.skillId}" 到 ~/.easycode-user/skills/${params.skillId}/。安装后重启会话即可使用。`,
-      urls: [SKILL_URL_TEMPLATE.replace('{skillId}', params.skillId!)],
+      urls: [SKILL_URL_TEMPLATE.replace('{skillId}', params.skillId!).replace('{filePath}', 'SKILL.md')],
       onConfirm: async () => {},
     };
   }
@@ -260,7 +284,7 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
   }
 
   /**
-   * Install a skill by downloading SKILL.md from CDN
+   * Install a skill by downloading all files from CDN
    */
   private async executeInstall(skillId: string, signal: AbortSignal): Promise<ToolResult> {
     const userSkillsDir = path.join(os.homedir(), '.easycode-user', 'skills');
@@ -311,13 +335,34 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
         };
       }
 
-      // Write to local directory
+      // Write SKILL.md to local directory
       fs.mkdirSync(targetDir, { recursive: true });
       fs.writeFileSync(targetSkillMd, content, 'utf-8');
 
+      // Download additional files (scripts, assets, references, etc.) via GitHub API
+      let additionalCount = 0;
+      try {
+        const fileList = await this.fetchFileList(skillId, signal);
+        if (fileList) {
+          for (const filePath of fileList) {
+            if (filePath === 'SKILL.md') continue; // Already downloaded
+            const fileContent = await this.fetchSkillFile(skillId, filePath, signal);
+            if (fileContent !== null) {
+              const targetPath = path.join(targetDir, filePath);
+              fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+              fs.writeFileSync(targetPath, fileContent, 'utf-8');
+              additionalCount++;
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: skill is still usable with just SKILL.md
+      }
+
+      const fileMsg = additionalCount > 0 ? ` 含 ${additionalCount} 个附加文件。` : '';
       return {
-        llmContent: `技能 "${skillId}" 已成功安装到 ${targetSkillMd}。\n\n重启会话后 SkillLoader 会自动发现此技能，使用 use_skill("${skillId}") 加载并使用。`,
-        returnDisplay: `Skill "${skillId}" installed successfully`,
+        llmContent: `技能 "${skillId}" 已成功安装到 ${targetSkillMd}。${fileMsg}\n\n重启会话后 SkillLoader 会自动发现此技能，使用 use_skill("${skillId}") 加载并使用。`,
+        returnDisplay: `Skill "${skillId}" installed successfully${additionalCount ? ` (+${additionalCount} files)` : ''}`,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -326,6 +371,44 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
         returnDisplay: `Error: ${errorMessage}`,
       };
     }
+  }
+
+  /**
+   * Fetch list of files in a skill directory using GitHub API
+   */
+  private async fetchFileList(skillId: string, signal: AbortSignal): Promise<string[] | null> {
+    try {
+      const response = await fetchWithTimeout(GIT_TREE_API_URL, FETCH_TIMEOUT_MS);
+      if (!response.ok) return null;
+      const data = await response.json() as { tree: Array<{ path: string; type: string }> };
+      const prefix = `skills/${skillId}/`;
+      return data.tree
+        .filter((item) => item.type === 'blob' && item.path.startsWith(prefix))
+        .map((item) => item.path.slice(prefix.length))
+        .filter((p) => !SKIP_FILE_PATTERNS.some((r) => r.test(p)));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch a single skill file from CDN (with fallback)
+   */
+  private async fetchSkillFile(skillId: string, filePath: string, signal: AbortSignal): Promise<string | null> {
+    const cdnUrl = SKILL_FILE_URL_TEMPLATE.replace('{skillId}', skillId).replace('{filePath}', filePath);
+    const fallbackUrl = SKILL_FILE_FALLBACK_TEMPLATE.replace('{skillId}', skillId).replace('{filePath}', filePath);
+
+    try {
+      const response = await fetchWithTimeout(cdnUrl, FETCH_TIMEOUT_MS);
+      if (response.ok) return await response.text();
+    } catch { /* fall through */ }
+
+    try {
+      const response = await fetchWithTimeout(fallbackUrl, FETCH_TIMEOUT_MS);
+      if (response.ok) return await response.text();
+    } catch { /* fall through */ }
+
+    return null;
   }
 
   /**
