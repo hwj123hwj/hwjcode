@@ -1659,7 +1659,7 @@ export const translations = {
     'tip.shell.mode': '! - Enter/exit shell mode',
     'tip.ctrl.j': 'Ctrl+J - Multiline input',
     'tip.cli.update': 'easycode -u - Check for updates',
-    'tip.cli.cloud': 'easycode --cloud-mode - Enable cloud remote control',
+    'tip.cli.cloud': 'hwjcode --cloud-mode - Enable cloud remote control',
 
     // Skills System
     'skill.command.description': 'Manage AI Skills (Marketplace → Plugin → Skill)',
@@ -3324,7 +3324,7 @@ export const translations = {
     'tip.shell.mode': '! - 进入/退出 Shell 模式',
     'tip.ctrl.j': 'Ctrl+J - 输入多行内容',
     'tip.cli.update': 'easycode -u - 检查更新',
-    'tip.cli.cloud': 'easycode --cloud-mode - 启用云端远程控制模式',
+    'tip.cli.cloud': 'hwjcode --cloud-mode - 启用云端远程控制模式',
 
     // Skills System
     'skill.command.description': '管理 AI Skills (Marketplace → Plugin → Skill)',

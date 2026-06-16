@@ -1329,7 +1329,7 @@ async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<vo
   if (process.platform !== 'win32') {
     console.log(
       '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
-      '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+      '可通过 `ps aux | grep hwjcode` 查看进程状态。\n'
     );
   }
 
@@ -2959,7 +2959,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         }
         return process.platform === 'win32'
           ? '🔄 收到重启指令，正在热重启飞书机器人（不更新版本），稍候我就回来。'
-          : '🔄 收到重启指令，正在热重启飞书机器人（不更新版本）。根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。';
+          : '🔄 收到重启指令，正在热重启飞书机器人（不更新版本）。根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep hwjcode` 即可查看。';
       } catch (e: any) {
         return `❌ 重启失败：${e?.message || String(e)}`;
       }
@@ -5135,8 +5135,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
         // 🎯 动态注册专属的音频朗读/转录工具（正常模式下不加载，避免污染和误导模型）
         toolRegistry.registerTool(new AudioReaderTool(config));
 
-        // 🎯 动态注册自更新重启工具（仅飞书模式可见）：模型一调用即升级 easycode-ai
-        //    到 latest 并以 `easycode --feishu` 自动重启。普通 CLI 模式绝不注册。
+        // 🎯 动态注册自更新重启工具（仅飞书模式可见）：模型一调用即升级 hwjcode
+        //    到 latest 并以 `hwjcode --feishu` 自动重启。普通 CLI 模式绝不注册。
         const selfUpdateTool = new SelfUpdateTool(config);
         // 注入优雅退出回调：AI 调用 self_update 时，先中止生成、断开 WS、清理队列，再退出。
         SelfUpdateTool.onBeforeRestart = async () => {
@@ -5153,7 +5153,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           if (process.platform !== 'win32') {
             console.log(
               '\n💡 Easy Code 飞书网关已在新进程中后台启动（无界面），' +
-              '可通过 `ps aux | grep easycode` 查看进程状态。\n'
+              '可通过 `ps aux | grep hwjcode` 查看进程状态。\n'
             );
           }
         };
