@@ -57,7 +57,7 @@ try {
 }
 
 // Finalize CLI if applicable
-if (packageName === 'easycode-cli' || packageName === 'deepv-code-cli') {
+if (packageName === 'hwjcode-cli' || packageName === 'easycode-cli' || packageName === 'deepv-code-cli') {
   const finalizeSpinner = ora({
     text: chalk.blue('Finalizing CLI distribution...'),
     spinner: 'dots12'

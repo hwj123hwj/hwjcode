@@ -17,8 +17,8 @@ import { Config } from '../config/config.js';
  * 新品牌 npm 包名与全局命令名。
  * 自更新固定从 npm 拉取 latest，并以飞书常驻模式重新拉起。
  */
-export const SELF_UPDATE_PACKAGE = 'easycode-ai';
-export const SELF_UPDATE_RELAUNCH_COMMAND = 'easycode';
+export const SELF_UPDATE_PACKAGE = 'hwjcode';
+export const SELF_UPDATE_RELAUNCH_COMMAND = 'hwjcode';
 export const SELF_UPDATE_RELAUNCH_ARGS = ['--feishu'];
 
 /**
@@ -227,7 +227,7 @@ export function launchRelaunchHelper(install: RelaunchInstallMode): string {
   const parentPid = process.pid;
   const scriptPath = join(
     tmpdir(),
-    `easycode-relaunch-${parentPid}-${Date.now()}.js`,
+    `hwjcode-relaunch-${parentPid}-${Date.now()}.js`,
   );
 
   // 重启日志固定写到全局配置目录，便于排障。
@@ -310,7 +310,7 @@ export interface SelfUpdateParams {
  * SelfUpdateTool — 仅在飞书常驻模式下动态注册。
  *
  * 用法：
- *   - 默认：从 npm 安装 easycode-ai@latest 并重启
+ *   - 默认：从 npm 安装 hwjcode@latest 并重启
  *   - action='restart_only'：不安装，仅重启当前进程（救卡死 / 应用新配置）
  *   - source='local' + sourcePath=<abs .tgz>：安装某个本地 tgz 包并重启
  */
@@ -334,11 +334,11 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
         '- action: "update_and_restart" (default) installs a new version then restarts; ' +
         '"restart_only" just restarts the current process WITHOUT installing (use to recover a stuck ' +
         'session or apply changed config).\n' +
-        '- source: "npm" (default) installs easycode-ai@latest from npm; "local" installs a local .tgz ' +
+        '- source: "npm" (default) installs hwjcode@latest from npm; "local" installs a local .tgz ' +
         '(requires sourcePath).\n' +
         '- sourcePath: absolute path to a local .tgz, required when source="local".\n' +
         'A detached cross-platform helper performs the work after this process exits, then relaunches ' +
-        '`easycode --feishu` automatically. The bot is briefly offline (tens of seconds) and returns by ' +
+        '`hwjcode --feishu` automatically. The bot is briefly offline (tens of seconds) and returns by ' +
         'itself; Feishu credentials are stored globally so no re-login is needed. If unsure which mode the ' +
         'user wants, ASK them first.',
       Icon.Hammer,
@@ -355,7 +355,7 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
             type: Type.STRING,
             enum: ['npm', 'local'],
             description:
-              'npm (default) = install easycode-ai@latest; local = install a local .tgz (needs sourcePath). Ignored when action=restart_only.',
+              'npm (default) = install hwjcode@latest; local = install a local .tgz (needs sourcePath). Ignored when action=restart_only.',
           },
           sourcePath: {
             type: Type.STRING,
@@ -479,7 +479,7 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
 
     const nonWinHint =
       process.platform !== 'win32'
-        ? '根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep easycode` 即可查看。'
+        ? '根据您的操作系统限制，重启后将以后台进程（无界面）运行，使用 `ps -ef | grep hwjcode` 即可查看。'
         : '';
     const displayText =
       install.type === 'none'
@@ -491,7 +491,7 @@ export class SelfUpdateTool extends BaseTool<SelfUpdateParams, ToolResult> {
     return {
       llmContent:
         `Self-update started: will ${actionText} via a detached helper after this process exits, ` +
-        'then relaunch `easycode --feishu`. The bot will be briefly offline and return automatically. ' +
+        'then relaunch `hwjcode --feishu`. The bot will be briefly offline and return automatically. ' +
         'Tell the user it is in progress and will be back shortly.',
       returnDisplay: displayText,
       summary: 'Self-update / restart triggered',
