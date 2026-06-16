@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- 允许 JIT 编译：Electron V8 引擎在 Apple Silicon (arm64) + Electron 20+
+         下必需，缺失会导致渲染进程 V8 CodeRange 分配失败而崩溃。 -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- 注意：不要启用 com.apple.security.cs.allow-unsigned-executable-memory。
+         它仅用于改写/修补 C 代码等特殊场景，且在 hardened runtime + Apple
+         Silicon 下会干扰 V8 的 CodeRange 虚拟内存保留，触发
+         "V8 process OOM (Failed to reserve virtual memory for CodeRange)"，
+         导致主窗口无法显示。Apple 与 Electron 官方均建议默认不开启。 -->
+    <!-- 允许加载外部未签名 / 不同 Team ID 的 frameworks 或动态库 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- 允许客户端访问网络 -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- 允许作为本地服务器运行并监听端口 (以便 ACP 连接) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+  </dict>
+</plist>

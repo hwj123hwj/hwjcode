@@ -269,6 +269,30 @@ describe('runDelegatedTask', () => {
     expect(result.transcript).not.toContain('已切换模型');
   }, 30_000);
 
+  it('switches the model via session/set_config_option for bridges that expose models in configOptions', async () => {
+    const result = await runDelegatedTask({
+      agentType: 'claude-code',
+      task: 'do something',
+      cwd: CWD,
+      signal: new AbortController().signal,
+      shell: false,
+      // claude-agent-acp exposes models only in configOptions and rejects
+      // session/set_model. Request "sonnet" by exact id.
+      model: 'sonnet',
+      launchOverride: {
+        command: process.execPath,
+        args: [STUB],
+        env: { STUB_MODE: 'configmodel' },
+      },
+    });
+
+    expect(result.status).toBe('success');
+    // The stub echoes the value it received via set_config_option(configId=model).
+    expect(result.answer).toContain('setmodel:sonnet');
+    expect(result.transcript).toContain('已切换模型 → Sonnet');
+    expect(result.progress?.model).toBe('Sonnet');
+  }, 30_000);
+
   it('tolerates a bridge that does not support set_model (keeps default model)', async () => {
     const result = await runDelegatedTask({
       agentType: 'claude-code',

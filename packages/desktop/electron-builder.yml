@@ -1,0 +1,63 @@
+appId: com.bot.easycode.desktop
+productName: Easy Code
+directories:
+  output: release/${version}
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+# Ship the agent backend the desktop spawns (`easycode --acp`). Built at the
+# repo root with `npm run bundle`; copied into the app under resources/backend.
+extraResources:
+  - from: ../../bundle
+    to: backend
+    filter:
+      - '**/*'
+asarUnpack:
+  - resources/**
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  # Lives at the `mac` root: electron-builder 25.x rejects `artifactName`
+  # inside a target array entry. Mirrors the Windows artifactName; productName
+  # stays "Easy Code" so the app display name and DMG volume are unchanged.
+  artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
+  # arm64 (Apple Silicon) only. Intel (x64) is intentionally dropped: a
+  # universal build nearly doubles the DMG size (~235MB vs ~152MB) and Intel
+  # Macs are a shrinking share. Switch a target's arch to `universal` (and add
+  # `x64ArchFiles: "**/@vscode/ripgrep/bin/*"`) if Intel support is needed again.
+  target:
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # 自 electron-builder v24.0.0+ 引入，支持基于内置 notarytool 自动进行公证。
+  # notarize: true 表示走环境变量自动模式，需在环境变量中提供：
+  #   APPLE_ID                     —— 开发者账号邮箱
+  #   APPLE_APP_SPECIFIC_PASSWORD  —— App 专用密码（注意变量名，不是 APPLE_ID_PASSWORD）
+  #   APPLE_TEAM_ID                —— 团队 ID
+  # 当未提供这些环境变量时，公证步骤会自动跳过，保证未配置公证的普通本地构建也能完成。
+  notarize: true
+win:
+  # electron-builder converts this PNG (>=256x256) into a multi-size .ico used
+  # for the .exe and, by default, the NSIS installer/uninstaller too.
+  icon: build/icon.png
+  target:
+    - nsis
+  # No spaces + a build timestamp so successive installers don't collide.
+  # BUILD_TIME (YYYYMMDDHHMM) is injected by scripts/pack-installer.cjs.
+  artifactName: EasyCode-v${version}-${env.BUILD_TIME}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # installerIcon / uninstallerIcon are intentionally omitted: electron-builder
+  # defaults them to the application icon generated from `win.icon` above.
+linux:
+  icon: build/icon.png
+  target:
+    - AppImage
+  category: Development
