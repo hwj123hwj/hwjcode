@@ -13,6 +13,7 @@
 | 05 | [raw/05-hooks-system.md](raw/05-hooks-system.md) | [source-05-hooks-system](wiki/source-05-hooks-system.md) | Hooks 5-layer architecture, 11 event types, configuration, I/O protocol | 2026-04-09 |
 | 06 | [raw/06-build-and-scripts.md](raw/06-build-and-scripts.md) | [source-06-build-system](wiki/source-06-build-system.md) | Build pipelines, esbuild config, CI/CD, npm publishing, TypeScript/ESLint config | 2026-04-09 |
 | 07 | [raw/07-mcp-system.md](raw/07-mcp-system.md) | [source-07-mcp-system](wiki/source-07-mcp-system.md) | MCP architecture, transport types, OAuth, two-phase loading, status display | 2026-04-09 |
+| 08 | feat/rename-to-hwjcode (commit 2fb40e12) | [source-hwjcode-rename](wiki/source-hwjcode-rename.md) | npm 包名 easycode-ai → hwjcode, CLI 命令 easycode → hwjcode, 发布到 npmjs.org | 2026-06-17 |
 
 
 ## Entities
@@ -56,6 +57,7 @@
 | [MarketplaceManager](wiki/MarketplaceManager.md) | entity | Plugin | `core/src/skills/marketplace-manager.ts` |
 | [lark-cli-tool](wiki/lark-cli-tool.md) | entity | Tool | `core/src/tools/lark-cli.ts` |
 | [audio-reader](packages/core/src/tools/audio-reader.ts) | entity | Tool | `core/src/tools/audio-reader.ts` |
+| [self-update](wiki/self-update.md) | entity | Tool | `core/src/tools/self-update.ts` |
 
 ## Overview
 

@@ -11,12 +11,14 @@ sources: [raw/01-architecture.md, raw/02-core-module.md]
 
 ## Overview
 
-Core 是 Easy Code 的后端包（NPM 名 `easycode-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
+Core 是 Easy Code 的后端包（NPM 名 `hwjcode-core`），包含所有 AI 交互、工具编排、会话管理和认证逻辑。它是 UI 无关的，可以同时被 [[cli-module]] 和 VSCode 插件使用。
+
+> 2026-06-17: 包名从 `easycode-core` 改为 `hwjcode-core`。详见 [[source-hwjcode-rename]]。
 
 ## Package Info
 
 - **Path**: `packages/core`
-- **NPM**: `easycode-core`
+- **NPM**: `hwjcode-core`
 - **Entry**: `index.ts` → re-exports from `src/index.ts`
 
 ## Key Subdirectories
