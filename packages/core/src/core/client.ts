@@ -473,7 +473,7 @@ export class GeminiClient {
     } else {
       const customModelInfo = this.getCustomModelInfo(modelToUse);
       const userRules = this.config.getUserRules();
-      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode());
+      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode());
     }
 
     const isThinking = isThinkingSupported(modelToUse);
@@ -668,7 +668,7 @@ export class GeminiClient {
     const currentModel = this.config.getModel();
     const customModelInfo = this.getCustomModelInfo(currentModel);
     const userRules = this.config.getUserRules();
-    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode());
+    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode());
 
     if (this.chat) {
       this.chat.setSystemInstruction(updatedSystemPrompt);
@@ -741,9 +741,14 @@ export class GeminiClient {
       fileIncludePattern: /\.(ts|js|tsx|jsx|json|md|py|go|rs|java|cpp|c|h|yml|yaml|toml)$/i, // 只显示重要文件类型
     });
 
+    const clientLabel = this.config.getDesktopMode()
+      ? 'Easy Code Desktop (a native desktop GUI app)'
+      : this.config.getVsCodePluginMode()
+        ? 'the Easy Code VS Code extension'
+        : 'the Easy Code CLI';
     const context = `
 🚀 **CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant** 🚀
-This is the Easy Code CLI with enhanced environment awareness.
+This is ${clientLabel} with enhanced environment awareness.
 **Date:** ${today}
 **Platform:** ${environmentInfo}
 **🎯 CRITICAL: Always use ${process.platform}-appropriate commands!**
@@ -854,7 +859,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
         currentModel,
         this.config.getPreferredLanguage(),
         customModelInfo,
-        this.config.getFeishuMode()
+        this.config.getFeishuMode(),
+        this.config.getDesktopMode()
       );
 
       // 🐛 FIX: 同上，不再在这里写死 includeThoughts:false 覆盖下游。
