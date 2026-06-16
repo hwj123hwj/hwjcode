@@ -79,6 +79,9 @@ remote-client/build
 # Build artifacts
 *.tgz
 
+# Log files
+*.log
+
 packages/cli/clipboard/
 
 # Debug exports (local diagnostics)

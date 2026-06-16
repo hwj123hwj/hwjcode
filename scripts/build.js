@@ -78,11 +78,13 @@ if (!existsSync(join(root, 'node_modules'))) {
 const allWorkspaces = [
   { path: 'packages/core', name: 'core' },
   { path: 'packages/cli', name: 'cli' },
+  { path: 'packages/desktop', name: 'desktop' },
   { path: 'packages/vscode-ui-plugin', name: 'vscode-ui-plugin' }
 ];
 
 // Filter workspaces based on NPM_PUBLISH_MODE
-// When publishing to npm, only build core and cli to speed up CI
+// When publishing to npm, only build core and cli to speed up CI (desktop and
+// vscode are not published to npm).
 const workspaces = process.env.NPM_PUBLISH_MODE === '1'
   ? allWorkspaces.filter(ws => ws.name === 'core' || ws.name === 'cli')
   : allWorkspaces;
@@ -90,7 +92,7 @@ const workspaces = process.env.NPM_PUBLISH_MODE === '1'
 const results = [];
 
 // Determine which packages are required (critical) for build success
-// vscode-ui-plugin is optional and won't block the build process
+// desktop and vscode-ui-plugin are optional and won't block the build process
 const criticalPackages = new Set(['core', 'cli']);
 
 printHeader('Building workspaces');

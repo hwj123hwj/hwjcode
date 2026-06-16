@@ -237,6 +237,7 @@ export interface ConfigParameters {
   silentMode?: boolean;
   vsCodePluginMode?: boolean;
   feishuMode?: boolean;
+  desktopMode?: boolean;
   memoryTokenCount?: number; // 新增
   hooks?: { [K in HookEventName]?: HookDefinition[] };
   healthyUse?: boolean;
@@ -316,6 +317,7 @@ export class Config {
   private readonly silentMode: boolean;
   private readonly vsCodePluginMode: boolean;
   private readonly feishuMode: boolean;
+  private readonly desktopMode: boolean;
   private projectSettingsManager: ProjectSettingsManager;
   private planModeActive: boolean = false;
   private readonly hooks: { [K in HookEventName]?: HookDefinition[] };
@@ -396,8 +398,11 @@ export class Config {
     this.ideClient = params.ideClient;
     this.vsCodePluginMode = params.vsCodePluginMode ?? false;
     this.feishuMode = params.feishuMode ?? false;
+    // Desktop client flag: explicit param wins, else inferred from the
+    // EASYCODE_DESKTOP=1 env the desktop app sets when spawning the backend.
+    this.desktopMode = params.desktopMode ?? process.env.EASYCODE_DESKTOP === '1';
     this.hooks = params.hooks ?? {};
-    this.healthyUse = params.healthyUse ?? true;
+    this.healthyUse = params.healthyUse ?? false;
     this.preferredLanguage = params.preferredLanguage;
 
     if (params.contextFileName) {
@@ -1051,6 +1056,10 @@ export class Config {
 
   getFeishuMode(): boolean {
     return this.feishuMode;
+  }
+
+  getDesktopMode(): boolean {
+    return this.desktopMode;
   }
 
   getHooks(): { [K in HookEventName]?: HookDefinition[] } {

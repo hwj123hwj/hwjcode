@@ -14,6 +14,28 @@ import os from 'os';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
+/**
+ * Returns true if the given directory contains any git-tracked files.
+ *
+ * Some packages keep source assets in dirs that *look* like build output
+ * (e.g. `packages/desktop/build/` holds icon.png + entitlements plists that are
+ * committed to git). The blanket clean of `dist|build|coverage|out` must never
+ * delete those — losing them breaks the next build. A dir tracked by git is, by
+ * definition, source we must not touch.
+ */
+function isGitTracked(absDir) {
+  try {
+    const out = execSync(`git ls-files --error-unmatch -- "${absDir}"`, {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    return out.length > 0;
+  } catch {
+    // Non-zero exit = no tracked files under this path (or not a git repo).
+    return false;
+  }
+}
+
 // --- UI Utilities (ANSI Colors) ---
 const COLORS = {
   reset: '\x1b[0m',
@@ -36,7 +58,7 @@ function printHeader(step, total, title) {
 }
 
 function printItem(status, path, type) {
-  const icon = status === 'success' ? `${COLORS.green}✅${COLORS.reset}` : `${COLORS.yellow}❌${COLORS.reset}`;
+  const icon = status === 'success' ? `${COLORS.green}✅${COLORS.reset}` : status === 'skip' ? `${COLORS.yellow}⏭️${COLORS.reset}` : `${COLORS.yellow}❌${COLORS.reset}`;
   const label = type ? `${COLORS.dim}[${type}]${COLORS.reset}` : '';
   const cleanPath = path.replace(/\\/g, '/');
   console.log(`  ${icon} ${label.padEnd(20)} ${COLORS.cyan}${cleanPath}${COLORS.reset}`);
@@ -74,6 +96,12 @@ for (const workspacePattern of workspaces) {
     for (const dir of toClean) {
       const target = join(pkgDir, dir);
       if (existsSync(target)) {
+        // Never delete a dir that holds git-tracked source (e.g. desktop/build
+        // keeps committed icon.png + entitlements). Deleting it breaks builds.
+        if (isGitTracked(target)) {
+          printItem('skip', join(pkgDirRel, dir), 'Source (git-tracked, kept)');
+          continue;
+        }
         rmSync(target, RMRF_OPTIONS);
         printItem('success', join(pkgDirRel, dir), 'Build Artifact');
       }

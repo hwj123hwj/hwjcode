@@ -6,18 +6,63 @@
 
 import {
   type Config,
+  type CustomModelConfig,
   type ToolResult,
   type ToolCallConfirmationDetails,
+  type ToolConfirmationPayload,
   Kind,
+  Icon,
   ApprovalMode,
   ToolConfirmationOutcome,
   proxyAuthManager,
   tokenLimit,
+  generateCustomModelId,
 } from 'deepv-code-core';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import { z } from 'zod';
 import type { LoadedSettings } from '../config/settings.js';
+import { loadCustomModels } from '../config/customModelsStorage.js';
+import { formatCustomModelDisplayName } from '../utils/modelUtils.js';
+
+/**
+ * Collect the user's enabled custom models (from `~/.easycode-user/
+ * custom-models.json`, falling back to whatever `Config` loaded at startup) as
+ * `{ modelId, name }` pairs ready to drop into the ACP model list.
+ *
+ * The interactive CLI surfaces custom models in its `/model` picker
+ * ({@link getAvailableModels}); ACP clients (the desktop app, IDEs) must see
+ * the same set or custom models become unselectable there.
+ */
+function customModelEntries(
+  config: Config,
+): Array<{ modelId: string; name: string }> {
+  let models: CustomModelConfig[] = [];
+  try {
+    models = loadCustomModels();
+  } catch {
+    models = [];
+  }
+  // Fall back to the config snapshot loaded at startup if the file read came
+  // back empty (e.g. permissions) but config still has them.
+  if (models.length === 0) {
+    try {
+      models = config.getCustomModels?.() ?? [];
+    } catch {
+      models = [];
+    }
+  }
+  const entries: Array<{ modelId: string; name: string }> = [];
+  for (const m of models) {
+    if (m?.enabled === false) continue;
+    if (!m?.displayName || !m?.modelId || !m?.baseUrl) continue;
+    entries.push({
+      modelId: generateCustomModelId(m),
+      name: formatCustomModelDisplayName(m),
+    });
+  }
+  return entries;
+}
 
 /**
  * Build the `session/update` payload for `sessionUpdate: 'usage_update'`.
@@ -69,9 +114,35 @@ export function hasMeta(
 }
 
 /**
+ * The answer payload an interactive ACP client (the desktop app) returns for
+ * an {@link AskUserQuestionTool} prompt, carried inside the `_meta.dvcode`
+ * channel of the {@link acp.Client.requestPermission} response (the base ACP
+ * `requestPermission` contract only models `optionId`, so there is no first-
+ * class field for free-form answers). Mirrors {@link ToolConfirmationPayload}.
+ */
+const AskAnswersMetaSchema = z
+  .object({
+    answers: z.record(z.string()).optional(),
+    annotations: z
+      .record(
+        z.object({
+          preview: z.string().optional(),
+          notes: z.string().optional(),
+        }),
+      )
+      .optional(),
+    feedback: z.string().optional(),
+  })
+  .optional();
+
+/**
  * Zod schema for the response to {@link acp.Client.requestPermission}.
  * ACP clients reply with either `{outcome: 'cancelled'}` or
  * `{outcome: 'selected', optionId: '...'}`.
+ *
+ * For `ask_user_question` the client additionally tucks the collected answers
+ * into `_meta.dvcode` (see {@link AskAnswersMetaSchema}); we parse it
+ * leniently so non-question tools (which never send it) are unaffected.
  */
 export const RequestPermissionResponseSchema = z.object({
   outcome: z.discriminatedUnion('outcome', [
@@ -81,7 +152,31 @@ export const RequestPermissionResponseSchema = z.object({
       optionId: z.string(),
     }),
   ]),
+  _meta: z
+    .object({ dvcode: AskAnswersMetaSchema })
+    .passthrough()
+    .optional(),
 });
+
+/**
+ * Pull the AskUserQuestion answer payload out of a parsed
+ * {@link RequestPermissionResponseSchema} result. Returns `undefined` for
+ * ordinary tool approvals (no answers attached), so callers can pass it
+ * straight through to `confirmation.onConfirm(outcome, payload)`.
+ */
+export function extractAskAnswers(
+  parsed: z.infer<typeof RequestPermissionResponseSchema>,
+): ToolConfirmationPayload | undefined {
+  const dvcode = parsed._meta?.dvcode;
+  if (!dvcode) return undefined;
+  const { answers, annotations, feedback } = dvcode;
+  if (!answers && !annotations && !feedback) return undefined;
+  return {
+    ...(answers ? { answers } : {}),
+    ...(annotations ? { annotations } : {}),
+    ...(feedback ? { feedback } : {}),
+  };
+}
 
 /**
  * Map an internal {@link ToolResult} to the wire shape expected in
@@ -228,6 +323,28 @@ export function toPermissionOptions(
 }
 
 /**
+ * Build the `_meta.dvcode` payload to attach to a `requestPermission` request
+ * for an {@link AskUserQuestionTool} prompt. The base ACP `requestPermission`
+ * contract only carries Allow/Reject options, so the actual questions (with
+ * their options/previews/multiSelect) are forwarded out-of-band here for
+ * interactive clients (the desktop app) to render. Returns `undefined` for any
+ * non-question confirmation so ordinary tool approvals stay untouched.
+ */
+export function questionMetaFor(
+  confirmation: ToolCallConfirmationDetails,
+): Record<string, unknown> | undefined {
+  if (confirmation.type !== 'question') return undefined;
+  return {
+    dvcode: {
+      askUserQuestion: {
+        questions: confirmation.questions,
+        ...(confirmation.metadata ? { metadata: confirmation.metadata } : {}),
+      },
+    },
+  };
+}
+
+/**
  * Decide whether an ACP caller (the upstream agent) should be asked to
  * approve this tool call, or whether the dvcode ACP runtime can silently
  * proceed.
@@ -271,6 +388,46 @@ export function confirmationRequiresCallerApproval(
  * Several kinds that have no exact ACP counterpart (`Agent`, `Plan`,
  * `Communicate`, `SwitchMode`) are folded into `'other'` / `'think'`.
  */
+/**
+ * Derive the ACP `ToolKind` from a tool's {@link Icon}.
+ *
+ * DeepCode's core tools don't carry a {@link Kind} on the instance (only an
+ * `icon`), so the ACP agent has no semantic kind to forward — every tool would
+ * otherwise fall back to `'other'`, and ACP clients (the desktop app, IDEs)
+ * would render them all with the same generic wrench icon. The `Icon` enum is a
+ * required constructor field on every tool, so it's a reliable proxy for the
+ * tool's intent; map it onto the closest ACP kind so clients can pick a
+ * per-tool icon. Unknown/ambiguous icons fall back to `'other'`.
+ */
+export function iconToAcpKind(icon: Icon | undefined): acp.ToolKind {
+  switch (icon) {
+    case Icon.Pencil:
+    case Icon.Wrench: // LintFix edits files
+      return 'edit' as acp.ToolKind;
+    case Icon.Trash:
+      return 'delete' as acp.ToolKind;
+    case Icon.Terminal:
+      return 'execute' as acp.ToolKind;
+    case Icon.FileSearch:
+    case Icon.Regex:
+    case Icon.Folder:
+      return 'search' as acp.ToolKind;
+    case Icon.Globe:
+      return 'fetch' as acp.ToolKind;
+    case Icon.LightBulb:
+      return 'think' as acp.ToolKind;
+    case Icon.Clipboard: // TodoRead
+    case Icon.List: // ListSkills
+    case Icon.Info: // GetSkillDetails
+      return 'read' as acp.ToolKind;
+    case Icon.Hammer:
+    case Icon.Tasks: // TodoWrite
+    case Icon.Question: // AskUserQuestion
+    default:
+      return 'other' as acp.ToolKind;
+  }
+}
+
 export function toAcpToolKind(kind: Kind): acp.ToolKind {
   switch (kind) {
     case Kind.Read:
@@ -368,7 +525,15 @@ export function buildAvailableModels(
     models.push({ modelId: m.name, name: m.displayName || m.name });
   }
 
-  // 3) Make sure the currently-selected and preferred ids are visible even
+  // 3) User-configured custom models (~/.easycode-user/custom-models.json),
+  //    so the desktop/IDE model picker can select them just like the CLI.
+  for (const entry of customModelEntries(config)) {
+    if (seen.has(entry.modelId)) continue;
+    seen.add(entry.modelId);
+    models.push(entry);
+  }
+
+  // 4) Make sure the currently-selected and preferred ids are visible even
   //    if they're not in the cloud list (user just switched to one via /model,
   //    cache empty on first run, etc.).
   for (const id of [preferred, current]) {
@@ -446,6 +611,12 @@ export function buildConfigOptionsSnapshot(
       value: m.name,
       name: m.displayName || m.name,
     });
+  }
+  // User-configured custom models (~/.easycode-user/custom-models.json).
+  for (const entry of customModelEntries(config)) {
+    if (seen.has(entry.modelId)) continue;
+    seen.add(entry.modelId);
+    options.push({ value: entry.modelId, name: entry.name });
   }
   // Ensure the currently-selected model is in the list even if it's not
   // marked available (server just rolled it back, user got it via /model,

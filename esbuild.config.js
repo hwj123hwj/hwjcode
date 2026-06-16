@@ -72,7 +72,17 @@ esbuild
       'process.env.DEV': JSON.stringify(process.env.DEV || 'false'),
     },
     banner: {
-      js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url); globalThis.__filename = require('url').fileURLToPath(import.meta.url); globalThis.__dirname = require('path').dirname(globalThis.__filename);`,
+      // The ACP stdout guard MUST be the very first code in the bundle. stdout is
+      // the JSON-RPC wire in `--acp` mode and ANY stray text corrupts the frames.
+      // We cannot rely on `acpStdoutGuard.ts` (imported first in the entry point)
+      // here: esbuild emits deeply-shared deps like core's `proxyAuthManager`
+      // singleton near the top of the bundle and the entry-only guard module near
+      // the bottom, so the singleton's import-time `console.log` runs long before
+      // the guard's redirect. Putting the redirect in the banner — prepended
+      // literally ahead of every module — closes that window. (The source/dev path
+      // still uses acpStdoutGuard.ts, where ESM import order holds.)
+      js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url); globalThis.__filename = require('url').fileURLToPath(import.meta.url); globalThis.__dirname = require('path').dirname(globalThis.__filename);
+(() => { try { const a = process.argv; if (a.some((x) => x === '--acp' || x === '--experimental-acp' || x.startsWith('--acp=') || x.startsWith('--experimental-acp='))) { const w = (...m) => { try { process.stderr.write(m.map((v) => typeof v === 'string' ? v : (() => { try { return JSON.stringify(v); } catch { return String(v); } })()).join(' ') + '\\n'); } catch {} }; console.log = w; console.info = w; console.warn = w; console.debug = w; } } catch {} })();`,
     },
   })
   .catch(() => process.exit(1));

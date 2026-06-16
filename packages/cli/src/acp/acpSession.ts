@@ -10,6 +10,8 @@ import {
   type GeminiChat,
   type ToolResult,
   type ToolCallConfirmationDetails,
+  type Kind,
+  type Icon,
   convertToFunctionResponse,
   logToolCall,
   isNodeError,
@@ -18,9 +20,11 @@ import {
   getErrorStatus,
   MESSAGE_ROLES,
   SceneType,
+  SceneManager,
   REFERENCE_CONTENT_START,
   REFERENCE_CONTENT_END,
   ToolConfirmationOutcome,
+  ApprovalMode,
   coreEvents,
   CoreEvent,
   SessionManager as CoreSessionManager,
@@ -43,10 +47,72 @@ import {
   hasMeta,
   toToolCallContent,
   toPermissionOptions,
+  questionMetaFor,
+  extractAskAnswers,
   toAcpToolKind,
+  iconToAcpKind,
 } from './acpUtils.js';
 import { getAcpErrorMessage } from './acpErrors.js';
 import type { GenerateContentResponse } from '@google/genai';
+
+/**
+ * Substring identifying the synthetic environment-context block that
+ * `GeminiClient.startChat` prepends as the first (user-role) history entry, and
+ * the fixed model ack that follows it. Kept in sync with `core/src/core/client.ts`
+ * (the `🚀 CRITICAL SYSTEM CONTEXT…` preamble) and `taskPrompts.ts`
+ * (`SUBAGENT_INITIAL_RESPONSE`). Used by {@link Session.streamHistory} to keep
+ * this internal priming out of the rehydrated transcript.
+ */
+const ENV_CONTEXT_MARKER = 'CRITICAL SYSTEM CONTEXT - Easy Code AI Assistant';
+const ENV_CONTEXT_ACK = 'Got it. Thanks for the context!';
+
+/**
+ * Prefix of the synthetic `agent_message_chunk` the backend emits to push an
+ * auto-generated session title to the client (same channel-marker trick as
+ * `[MODE_UPDATE]`). The desktop bridge strips the prefix and updates the
+ * session card's title instead of rendering it as a chat bubble. Kept in sync
+ * with `packages/desktop/src/main/acpSession.ts`.
+ */
+const TITLE_UPDATE_MARKER = '[TITLE_UPDATE]';
+
+/**
+ * True when a persisted history message is the injected environment-context
+ * preamble (the user context block or the model's ack) rather than a real
+ * conversation turn. Such messages are model priming and must not be replayed
+ * as visible chat bubbles on `session/load`.
+ */
+function isInjectedEnvPreamble(role: string | undefined, text: string): boolean {
+  if (role === 'user') return text.includes(ENV_CONTEXT_MARKER);
+  return text.trim() === ENV_CONTEXT_ACK;
+}
+
+/** Concatenate the text parts of a model response (no `getResponseText` in the barrel). */
+function responseText(resp: GenerateContentResponse | undefined): string {
+  const parts = resp?.candidates?.[0]?.content?.parts ?? [];
+  return parts
+    .map((p) => (typeof (p as { text?: string }).text === 'string'
+      ? (p as { text: string }).text
+      : ''))
+    .join('');
+}
+
+/**
+ * Turn a raw model title into a clean one-line label: first non-empty line,
+ * surrounding quotes/brackets stripped, trailing punctuation removed, clamped
+ * to a sane length. Returns '' if nothing usable remains.
+ */
+function sanitizeTitle(raw: string): string {
+  let title = (raw ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0) ?? '';
+  // Strip wrapping quotes / brackets the model sometimes adds.
+  title = title.replace(/^["'`《》「」“”‘’\[\]]+|["'`《》「」“”‘’\[\]]+$/g, '').trim();
+  // Drop a trailing sentence-ending punctuation mark.
+  title = title.replace(/[。．.!！?？,，;；:：]+$/u, '').trim();
+  if (title.length > 60) title = title.slice(0, 60).trim();
+  return title;
+}
 
 /**
  * Slice a persisted `SessionData.history` array (the UI-shape one stored at
@@ -108,6 +174,12 @@ export function truncateUiHistoryByUserMessageCount(
 export class Session {
   private pendingAbort?: AbortController;
   private readonly approvalModeUnsubscribe: () => void;
+  /**
+   * Set once we've kicked off auto-title generation for this session so a
+   * second prompt never re-summarizes. Loaded (resumed) sessions start `true`
+   * because they already carry a title the user chose / generated earlier.
+   */
+  private titleGenerated = false;
   /**
    * Runtime cache of session/set_config_option values. Used to answer
    * subsequent `set_config_option` responses with the `currentValue` the
@@ -314,6 +386,53 @@ export class Session {
     }
   }
 
+  /**
+   * Persist the current conversation to disk so a later `session/load` (e.g.
+   * the desktop app reopening this session after the app — and the backend
+   * process — has been restarted) can rehydrate the transcript and the model's
+   * context.
+   *
+   * The interactive Ink CLI does this through its `useSessionAutoSave` hook; the
+   * pure-ACP path has no equivalent, so without this the conversation lives only
+   * in the in-memory {@link GeminiChat} and is lost the moment the backend exits
+   * — `loadSession` then finds nothing in the session index and falls back to a
+   * fresh session, which is exactly the "history not restored" bug.
+   *
+   * Best-effort: a failed write must never break the prompt turn. We first
+   * `loadSession` (which lazily creates `metadata.json` and registers the id in
+   * the on-disk session index, so `resolveSession` can find it later), then
+   * overwrite `history.json` + `context.json` with the current curated history —
+   * the same `Content[]` shape that {@link streamHistory} and
+   * `convertSessionToClientHistory` both consume on the way back in.
+   */
+  private async persistHistory(): Promise<void> {
+    const projectRoot = this.cwd ?? this.config.getProjectRoot?.();
+    if (!projectRoot) {
+      this.debug('persistHistory skipped: no projectRoot');
+      return;
+    }
+    try {
+      const history = this.chat.getHistory(false);
+      if (history.length === 0) return;
+      const mgr = new CoreSessionManager(projectRoot);
+      // Ensures metadata.json exists and the id is in the session index, so a
+      // later resolveSession(this.id) can locate it.
+      await mgr.loadSession(this.id);
+      await mgr.saveSessionHistory(this.id, history, history);
+    } catch (err) {
+      this.debug(`persistHistory failed: ${getAcpErrorMessage(err)}`);
+    }
+  }
+
+  /**
+   * Mark this session as already-titled so the next prompt does not auto-name
+   * it. Called by the session manager right after `session/load`, since a
+   * resumed session already has the title it was given on first use.
+   */
+  markTitleGenerated(): void {
+    this.titleGenerated = true;
+  }
+
   setMode(modeId: string): void {
     // DeepCode's ApprovalMode uses upper-case ids; ACP clients send back the
     // same ids we advertised via `buildAvailableModes`, so we coerce in place
@@ -495,6 +614,13 @@ export class Session {
           : ''))
         .join('');
       if (!text) continue;
+      // Skip the synthetic environment-context preamble that
+      // `GeminiClient.startChat` prepends to every conversation (a user
+      // "CRITICAL SYSTEM CONTEXT…" block + the model's "Got it. Thanks for the
+      // context!" ack). It is genuine model context, but it is never shown as a
+      // chat bubble in the live turn, so it must not surface as one when an IDE
+      // rehydrates the transcript on session/load either.
+      if (isInjectedEnvPreamble(msg.role, text)) continue;
       await this.sendUpdate(
         msg.role === 'user'
           ? {
@@ -576,6 +702,19 @@ export class Session {
     this.pendingAbort?.abort();
     const abort = new AbortController();
     this.pendingAbort = abort;
+
+    // The very first real user message names the session. Fire-and-forget so
+    // the cheap summarizer model never blocks (or is blocked by) the main
+    // response stream. Guarded by `titleGenerated` + a history check so it runs
+    // exactly once and never on a resumed/already-populated conversation.
+    if (
+      !this.titleGenerated &&
+      textChunks.length > 0 &&
+      this.countRealUserMessages() === 0
+    ) {
+      this.titleGenerated = true;
+      void this.generateTitle(textChunks);
+    }
 
     const promptId = Math.random().toString(16).slice(2);
     const parts = await this.resolvePrompt(req, abort.signal);
@@ -666,6 +805,10 @@ export class Session {
       return { stopReason: 'end_turn' };
     } finally {
       if (this.pendingAbort === abort) this.pendingAbort = undefined;
+      // Save the turn's result (and the model context) to disk so the session
+      // survives a backend/app restart. Runs on normal completion, cancel, and
+      // error alike — best-effort and self-contained, never throws.
+      await this.persistHistory();
     }
   }
 
@@ -751,10 +894,14 @@ export class Session {
     }
 
     const toolCallId = callId;
-    const toolKind = toAcpToolKind(
-      ((tool as unknown as { kind?: unknown }).kind as never) ??
-        ('other' as never),
-    );
+    // Core tools don't carry a semantic `Kind` on the instance — only an
+    // `icon` — so derive the ACP kind from that (falling back to a real `kind`
+    // if a tool ever sets one). Without this every tool reports `other` and ACP
+    // clients render them all with the same generic icon.
+    const rawKind = (tool as unknown as { kind?: Kind }).kind;
+    const toolKind = rawKind
+      ? toAcpToolKind(rawKind)
+      : iconToAcpKind((tool as unknown as { icon?: Icon }).icon);
 
     // Announce the tool call to the IDE.
     await this.sendUpdate({
@@ -768,34 +915,40 @@ export class Session {
 
     // Confirm if necessary.
     //
-    // ACP mode is agent-to-agent, so the calling agent is the "user". We
-    // split confirmations into three buckets:
+    // Whether the client must approve a tool call depends on the session's
+    // ApprovalMode (set by the client via `session/set_mode`):
     //
-    //   1. Auto-approve (no roundtrip): routine `edit`, `write`, generic
-    //      `exec`, `mcp`, `info`. These are the tools that also auto-run
-    //      under TUI YOLO mode. We just call `onConfirm(ProceedOnce)` so
-    //      the tool's allowlist/state bookkeeping still runs.
+    //   - DEFAULT / AUTO_EDIT: the user explicitly asked to be prompted, so
+    //     we escalate *every* confirmation the tool raises via ACP
+    //     `requestPermission` and let the client present a dialog. (Edits in
+    //     AUTO_EDIT are already filtered out by the tool's own
+    //     `shouldConfirmExecute`, so only the tools that still need approval
+    //     in that mode reach here.) Interactive clients (the desktop app,
+    //     IDEs) show a prompt; headless delegation clients auto-approve in
+    //     their own `requestPermission` handler — either way the *client*
+    //     decides, which is the whole point of the mode.
     //
-    //   2. Escalate to the caller agent via ACP `requestPermission`:
-    //      - `exec` with a `warning` (dangerous-command-detector matched
-    //        things like `rm -rf /`, `sudo`, fork bombs, etc.)
-    //      - `delete` (irreversible)
-    //      - `question` (`ask_user_question` — only the real user, i.e. the
-    //        caller agent's own prompter, can meaningfully answer)
+    //   - YOLO: agent-to-agent autonomy. Auto-approve routine `edit`/`write`/
+    //     generic `exec`/`mcp`/`info` (no roundtrip — just call
+    //     `onConfirm(ProceedOnce)` so allowlist/state bookkeeping still runs),
+    //     and only escalate the hard-stops that even YOLO must not run
+    //     silently: dangerous `exec` (warning matched), `delete`, and
+    //     `question` (only a real user can answer). This is the legacy
+    //     `confirmationRequiresCallerApproval` split.
     //
-    //   3. If `requestPermission` itself fails (old ACP clients don't
-    //      implement it — they return "Permission prompt unavailable in
-    //      non-interactive mode"), we fall back to rejecting the dangerous
-    //      call. Auto-approved tools in bucket 1 never hit that path.
+    // If `requestPermission` itself fails (old ACP clients that don't
+    // implement it), we fall back to rejecting the call rather than silently
+    // running it.
     const confirmation = await tool.shouldConfirmExecute(args, signal);
     if (confirmation) {
-      const needsCallerApproval = confirmationRequiresCallerApproval(
-        confirmation,
-      );
+      const needsCallerApproval =
+        this.config.getApprovalMode() === ApprovalMode.YOLO
+          ? confirmationRequiresCallerApproval(confirmation)
+          : true;
 
       if (!needsCallerApproval) {
-        // Bucket 1: silently proceed. Still invoke `onConfirm` so tools
-        // that track allowlist state (shell's rootCommand allowlist,
+        // YOLO routine tool: silently proceed. Still invoke `onConfirm` so
+        // tools that track allowlist state (shell's rootCommand allowlist,
         // ApprovalMode promotion on ProceedAlways) see the outcome.
         try {
           await confirmation.onConfirm(ToolConfirmationOutcome.ProceedOnce);
@@ -804,6 +957,7 @@ export class Session {
         }
       } else {
         const options = toPermissionOptions(confirmation, this.config);
+        const questionMeta = questionMetaFor(confirmation);
         try {
           const rawResp = await this.connection.requestPermission({
             sessionId: this.id,
@@ -811,6 +965,7 @@ export class Session {
               toolCallId,
               title: tool.getDescription?.(args) ?? fc.name,
               kind: toolKind,
+              ...(questionMeta ? { _meta: questionMeta } : {}),
             },
             options,
           });
@@ -837,7 +992,12 @@ export class Session {
               new Error(`Tool "${fc.name}" not allowed to run by the user.`),
             );
           }
-          await confirmation.onConfirm(outcome);
+          // For ask_user_question the interactive client returns the collected
+          // answers in `_meta.dvcode`; forward them as the confirmation payload
+          // so the tool's execute() can format them for the LLM. Non-question
+          // tools yield `undefined` here and behave exactly as before.
+          const answerPayload = extractAskAnswers(parsed);
+          await confirmation.onConfirm(outcome, answerPayload);
         } catch (err) {
           // The ACP client couldn't/wouldn't surface the prompt. For
           // dangerous operations we must refuse — never silently run.
@@ -1046,11 +1206,22 @@ export class Session {
       );
     }
 
+    // Inline image blocks (e.g. pasted/attached images from the desktop) must
+    // still reach the model when the prompt ALSO carries @-path references —
+    // the early flatMap branch above only runs when there are no @-paths.
+    const imageParts: Part[] = blocks.flatMap((b) => {
+      if ((b as { type?: string }).type !== 'image') return [];
+      const img = b as unknown as { mimeType?: string; data?: string };
+      return img.mimeType && img.data
+        ? [{ inlineData: { mimeType: img.mimeType, data: img.data } } as Part]
+        : [];
+    });
+
     if (pathSpecsToRead.length === 0) {
-      return [{ text: queryText } as Part];
+      return [{ text: queryText } as Part, ...imageParts];
     }
 
-    const parts: Part[] = [{ text: queryText } as Part];
+    const parts: Part[] = [{ text: queryText } as Part, ...imageParts];
     const toolArgs = { paths: pathSpecsToRead, respectGitIgnore };
     try {
       const result = await readManyFilesTool.execute(toolArgs, signal);
@@ -1078,6 +1249,96 @@ export class Session {
       );
     }
     return parts;
+  }
+
+  /**
+   * Count the real, user-typed text turns currently in the chat history —
+   * i.e. `role:'user'` entries that are neither the injected env-context
+   * preamble nor a tool `functionResponse`. Returns 0 for a brand-new chat
+   * (which holds only the env preamble), which is exactly the signal that the
+   * incoming prompt is the session's first message.
+   */
+  private countRealUserMessages(): number {
+    let count = 0;
+    for (const entry of this.chat.getHistory(false)) {
+      if (entry.role !== MESSAGE_ROLES.USER) continue;
+      const parts = entry.parts ?? [];
+      if (parts.some((p) => (p as { functionResponse?: unknown }).functionResponse)) {
+        continue;
+      }
+      const text = parts
+        .map((p) => (typeof (p as { text?: string }).text === 'string'
+          ? (p as { text: string }).text
+          : ''))
+        .join('');
+      if (isInjectedEnvPreamble(MESSAGE_ROLES.USER, text)) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * Summarize the first user message into a short session title with a cheap,
+   * fast model (the `CONTENT_SUMMARY` scene → `gemini-2.5-flash-lite`) and push
+   * it to the client via the `[TITLE_UPDATE]` marker. Mirrors the CLI's use of
+   * `createTemporaryChat` for side-channel summarization: a throwaway chat with
+   * no system prompt, fully isolated from the session's own `GeminiChat`, so it
+   * never pollutes the conversation history or context window.
+   *
+   * Best-effort: any failure is swallowed (the session simply keeps its
+   * folder-name default title). Runs with its own short-lived AbortController so
+   * cancelling the user's turn doesn't kill the title, and vice-versa.
+   */
+  private async generateTitle(userText: string): Promise<void> {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 20_000);
+    try {
+      const client = this.config.getGeminiClient?.() as
+        | {
+            createTemporaryChat?: (
+              scene: SceneType,
+              model?: string,
+              agentContext?: unknown,
+              options?: { disableSystemPrompt?: boolean },
+            ) => Promise<GeminiChat>;
+          }
+        | undefined;
+      if (!client?.createTemporaryChat) return;
+
+      const tempChat = await client.createTemporaryChat(
+        SceneType.CONTENT_SUMMARY,
+        SceneManager.getModelForScene(SceneType.CONTENT_SUMMARY),
+        { type: 'sub', agentId: 'TitleGen' },
+        { disableSystemPrompt: true },
+      );
+
+      const prompt =
+        'Generate a concise title (at most 6 words) summarizing the following ' +
+        'user request, so it can label a chat session in a sidebar. Reply with ' +
+        'ONLY the title text — no quotes, no punctuation at the end, and in the ' +
+        'same language as the request.\n\nUser request:\n' +
+        userText.slice(0, 2000);
+
+      const response = (await tempChat.sendMessage(
+        {
+          message: prompt,
+          config: { maxOutputTokens: 40, abortSignal: abort.signal },
+        },
+        `title-${Date.now()}`,
+        SceneType.CONTENT_SUMMARY,
+      )) as GenerateContentResponse;
+
+      const title = sanitizeTitle(responseText(response));
+      if (!title) return;
+      await this.sendUpdate({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: `${TITLE_UPDATE_MARKER} ${title}` },
+      });
+    } catch (err) {
+      this.debug(`generateTitle failed: ${getAcpErrorMessage(err)}`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private debug(msg: string): void {
