@@ -23,14 +23,14 @@ import type { Config } from '../config/config.js';
 describe('buildRelaunchScript', () => {
   const base = {
     parentPid: 12345,
-    relaunchCommand: 'easycode',
+    relaunchCommand: 'hwjcode',
     relaunchArgs: ['--feishu'],
-    scriptPath: '/tmp/easycode-relaunch-12345.js',
+    scriptPath: '/tmp/hwjcode-relaunch-12345.js',
   };
 
-  const npmMode: RelaunchInstallMode = { type: 'npm', packageName: 'easycode-ai' };
+  const npmMode: RelaunchInstallMode = { type: 'npm', packageName: 'hwjcode' };
   const noneMode: RelaunchInstallMode = { type: 'none' };
-  const tgzMode: RelaunchInstallMode = { type: 'tgz', path: '/abs/easycode-ai-1.1.3.tgz' };
+  const tgzMode: RelaunchInstallMode = { type: 'tgz', path: '/abs/hwjcode-1.1.3.tgz' };
 
   it('always embeds parent PID polling via process.kill', () => {
     const script = buildRelaunchScript({ ...base, install: npmMode });
@@ -40,14 +40,14 @@ describe('buildRelaunchScript', () => {
 
   it('npm mode embeds `<pkg>@latest` install', () => {
     const script = buildRelaunchScript({ ...base, install: npmMode });
-    expect(script).toContain('easycode-ai@latest');
+    expect(script).toContain('hwjcode@latest');
     expect(script).toContain('install');
     expect(script).toContain('-g');
   });
 
   it('tgz mode embeds the local tgz absolute path install', () => {
     const script = buildRelaunchScript({ ...base, install: tgzMode });
-    expect(script).toContain('/abs/easycode-ai-1.1.3.tgz');
+    expect(script).toContain('/abs/hwjcode-1.1.3.tgz');
     expect(script).toContain('install');
     expect(script).toContain('-g');
     expect(script).not.toContain('@latest');
@@ -57,14 +57,14 @@ describe('buildRelaunchScript', () => {
     const script = buildRelaunchScript({ ...base, install: noneMode });
     expect(script).toContain('INSTALL_ARGS = null');
     expect(script).not.toContain('@latest');
-    expect(script).toContain('easycode');
+    expect(script).toContain('hwjcode');
     expect(script).toContain('--feishu');
   });
 
   it('always embeds the relaunch command and args', () => {
     for (const install of [npmMode, noneMode, tgzMode]) {
       const script = buildRelaunchScript({ ...base, install });
-      expect(script).toContain('easycode');
+      expect(script).toContain('hwjcode');
       expect(script).toContain('--feishu');
     }
   });
@@ -151,7 +151,7 @@ describe('buildRelaunchScript', () => {
   });
 
   it('embeds tgz path via JSON to handle spaces/backslashes safely', () => {
-    const winPath = 'C:\\Users\\me\\pkgs\\easycode-ai 1.1.3.tgz';
+    const winPath = 'C:\\Users\\me\\pkgs\\hwjcode 1.1.3.tgz';
     const script = buildRelaunchScript({
       ...base,
       install: { type: 'tgz', path: winPath },
