@@ -31,10 +31,12 @@ tags: [npm, rename, hwjcode, packaging, release, fork]
 ### 未改动的（有意保留）
 
 - `bundle/easycode.js` — 内部文件路径，不影响用户，改名风险大
-- `.easycode-user/` — 配置目录路径，改了会破坏现有用户数据
+- `.easycode-user/` — 配置目录路径，改了会破坏现有用户数据（详见 [[paths]]）
 - `EASYCODE_*` 环境变量 — 进程间通信协议
 - `EasyCode` 品牌 — UI 层面，与包名/命令名无关
 - `Gemini` OAuth 标识 — 必须保留，第三方 OAuth 服务只认 Gemini
+
+> **解耦原理**：由于所有数据目录基于硬编码常量和项目路径哈希（而非 CLI 命名），改名后用户无需重新认证、对话历史自动继承。详见 [[source-data-directory-decoupling]]。
 
 ## Notable Data Points
 
@@ -76,3 +78,5 @@ tags: [npm, rename, hwjcode, packaging, release, fork]
 - [[core-module]] — Core 模块包名变更
 - [[self-update]] — 自更新工具
 - [[development-workflow]] — 开发工作流
+- [[paths]] — 数据目录体系（解耦原理）
+- [[source-data-directory-decoupling]] — CLI 命名与数据存储解耦详解
