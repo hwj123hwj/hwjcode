@@ -30,6 +30,8 @@ CLI 是 Easy Code 的终端前端包（NPM 名 `easycode-cli`），使用 Ink/Re
 - **AppWrapper / App**: Root Ink/React component tree
 - **useGeminiStream**: Hook managing streaming AI responses
 - **useSlashCommandProcessor**: Hook handling 50+ slash commands
+- **useNLCommandDispatch**: Hook for natural language → slash command rewrite (Feishu only, not CLI yet)
+- **useNLModelSwitch**: Hook for natural language model switching (CLI + Feishu)
 - **themeManager**: Singleton for theme loading/switching
 - **Extension system**: Dynamic loading via `loadExtensions()` with TOML prompt extensions
 
@@ -51,3 +53,4 @@ CLI 是 Easy Code 的终端前端包（NPM 名 `easycode-cli`），使用 Ink/Re
 
 - [[source-01-architecture]]
 - [[source-03-cli-module]]
+- [[nl-command-dispatch]]

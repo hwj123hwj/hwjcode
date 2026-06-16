@@ -115,3 +115,4 @@ Easy Code (Monorepo)
 - 本仓库是上游 Easy Code 项目的个人 fork，不走上游 CI 发版流程。版本号与上游 release tag 完全一致（同步脚本 `scripts/sync-upstream.sh` 会自动对齐），不存在「版本号必须严格低于 tag」的约束。
 - 演示了工具调用能力，用户要求尽可能多地展示可用工具
 - 独立 GitLab仓库: `https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient`（项目ID: 9774），Personal Access Token: `glpat-myrVXWAg5e7HF-RGRYFv`（全局），可用 GitLab API 创建/合并 MR。上游仓库: `https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient`。开发规范见 `.llm-wiki/wiki/development-workflow.md`，同步脚本见 `scripts/sync-upstream.sh`。
+- hwjcode 已发布到 npmjs.org，包名 hwjcode，版本 1.1.26，CLI 命令名 hwjcode，bin 指向 bundle/easycode.js（内部文件名未改），自更新常量 SELF_UPDATE_PACKAGE='hwjcode', SELF_UPDATE_RELAUNCH_COMMAND='hwjcode'。安装命令：npm i -g hwjcode。npm 账号 hwj123weijian。
