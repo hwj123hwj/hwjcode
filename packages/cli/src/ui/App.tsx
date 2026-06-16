@@ -30,7 +30,7 @@ import { useTaskCompletionSummary } from './hooks/useTaskCompletionSummary.js';
 import { TaskCompletionSummary } from './components/TaskCompletionSummary.js';
 import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
-import { detectNLModelSwitch, buildSwitchMessage } from './hooks/useNLModelSwitch.js';
+import { detectNLTrigger, buildSwitchMessage } from './hooks/useNLTriggerRegistry.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
 import { useDebateWizard } from './hooks/useDebateWizard.js';
 import { useGoalWizard } from './hooks/useGoalWizard.js';
@@ -2051,37 +2051,39 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
           // 如果slashCommandResult为false，说明不是有效的slash命令，继续正常处理
         }
 
-        // 🎯 自然语言模型切换检测（仅匹配收藏列表）
-        // 匹配 "切换模型xxx" / "用xxx" / "换xxx" 等模式，直接切换模型，不发给AI
+        // 🎯 自然语言触发检测（统一注册中心）
+        // 匹配模型切换、命令调度、工具开关等 NL 触发规则
         const favoriteModelIds: string[] = settings.merged?.favoriteModels || [];
-        if (favoriteModelIds.length > 0) {
-          const cloudModels = config.getCloudModels() || [];
-          const favorites = favoriteModelIds
-            .map((id) => {
-              const model = cloudModels.find(m => m.name === id);
-              return model ? { name: model.name, displayName: model.displayName } : null;
-            })
-            .filter((f): f is { name: string; displayName: string } => f !== null);
+        const cloudModels = config.getCloudModels() || [];
+        const favorites = favoriteModelIds
+          .map((id) => {
+            const model = cloudModels.find(m => m.name === id);
+            return model ? { name: model.name, displayName: model.displayName } : null;
+          })
+          .filter((f): f is { name: string; displayName: string } => f !== null);
 
-          const nlMatch = detectNLModelSwitch(trimmedValue, favorites);
-          if (nlMatch) {
+        const nlResult = detectNLTrigger(trimmedValue, { favorites });
+
+        if (nlResult) {
+          if (nlResult.type === 'modelSwitch' && nlResult.modelName) {
+            // 模型切换：直接切换，不发给 AI
             try {
               const geminiClient = config.getGeminiClient();
               if (geminiClient) {
                 await geminiClient.waitForChatInitialized();
                 const knownTokenCount = lastTokenUsage?.input_tokens;
                 const switchResult = await geminiClient.switchModel(
-                  nlMatch.modelName,
+                  nlResult.modelName,
                   new AbortController().signal,
                   knownTokenCount,
                 );
 
                 if (switchResult.success) {
-                  settings.setValue(SettingScope.User, 'preferredModel', nlMatch.modelName);
-                  appEvents.emit(AppEvent.ModelChanged, nlMatch.modelName);
-                  setCurrentModel(nlMatch.modelName);
+                  settings.setValue(SettingScope.User, 'preferredModel', nlResult.modelName);
+                  appEvents.emit(AppEvent.ModelChanged, nlResult.modelName);
+                  setCurrentModel(nlResult.modelName);
 
-                  let msg = buildSwitchMessage(nlMatch.modelDisplayName, nlMatch.matchedKeyword);
+                  let msg = buildSwitchMessage(nlResult.modelDisplayName || nlResult.modelName, nlResult.matchedKeyword);
                   if (switchResult.compressionInfo) {
                     msg += `\n📦 上下文压缩: ${switchResult.compressionInfo.originalTokenCount} → ${switchResult.compressionInfo.newTokenCount} tokens`;
                   }
@@ -2094,24 +2096,31 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
                 }
               } else {
                 // Fallback: 直接修改配置
-                config.setModel(nlMatch.modelName);
-                settings.setValue(SettingScope.User, 'preferredModel', nlMatch.modelName);
-                appEvents.emit(AppEvent.ModelChanged, nlMatch.modelName);
-                setCurrentModel(nlMatch.modelName);
+                config.setModel(nlResult.modelName);
+                settings.setValue(SettingScope.User, 'preferredModel', nlResult.modelName);
+                appEvents.emit(AppEvent.ModelChanged, nlResult.modelName);
+                setCurrentModel(nlResult.modelName);
                 addItem({
                   type: MessageType.INFO,
-                  text: buildSwitchMessage(nlMatch.modelDisplayName, nlMatch.matchedKeyword),
+                  text: buildSwitchMessage(nlResult.modelDisplayName || nlResult.modelName, nlResult.matchedKeyword),
                 } as HistoryItemWithoutId, Date.now());
               }
               return;
             } catch (error) {
-              console.warn('[NL Model Switch] Error:', error);
+              console.warn('[NL Trigger] Model switch error:', error);
               addItem({
                 type: MessageType.ERROR,
                 text: `切换模型出错: ${error instanceof Error ? error.message : String(error)}`,
               } as HistoryItemWithoutId, Date.now());
               return;
             }
+          }
+
+          if (nlResult.type === 'command' || nlResult.type === 'toolToggle') {
+            // 命令调度 / 工具开关：改写为 slash 命令，走斜杠命令管线
+            const slashResult = await handleSlashCommand(nlResult.slashCommand || '');
+            if (slashResult) return;
+            // slash 命令处理失败，继续正常流程
           }
         }
 

@@ -3350,55 +3350,29 @@ async function handleStart(context?: CommandContext): Promise<string> {
       return null;
     }
 
-    // 🔧 自然语言模型切换（仅飞书场景）
-    // 匹配 "切换/用 + 模型名"，改写成 /model <name> 交给后续斜杠命令处理
+    // 🔧 自然语言触发检测（统一注册中心）
+    // 匹配模型切换、命令调度、工具开关等 NL 触发规则
     if (!messageText.startsWith('/')) {
       const trimmed = messageText.trim();
       const settings = globalCommandContext?.services?.settings;
       const favoriteModelIds: string[] = settings?.merged?.favoriteModels || [];
-      dlog(`[NL-Model] msg="${trimmed}" favorites=[${favoriteModelIds.join(',')}]`);
-      if (favoriteModelIds.length > 0) {
-        const cloudModels = currentConfig?.getCloudModels?.() || [];
-        const favorites = favoriteModelIds
-          .map((id) => {
-            const model = cloudModels.find((m: any) => m.name === id);
-            return model ? { name: model.name, displayName: model.displayName } : null;
-          })
-          .filter((f): f is { name: string; displayName: string } => f !== null);
+      const cloudModels = currentConfig?.getCloudModels?.() || [];
+      const favorites = favoriteModelIds
+        .map((id) => {
+          const model = cloudModels.find((m: any) => m.name === id);
+          return model ? { name: model.name, displayName: model.displayName } : null;
+        })
+        .filter((f): f is { name: string; displayName: string } => f !== null);
 
-        if (favorites.length > 0) {
-          const nlMatch = await import('../hooks/useNLModelSwitch.js').then(m =>
-            m.detectNLModelSwitch(trimmed, favorites),
-          );
-          if (nlMatch) {
-            dlog(`[NL-Model] MATCHED → /model ${nlMatch.modelName}`);
-            messageText = `/model ${nlMatch.modelName}`;
-          }
-        }
-      }
-
-      // 🔧 自然语言命令分发（新对话、压缩上下文、知识库摄取等）
-      // 匹配自然语言关键词，改写成对应 slash 命令交给后续斜杠命令处理
-      const nlCmd = await import('../hooks/useNLCommandDispatch.js').then(m =>
-        m.detectNLCommand(trimmed),
+      const nlResult = await import('../hooks/useNLTriggerRegistry.js').then(m =>
+        m.detectNLTrigger(trimmed, { favorites }),
       );
-      if (nlCmd) {
-        dlog(`[NL-Cmd] MATCHED "${nlCmd.matchedKeyword}" → ${nlCmd.slashCommand}`);
-        messageText = nlCmd.slashCommand;
-      }
-    }
-
-    // 🔧 自然语言工具开关触发词（等效于 /tool enable/disable）
-    if (!messageText.startsWith('/')) {
-      const trimmed = messageText.trim();
-      for (const [toolName, def] of Object.entries(TOGGLEABLE_TOOLS)) {
-        if (def.nlEnable.includes(trimmed)) {
-          messageText = `/tool enable ${toolName}`;
-          break;
-        }
-        if (def.nlDisable.includes(trimmed)) {
-          messageText = `/tool disable ${toolName}`;
-          break;
+      if (nlResult) {
+        dlog(`[NL-Trigger] type=${nlResult.type} keyword="${nlResult.matchedKeyword}"`);
+        if (nlResult.type === 'modelSwitch' && nlResult.modelName) {
+          messageText = `/model ${nlResult.modelName}`;
+        } else if (nlResult.slashCommand) {
+          messageText = nlResult.slashCommand;
         }
       }
     }
