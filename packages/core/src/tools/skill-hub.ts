@@ -15,9 +15,9 @@ import {
 import { Type } from '@google/genai';
 import { Config } from '../config/config.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
+import { getProjectSkillsDir } from '../utils/paths.js';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 const REGISTRY_URL = 'https://cdn.jsdelivr.net/gh/hwj123hwj/custom-skills@main/registry/skills.json';
 const REGISTRY_FALLBACK_URL = 'https://raw.githubusercontent.com/hwj123hwj/custom-skills/main/registry/skills.json';
@@ -131,8 +131,8 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
 
   override toolLocations(params: SkillHubParams): ToolLocation[] {
     if (params.action === 'install') {
-      const userSkillsDir = path.join(os.homedir(), '.easycode-user', 'skills');
-      return [{ path: path.join(userSkillsDir, params.skillId!, 'SKILL.md') }];
+      const projectSkillsDir = getProjectSkillsDir(this.config.getProjectRoot());
+      return [{ path: path.join(projectSkillsDir, params.skillId!, 'SKILL.md') }];
     }
     return [];
   }
@@ -148,7 +148,7 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
     return {
       type: 'info',
       title: `Install Skill: ${params.skillId}`,
-      prompt: `将安装技能 "${params.skillId}" 到 ~/.easycode-user/skills/${params.skillId}/。安装后重启会话即可使用。`,
+      prompt: `将安装技能 "${params.skillId}" 到项目目录 .easycode/skills/${params.skillId}/。安装后重启会话即可使用。`,
       urls: [SKILL_URL_TEMPLATE.replace('{skillId}', params.skillId!).replace('{filePath}', 'SKILL.md')],
       onConfirm: async () => {},
     };
@@ -287,8 +287,8 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
    * Install a skill by downloading all files from CDN
    */
   private async executeInstall(skillId: string, signal: AbortSignal): Promise<ToolResult> {
-    const userSkillsDir = path.join(os.homedir(), '.easycode-user', 'skills');
-    const targetDir = path.join(userSkillsDir, skillId);
+    const projectSkillsDir = getProjectSkillsDir(this.config.getProjectRoot());
+    const targetDir = path.join(projectSkillsDir, skillId);
     const targetSkillMd = path.join(targetDir, 'SKILL.md');
 
     // Check if already installed
