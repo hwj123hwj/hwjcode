@@ -14,6 +14,7 @@
 | 06 | [raw/06-build-and-scripts.md](raw/06-build-and-scripts.md) | [source-06-build-system](wiki/source-06-build-system.md) | Build pipelines, esbuild config, CI/CD, npm publishing, TypeScript/ESLint config | 2026-04-09 |
 | 07 | [raw/07-mcp-system.md](raw/07-mcp-system.md) | [source-07-mcp-system](wiki/source-07-mcp-system.md) | MCP architecture, transport types, OAuth, two-phase loading, status display | 2026-04-09 |
 
+
 ## Entities
 
 ### Modules / Systems
@@ -30,6 +31,7 @@
 | [skills-system](wiki/skills-system.md) | entity | Pluggable skill modules / marketplace |
 | [background-tasks](wiki/background-tasks.md) | entity | Background Task system - process control & execution |
 | [feishu-integration](wiki/feishu-integration.md) | entity | Feishu / Lark Bot Integration - WebSocket long-polling gateway |
+| [nl-command-dispatch](wiki/nl-command-dispatch.md) | concept | Natural Language Command Dispatch — NL keyword → slash command rewrite (3 mechanisms) |
 
 ### Classes / Components
 
@@ -69,6 +71,7 @@
 | [goal-driven-mode](wiki/goal-driven-mode.md) | Goal-Driven state machine, watchdog control, contract boundaries, and goal_achieved triggers |
 | [context-compression](wiki/context-compression.md) | Token-aware MicroCompactService, post-compact restoration, and prefill crash guards |
 | [adaptive-thinking](wiki/adaptive-thinking.md) | Adaptive thinking effort mappings (Claude/OpenAI/Gemini), UI brain outlines, and sanitization |
+| [nl-command-dispatch](wiki/nl-command-dispatch.md) | Natural Language Command Dispatch — keyword-to-slash rewrite, model switch, tool toggle |
 
 ## Guides & Checklists
 

@@ -2,6 +2,22 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-16] ingest | NL Command Dispatch — 自然语言命令分发系统（合并更新）
+
+从代码分析中提取自然语言命令分发系统的完整知识，合并旧页面并创建统一概念页面。
+
+### Pages Created
+- `wiki/nl-command-dispatch.md` — 三套 NL 分发机制（通用命令、模型切换、工具开关）的完整文档，含关键词映射表、6层匹配算法、CLI vs 飞书差异、已知限制和扩展指南
+
+### Pages Deleted (merged into nl-command-dispatch)
+- `wiki/nl-command-mapping.md` — 旧概念页面，内容已合并到 nl-command-dispatch.md
+- `wiki/source-nl-command-mapping.md` — 旧 source summary，内容已合并到 nl-command-dispatch.md
+
+### Pages Updated
+- `wiki/feishu-integration.md` — 新增「Natural Language Command Dispatch」章节，修正 wikilink 从 `nl-command-mapping` 到 `nl-command-dispatch`
+- `wiki/cli-module.md` — 新增 `useNLCommandDispatch` 和 `useNLModelSwitch` hooks 条目，新增 `[[nl-command-dispatch]]` wikilink
+- `index.md` — 移除旧 source-08 和 nl-command-mapping 条目，保留 nl-command-dispatch 在 Entities 和 Features 区域
+
 ## [2026-06-05] update | feishu-integration.md & goal-driven-mode.md — 安全防护与飞书目标路由更新
 
 更新 `.llm-wiki/wiki/feishu-integration.md` 与 `.llm-wiki/wiki/goal-driven-mode.md`：

@@ -79,7 +79,30 @@ To guarantee a clean TUI (terminal) display and protect sensitive corporate prom
    - Standard Feishu cards have strict character limits. A single massive tool block output (like a large file write or a lengthy bash stdout) can exceed Feishu's limits, causing card failures or unwanted pagination.
    - Large tool blocks are parsed and clamped via `clampCodeBlock` using a dual-constraint model (lines + characters), preserving readability while guaranteeing layout compliance on all screens.
 
+## 自然语言命令映射 (NL Command Mapping)
+
+飞书支持将用户的自然语言输入自动映射为对应 slash 命令，无需输入 `/` 前缀。处理顺序在斜杠命令检测之后、发给 AI 之前。
+
+### 模型切换
+用户说 `切换到 deepseek` / `用 glm` / `换 claude` 等 → 自动改写为 `/model <name>`。支持 13 种触发词和 6 层匹配（精确名→显示名→关键词交集→厂商别名），仅匹配收藏模型。
+
+### 命令分发
+| 自然语言示例 | 映射命令 |
+|---|---|
+| `新对话` `清空对话` `重新开始` | `/new` |
+| `压缩上下文` `精简对话` `总结对话` | `/compress` |
+| `更新知识库` `整理知识库` | `/wiki ingest .` |
+
+### 工具开关
+| 自然语言 | 等效命令 |
+|---|---|
+| `开启生图` `关闭生图` | `/tool enable/disable nanobanana_generate` |
+| `开启音频` `关闭音频` | `/tool enable/disable audio_reader` |
+
+详见 [[nl-command-dispatch]]。
+
 ## Related Pages
+- [[nl-command-dispatch]]
 - [[lark-cli-tool]]
 - [[tools-system]]
 - [[cli-module]]
