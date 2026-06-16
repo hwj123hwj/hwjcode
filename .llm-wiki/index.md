@@ -14,6 +14,7 @@
 | 06 | [raw/06-build-and-scripts.md](raw/06-build-and-scripts.md) | [source-06-build-system](wiki/source-06-build-system.md) | Build pipelines, esbuild config, CI/CD, npm publishing, TypeScript/ESLint config | 2026-04-09 |
 | 07 | [raw/07-mcp-system.md](raw/07-mcp-system.md) | [source-07-mcp-system](wiki/source-07-mcp-system.md) | MCP architecture, transport types, OAuth, two-phase loading, status display | 2026-04-09 |
 | 08 | feat/rename-to-hwjcode (commit 2fb40e12) | [source-hwjcode-rename](wiki/source-hwjcode-rename.md) | npm 包名 easycode-ai → hwjcode, CLI 命令 easycode → hwjcode, 发布到 npmjs.org | 2026-06-17 |
+| 09 | conversation-2026-06-17 | [source-data-directory-decoupling](wiki/source-data-directory-decoupling.md) | CLI 命名与数据存储解耦原理 — 所有持久化路径与包名无关 | 2026-06-17 |
 
 
 ## Entities
@@ -51,8 +52,9 @@
 | [mcp-client](wiki/mcp-client.md) | entity | Module | `core/src/tools/mcp-client.ts` |
 | [HookSystem](wiki/HookSystem.md) | entity | Coordinator | `core/src/hooks/hookSystem.ts` |
 | [HookRegistry](wiki/HookRegistry.md) | entity | Registry | `core/src/hooks/hookRegistry.ts` |
-| [ProxyAuthManager](wiki/ProxyAuthManager.md) | entity | Singleton | `core/src/auth/` |
+| [ProxyAuthManager](wiki/ProxyAuthManager.md) | entity | Singleton | `core/src/core/proxyAuth.ts` |
 | [SessionManager](wiki/SessionManager.md) | entity | Repository | `core/src/services/sessionManager.ts` |
+| [paths](wiki/paths.md) | concept | Constants | `core/src/utils/paths.ts` |
 | [SkillLoader](wiki/SkillLoader.md) | entity | Plugin | `core/src/skills/skill-loader.ts` |
 | [MarketplaceManager](wiki/MarketplaceManager.md) | entity | Plugin | `core/src/skills/marketplace-manager.ts` |
 | [lark-cli-tool](wiki/lark-cli-tool.md) | entity | Tool | `core/src/tools/lark-cli.ts` |
