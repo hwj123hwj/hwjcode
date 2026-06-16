@@ -14,8 +14,9 @@ Easy Code 是一款 AI 驱动的智能编程助手，通过深度整合人工智
 
 ## Key Facts
 
-- **Package name:** `easycode-ai`
-- **Version:** 1.0.316
+- **Package name:** `hwjcode` (npmjs.org) — 2026-06-17 从 `easycode-ai` 重命名
+- **Version:** 1.1.26
+- **CLI binary:** `hwjcode`
 - **License:** Apache-2.0
 - **Runtime:** Node.js >= 20.0.0
 - **Language:** TypeScript 5.0+
@@ -30,6 +31,7 @@ This is a monorepo managed via npm workspaces with three packages:
 |---------|------|---------|
 | `cli` | `packages/cli` | Command-line interface entry point |
 | `core` | `packages/core` | Core logic, tools, AI interaction |
+| `desktop` | `packages/desktop` | Electron desktop GUI (ACP) |
 | `vscode-ui-plugin` | `packages/vscode-ui-plugin` | VS Code extension UI |
 
 An additional companion extension lives at `packages/vscode-ide-companion`.
