@@ -196,6 +196,36 @@ describe('GrepTool', () => {
       expect(result.llmContent).toContain("Error: Invalid parameters provided");
       expect(result.returnDisplay).toContain("Error: params must have required property 'pattern'");
     });
+
+    // Regression: on Windows, ripgrep emits CRLF-terminated lines for files
+    // that use CRLF line endings. The output parser must strip the trailing
+    // `\r`, otherwise the `$`-anchored match regex fails on every line and the
+    // tool reports "No matches found" even though ripgrep found matches.
+    it('should find matches in files with CRLF line endings (single file)', async () => {
+      const crlfPath = path.join(tempRootDir, 'crlf.json');
+      await fs.writeFile(crlfPath, '{\r\n  "name": "easycode-website",\r\n  "version": "1.0.0"\r\n}\r\n');
+      const params: GrepToolParams = { pattern: 'name', path: crlfPath };
+      const result = await grepTool.execute(params, abortSignal);
+      expect(result.returnDisplay).toContain('Found 1 match');
+      expect(result.llmContent).toContain('L2:');
+      expect(result.llmContent).toContain('"name": "easycode-website"');
+      // The parsed content must not retain a trailing carriage return.
+      expect(result.llmContent).not.toContain('\r');
+    });
+
+    it('should find matches in files with CRLF line endings (directory)', async () => {
+      await fs.writeFile(
+        path.join(tempRootDir, 'crlfA.txt'),
+        'alpha world\r\nbeta world\r\n',
+      );
+      const params: GrepToolParams = { pattern: 'world', path: '.' };
+      const result = await grepTool.execute(params, abortSignal);
+      // The 2 CRLF matches must be parsed in addition to the LF fixtures.
+      expect(result.llmContent).toContain('crlfA.txt');
+      expect(result.llmContent).toContain('L1: alpha world');
+      expect(result.llmContent).toContain('L2: beta world');
+      expect(result.llmContent).not.toContain('\r');
+    });
   });
 
   describe('getDescription', () => {
