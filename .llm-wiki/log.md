@@ -2,6 +2,24 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-17] ingest | hwjcode Rename & npm Publish
+
+npm 包名从 `easycode-ai` 重命名为 `hwjcode`，CLI 命令从 `easycode` 改为 `hwjcode`，已发布 `hwjcode@1.1.26` 到 npmjs.org。MR #8 已合并。
+
+### Pages Created
+- `wiki/source-hwjcode-rename.md` — 重命名源文档摘要，含包名映射表、未改动清单、sync-upstream.sh 防护机制
+- `wiki/self-update.md` — SelfUpdateTool 实体页，含常量、安装模式、双轨重启机制、Desktop 防护
+
+### Pages Updated
+- `wiki/overview.md` — Package name `easycode-ai` → `hwjcode`，version 更新，新增 desktop 包行
+- `wiki/cli-module.md` — NPM 名 `easycode-cli` → `hwjcode-cli`，binary `easycode` → `hwjcode`，新增重命名说明
+- `wiki/core-module.md` — NPM 名 `easycode-core` → `hwjcode-core`，新增重命名说明
+- `wiki/build-system.md` — 新增 npm Publishing 章节（包名、安装命令、sync 保护），新增重命名说明
+- `index.md` — 新增 source-08 和 self-update 条目
+
+### Contradictions
+- `overview.md` 原记录 version 为 `1.0.316`，现更正为 `1.1.26`（与上游 tag 对齐）
+
 ## [2026-06-16] ingest | NL Command Dispatch — 自然语言命令分发系统（合并更新）
 
 从代码分析中提取自然语言命令分发系统的完整知识，合并旧页面并创建统一概念页面。
