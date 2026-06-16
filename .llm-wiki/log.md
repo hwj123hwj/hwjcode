@@ -2,6 +2,23 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-17] ingest | CLI 命名与数据存储解耦原理
+
+从对话中提取 CLI 改名后认证和历史自动继承的原理解释，创建数据目录解耦相关的 wiki 页面。
+
+### Pages Created
+- `wiki/source-data-directory-decoupling.md` — 源文档摘要：数据存储路径与 CLI 命名完全解耦的原理，含完整数据目录映射表和旧包清理说明
+- `wiki/paths.md` — 概念页：数据目录与路径体系，含目录树、关键函数表、解耦原理、legacy migration 说明
+
+### Pages Updated
+- `wiki/ProxyAuthManager.md` — 新增 Data Storage 章节（JWT 凭证路径、与 CLI 命名解耦说明）、修正 Location 为 `proxyAuth.ts`、新增 [[paths]] 交叉引用
+- `wiki/SessionManager.md` — 新增 Data Storage 章节（会话目录路径链路、项目哈希隔离、与 CLI 命名解耦说明）、新增 [[paths]] 交叉引用
+- `wiki/source-hwjcode-rename.md` — 在"未改动"清单中新增解耦原理引用、新增 [[paths]] 和 [[source-data-directory-decoupling]] 交叉引用
+- `index.md` — 新增 source-09 和 paths 条目
+
+### Contradictions
+- `ProxyAuthManager.md` 原记录 Location 为 `core/src/auth/`，实际代码在 `core/src/core/proxyAuth.ts`，已更正
+
 ## [2026-06-17] ingest | hwjcode Rename & npm Publish
 
 npm 包名从 `easycode-ai` 重命名为 `hwjcode`，CLI 命令从 `easycode` 改为 `hwjcode`，已发布 `hwjcode@1.1.26` 到 npmjs.org。MR #8 已合并。
