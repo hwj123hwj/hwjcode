@@ -177,6 +177,11 @@ export const en = {
   'settings.language': 'Display language',
   'settings.langZh': '简体中文',
   'settings.langEn': 'English',
+  'settings.theme': 'Appearance',
+  'settings.themeSystem': 'System',
+  'settings.themeLight': 'Light',
+  'settings.themeDark': 'Dark',
+  'settings.themeDesc': 'Choose light or dark, or follow your system setting.',
   'settings.replyLanguage': 'Reply language',
   'settings.replyLanguagePlaceholder': 'e.g. 中文 / English (blank = model default)',
   'settings.replyLanguageDesc': 'Preferred language for model replies.',
@@ -213,6 +218,23 @@ export const en = {
   'tool.status.in_progress': 'Running',
   'tool.status.completed': 'Done',
   'tool.status.failed': 'Failed',
+
+  // ── tool result summaries (single-line description, VSCode-plugin style) ───────────────
+  'tool.sum.read': 'Read {name}, {n} lines',
+  'tool.sum.readLines': 'Read {name}, lines {range}',
+  'tool.sum.readFiles': 'Read {n} files',
+  'tool.sum.readName': 'Read {name}',
+  'tool.sum.found': 'Found {n} matches for "{q}"',
+  'tool.sum.foundNoQuery': 'Found {n} matches',
+  'tool.sum.foundFiles': 'Found {n} files for "{q}"',
+  'tool.sum.noMatches': 'No matches for "{q}"',
+  'tool.sum.noMatchesNoQuery': 'No matches',
+  'tool.sum.listed': 'Listed {n} items',
+  'tool.sum.edited': 'Edited {name}',
+  'tool.sum.created': 'Created {name}',
+  'tool.sum.deleted': 'Deleted {name}',
+  'tool.sum.exit': 'Exit code {code}',
+  'diff.moreLines': '… {n} more lines',
 
   // ── panes ──────────────────────────────────────────────────────────────────────────────
   'pane.chat': 'Chat',
@@ -277,10 +299,42 @@ export const en = {
 
   // ── plan / tasks / terminal / file panes ───────────────────────────────────────────────────────
   'plan.empty': 'No plan yet',
+  'todo.title': 'Tasks',
   'tasks.summary': '{running} running / {total} total',
   'tasks.empty': 'No tool calls yet',
   'terminal.noOutput': '(no command output yet)',
   'terminal.backendLog': 'Backend log',
   'terminal.none': '(none)',
   'file.empty': 'Click a file path in a tool call to view it',
+
+  // ── version update ───────────────────────────────────────────────────────────────────────────
+  'update.available': 'New version {version} available',
+  'update.currentVersion': 'Current version v{version}',
+  'update.updateNow': 'Update now',
+  'update.later': 'Later',
+  'update.skip': 'Skip this version',
+  'update.downloading': 'Downloading update…',
+  'update.downloaded': 'Update ready to install',
+  'update.installNow': 'Install now',
+  'update.installingTitle': 'Starting installer',
+  'update.installingMac': 'The installer is open — drag Easy Code into Applications to finish updating',
+  'update.installingWin': 'Quitting to run the installer…',
+  'update.failed': 'Update failed',
+  'update.retry': 'Retry',
+  // settings → Software update
+  'update.section': 'Software update',
+  'update.checkNow': 'Check for updates',
+  'update.checking': 'Checking…',
+  'update.upToDate': 'You’re on the latest version (v{version})',
+  'update.newAvailable': 'Update available: {version}',
+  'update.checkFailed': 'Check failed, please try again later',
+
+  // ── mermaid diagrams ─────────────────────────────────────────────────────────────────────────
+  'mermaid.copy': 'Copy source',
+  'mermaid.copied': 'Copied',
+  'mermaid.zoom': 'Zoom',
+  'mermaid.viewSource': 'View source',
+  'mermaid.viewDiagram': 'View diagram',
+  'mermaid.rendering': 'Rendering diagram…',
+  'mermaid.error': 'Failed to render diagram',
 };

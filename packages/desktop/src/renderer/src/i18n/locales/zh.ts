@@ -175,6 +175,11 @@ export const zh = {
   'settings.language': '显示语言',
   'settings.langZh': '简体中文',
   'settings.langEn': 'English',
+  'settings.theme': '外观主题',
+  'settings.themeSystem': '跟随系统',
+  'settings.themeLight': '浅色',
+  'settings.themeDark': '深色',
+  'settings.themeDesc': '选择浅色或深色，或跟随系统设置。',
   'settings.replyLanguage': '回复语言',
   'settings.replyLanguagePlaceholder': '例如 中文 / English（留空使用模型默认）',
   'settings.replyLanguageDesc': '模型回复时优先使用的语言。',
@@ -211,6 +216,23 @@ export const zh = {
   'tool.status.in_progress': '执行中',
   'tool.status.completed': '完成',
   'tool.status.failed': '失败',
+
+  // ── tool result summaries (single-line description, VSCode-plugin style) ───────────────
+  'tool.sum.read': '读取 {name}，{n} 行',
+  'tool.sum.readLines': '读取 {name}，第 {range} 行',
+  'tool.sum.readFiles': '读取 {n} 个文件',
+  'tool.sum.readName': '读取 {name}',
+  'tool.sum.found': '找到 {n} 处匹配："{q}"',
+  'tool.sum.foundNoQuery': '找到 {n} 处匹配',
+  'tool.sum.foundFiles': '找到 {n} 个文件："{q}"',
+  'tool.sum.noMatches': '未找到匹配："{q}"',
+  'tool.sum.noMatchesNoQuery': '未找到匹配',
+  'tool.sum.listed': '列出 {n} 项',
+  'tool.sum.edited': '编辑 {name}',
+  'tool.sum.created': '创建 {name}',
+  'tool.sum.deleted': '删除 {name}',
+  'tool.sum.exit': '退出码 {code}',
+  'diff.moreLines': '… 还有 {n} 行',
 
   // ── panes ──────────────────────────────────────────────────────────────────────────────
   'pane.chat': '对话',
@@ -275,10 +297,42 @@ export const zh = {
 
   // ── plan / tasks / terminal / file panes ───────────────────────────────────────────────────────
   'plan.empty': '尚无计划',
+  'todo.title': '任务清单',
   'tasks.summary': '{running} 进行中 / {total} 总计',
   'tasks.empty': '暂无工具调用',
   'terminal.noOutput': '（暂无命令输出）',
   'terminal.backendLog': '后端日志',
   'terminal.none': '（无）',
   'file.empty': '点击工具调用中的文件路径以查看',
+
+  // ── version update ───────────────────────────────────────────────────────────────────────────
+  'update.available': '发现新版本 {version}',
+  'update.currentVersion': '当前版本 v{version}',
+  'update.updateNow': '立即更新',
+  'update.later': '稍后',
+  'update.skip': '跳过此版本',
+  'update.downloading': '正在下载更新…',
+  'update.downloaded': '更新已下载完成',
+  'update.installNow': '立即安装',
+  'update.installingTitle': '正在启动安装',
+  'update.installingMac': '安装包已打开，请将 Easy Code 拖入“应用程序”以完成更新',
+  'update.installingWin': '即将退出并运行安装程序…',
+  'update.failed': '更新失败',
+  'update.retry': '重试',
+  // settings → 软件更新
+  'update.section': '软件更新',
+  'update.checkNow': '检查更新',
+  'update.checking': '正在检查…',
+  'update.upToDate': '已是最新版本（v{version}）',
+  'update.newAvailable': '有可用更新：{version}',
+  'update.checkFailed': '检查失败，请稍后重试',
+
+  // ── mermaid diagrams ─────────────────────────────────────────────────────────────────────────
+  'mermaid.copy': '复制源码',
+  'mermaid.copied': '已复制',
+  'mermaid.zoom': '放大查看',
+  'mermaid.viewSource': '查看源码',
+  'mermaid.viewDiagram': '查看图表',
+  'mermaid.rendering': '正在渲染图表…',
+  'mermaid.error': '图表渲染失败',
 } as const;

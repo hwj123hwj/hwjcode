@@ -14,6 +14,7 @@ import { registerIpc } from './ipc.js';
 import { ensurePathFromLoginShell } from './shellPath.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
+import type { UpdateManager } from './updater.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
 // taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
 // from the packaged .app bundle, so this is harmless there.
@@ -24,6 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
+let updater: UpdateManager | null = null;
 
 /**
  * macOS application menu. The first submenu's title is the app name shown in the
@@ -129,8 +131,11 @@ app.whenReady().then(() => {
     // Drop the default application menu on Windows/Linux entirely.
     Menu.setApplicationMenu(null);
   }
-  ({ hub, feishu } = registerIpc(() => mainWindow));
+  ({ hub, feishu, updater } = registerIpc(() => mainWindow));
   createWindow();
+  // Kick off the version-update lifecycle (startup check + periodic poll). It
+  // delays its first check internally so it never competes with boot.
+  updater.start();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -146,4 +151,6 @@ app.on('before-quit', () => {
   // Tear down the desktop-managed Feishu gateway so we never leave an orphan
   // gateway behind (which the next launch would otherwise detect + kill).
   feishu?.dispose();
+  // Stop the update poll timer and abort any in-flight download.
+  updater?.dispose();
 });
