@@ -852,7 +852,7 @@ describe('LarkCliTool', () => {
       const mockProjectSettings = {
         feishu: {
           recommend: true,
-          excludeScopes: ['im:message.send_as_user', 'mail:user_mailbox.message.body:read'],
+          excludeScopes: ['mail:user_mailbox.message.body:read'],
         },
       };
       tool['config'].getProjectSettingsManager = vi.fn().mockReturnValue({
@@ -875,6 +875,8 @@ describe('LarkCliTool', () => {
       expect(authCmd).toContain('auth login');
       expect(authCmd).toContain('--domain mail');
       expect(authCmd).toContain('--recommend');
+      // im:message.send_as_user is always excluded by default now, plus the
+      // project-level exclude.
       expect(authCmd).toContain('--exclude "im:message.send_as_user,mail:user_mailbox.message.body:read"');
 
       authChild.close(0);
