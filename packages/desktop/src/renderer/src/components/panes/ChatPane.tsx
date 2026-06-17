@@ -156,6 +156,7 @@ function ChatItemView({
           locations={item.locations}
           content={item.content}
           terminalOutput={item.terminalOutput}
+          rawInput={item.rawInput}
           defaultOpen={density === 'verbose'}
           onOpenFile={onOpenFile}
         />
