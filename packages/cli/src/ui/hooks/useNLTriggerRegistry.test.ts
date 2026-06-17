@@ -13,7 +13,7 @@ import {
 
 // 模拟收藏列表
 const mockFavorites: FavoriteModelEntry[] = [
-  { name: 'glm-5.1', displayName: 'GLM-5.1' },
+  { name: 'glm-5.2', displayName: 'GLM-5.2' },
   { name: 'deepseek-v4-flash', displayName: 'DeepSeek-V4-Flash' },
   { name: 'gemini-2.5-flash', displayName: 'Gemini-2.5-Flash' },
 ];
@@ -33,7 +33,7 @@ describe('模型切换（type=modelSwitch）', () => {
   it('匹配 "用" + 中文别名（厂商别名 → glm）', () => {
     const result = detectNLTrigger('用智谱', { favorites: mockFavorites });
     expect(result).not.toBeNull();
-    expect(result!.modelName).toBe('glm-5.1');
+    expect(result!.modelName).toBe('glm-5.2');
   });
 
   it('匹配 "切换到" + 模型名', () => {
@@ -64,19 +64,19 @@ describe('模型切换（type=modelSwitch）', () => {
   it('匹配 "切换智谱模型"（噪声词"模型"被过滤）', () => {
     const result = detectNLTrigger('切换智谱模型', { favorites: mockFavorites });
     expect(result).not.toBeNull();
-    expect(result!.modelName).toBe('glm-5.1');
+    expect(result!.modelName).toBe('glm-5.2');
   });
 
   it('匹配 "切换智谱的模型"（噪声词"的""模型"被过滤）', () => {
     const result = detectNLTrigger('切换智谱的模型', { favorites: mockFavorites });
     expect(result).not.toBeNull();
-    expect(result!.modelName).toBe('glm-5.1');
+    expect(result!.modelName).toBe('glm-5.2');
   });
 
   it('匹配 "用zhipu"（英文厂商别名 → glm）', () => {
     const result = detectNLTrigger('用zhipu', { favorites: mockFavorites });
     expect(result).not.toBeNull();
-    expect(result!.modelName).toBe('glm-5.1');
+    expect(result!.modelName).toBe('glm-5.2');
   });
 
   it('匹配 "用深度求索"（厂商别名 → deepseek）', () => {
@@ -109,7 +109,7 @@ describe('模型切换（type=modelSwitch）', () => {
   });
 
   it('不匹配斜杠命令', () => {
-    const result = detectNLTrigger('/model glm-5.1', { favorites: mockFavorites });
+    const result = detectNLTrigger('/model glm-5.2', { favorites: mockFavorites });
     expect(result).toBeNull();
   });
 
@@ -283,8 +283,8 @@ describe('非命令输入 → null', () => {
 
 describe('辅助函数', () => {
   it('buildSwitchMessage 生成确认消息', () => {
-    const msg = buildSwitchMessage('GLM-5.1', '切换到');
-    expect(msg).toBe('🔄 已切换模型为：GLM-5.1');
+    const msg = buildSwitchMessage('GLM-5.2', '切换到');
+    expect(msg).toBe('🔄 已切换模型为：GLM-5.2');
   });
 
   it('getNoiseWords 返回统一噪声词列表', () => {
