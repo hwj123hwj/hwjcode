@@ -203,6 +203,11 @@ npm run build
 This is mandatory — `bundle/easycode.js` is what the CLI actually runs.
 Source-only changes won't take effect until the bundle is rebuilt.
 
+> ⚠️ **关键陷阱（2026-06-17 发现）**：如果 `packages/*/src/` 目录下存在旧的
+> `.js` 编译产物，esbuild 会优先打包 `.js` 而非 `.ts`，导致源码修改完全不
+> 生效且无任何报错。发布前务必确认 src 下没有 `.js` 产物，或用 esbuild
+> metafile 验证。详见 [[esbuild-stale-js-bug]]。
+
 To verify the tool ended up in the bundle:
 
 ```bash
