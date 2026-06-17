@@ -108,7 +108,7 @@ import { ExtensionCommandLoader } from '../../services/ExtensionCommandLoader.js
 import { FileCommandLoader } from '../../services/FileCommandLoader.js';
 import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command-loader.js';
 import { SettingScope } from '../../config/settings.js';
-import { getAvailableModels, refreshModelsInBackground } from './modelCommand.js';
+import { getAvailableModels, refreshModelsInBackground, getModelDisplayName, getModelNameFromDisplayName } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
 import { launchGoalMode } from '../hooks/launchGoalMode.js';
 import {
@@ -2444,6 +2444,64 @@ async function handleFeishuCommand(
       const settings = globalCommandContext?.services?.settings;
       if (!settings) {
         return '❌ settings 服务不可用，无法更改模型。';
+      }
+
+      // 🎯 /model favorites 子命令：管理收藏模型列表
+      if (parts[1]?.toLowerCase() === 'favorites') {
+        const MAX_FAVORITES = 5;
+        const subCmd = parts[2]?.toLowerCase() || 'list';
+        const modelArg = parts.slice(3).join(' ').trim();
+        const favorites: string[] = settings.merged?.favoriteModels || [];
+
+        if (subCmd === 'list') {
+          if (favorites.length === 0) {
+            return '📋 当前没有收藏模型。使用 `/model favorites add <模型名>` 来添加。';
+          }
+          const lines = ['📋 **收藏模型列表:**', ''];
+          favorites.forEach((id: string, i: number) => {
+            const displayName = getModelDisplayName(id, config || null);
+            lines.push(`  ${i + 1}. **${displayName}** (${id})`);
+          });
+          lines.push('');
+          lines.push('💡 使用 "用智谱"、"切换到gemini" 等自然语言快速切换收藏模型。');
+          return lines.join('\n');
+        }
+
+        if (subCmd === 'add') {
+          if (!modelArg) {
+            return '❌ 请指定模型名称。用法：`/model favorites add <模型名>`';
+          }
+          if (favorites.length >= MAX_FAVORITES) {
+            return `❌ 最多只能收藏 ${MAX_FAVORITES} 个模型。请先删除一些再添加。`;
+          }
+          // 尝试解析模型名
+          const { modelInfos } = await getAvailableModels(settings, config || undefined);
+          const modelId = getModelNameFromDisplayName(modelArg, modelInfos);
+          if (!modelId) {
+            return `❌ 找不到模型 "${modelArg}"。请使用准确的模型名称，输入 \`/model\` 查看可用列表。`;
+          }
+          if (favorites.includes(modelId)) {
+            return `"${getModelDisplayName(modelId, config || null)}" 已在收藏列表中。`;
+          }
+          favorites.push(modelId);
+          settings.setValue(SettingScope.User, 'favoriteModels', favorites);
+          return `✅ 已将 "${getModelDisplayName(modelId, config || null)}" 加入收藏。`;
+        }
+
+        if (subCmd === 'remove') {
+          if (!modelArg) {
+            return '❌ 请指定要移除的模型。用法：`/model favorites remove <模型名>`';
+          }
+          const idx = favorites.findIndex((f: string) => f === modelArg || getModelDisplayName(f, config || null) === modelArg);
+          if (idx === -1) {
+            return `❌ "${modelArg}" 不在收藏列表中。`;
+          }
+          const removed = favorites.splice(idx, 1)[0];
+          settings.setValue(SettingScope.User, 'favoriteModels', favorites);
+          return `✅ 已将 "${getModelDisplayName(removed, config || null)}" 从收藏中移除。`;
+        }
+
+        return `❌ 未知子命令 "${subCmd}"。可用：\`add\`, \`remove\`, \`list\``;
       }
 
       try {
