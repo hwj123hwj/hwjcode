@@ -54,6 +54,7 @@ import { LocalTimeTool } from '../tools/local-time.js';
 import { LarkCliTool } from '../tools/lark-cli.js';
 import { DelegateToAgentTool } from '../tools/delegate-agent.js';
 import { CheckDelegateStatusTool } from '../tools/delegate-status.js';
+import { hasAnyLocalAgent } from '../acp-client/localAgentDetection.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
@@ -1156,10 +1157,15 @@ export class Config {
     registerCoreTool(LocalTimeTool, this);
     registerCoreTool(LarkCliTool, this);
 
-    // Delegate-to-external-agent (ACP client). Drives the user's local Claude
-    // Code; gracefully reports a readable error if the bridge isn't installed.
-    registerCoreTool(DelegateToAgentTool, this);
-    registerCoreTool(CheckDelegateStatusTool, this);
+    // Delegate-to-external-agent (ACP client). Only register when at least
+    // one external agent (Claude Code or Codex) is detected on the user's
+    // machine — otherwise the AI would blindly call the tool and pretend the
+    // task was dispatched when in fact nothing happened.
+    const hasAgent = await hasAnyLocalAgent();
+    if (hasAgent) {
+      registerCoreTool(DelegateToAgentTool, this);
+      registerCoreTool(CheckDelegateStatusTool, this);
+    }
 
     // TaskTool (SubAgent) is available in both CLI and VSCode environments
     registerCoreTool(TaskTool, this, registry);

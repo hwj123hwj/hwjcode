@@ -10,6 +10,7 @@ import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { runDelegatedTask, type DelegateProgress } from '../acp-client/acpAgentClient.js';
+import { isAgentAvailable } from '../acp-client/localAgentDetection.js';
 import {
   EXTERNAL_AGENT_TYPES,
   isExternalAgentType,
@@ -229,6 +230,30 @@ export class DelegateToAgentTool extends BaseTool<
     const agent: ExternalAgentType = params.agent ?? DEFAULT_AGENT;
     const mode: DelegateMode = params.mode ?? DEFAULT_MODE;
     const label = resolveExternalAgentSpec(agent).label;
+
+    // Runtime guard: even if the tool was registered (an agent was available
+    // at startup), the user may have uninstalled it mid-session. Check again
+    // before dispatching, so the AI gets a clear message instead of silently
+    // spawning a process that will fail with ENOENT.
+    const agentReady = await isAgentAvailable(agent);
+    if (!agentReady) {
+      const guidance =
+        `${label} is not installed on this machine. The task was NOT dispatched — nothing was executed.\n` +
+        `To use this feature, install ${label} (e.g. \`npm install -g ${agent === 'codex' ? '@openai/codex' : '@anthropic-ai/claude-code'}\`) and log in, ` +
+        `or set the ${agent === 'codex' ? 'EASYCODE_CODEX_ACP_CMD' : 'EASYCODE_CLAUDE_CODE_ACP_CMD'} environment variable to point to a custom ACP bridge.\n` +
+        `You should inform the user that ${label} is not available and handle the task yourself.`;
+      return {
+        status: 'failed',
+        llmContent: JSON.stringify({
+          status: 'failed',
+          agent,
+          error: `${label} is not installed on this machine`,
+          guidance,
+        }),
+        returnDisplay: `❌ ${label} 未安装，任务未执行。请先安装 ${label} 或由 Easy Code 自行处理。`,
+        summary: `${label} not installed`,
+      };
+    }
 
     if (mode === 'stream') {
       return this.runStream(params, agent, label, cwd, signal, updateOutput);
