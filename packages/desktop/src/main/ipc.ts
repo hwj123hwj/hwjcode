@@ -8,10 +8,11 @@
  * the renderer.
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, nativeTheme } from 'electron';
 import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
 import { TurnNotifier } from './notifications.js';
+import { UpdateManager } from './updater.js';
 import {
   cancelBrowserLogin,
   getAuthStatus,
@@ -48,12 +49,14 @@ import type {
   PermissionMode,
   PermissionResponse,
   PromptOptions,
+  ThemeMode,
 } from '../shared/ipc.js';
 
 /** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
 export interface IpcServices {
   hub: SessionHub;
   feishu: FeishuManager;
+  updater: UpdateManager;
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
@@ -170,6 +173,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     updateUserSettings(patch),
   );
 
+  // ── color theme ───────────────────────────────────────────────────────────
+  // Mirror the renderer's GUI theme onto the native window chrome (title bar,
+  // scrollbars, form controls). 'system' restores OS-follow. The visible app
+  // palette itself is driven by CSS in the renderer; this just keeps the native
+  // shell consistent. The preference is persisted renderer-side (localStorage).
+  ipcMain.handle(IpcInvoke.ThemeSet, (_e, mode: ThemeMode) => {
+    nativeTheme.themeSource = mode;
+  });
+
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(
     IpcInvoke.PermissionRespond,
@@ -205,5 +217,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   // ── clipboard ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ReadClipboardImage, () => readClipboardImage());
 
-  return { hub, feishu };
+  // ── version update ────────────────────────────────────────────────────────
+  const updater = new UpdateManager({
+    onStatus: (state) => send(IpcEvent.UpdateStatus, state),
+    // Carry the live progress on the status payload too, so a late subscriber
+    // re-rendering from `onStatus` still sees the bar; the dedicated channel
+    // just avoids a full re-render storm during the download.
+    onProgress: (state) => send(IpcEvent.UpdateProgress, state.progress),
+  });
+  ipcMain.handle(IpcInvoke.UpdateGetState, () => updater.getState());
+  ipcMain.handle(IpcInvoke.UpdateCheck, (_e, manual?: boolean) => updater.check(!!manual));
+  ipcMain.handle(IpcInvoke.UpdateDownload, () => updater.download());
+  ipcMain.handle(IpcInvoke.UpdateCancelDownload, () => updater.cancelDownload());
+  ipcMain.handle(IpcInvoke.UpdateInstall, () => updater.install());
+  ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
+  ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
+
+  return { hub, feishu, updater };
 }
