@@ -59,3 +59,5 @@ SelfUpdateTool 仅在飞书网关模式下动态注册，支持从 npm 安装最
 - [[feishu-integration]] — 飞书网关模式
 - [[build-system]] — npm 发布流程
 - [[source-hwjcode-rename]] — 包名重命名记录
+- [[release-process]] — 发版流程规范
+- [[source-upstream-sync-version-strategy]] — 版本号策略与最新版本
