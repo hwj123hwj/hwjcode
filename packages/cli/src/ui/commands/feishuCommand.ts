@@ -3460,16 +3460,35 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const lastSessionAt = routeForChat?.lastSessionAt;
         const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId, lastSessionAt);
         if (delegation.delegate && delegation.task) {
-          messageTextForAI = buildDelegateDirective(
-            delegation.task,
-            delegation.agent,
-            'stream',
-            delegation.resumeSessionId,
-          );
-          currentMessage = messageTextForAI;
-          dlog(
-            `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
-          );
+          // Guard: if the delegate_to_agent tool is not registered (no local
+          // agent detected at startup), skip the directive rewrite and let
+          // Easy Code handle the task itself. Otherwise the AI would be
+          // instructed to call a non-existent tool and fail.
+          const toolRegistry = await config.getToolRegistry();
+          const delegateTool = toolRegistry.getTool('delegate_to_agent');
+          if (!delegateTool) {
+            const agentLabel = delegation.agent === 'codex' ? 'Codex' : 'Claude Code';
+            dwarn(
+              `[Feishu] Delegation to ${delegation.agent} skipped: ${agentLabel} is not installed on this machine. Handling locally.`,
+            );
+            // Prepend a note so the AI knows the user wanted to delegate but
+            // the target agent is unavailable — the AI should handle it itself.
+            messageTextForAI =
+              `（注意：用户尝试将任务派发给本机 ${agentLabel}，但该 agent 未安装。请由你自行处理此任务。）\n\n` +
+              messageTextForAI;
+            currentMessage = messageTextForAI;
+          } else {
+            messageTextForAI = buildDelegateDirective(
+              delegation.task,
+              delegation.agent,
+              'stream',
+              delegation.resumeSessionId,
+            );
+            currentMessage = messageTextForAI;
+            dlog(
+              `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
+            );
+          }
         }
       } catch (e: any) {
         dwarn(`[Feishu] Delegation routing check failed: ${e?.message || e}`);
