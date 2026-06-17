@@ -9,6 +9,7 @@ import type {
   CustomModelProvider,
   DesktopUserSettings,
   ProjectMemoryMode,
+  ThemeMode,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -35,6 +36,13 @@ const MEMORY_MODES: Array<{ id: ProjectMemoryMode; labelKey: TranslationKey; hin
   { id: 'all', labelKey: 'settings.memoryAll', hintKey: 'settings.memoryAllHint' },
   { id: 'deepv-only', labelKey: 'settings.memoryDeepvOnly', hintKey: 'settings.memoryDeepvOnlyHint' },
   { id: 'none', labelKey: 'settings.memoryNone', hintKey: 'settings.memoryNoneHint' },
+];
+
+/** GUI color-theme options shown as chips in the 通用 tab. */
+const THEME_MODES: Array<{ id: ThemeMode; labelKey: TranslationKey }> = [
+  { id: 'system', labelKey: 'settings.themeSystem' },
+  { id: 'light', labelKey: 'settings.themeLight' },
+  { id: 'dark', labelKey: 'settings.themeDark' },
 ];
 
 type Tab = 'general' | 'models';
@@ -99,9 +107,33 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
   const t = useT();
   const lang = useStore((s) => s.lang);
   const setLang = useStore((s) => s.setLang);
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const update = useStore((s) => s.update);
+  const checkUpdate = useStore((s) => s.checkUpdate);
+  const [checking, setChecking] = useState(false);
   const [settings, setSettings] = useState<DesktopUserSettings | null>(null);
   const [replyLang, setReplyLang] = useState('');
   const [saved, setSaved] = useState(false);
+
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      await checkUpdate(true);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // Resolve the line under the "Check for updates" button from the latest state.
+  const curVersion = update?.currentVersion ?? __APP_VERSION__;
+  const updateStatus = checking
+    ? t('update.checking')
+    : update?.phase === 'available' && update.info
+      ? t('update.newAvailable', { version: update.info.version })
+      : update?.phase === 'error'
+        ? t('update.checkFailed')
+        : t('update.upToDate', { version: curVersion });
 
   const load = async () => {
     const s = await api.settings.get();
@@ -150,6 +182,23 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="setting-item">
+          <label className="field-label">{t('settings.theme')}</label>
+          <div className="prompt-config">
+            {THEME_MODES.map((m) => (
+              <span
+                key={m.id}
+                className={`chip interactive ${theme === m.id ? 'accent' : ''}`}
+                onClick={() => setTheme(m.id)}
+              >
+                {theme === m.id && <Icon name="check" size={13} />}
+                {t(m.labelKey)}
+              </span>
+            ))}
+          </div>
+          <div className="setting-desc">{t('settings.themeDesc')}</div>
+        </div>
+
+        <div className="setting-item">
           <label className="field-label">{t('settings.replyLanguage')}</label>
           <input
             className="prompt-input cm-input"
@@ -194,6 +243,17 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
             {t('settings.healthyUse')}
           </label>
           <div className="setting-desc">{t('settings.healthyUseDesc')}</div>
+        </div>
+
+        <div className="setting-item">
+          <label className="field-label">{t('update.section')}</label>
+          <div className="update-check-row">
+            <button className="btn" disabled={checking} onClick={() => void runCheck()}>
+              {checking ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
+              {t('update.checkNow')}
+            </button>
+            <span className="setting-desc">{updateStatus}</span>
+          </div>
         </div>
       </div>
 
