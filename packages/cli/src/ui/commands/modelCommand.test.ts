@@ -75,10 +75,10 @@ describe('modelCommand', () => {
     });
 
     it('favorites list should show favorites when non-empty', () => {
-      mockSettings.merged.favoriteModels = ['glm-5.1', 'deepseek-v4-flash'];
+      mockSettings.merged.favoriteModels = ['glm-5.2', 'deepseek-v4-flash'];
       modelCommand.action!(mockContext, 'favorites list');
       expect(mockContext.ui.addItem).toHaveBeenCalledWith(
-        expect.objectContaining({ text: expect.stringContaining('GLM-5.1') }),
+        expect.objectContaining({ text: expect.stringContaining('GLM-5.2') }),
         expect.any(Number),
       );
     });
@@ -93,7 +93,7 @@ describe('modelCommand', () => {
     });
 
     it('favorites remove should error without model name', () => {
-      mockSettings.merged.favoriteModels = ['glm-5.1'];
+      mockSettings.merged.favoriteModels = ['glm-5.2'];
       modelCommand.action!(mockContext, 'favorites remove');
       expect(mockContext.ui.addItem).toHaveBeenCalledWith(
         expect.objectContaining({ text: expect.stringContaining('请指定要移除的模型') }),
@@ -102,7 +102,7 @@ describe('modelCommand', () => {
     });
 
     it('favorites remove should error when model not found', () => {
-      mockSettings.merged.favoriteModels = ['glm-5.1'];
+      mockSettings.merged.favoriteModels = ['glm-5.2'];
       modelCommand.action!(mockContext, 'favorites remove deepseek-v4-pro');
       expect(mockContext.ui.addItem).toHaveBeenCalledWith(
         expect.objectContaining({ text: expect.stringContaining('不在收藏列表中') }),
