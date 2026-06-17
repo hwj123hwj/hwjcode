@@ -21,6 +21,15 @@ vi.mock('../acp-client/acpAgentClient.js', () => ({
 
 const runDelegatedTask = vi.mocked(acpClient.runDelegatedTask);
 
+// Mock the local agent detection so tests don't depend on the host machine.
+vi.mock('../acp-client/localAgentDetection.js', () => ({
+  isAgentAvailable: vi.fn().mockResolvedValue(true),
+}));
+
+// Import the mocked function so we can override per-test.
+import { isAgentAvailable } from '../acp-client/localAgentDetection.js';
+const mockedIsAgentAvailable = vi.mocked(isAgentAvailable);
+
 function makeTool(targetDir = '/proj') {
   const config = {
     getTargetDir: () => targetDir,
@@ -31,6 +40,7 @@ function makeTool(targetDir = '/proj') {
 describe('DelegateToAgentTool', () => {
   beforeEach(() => {
     runDelegatedTask.mockReset();
+    mockedIsAgentAvailable.mockResolvedValue(true);
     // Clear the singleton between tests so tasks don't accumulate.
     const mgr = getBackgroundTaskManager();
     mgr.clearAllTasks();
@@ -389,6 +399,54 @@ describe('DelegateToAgentTool', () => {
       const task = getBackgroundTaskManager().getTask(taskId);
       expect(task?.status).toBe('cancelled');
     });
+  });
+
+  // ── Runtime agent-availability guard ──────────────────────────────────
+
+  it('returns a clear "not installed" failure when claude-code is unavailable', async () => {
+    mockedIsAgentAvailable.mockResolvedValue(false);
+
+    const tool = makeTool();
+    const res = await tool.execute(
+      { task: 'do x' },
+      new AbortController().signal,
+    );
+    expect(res.status).toBe('failed');
+    expect(runDelegatedTask).not.toHaveBeenCalled();
+    expect(res.returnDisplay).toContain('未安装');
+    expect(res.returnDisplay).toContain('Claude Code');
+    // The llmContent must carry guidance so the AI knows the task was NOT
+    // dispatched and should handle it itself.
+    const llmStr = typeof res.llmContent === 'string' ? res.llmContent : JSON.stringify(res.llmContent);
+    expect(llmStr).toContain('not installed');
+    expect(llmStr).toContain('guidance');
+    expect(llmStr).toContain('handle the task yourself');
+  });
+
+  it('returns a clear "not installed" failure when codex is unavailable', async () => {
+    mockedIsAgentAvailable.mockResolvedValue(false);
+
+    const tool = makeTool();
+    const res = await tool.execute(
+      { task: 'do x', agent: 'codex' },
+      new AbortController().signal,
+    );
+    expect(res.status).toBe('failed');
+    expect(runDelegatedTask).not.toHaveBeenCalled();
+    expect(res.returnDisplay).toContain('Codex');
+    expect(res.returnDisplay).toContain('未安装');
+    const llmStr = typeof res.llmContent === 'string' ? res.llmContent : JSON.stringify(res.llmContent);
+    expect(llmStr).toContain('EASYCODE_CODEX_ACP_CMD');
+  });
+
+  it('still dispatches normally when agent IS available', async () => {
+    mockedIsAgentAvailable.mockResolvedValue(true);
+    runDelegatedTask.mockReturnValue(new Promise(() => {}));
+
+    const tool = makeTool();
+    const res = await tool.execute({ task: 'do x' }, new AbortController().signal);
+    expect(res.status).toBe('success');
+    expect(runDelegatedTask).toHaveBeenCalled();
   });
 });
 
