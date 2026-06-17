@@ -50,7 +50,7 @@ Do NOT use this tool:
 
 export const GEMINI_CONFIG_DIR = '.easycode-user';
 export const DEFAULT_CONTEXT_FILENAME = 'DEEPV.md';
-export const MEMORY_SECTION_HEADER = '## DeepV Code Added Memories';
+export const MEMORY_SECTION_HEADER = '## Easy Code Added Memories';
 
 /**
  * Default context file names in priority order.
