@@ -74,6 +74,14 @@ export const IpcInvoke = {
   SaveClipboardImage: 'workspace:save-clipboard-image',
   // clipboard
   ReadClipboardImage: 'clipboard:read-image',
+  // version update
+  UpdateGetState: 'update:get-state',
+  UpdateCheck: 'update:check',
+  UpdateDownload: 'update:download',
+  UpdateCancelDownload: 'update:cancel-download',
+  UpdateInstall: 'update:install',
+  UpdateSkip: 'update:skip',
+  UpdateSnooze: 'update:snooze',
 } as const;
 
 /** Main -> renderer, push events (webContents.send / ipcRenderer.on). */
@@ -86,6 +94,10 @@ export const IpcEvent = {
   FeishuChanged: 'feishu:changed',
   /** Main asks the renderer to surface a session (e.g. notification clicked). */
   SessionFocusRequest: 'session:focus-request',
+  /** Version-update state changed (check result, download done, error, …). */
+  UpdateStatus: 'update:status',
+  /** Streamed download progress for an in-flight update download. */
+  UpdateProgress: 'update:progress',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -379,6 +391,8 @@ export type DesktopSessionEvent =
       status: ToolCallStatus;
       locations?: ToolLocation[];
       content?: ToolCallContent[];
+      /** Raw tool arguments, used to build parameter-aware result summaries. */
+      rawInput?: Record<string, unknown>;
     }
   | {
       kind: 'tool_update';
@@ -612,6 +626,89 @@ export interface RewindResult {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Version updates
+//
+// The desktop checks `…/api/desktop/version` for a newer build, downloads the
+// platform installer (DMG on macOS, NSIS .exe on Windows) with progress, and
+// then launches it. There is no in-place auto-update (no electron-updater feed):
+// macOS mounts the DMG for a manual drag-to-Applications, Windows runs the
+// installer and quits so it can replace the files.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The OS key under the version API's `data` object. Linux is unsupported. */
+export type UpdatePlatform = 'mac' | 'windows';
+
+/**
+ * The update lifecycle, mirrored 1:1 into the renderer's banner UI.
+ *  - `idle`        — no update known (or already on the latest version).
+ *  - `checking`    — a version check is in flight.
+ *  - `available`   — a newer version exists; not yet downloading.
+ *  - `downloading` — the installer is downloading (see {@link UpdateState.progress}).
+ *  - `downloaded`  — the installer is on disk, ready to launch.
+ *  - `installing`  — the installer has been launched (Windows: app about to quit).
+ *  - `error`       — the last check/download/launch failed (see `error`).
+ */
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'installing'
+  | 'error';
+
+/** A newer build advertised by the version API for this platform. */
+export interface UpdateInfo {
+  /** Semver of the available build, e.g. "1.2.3". */
+  version: string;
+  /** Direct download URL of the platform installer (DMG / EXE). */
+  url: string;
+  platform: UpdatePlatform;
+  /** Optional release notes / changelog, if the API ever provides them. */
+  notes?: string;
+}
+
+/** Streamed progress while the installer downloads. */
+export interface UpdateDownloadProgress {
+  receivedBytes: number;
+  /** Total size from Content-Length, or 0 when the server didn't send one. */
+  totalBytes: number;
+  /** 0..100, or -1 when the total size is unknown. */
+  percent: number;
+  bytesPerSecond: number;
+}
+
+/** The full update snapshot the renderer renders from. */
+export interface UpdateState {
+  phase: UpdatePhase;
+  /** The running app's version (`app.getVersion()`). */
+  currentVersion: string;
+  /** The available update, present once a check finds one. */
+  info?: UpdateInfo;
+  /** Live download progress (only while `phase === 'downloading'`). */
+  progress?: UpdateDownloadProgress;
+  /** Absolute path of the downloaded installer (once `phase === 'downloaded'`). */
+  downloadedPath?: string;
+  /** Last error message (only while `phase === 'error'`). */
+  error?: string;
+  /** True when the user chose "skip this version" — the banner stays hidden. */
+  skipped?: boolean;
+  /**
+   * True when the user chose "later" this run — the banner is hidden until the
+   * next launch even though an update is available. Renderer-only concern.
+   */
+  snoozed?: boolean;
+  /** False on platforms without an installer feed (Linux) — no banner is shown. */
+  supported: boolean;
+}
+
+export interface UpdateCheckResult {
+  /** True when a newer, non-skipped version is available for this platform. */
+  updateAvailable: boolean;
+  state: UpdateState;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // The bridge surface exposed on window.easycode (preload).
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -750,6 +847,30 @@ export interface EasycodeBridge {
   };
   backend: {
     onLog(cb: (line: string) => void): () => void;
+  };
+  updater: {
+    /** Read the current update snapshot (e.g. to render the banner on mount). */
+    getState(): Promise<UpdateState>;
+    /**
+     * Check the version API now. `manual: true` ignores a prior "skip"/"snooze"
+     * so the user-initiated check in Settings always reports honestly.
+     */
+    check(manual?: boolean): Promise<UpdateCheckResult>;
+    /** Begin downloading the available installer; resolves with the new state. */
+    download(): Promise<UpdateState>;
+    /** Abort an in-flight download. */
+    cancelDownload(): Promise<void>;
+    /**
+     * Launch the downloaded installer. macOS mounts the DMG (manual drag);
+     * Windows runs the .exe and quits the app so it can replace files.
+     */
+    install(): Promise<void>;
+    /** Permanently dismiss the given version (persisted across launches). */
+    skip(version: string): Promise<void>;
+    /** Hide the banner until the next app launch (this run only). */
+    snooze(): Promise<void>;
+    onStatus(cb: (state: UpdateState) => void): () => void;
+    onProgress(cb: (p: UpdateDownloadProgress) => void): () => void;
   };
 }
 

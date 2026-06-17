@@ -4,6 +4,7 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { UpdateBanner } from './components/UpdateBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
 import { useT } from './i18n/useT';
@@ -67,6 +68,7 @@ export function App() {
           <SessionView />
         </ErrorBoundary>
         <PermissionDialog />
+        <UpdateBanner />
       </div>
     </ErrorBoundary>
   );
