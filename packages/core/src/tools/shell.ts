@@ -466,7 +466,9 @@ Reserve this tool for system commands and terminal operations that have no dedic
     let description = `${params.command}`;
     // append optional [in directory]
     // note description is needed even if validation fails due to absolute path
-    if (params.directory) {
+    // `(root)` is the sentinel meaning "project root" (the default cwd), so it
+    // carries no information — skip it rather than leak the raw token into the UI.
+    if (params.directory && params.directory !== '(root)') {
       description += ` [in ${params.directory}]`;
     }
     // append optional (description), replacing any line breaks with spaces

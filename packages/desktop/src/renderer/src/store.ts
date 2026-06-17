@@ -26,6 +26,7 @@ import type {
   ToolCallContent,
   ToolCallStatus,
   ToolLocation,
+  UpdateState,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -52,6 +53,7 @@ export type ChatItem =
       locations?: ToolLocation[];
       content: ToolCallContent[];
       terminalOutput?: string;
+      rawInput?: Record<string, unknown>;
     };
 
 export interface SessionView {
@@ -103,6 +105,20 @@ interface StoreState {
    */
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
+
+  /** Latest version-update snapshot from the main process (null until loaded). */
+  update: UpdateState | null;
+  /** Run a version check. `manual` ignores a prior skip (Settings button). */
+  checkUpdate: (manual?: boolean) => Promise<void>;
+  /** Download the available installer (progress streams in via onProgress). */
+  downloadUpdate: () => Promise<void>;
+  cancelUpdateDownload: () => Promise<void>;
+  /** Launch the downloaded installer (DMG mount / EXE run). */
+  installUpdate: () => Promise<void>;
+  /** Permanently dismiss the available version. */
+  skipUpdate: () => Promise<void>;
+  /** Hide the banner until the next launch. */
+  snoozeUpdate: () => Promise<void>;
 
   /**
    * Enter custom-model-only mode (bypass the login gate). Refreshes the default
@@ -216,6 +232,29 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ theme });
   },
 
+  update: null,
+  checkUpdate: async (manual) => {
+    const res = await api.updater.check(!!manual);
+    set({ update: res.state });
+  },
+  downloadUpdate: async () => {
+    const state = await api.updater.download();
+    set({ update: state });
+  },
+  cancelUpdateDownload: async () => {
+    await api.updater.cancelDownload();
+  },
+  installUpdate: async () => {
+    await api.updater.install();
+  },
+  skipUpdate: async () => {
+    const v = get().update?.info?.version;
+    if (v) await api.updater.skip(v);
+  },
+  snoozeUpdate: async () => {
+    await api.updater.snooze();
+  },
+
   enterCustomModelMode: async () => {
     const id = await firstEnabledCustomModelId();
     if (!id) return false; // nothing usable — keep the user on the login screen
@@ -284,6 +323,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
     api.backend.onLog((line) => {
       set((s) => ({ backendLog: [...s.backendLog.slice(-400), line] }));
+    });
+
+    // Version updates: seed the initial snapshot, then track main-process state
+    // changes (check result / download done / error) and live download progress.
+    api.updater
+      .getState()
+      .then((u) => set({ update: u }))
+      .catch(() => undefined);
+    api.updater.onStatus((u) => set({ update: u }));
+    api.updater.onProgress((progress) => {
+      set((s) => (s.update ? { update: { ...s.update, progress } } : {}));
     });
 
     await get().refreshSessions();
@@ -650,6 +700,27 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
       };
 
     case 'tool_call': {
+      // Idempotent on toolCallId: a backend may re-announce a call (e.g. a
+      // streaming proxy replaying the cumulative candidate). Refresh the
+      // existing row in place rather than appending a duplicate.
+      const exists = view.transcript.some(
+        (it) => it.kind === 'tool' && it.toolCallId === event.toolCallId,
+      );
+      if (exists) {
+        const t = view.transcript.map((it) => {
+          if (it.kind !== 'tool' || it.toolCallId !== event.toolCallId) return it;
+          return {
+            ...it,
+            title: event.title,
+            toolKind: event.toolKind,
+            status: event.status,
+            locations: event.locations,
+            rawInput: event.rawInput,
+            content: event.content && event.content.length ? event.content : it.content,
+          };
+        });
+        return { ...view, transcript: t, draftAssistantId: undefined };
+      }
       const item: ChatItem = {
         kind: 'tool',
         id: newId(),
@@ -659,6 +730,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         status: event.status,
         locations: event.locations,
         content: event.content ?? [],
+        rawInput: event.rawInput,
       };
       return { ...view, transcript: [...view.transcript, item], draftAssistantId: undefined };
     }

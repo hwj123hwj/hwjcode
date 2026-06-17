@@ -583,6 +583,18 @@ select {
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+  position: relative;
+}
+/* The empty/home screen has no .toolbar, so this overlay strip provides the
+   same draggable window region across the top of the main pane. Height mirrors
+   the .toolbar (48px) so the draggable zone lines up with the sidebar header. */
+.empty-titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  -webkit-app-region: drag;
 }
 .toolbar {
   display: flex;
@@ -863,13 +875,26 @@ select {
 .tool-title {
   font-family: var(--mono);
   font-size: 12.5px;
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text);
 }
+/* Secondary single-line result description ("Read X, N lines", "Found N matches"). */
+.tool-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tool-status {
+  margin-left: auto;
+  flex: none;
   font-size: 10.5px;
   font-weight: 600;
   padding: 2px 9px;
@@ -892,6 +917,29 @@ select {
 .tool-status.failed {
   background: var(--red-weak);
   color: var(--red);
+}
+/* Per-status left accent so running/failed calls read at a glance. */
+.tool-pending,
+.tool-in_progress {
+  border-left: 2px solid var(--amber);
+}
+.tool-in_progress {
+  animation: tool-pulse 1.6s ease-in-out infinite;
+}
+.tool-failed {
+  border-left: 2px solid var(--red);
+}
+.tool-completed {
+  border-left: 2px solid transparent;
+}
+@keyframes tool-pulse {
+  0%,
+  100% {
+    border-left-color: var(--amber);
+  }
+  50% {
+    border-left-color: var(--amber-weak);
+  }
 }
 .tool-chevron {
   color: var(--text-faint);
@@ -969,6 +1017,85 @@ select {
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
 }
+.diff-preview-verb {
+  flex: none;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.diff-preview-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.diff-preview-stat {
+  flex: none;
+  display: inline-flex;
+  gap: 7px;
+  font-weight: 600;
+}
+.diff-preview-stat .add {
+  color: var(--green);
+}
+.diff-preview-stat .del {
+  color: var(--red);
+}
+.diff-preview-body {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  background: var(--bg);
+}
+.diff-preview-body .diff-line {
+  display: flex;
+  padding: 0;
+  white-space: pre;
+}
+.diff-preview-body .diff-line.add {
+  background: var(--green-weak);
+}
+.diff-preview-body .diff-line.del {
+  background: var(--red-weak);
+}
+.diff-preview-body .diff-line.ctx {
+  background: transparent;
+}
+.diff-preview-body .diff-line.gap {
+  background: var(--bg-elev);
+  color: var(--text-faint);
+  font-style: italic;
+}
+.diff-gut {
+  flex: none;
+  width: 34px;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+.diff-mark {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  user-select: none;
+  color: var(--text-faint);
+}
+.diff-preview-body .diff-line.add .diff-mark {
+  color: var(--green);
+}
+.diff-preview-body .diff-line.del .diff-mark {
+  color: var(--red);
+}
+.diff-code {
+  flex: 1 1 auto;
+  padding-right: 12px;
+}
 
 /* markdown */
 .md p {
@@ -1038,10 +1165,27 @@ select {
 .md a:hover {
   border-bottom-color: var(--accent);
 }
+.md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin: 4px 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .md table {
   border-collapse: collapse;
-  margin: 0 0 12px;
+  width: 100%;
   font-size: 12.5px;
+}
+.md-table-wrap table {
+  margin: 0;
 }
 .md th,
 .md td {
@@ -1058,6 +1202,151 @@ select {
   padding-left: 14px;
   border-left: 2px solid var(--border-strong);
   color: var(--text-dim);
+}
+
+/* ── mermaid diagrams ──────────────────────────────────────────────────── */
+.mermaid-block {
+  position: relative;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.mermaid-toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 1;
+}
+.mermaid-block:hover .mermaid-toolbar {
+  opacity: 1;
+}
+.mermaid-tool-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.mermaid-tool-btn:hover {
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.mermaid-svg {
+  display: flex;
+  justify-content: center;
+  padding: 16px 14px;
+  overflow-x: auto;
+  cursor: zoom-in;
+}
+.mermaid-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-source {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--bg-sunken);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.mermaid-source code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.mermaid-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.mermaid-status .ic {
+  flex: none;
+}
+
+/* zoom overlay */
+.mermaid-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  z-index: 120;
+  animation: fade-in 0.12s ease;
+  /* Inset the panel from the window edges so the overlay doesn't run flush to
+     the frame, and reserve extra room at the top for the title-bar / window
+     controls so neither the panel nor the close button collides with them. */
+  --mermaid-zoom-edge: 28px;
+  --mermaid-zoom-top: 28px;
+}
+/* macOS draws traffic-light buttons over the top of the content (hiddenInset);
+   give the top a wider safe area so the close button clears them. */
+[data-platform='darwin'] .mermaid-zoom-backdrop {
+  --mermaid-zoom-top: 52px;
+}
+.mermaid-zoom-close {
+  position: absolute;
+  top: var(--mermaid-zoom-top);
+  right: var(--mermaid-zoom-edge);
+  /* Lift the button half-out of the top safe area so it sits above the panel's
+     top-right corner instead of overlapping the diagram. */
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  z-index: 1;
+}
+.mermaid-zoom-close:hover {
+  background: var(--bg-elev);
+}
+.mermaid-zoom-stage {
+  position: absolute;
+  inset: var(--mermaid-zoom-top) var(--mermaid-zoom-edge) var(--mermaid-zoom-edge);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.4));
+}
+.mermaid-zoom-stage:active {
+  cursor: grabbing;
+}
+.mermaid-zoom-svg {
+  transform-origin: center center;
+}
+.mermaid-zoom-svg svg {
+  /* Fit within the inset panel (minus its padding) rather than the viewport. */
+  max-width: 100%;
+  max-height: 100%;
+  height: auto;
 }
 
 /* ── prompt bar ────────────────────────────────────────────────────────── */
@@ -1352,6 +1641,154 @@ select {
 .plan-text.mono {
   font-family: var(--mono);
   font-size: 12px;
+}
+
+/* ── sticky todo panel ─────────────────────────────────────────────────── */
+@keyframes todoSlideUp {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.sticky-todo-panel {
+  margin: 0 16px 8px 16px;
+  align-self: center;
+  width: calc(100% - 32px);
+  max-width: 620px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  z-index: 5;
+  animation: todoSlideUp 0.22s ease-out;
+}
+.sticky-todo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.sticky-todo-header:hover {
+  background: var(--bg-hover);
+}
+.sticky-todo-panel.expanded .sticky-todo-header {
+  border-bottom: 1px solid var(--border);
+}
+.sticky-todo-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sticky-todo-icon {
+  color: var(--accent);
+  flex: none;
+}
+.sticky-todo-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.sticky-todo-count {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.sticky-todo-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-faint);
+  flex: none;
+}
+.sticky-todo-bar {
+  width: 64px;
+  height: 4px;
+  background: var(--bg-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sticky-todo-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.sticky-todo-chevron {
+  transition: transform 0.2s ease;
+}
+.sticky-todo-chevron.up {
+  transform: rotate(180deg);
+}
+.sticky-todo-content {
+  max-height: 26vh;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.sticky-todo-content .todo-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 12px;
+}
+.sticky-todo-content .todo-item-text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.sticky-todo-content .todo-item-text.completed,
+.sticky-todo-content .todo-item-text.cancelled {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.sticky-todo-content .todo-item-text.in_progress {
+  color: var(--text);
+  font-weight: 500;
+}
+/* status checkbox */
+.sticky-todo-panel .todo-checkbox {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-faint);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  background: transparent;
+}
+.sticky-todo-panel .todo-checkbox.in_progress {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.sticky-todo-panel .todo-checkbox-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+.sticky-todo-panel .todo-checkbox.completed {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--bg-elev);
+}
+.sticky-todo-panel .todo-checkbox.cancelled {
+  border-color: var(--text-faint);
+  color: var(--text-faint);
 }
 
 /* ── diff pane ─────────────────────────────────────────────────────────── */
@@ -2467,4 +2904,107 @@ select {
 }
 .typing-agent-ic {
   border-radius: 5px;
+}
+
+/* ── version-update toast (bottom-right, non-intrusive) ───────────────────── */
+.update-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  width: 340px;
+  max-width: calc(100vw - 36px);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 14px 14px 12px;
+  animation: pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.update-toast-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.update-toast-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px;
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.update-toast-titles {
+  flex: 1;
+  min-width: 0;
+}
+.update-toast-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.update-toast-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.update-toast-x {
+  flex: none;
+  margin: -2px -2px 0 0;
+}
+.update-progress {
+  margin-top: 11px;
+}
+.update-progress-track {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.2s ease;
+}
+.update-progress-fill.indeterminate {
+  width: 40%;
+  animation: update-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes update-indeterminate {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+.update-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.update-toast-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn.sm {
+  padding: 5px 11px;
+  font-size: 12px;
+}
+/* settings → software-update row */
+.update-check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.update-check-row .setting-desc {
+  margin: 0;
 }
