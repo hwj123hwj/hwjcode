@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type PaneKind, type SessionView as SV, type ViewDensity } from '../store';
 import { ChatPane } from './panes/ChatPane';
+import { SessionTodoPanel } from './StickyTodoPanel';
 import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
@@ -109,6 +110,8 @@ export function SessionView() {
           <PaneHost key={p} kind={p} view={view} t={t} onDensity={(d) => setDensity(meta.id, d)} />
         ))}
       </div>
+
+      <SessionTodoPanel key={view.meta.id} view={view} />
 
       <PromptBar view={view} />
     </main>
@@ -282,6 +285,9 @@ function EmptyState() {
 
   return (
     <main className="main">
+      {/* Draggable strip so the window can be moved from the empty/home screen,
+          matching the .toolbar drag region used once a session is open. */}
+      <div className="empty-titlebar" />
       <div className="empty">
         <div className="empty-inner">
           <div className="empty-title">{t('session.emptyPrompt')}</div>
