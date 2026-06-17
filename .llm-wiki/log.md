@@ -2,6 +2,25 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-17] ingest | 飞书 /model favorites 子命令 & esbuild 陈旧 JS 产物 Bug
+
+从对话中提取两个关键知识点：飞书端 `/model favorites` 子命令缺失修复，以及 esbuild 在 NodeNext 模块解析下打包 src 目录陈旧 `.js` 产物导致源码修改不生效的严重构建 Bug。
+
+### Pages Created
+- `wiki/source-feishu-model-favorites.md` — 源文档摘要：飞书 favorites 子命令修复全过程、模型配置存储机制、版本时间线、服务端数据问题
+- `wiki/esbuild-stale-js-bug.md` — 概念页：esbuild NodeNext 模块解析下优先打包 src/ 下的 .js 而非 .ts 的严重 Bug，含根因、症状特征、诊断方法、修复步骤、预防措施
+
+### Pages Updated
+- `wiki/nl-command-dispatch.md` — 更新日期至 2026-06-17，新增飞书端 favorites 子命令说明（1.1.30 新增），修正 CLI vs 飞书差异描述，新增已知限制 #6（代码分叉），新增 `[[source-feishu-model-favorites]]` 交叉引用
+- `wiki/build-system.md` — 新增 Pipelines 下方的 esbuild 关键陷阱警告和 `[[esbuild-stale-js-bug]]` 交叉引用，Sources 区域新增 `[[source-feishu-model-favorites]]` 和 `[[esbuild-stale-js-bug]]`
+- `wiki/feishu-integration.md` — 模型切换章节新增飞书端 `/model favorites` 子命令说明（1.1.30 新增）
+- `wiki/adding-builtin-tool-checklist.md` — 第12步 "Rebuild the Bundle" 新增 esbuild 陈旧 JS 产物陷阱警告和 `[[esbuild-stale-js-bug]]` 交叉引用
+- `wiki/development-workflow.md` — 红线区域新增"发版前必须验证 bundle 含最新代码"条目
+- `index.md` — Sources 表新增 #10，Entities/Concepts 表新增 esbuild-stale-js-bug 条目
+
+### Contradictions
+- `nl-command-dispatch.md` 原文说"飞书 `/model` handler 仅精确匹配"，暗示飞书端有 `/model <name>` 但未提及 favorites 缺失。实际飞书端 `/model` 是完全独立的实现，与 CLI 端 `modelCommand.ts` 并不共享代码。已在更新中修正。
+
 ## [2026-06-17] ingest | CLI 命名与数据存储解耦原理
 
 从对话中提取 CLI 改名后认证和历史自动继承的原理解释，创建数据目录解耦相关的 wiki 页面。

@@ -15,6 +15,7 @@
 | 07 | [raw/07-mcp-system.md](raw/07-mcp-system.md) | [source-07-mcp-system](wiki/source-07-mcp-system.md) | MCP architecture, transport types, OAuth, two-phase loading, status display | 2026-04-09 |
 | 08 | feat/rename-to-hwjcode (commit 2fb40e12) | [source-hwjcode-rename](wiki/source-hwjcode-rename.md) | npm 包名 easycode-ai → hwjcode, CLI 命令 easycode → hwjcode, 发布到 npmjs.org | 2026-06-17 |
 | 09 | conversation-2026-06-17 | [source-data-directory-decoupling](wiki/source-data-directory-decoupling.md) | CLI 命名与数据存储解耦原理 — 所有持久化路径与包名无关 | 2026-06-17 |
+| 10 | conversation-2026-06-17-feishu-model-favorites | [source-feishu-model-favorites](wiki/source-feishu-model-favorites.md) | 飞书 /model favorites 子命令新增 & esbuild 陈旧 JS 产物 Bug 修复 | 2026-06-17 |
 
 
 ## Entities
@@ -34,6 +35,7 @@
 | [background-tasks](wiki/background-tasks.md) | entity | Background Task system - process control & execution |
 | [feishu-integration](wiki/feishu-integration.md) | entity | Feishu / Lark Bot Integration - WebSocket long-polling gateway |
 | [nl-command-dispatch](wiki/nl-command-dispatch.md) | concept | Natural Language Command Dispatch — NL keyword → slash command rewrite (3 mechanisms) |
+| [esbuild-stale-js-bug](wiki/esbuild-stale-js-bug.md) | concept | Critical build trap — esbuild ships stale .js artifacts from src/ instead of .ts source |
 
 ### Classes / Components
 

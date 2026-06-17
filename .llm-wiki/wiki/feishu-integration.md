@@ -86,6 +86,8 @@ To guarantee a clean TUI (terminal) display and protect sensitive corporate prom
 ### 模型切换
 用户说 `切换到 deepseek` / `用 glm` / `换 claude` 等 → 自动改写为 `/model <name>`。支持 13 种触发词和 6 层匹配（精确名→显示名→关键词交集→厂商别名），仅匹配收藏模型。
 
+> **飞书端 `/model favorites` 子命令**（1.1.30 新增）：支持 `/model favorites add/remove/list`，与 CLI 端 `modelCommand.ts` 对齐。此前飞书端 `/model` 是独立实现，缺少 favorites 子命令，输入 `/model favorites add xxx` 会被当成模型名查找而报错。详见 [[source-feishu-model-favorites]]。
+
 ### 命令分发
 | 自然语言示例 | 映射命令 |
 |---|---|

@@ -1,8 +1,8 @@
 ---
 type: concept
-date: 2026-06-16
+date: 2026-06-17
 tags: [cli, feishu, natural-language, slash-command, model-switching, tool-toggle]
-sources: [packages/cli/src/ui/hooks/useNLCommandDispatch.ts, packages/cli/src/ui/hooks/useNLModelSwitch.ts, packages/cli/src/ui/commands/feishuCommand.ts]
+sources: [packages/cli/src/ui/hooks/useNLCommandDispatch.ts, packages/cli/src/ui/hooks/useNLModelSwitch.ts, packages/cli/src/ui/commands/feishuCommand.ts, conversation-2026-06-17-feishu-model-favorites]
 ---
 
 # Natural Language Command Dispatch (自然语言命令分发)
@@ -47,9 +47,11 @@ sources: [packages/cli/src/ui/hooks/useNLCommandDispatch.ts, packages/cli/src/ui
 
 **限制**：仅匹配用户收藏模型（`/model favorites add` 添加，最多5个）
 
+> **重要**：飞书端 `/model favorites` 子命令于 1.1.30 版本新增。此前飞书端 `/model` 是独立实现（不与 CLI 端 `modelCommand.ts` 共享代码），只支持 `/model`（列表）和 `/model <name>`（切换），输入 `/model favorites add xxx` 会被当成模型名查找而报错。详见 [[source-feishu-model-favorites]]。
+
 **CLI vs 飞书差异**：
-- CLI：命中后直接调用 `geminiClient.switchModel()`，消息不发 AI
-- 飞书：改写为 `/model <name>`，走 slash 命令管线
+- CLI：`modelCommand.ts` 有完整 favorites 子命令（add/remove/list），命中 NL 切换后直接调用 `geminiClient.switchModel()`，消息不发 AI
+- 飞书：`feishuCommand.ts` 独立实现 `/model` handler，1.1.30 起新增 favorites 子命令；NL 切换改写为 `/model <name>` 走 slash 命令管线
 
 ### 2. 命令分发
 
@@ -88,6 +90,7 @@ sources: [packages/cli/src/ui/hooks/useNLCommandDispatch.ts, packages/cli/src/ui
 3. **无英文关键词**: 所有关键词仅中文，无英文自然语言触发
 4. **工具开关精确匹配**: 不像通用命令分发支持子串匹配+噪声剥离，工具开关要求输入精确匹配触发短语
 5. **潜在误触发**: `indexOf` 子串匹配可能导致长句中偶然包含关键词时误触发
+6. **飞书/CLI 代码分叉**: 飞书端 `/model` 在 `feishuCommand.ts` 独立实现，CLI 端在 `modelCommand.ts`，两套代码需同步维护 favorites 等子命令。详见 [[source-feishu-model-favorites]]
 
 ## 扩展指南
 
