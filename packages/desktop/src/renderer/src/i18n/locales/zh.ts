@@ -319,6 +319,8 @@ export const zh = {
   'update.installingWin': '即将退出并运行安装程序…',
   'update.failed': '更新失败',
   'update.retry': '重试',
+  'update.minimize': '最小化（后台继续下载）',
+  'update.expand': '展开更新进度',
   // settings → 软件更新
   'update.section': '软件更新',
   'update.checkNow': '检查更新',
