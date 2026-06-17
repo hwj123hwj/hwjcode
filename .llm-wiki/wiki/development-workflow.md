@@ -37,6 +37,7 @@ docs(wiki): update repo references
 - **禁止直接推 master**——所有改动必须走分支 + MR
 - **禁止 `git push --force` 到 master**——master是保护分支
 - **禁止 `git commit --amend`已推送的提交**
+- **发版前必须验证 bundle 含最新代码**——`src/` 下的旧 `.js` 编译产物会导致 esbuild 打包旧代码，详见 [[esbuild-stale-js-bug]]
 
 ## 上游同步
 
