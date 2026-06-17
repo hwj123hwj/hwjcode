@@ -8,8 +8,15 @@
  * update, or an error from a *manual* check). The whole flow lives here:
  * available → download (with progress + cancel) → install. The user can always
  * snooze ("later", this run) or permanently skip the version.
+ *
+ * While downloading, the user can *minimize* the card into a small floating
+ * progress pill (bottom-right) so the corner stays out of the way and they can
+ * keep working — the download keeps running in the background. We auto-expand
+ * again the moment something needs the user's attention (download finished and
+ * ready to install, install/restart starting, or an error).
  */
 
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useStore } from '../store';
 import { Icon } from './Icon';
 import { useT } from '../i18n/useT';
@@ -37,8 +44,16 @@ export function UpdateBanner() {
   const skip = useStore((s) => s.skipUpdate);
   const snooze = useStore((s) => s.snoozeUpdate);
 
+  // UI-only: collapsed into the floating progress pill. Minimizing is offered
+  // only while downloading; any later phase needs attention, so we expand back.
+  const [minimized, setMinimized] = useState(false);
+  const phase = update?.phase;
+  useEffect(() => {
+    if (phase !== 'downloading') setMinimized(false);
+  }, [phase]);
+
   if (!update || !update.supported) return null;
-  const { phase, info, progress, skipped, snoozed } = update;
+  const { info, progress, skipped, snoozed } = update;
 
   // Nothing to show while idle/checking, or once the user dismissed this version.
   const errorFromManual = phase === 'error' && !!update.error;
@@ -52,6 +67,28 @@ export function UpdateBanner() {
   if (phase !== 'error' && !info) return null;
 
   const version = info?.version ?? '';
+
+  // Minimized: a tiny floating pill that keeps showing download progress and
+  // expands back to the full card on click. Only reachable while downloading.
+  if (minimized && phase === 'downloading') {
+    const pct = progress && progress.percent >= 0 ? progress.percent : -1;
+    return (
+      <button
+        className="update-pill"
+        title={t('update.expand')}
+        aria-label={t('update.expand')}
+        onClick={() => setMinimized(false)}
+      >
+        <span
+          className={`update-pill-ring${pct < 0 ? ' indeterminate' : ''}`}
+          style={pct >= 0 ? ({ ['--p']: pct } as CSSProperties) : undefined}
+        >
+          <Icon name={pct < 0 ? 'loader' : 'sparkle'} size={12} />
+        </span>
+        <span className="update-pill-pct">{pct >= 0 ? `${pct}%` : t('update.downloading')}</span>
+      </button>
+    );
+  }
 
   return (
     <div className="update-toast" role="status">
@@ -83,6 +120,17 @@ export function UpdateBanner() {
                 : t('update.currentVersion', { version: update.currentVersion })}
           </div>
         </div>
+        {/* While downloading, offer minimize (keep going in the background). */}
+        {phase === 'downloading' && (
+          <button
+            className="icon-btn update-toast-x"
+            title={t('update.minimize')}
+            aria-label={t('update.minimize')}
+            onClick={() => setMinimized(true)}
+          >
+            <Icon name="minimize" size={14} />
+          </button>
+        )}
         {/* Snooze (this run) is always the lightweight dismiss affordance. */}
         {phase !== 'installing' && (
           <button
