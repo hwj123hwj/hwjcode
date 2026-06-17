@@ -10,6 +10,7 @@
 
 import { create } from 'zustand';
 import { type Lang, loadStoredLang, persistLang } from './i18n/i18n';
+import { type ThemeMode, loadStoredTheme, persistTheme } from './theme';
 import { deriveTitleFromMessage, stripImageHints } from './sessionTitle';
 import type {
   AcpToolKind,
@@ -95,6 +96,13 @@ interface StoreState {
   /** UI display language; persisted to localStorage, defaults to the OS lang. */
   lang: Lang;
   setLang: (lang: Lang) => void;
+  /**
+   * Color theme override; persisted to localStorage. 'system' follows the OS,
+   * 'light'/'dark' force a palette. Applied to <html data-theme> by <App> (and
+   * mirrored to the native window chrome via `api.theme.set`).
+   */
+  theme: ThemeMode;
+  setTheme: (theme: ThemeMode) => void;
 
   /**
    * Enter custom-model-only mode (bypass the login gate). Refreshes the default
@@ -201,6 +209,11 @@ export const useStore = create<StoreState>((set, get) => ({
   setLang: (lang) => {
     persistLang(lang);
     set({ lang });
+  },
+  theme: loadStoredTheme(),
+  setTheme: (theme) => {
+    persistTheme(theme);
+    set({ theme });
   },
 
   enterCustomModelMode: async () => {

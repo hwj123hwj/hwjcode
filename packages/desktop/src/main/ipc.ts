@@ -8,7 +8,7 @@
  * the renderer.
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, nativeTheme } from 'electron';
 import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
 import { TurnNotifier } from './notifications.js';
@@ -48,6 +48,7 @@ import type {
   PermissionMode,
   PermissionResponse,
   PromptOptions,
+  ThemeMode,
 } from '../shared/ipc.js';
 
 /** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
@@ -169,6 +170,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
     updateUserSettings(patch),
   );
+
+  // ── color theme ───────────────────────────────────────────────────────────
+  // Mirror the renderer's GUI theme onto the native window chrome (title bar,
+  // scrollbars, form controls). 'system' restores OS-follow. The visible app
+  // palette itself is driven by CSS in the renderer; this just keeps the native
+  // shell consistent. The preference is persisted renderer-side (localStorage).
+  ipcMain.handle(IpcInvoke.ThemeSet, (_e, mode: ThemeMode) => {
+    nativeTheme.themeSource = mode;
+  });
 
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(

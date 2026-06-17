@@ -40,6 +40,7 @@ import type {
   SessionEventEnvelope,
   SessionMeta,
   SessionStatusEnvelope,
+  ThemeMode,
 } from '../shared/ipc.js';
 
 /** Subscribe to a push channel; returns an unsubscribe fn. */
@@ -101,6 +102,9 @@ const bridge: EasycodeBridge = {
     get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,
     update: (patch: DesktopUserSettings) =>
       ipcRenderer.invoke(IpcInvoke.SettingsUpdate, patch) as Promise<DesktopUserSettings>,
+  },
+  theme: {
+    set: (mode: ThemeMode) => ipcRenderer.invoke(IpcInvoke.ThemeSet, mode) as Promise<void>,
   },
   agents: {
     detect: () =>

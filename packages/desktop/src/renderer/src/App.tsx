@@ -7,6 +7,7 @@ import { PermissionDialog } from './components/PermissionDialog';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
 import { useT } from './i18n/useT';
+import { applyTheme } from './theme';
 
 export function App() {
   const init = useStore((s) => s.init);
@@ -14,6 +15,7 @@ export function App() {
   const auth = useStore((s) => s.auth);
   const customModelOnly = useStore((s) => s.customModelOnly);
   const lang = useStore((s) => s.lang);
+  const theme = useStore((s) => s.theme);
   const t = useT();
 
   useEffect(() => {
@@ -24,6 +26,14 @@ export function App() {
   useEffect(() => {
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   }, [lang]);
+
+  // Reflect the theme choice onto <html data-theme> (drives the CSS palette) and
+  // mirror it to the native window chrome (title bar, scrollbars, form controls)
+  // via nativeTheme.themeSource in the main process.
+  useEffect(() => {
+    applyTheme(theme);
+    void window.easycode.theme?.set(theme);
+  }, [theme]);
 
   if (!ready || !auth) {
     return (

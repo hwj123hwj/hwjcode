@@ -9,6 +9,7 @@ import type {
   CustomModelProvider,
   DesktopUserSettings,
   ProjectMemoryMode,
+  ThemeMode,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -35,6 +36,13 @@ const MEMORY_MODES: Array<{ id: ProjectMemoryMode; labelKey: TranslationKey; hin
   { id: 'all', labelKey: 'settings.memoryAll', hintKey: 'settings.memoryAllHint' },
   { id: 'deepv-only', labelKey: 'settings.memoryDeepvOnly', hintKey: 'settings.memoryDeepvOnlyHint' },
   { id: 'none', labelKey: 'settings.memoryNone', hintKey: 'settings.memoryNoneHint' },
+];
+
+/** GUI color-theme options shown as chips in the 通用 tab. */
+const THEME_MODES: Array<{ id: ThemeMode; labelKey: TranslationKey }> = [
+  { id: 'system', labelKey: 'settings.themeSystem' },
+  { id: 'light', labelKey: 'settings.themeLight' },
+  { id: 'dark', labelKey: 'settings.themeDark' },
 ];
 
 type Tab = 'general' | 'models';
@@ -99,6 +107,8 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
   const t = useT();
   const lang = useStore((s) => s.lang);
   const setLang = useStore((s) => s.setLang);
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
   const [settings, setSettings] = useState<DesktopUserSettings | null>(null);
   const [replyLang, setReplyLang] = useState('');
   const [saved, setSaved] = useState(false);
@@ -147,6 +157,23 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
               </span>
             ))}
           </div>
+        </div>
+
+        <div className="setting-item">
+          <label className="field-label">{t('settings.theme')}</label>
+          <div className="prompt-config">
+            {THEME_MODES.map((m) => (
+              <span
+                key={m.id}
+                className={`chip interactive ${theme === m.id ? 'accent' : ''}`}
+                onClick={() => setTheme(m.id)}
+              >
+                {theme === m.id && <Icon name="check" size={13} />}
+                {t(m.labelKey)}
+              </span>
+            ))}
+          </div>
+          <div className="setting-desc">{t('settings.themeDesc')}</div>
         </div>
 
         <div className="setting-item">
