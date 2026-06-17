@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    <key>com.apple.security.inherit</key>
+    <true/>
+    <!-- 关键：Helper 进程（Renderer / GPU / Plugin）各自独立初始化 V8，
+         CodeRange 是每进程分配的。inherit=true 只继承沙盒权限，不会继承
+         allow-jit 这类 code-signing entitlement，必须在此显式声明，否则
+         hardened runtime + Apple Silicon 下 V8 JIT 无法预留可执行虚拟内存，
+         触发 "V8 process OOM (Failed to reserve virtual memory for CodeRange)"。 -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- 同主 entitlements：不要启用 allow-unsigned-executable-memory，
+         它会干扰 V8 的 CodeRange 虚拟内存保留。 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

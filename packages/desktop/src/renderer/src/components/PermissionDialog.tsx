@@ -1,5 +1,7 @@
 import { useStore } from '../store';
 import { Icon, toolKindIcon } from './Icon';
+import { useT } from '../i18n/useT';
+import { AskQuestionCard } from './AskQuestionCard';
 import type { PermissionOption } from '@shared/ipc';
 
 function btnClass(kind: PermissionOption['kind']): string {
@@ -11,8 +13,29 @@ function btnClass(kind: PermissionOption['kind']): string {
 export function PermissionDialog() {
   const queue = useStore((s) => s.permissionQueue);
   const respond = useStore((s) => s.respondPermission);
+  const t = useT();
   const req = queue[0];
   if (!req) return null;
+
+  // ask_user_question: the backend forwarded the multi-choice questions on the
+  // request. Render the dedicated card instead of the plain Allow/Reject dialog.
+  // Submitting picks the "allow" option (so the backend proceeds with
+  // ProceedOnce) and carries the collected answers back in the response _meta.
+  if (req.questions && req.questions.length > 0) {
+    const allow =
+      req.options.find((o) => o.kind === 'allow_once') ??
+      req.options.find((o) => o.kind === 'allow_always') ??
+      req.options.find((o) => o.kind !== 'reject_once' && o.kind !== 'reject_always');
+    return (
+      <AskQuestionCard
+        questions={req.questions}
+        onSubmit={(answers) =>
+          void respond(req.requestId, allow?.optionId ?? null, answers)
+        }
+        onCancel={() => void respond(req.requestId, null)}
+      />
+    );
+  }
 
   return (
     <div className="modal-backdrop">
@@ -20,7 +43,7 @@ export function PermissionDialog() {
         <div className="modal-head">
           <h3>
             <Icon name="shield" size={17} />
-            需要你的批准
+            {t('permission.title')}
           </h3>
           <div className="sub">
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -38,7 +61,7 @@ export function PermissionDialog() {
                 <div key={i} className="diff-preview">
                   <div className="diff-preview-head">
                     <Icon name={c.diff.oldText ? 'edit' : 'file'} size={13} />
-                    {c.diff.oldText ? '编辑' : '写入'} {c.diff.path}
+                    {c.diff.oldText ? t('diff.edit') : t('diff.write')} {c.diff.path}
                   </div>
                   <div style={{ overflowX: 'auto' }}>
                     {c.diff.oldText
@@ -66,7 +89,7 @@ export function PermissionDialog() {
         </div>
         <div className="modal-foot">
           <button className="btn" onClick={() => void respond(req.requestId, null)}>
-            取消
+            {t('common.cancel')}
           </button>
           {req.options.map((o) => (
             <button

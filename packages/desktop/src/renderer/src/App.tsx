@@ -4,17 +4,37 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { UpdateBanner } from './components/UpdateBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
+import { useT } from './i18n/useT';
+import { applyTheme } from './theme';
 
 export function App() {
   const init = useStore((s) => s.init);
   const ready = useStore((s) => s.ready);
   const auth = useStore((s) => s.auth);
+  const customModelOnly = useStore((s) => s.customModelOnly);
+  const lang = useStore((s) => s.lang);
+  const theme = useStore((s) => s.theme);
+  const t = useT();
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Keep <html lang> in sync for correct font hinting / accessibility.
+  useEffect(() => {
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }, [lang]);
+
+  // Reflect the theme choice onto <html data-theme> (drives the CSS palette) and
+  // mirror it to the native window chrome (title bar, scrollbars, form controls)
+  // via nativeTheme.themeSource in the main process.
+  useEffect(() => {
+    applyTheme(theme);
+    void window.easycode.theme?.set(theme);
+  }, [theme]);
 
   if (!ready || !auth) {
     return (
@@ -24,13 +44,16 @@ export function App() {
             <Icon name="sparkle" size={20} />
           </span>
           <span className="spinner" />
-          <span>正在启动 Easy Code…</span>
+          <span>{t('app.booting')}</span>
         </div>
       </div>
     );
   }
 
-  if (!auth.loggedIn) {
+  // Auth gate: signed-in users pass, and so do users who opted into
+  // custom-model-only mode (their own API keys, no sign-in needed). Everyone
+  // else gets the login screen — where they can also enter custom-model mode.
+  if (!auth.loggedIn && !customModelOnly) {
     return <Login />;
   }
 
@@ -45,6 +68,7 @@ export function App() {
           <SessionView />
         </ErrorBoundary>
         <PermissionDialog />
+        <UpdateBanner />
       </div>
     </ErrorBoundary>
   );

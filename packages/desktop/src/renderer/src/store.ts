@@ -9,9 +9,13 @@
  */
 
 import { create } from 'zustand';
+import { type Lang, loadStoredLang, persistLang } from './i18n/i18n';
+import { type ThemeMode, loadStoredTheme, persistTheme } from './theme';
+import { deriveTitleFromMessage, stripImageHints } from './sessionTitle';
 import type {
   AcpToolKind,
   AgentKind,
+  AskAnswersPayload,
   AuthStatus,
   GitFileDiff,
   PermissionMode,
@@ -22,6 +26,7 @@ import type {
   ToolCallContent,
   ToolCallStatus,
   ToolLocation,
+  UpdateState,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -48,6 +53,7 @@ export type ChatItem =
       locations?: ToolLocation[];
       content: ToolCallContent[];
       terminalOutput?: string;
+      rawInput?: Record<string, unknown>;
     };
 
 export interface SessionView {
@@ -68,12 +74,60 @@ export interface SessionView {
 interface StoreState {
   ready: boolean;
   auth: AuthStatus | null;
+  /**
+   * "Custom-model-only" mode: the user chose to use the app with their own
+   * custom models without signing in (mirrors the VSCode UI). When true the
+   * auth gate in <App> is bypassed even though `auth.loggedIn` is false. This
+   * is renderer-only state — refreshing the window resets it (the user is shown
+   * the login screen again, where they can re-enter the mode in one click).
+   */
+  customModelOnly: boolean;
+  /**
+   * The `custom:…` id of the first enabled custom model, captured at init / when
+   * entering custom-model mode. New sessions created while in custom-model mode
+   * default to this model so they don't fall back to the cloud model (which
+   * 401s when not signed in).
+   */
+  defaultCustomModelId?: string;
   sessions: Record<string, SessionView>;
   order: string[]; // session ids, newest first
   activeSessionId?: string;
   permissionQueue: PermissionRequest[];
   backendLog: string[];
   sidebarFilter: { status: 'all' | 'active' | 'archived'; query: string };
+  /** UI display language; persisted to localStorage, defaults to the OS lang. */
+  lang: Lang;
+  setLang: (lang: Lang) => void;
+  /**
+   * Color theme override; persisted to localStorage. 'system' follows the OS,
+   * 'light'/'dark' force a palette. Applied to <html data-theme> by <App> (and
+   * mirrored to the native window chrome via `api.theme.set`).
+   */
+  theme: ThemeMode;
+  setTheme: (theme: ThemeMode) => void;
+
+  /** Latest version-update snapshot from the main process (null until loaded). */
+  update: UpdateState | null;
+  /** Run a version check. `manual` ignores a prior skip (Settings button). */
+  checkUpdate: (manual?: boolean) => Promise<void>;
+  /** Download the available installer (progress streams in via onProgress). */
+  downloadUpdate: () => Promise<void>;
+  cancelUpdateDownload: () => Promise<void>;
+  /** Launch the downloaded installer (DMG mount / EXE run). */
+  installUpdate: () => Promise<void>;
+  /** Permanently dismiss the available version. */
+  skipUpdate: () => Promise<void>;
+  /** Hide the banner until the next launch. */
+  snoozeUpdate: () => Promise<void>;
+
+  /**
+   * Enter custom-model-only mode (bypass the login gate). Refreshes the default
+   * custom model from disk first; returns false (and stays on the login screen)
+   * if there is no enabled custom model to use.
+   */
+  enterCustomModelMode: () => Promise<boolean>;
+  /** Leave custom-model-only mode (e.g. on logout / explicit sign-in switch). */
+  exitCustomModelMode: () => void;
 
   init: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -86,6 +140,12 @@ interface StoreState {
     agentType?: AgentKind,
     model?: string,
   ) => Promise<void>;
+  /** Start a directory-less "just chat" session (Chats section). Returns its id. */
+  createChatSession: (
+    mode?: PermissionMode,
+    agentType?: AgentKind,
+    model?: string,
+  ) => Promise<string>;
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
@@ -99,7 +159,11 @@ interface StoreState {
   setModel: (id: string, modelId: string) => Promise<void>;
   setMode: (id: string, mode: PermissionMode) => Promise<void>;
   rewindTo: (id: string, beforeUserMessageIndex: number) => Promise<void>;
-  respondPermission: (requestId: string, optionId: string | null) => Promise<void>;
+  respondPermission: (
+    requestId: string,
+    optionId: string | null,
+    answers?: AskAnswersPayload,
+  ) => Promise<void>;
   setDensity: (id: string, density: ViewDensity) => void;
   togglePane: (id: string, pane: PaneKind) => void;
   setActivePane: (id: string, pane: PaneKind) => void;
@@ -150,11 +214,55 @@ function emptyView(meta: SessionMeta): SessionView {
 export const useStore = create<StoreState>((set, get) => ({
   ready: false,
   auth: null,
+  customModelOnly: false,
+  defaultCustomModelId: undefined,
   sessions: {},
   order: [],
   permissionQueue: [],
   backendLog: [],
   sidebarFilter: { status: 'active', query: '' },
+  lang: loadStoredLang(),
+  setLang: (lang) => {
+    persistLang(lang);
+    set({ lang });
+  },
+  theme: loadStoredTheme(),
+  setTheme: (theme) => {
+    persistTheme(theme);
+    set({ theme });
+  },
+
+  update: null,
+  checkUpdate: async (manual) => {
+    const res = await api.updater.check(!!manual);
+    set({ update: res.state });
+  },
+  downloadUpdate: async () => {
+    const state = await api.updater.download();
+    set({ update: state });
+  },
+  cancelUpdateDownload: async () => {
+    await api.updater.cancelDownload();
+  },
+  installUpdate: async () => {
+    await api.updater.install();
+  },
+  skipUpdate: async () => {
+    const v = get().update?.info?.version;
+    if (v) await api.updater.skip(v);
+  },
+  snoozeUpdate: async () => {
+    await api.updater.snooze();
+  },
+
+  enterCustomModelMode: async () => {
+    const id = await firstEnabledCustomModelId();
+    if (!id) return false; // nothing usable — keep the user on the login screen
+    set({ customModelOnly: true, defaultCustomModelId: id });
+    return true;
+  },
+
+  exitCustomModelMode: () => set({ customModelOnly: false }),
 
   init: async () => {
     // Idempotent: React StrictMode double-invokes the mount effect, and the App
@@ -166,6 +274,10 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const auth = await api.auth.status();
     set({ auth });
+
+    // Capture the default custom model up front so custom-model-only mode (and
+    // the first session it creates) can use it without another disk read.
+    set({ defaultCustomModelId: await firstEnabledCustomModelId() });
 
     api.auth.onChanged((status) => set({ auth: status }));
 
@@ -213,6 +325,17 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({ backendLog: [...s.backendLog.slice(-400), line] }));
     });
 
+    // Version updates: seed the initial snapshot, then track main-process state
+    // changes (check result / download done / error) and live download progress.
+    api.updater
+      .getState()
+      .then((u) => set({ update: u }))
+      .catch(() => undefined);
+    api.updater.onStatus((u) => set({ update: u }));
+    api.updater.onProgress((progress) => {
+      set((s) => (s.update ? { update: { ...s.update, progress } } : {}));
+    });
+
     await get().refreshSessions();
     set({ ready: true });
   },
@@ -242,13 +365,33 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   createSession: async (cwd, mode, agentType, model) => {
-    const meta = await api.sessions.create({ cwd, permissionMode: mode, agentType, model });
+    const meta = await api.sessions.create({
+      cwd,
+      permissionMode: mode,
+      agentType,
+      model: model ?? defaultModelFor(get()),
+    });
     liveSessions.add(meta.id);
     set((s) => ({
       sessions: { ...s.sessions, [meta.id]: emptyView(meta) },
       order: [meta.id, ...s.order.filter((x) => x !== meta.id)],
       activeSessionId: meta.id,
     }));
+  },
+
+  createChatSession: async (mode, agentType, model) => {
+    const meta = await api.sessions.createChat({
+      permissionMode: mode ?? 'default',
+      agentType,
+      model: model ?? defaultModelFor(get()),
+    });
+    liveSessions.add(meta.id);
+    set((s) => ({
+      sessions: { ...s.sessions, [meta.id]: emptyView(meta) },
+      order: [meta.id, ...s.order.filter((x) => x !== meta.id)],
+      activeSessionId: meta.id,
+    }));
+    return meta.id;
   },
 
   resumeSession: async (id) => {
@@ -295,6 +438,22 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   sendPrompt: async (id, text, atPaths, images) => {
+    // First user message → derive a provisional sidebar title from it (front-end
+    // only; the backend may later refine it via [TITLE_UPDATE]). Detected before
+    // we push the optimistic bubble, so "no user bubble yet" means "first turn".
+    const viewBefore = get().sessions[id];
+    const isFirstUserMessage =
+      !!viewBefore && !viewBefore.transcript.some((i) => i.kind === 'user');
+    if (isFirstUserMessage) {
+      const provisional = deriveTitleFromMessage(text);
+      if (provisional) {
+        // Optimistic local patch so the sidebar updates instantly; the main
+        // process persists + echoes back via sessionStatus (no lock).
+        patchMeta(set, id, { title: provisional });
+        api.sessions.setTitleProvisional(id, provisional).catch(() => undefined);
+      }
+    }
+
     // Optimistically render the user bubble. We send `text` (which may carry the
     // backend-only "[IMAGE: name (path)]" hints for image_reader) to the backend
     // verbatim, but the bubble shows the user's words with those hints stripped
@@ -359,10 +518,12 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
 
-  respondPermission: async (requestId, optionId) => {
+  respondPermission: async (requestId, optionId, answers) => {
     await api.permissions.respond(
       requestId,
-      optionId ? { outcome: 'selected', optionId } : { outcome: 'cancelled' },
+      optionId
+        ? { outcome: 'selected', optionId, ...(answers ? { answers } : {}) }
+        : { outcome: 'cancelled' },
     );
     set((s) => ({ permissionQueue: s.permissionQueue.filter((r) => r.requestId !== requestId) }));
   },
@@ -396,6 +557,30 @@ export const useStore = create<StoreState>((set, get) => ({
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
+/**
+ * The `custom:…` id of the first enabled custom model, or undefined if there
+ * are none. Used to (a) decide whether custom-model-only mode is even possible
+ * and (b) pick the default model for sessions created in that mode.
+ */
+async function firstEnabledCustomModelId(): Promise<string | undefined> {
+  try {
+    const models = await api.models.listCustom();
+    return models.find((m) => m.enabled !== false)?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The model a freshly created session should default to. In custom-model-only
+ * mode that's the captured custom model (otherwise the backend would fall back
+ * to the cloud model, which 401s when not signed in). Signed-in users get the
+ * backend default (undefined).
+ */
+function defaultModelFor(s: StoreState): string | undefined {
+  return s.customModelOnly ? s.defaultCustomModelId : undefined;
+}
+
 type SetFn = (
   partial:
     | StoreState
@@ -409,15 +594,6 @@ function updateView(set: SetFn, id: string, fn: (v: SessionView) => SessionView)
     if (!view) return {};
     return { sessions: { ...(s as StoreState).sessions, [id]: fn(view) } };
   });
-}
-
-/**
- * Strip the "[IMAGE: name (path)]" hints we append to a prompt for the backend's
- * image_reader tool, so the chat bubble shows clean user text rather than the
- * raw on-disk path. Used both for the optimistic bubble and replayed history.
- */
-function stripImageHints(text: string): string {
-  return text.replace(/\n*\[IMAGE:[^\]]*\][ \t]*/g, '').trim();
 }
 
 function patchMeta(set: SetFn, id: string, patch: Partial<SessionMeta>): void {
@@ -524,6 +700,27 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
       };
 
     case 'tool_call': {
+      // Idempotent on toolCallId: a backend may re-announce a call (e.g. a
+      // streaming proxy replaying the cumulative candidate). Refresh the
+      // existing row in place rather than appending a duplicate.
+      const exists = view.transcript.some(
+        (it) => it.kind === 'tool' && it.toolCallId === event.toolCallId,
+      );
+      if (exists) {
+        const t = view.transcript.map((it) => {
+          if (it.kind !== 'tool' || it.toolCallId !== event.toolCallId) return it;
+          return {
+            ...it,
+            title: event.title,
+            toolKind: event.toolKind,
+            status: event.status,
+            locations: event.locations,
+            rawInput: event.rawInput,
+            content: event.content && event.content.length ? event.content : it.content,
+          };
+        });
+        return { ...view, transcript: t, draftAssistantId: undefined };
+      }
       const item: ChatItem = {
         kind: 'tool',
         id: newId(),
@@ -533,6 +730,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         status: event.status,
         locations: event.locations,
         content: event.content ?? [],
+        rawInput: event.rawInput,
       };
       return { ...view, transcript: [...view.transcript, item], draftAssistantId: undefined };
     }

@@ -3048,12 +3048,26 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const path = await import('node:path');
         const fs = await import('node:fs');
         const absPath = path.resolve(targetPath);
+        // ⚠️ Bug 修复：绝不静默创建空目录。
+        // 旧逻辑在路径不存在时 mkdirSync(absPath)，导致用户拼错路径也能「绑定成功」，
+        // 但实际工作目录是一个空目录，群聊里的搜索/读写永远返回 0 结果且无任何报错，
+        // 极难排查。改为：路径不存在直接报错，让用户确认或先自行创建目录。
         if (!fs.existsSync(absPath)) {
-          fs.mkdirSync(absPath, { recursive: true });
+          return `❌ 绑定失败：路径不存在 \`${absPath}\`\n\n` +
+            `请确认该路径在本机真实存在（注意盘符与大小写）。\n` +
+            `若这是一个全新项目，请先在本地创建该目录后再执行 \`/bind\`。`;
+        }
+        if (!fs.statSync(absPath).isDirectory()) {
+          return `❌ 绑定失败：\`${absPath}\` 不是一个目录。\n请提供一个项目目录的绝对路径。`;
         }
         const routeUpdate: Partial<FeishuProjectRoute> = { projectRoot: absPath };
         if (agent) routeUpdate.agent = agent;
         await saveProjectRoute(msg.chatId, routeUpdate);
+        // 🧹 Bug 修复：清理该 chat 的隔离会话缓存。
+        // isolatedSessions 缓存了基于旧 targetDir 构建的 Config/GeminiClient，
+        // 仅在全局重启时 clear。若不在此处按 chatId 删除，重新 /bind 到新目录后，
+        // 下一条消息仍会命中旧缓存、在旧工作目录下执行，导致新绑定不生效。
+        isolatedSessions.delete(msg.chatId);
         // 📡 通知仪表板路由已更新
         emitFeishuProjectRoutesUpdated();
         const agentTip = agent
@@ -3779,16 +3793,35 @@ async function handleStart(context?: CommandContext): Promise<string> {
         const lastSessionAt = routeForChat?.lastSessionAt;
         const delegation = resolveDelegation(messageTextForAI, routeAgentForChat, lastSessionId, lastSessionAt);
         if (delegation.delegate && delegation.task) {
-          messageTextForAI = buildDelegateDirective(
-            delegation.task,
-            delegation.agent,
-            'stream',
-            delegation.resumeSessionId,
-          );
-          currentMessage = messageTextForAI;
-          dlog(
-            `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
-          );
+          // Guard: if the delegate_to_agent tool is not registered (no local
+          // agent detected at startup), skip the directive rewrite and let
+          // Easy Code handle the task itself. Otherwise the AI would be
+          // instructed to call a non-existent tool and fail.
+          const toolRegistry = await config.getToolRegistry();
+          const delegateTool = toolRegistry.getTool('delegate_to_agent');
+          if (!delegateTool) {
+            const agentLabel = delegation.agent === 'codex' ? 'Codex' : 'Claude Code';
+            dwarn(
+              `[Feishu] Delegation to ${delegation.agent} skipped: ${agentLabel} is not installed on this machine. Handling locally.`,
+            );
+            // Prepend a note so the AI knows the user wanted to delegate but
+            // the target agent is unavailable — the AI should handle it itself.
+            messageTextForAI =
+              `（注意：用户尝试将任务派发给本机 ${agentLabel}，但该 agent 未安装。请由你自行处理此任务。）\n\n` +
+              messageTextForAI;
+            currentMessage = messageTextForAI;
+          } else {
+            messageTextForAI = buildDelegateDirective(
+              delegation.task,
+              delegation.agent,
+              'stream',
+              delegation.resumeSessionId,
+            );
+            currentMessage = messageTextForAI;
+            dlog(
+              `[Feishu] Delegating message to ${delegation.agent} (reason=${delegation.reason}${delegation.resumeSessionId ? `, resume=${delegation.resumeSessionId}` : ''})`,
+            );
+          }
         }
       } catch (e: any) {
         dwarn(`[Feishu] Delegation routing check failed: ${e?.message || e}`);

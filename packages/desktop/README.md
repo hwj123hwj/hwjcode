@@ -45,6 +45,23 @@ npm run desktop:dev         # builds the agent bundle (dev) + launches Electron
 `desktop:dev` runs `bundle:dev` first so `bundle/easycode.js` exists for the
 backend to spawn. To point at a custom backend, set `EASYCODE_BACKEND_JS`.
 
+### Running a production backend locally
+
+`npm run start` (Electron preview) does **not** rebuild the bundle — it just
+spawns whatever `bundle/easycode.js` already exists. That file's environment
+(dev vs prod) is whatever the *last* bundle command produced, so a bare
+`start`/`desktop:dev` leaves you on a **dev** bundle. To preview the desktop on a
+guaranteed **production** backend:
+
+```bash
+npm run desktop:start:prod  # BUILD_ENV=production npm run bundle  +  start
+```
+
+This rebuilds `bundle/easycode.js` with `BUILD_ENV=production` (minified, baked
+to the live `api-code.deepvlab.ai` server) and then launches the preview against
+it. Note it leaves the repo's `bundle/` in prod form; run `desktop:dev` again to
+return to a dev bundle.
+
 Useful env (mirrors the CLI):
 
 - `DEEPX_SERVER_URL` — proxy/auth server (default `https://api-code.deepvlab.ai`)
@@ -69,6 +86,125 @@ npm run pack:desktop          # all three (per-OS toolchain still required:
 
 Artifacts land in `packages/desktop/release/<version>/`. The agent bundle is
 copied into the app under `resources/backend` via `electron-builder.yml`.
+
+## Signed & notarized macOS DMG
+
+`npm run pack:desktop:mac` produces an **unsigned** build. To ship a DMG that
+Gatekeeper accepts on other Macs you must **code-sign with a Developer ID
+certificate and notarize with Apple**. The repo ships a one-command wrapper for
+this — run it from the repo root:
+
+```bash
+npm run pack:mac:dmg            # build + Developer ID sign + Apple notarize + DMG
+# (alias: npm run desktop:pack:mac:notarize — identical)
+```
+
+This runs `packages/desktop/scripts/interactive-build.cjs`, which resolves your
+Apple credentials automatically (env vars → macOS Keychain), then drives
+electron-builder's `notarize: true` flow (see `electron-builder.yml`). The
+finished DMG lands in `packages/desktop/release/<version>/`.
+
+### One-time setup (per Mac that packages)
+
+Notarization/signing tooling is **macOS-only** (`codesign`, `xcrun notarytool`),
+so this must run on a Mac. Each packaging machine needs three things:
+
+1. **Xcode command-line tools**
+
+   ```bash
+   xcode-select --install
+   ```
+
+2. **The `Developer ID Application` certificate (with private key)** imported
+   into the *login* keychain. Export it from a machine that already has it as a
+   `.p12` and double-click to import, or request a new one from the Apple
+   Developer portal. The whole team shares the same Developer ID certificate.
+
+3. **The Apple App-specific password stored in the Keychain** — never hard-code
+   it. The build script reads the entry named `EC_APPLE_NOTARY`:
+
+   ```bash
+   security add-generic-password \
+     -a "<your-apple-id-email>" \
+     -s "EC_APPLE_NOTARY" \
+     -w "<app-specific-password>" \
+     -U
+   ```
+
+   Generate the app-specific password at <https://appleid.apple.com> →
+   Sign-In and Security → App-Specific Passwords (this is **not** your Apple
+   account password).
+
+4. **Shell env vars** (e.g. in `~/.zshrc`) — note the password is read from the
+   Keychain, *not* written in plain text:
+
+   ```bash
+   export APPLE_ID="<your-apple-id-email>"
+   export APPLE_TEAM_ID="6LUTP4CUH2"
+   # electron-builder notarytool reads APPLE_APP_SPECIFIC_PASSWORD (NOT APPLE_ID_PASSWORD)
+   export APPLE_APP_SPECIFIC_PASSWORD="$(security find-generic-password -a "$APPLE_ID" -s "EC_APPLE_NOTARY" -w 2>/dev/null)"
+   ```
+
+The build script falls back to a masked interactive prompt if neither the env
+vars nor the Keychain entry are available, so it still works on an un-configured
+machine.
+
+### Team collaboration
+
+- **Signing is tied to the Team, not to one person.** Any Apple ID that is a
+  member of Team `6LUTP4CUH2` can sign and notarize. Each member uses **their
+  own** Apple ID + **their own** app-specific password — do not share personal
+  Apple ID passwords.
+- Adding members requires an **Organization** developer account (an *Individual*
+  account cannot add team members). Invite people in App Store Connect → Users
+  and Access, the **Developer** role is enough for signing/notarizing.
+- To package on another Mac, copy what is *portable*: import the Developer ID
+  `.p12` (contains the private key — transfer securely, set a strong password,
+  never commit it) and configure the Keychain entry above. It is **not** locked
+  to any single machine.
+
+### Entitlements & the "blank window / V8 OOM" trap
+
+Under `hardenedRuntime: true` the entitlements must be exactly right or the app
+launches with **no main window** (only the dock icon and the About menu work).
+The give-away in `Console`/stderr is:
+
+```
+V8 process OOM (Failed to reserve virtual memory for CodeRange)
+```
+
+Two rules, both already encoded in `build/entitlements.mac.plist` and
+`build/entitlements.mac.inherit.plist`:
+
+1. **Enable `com.apple.security.cs.allow-jit`** — V8's JIT needs to reserve
+   executable virtual memory (the CodeRange). On Apple Silicon, missing this
+   crashes the renderer.
+2. **Do *not* enable `com.apple.security.cs.allow-unsigned-executable-memory`** —
+   it is only for patching C code and actively *interferes* with V8's CodeRange
+   reservation under hardened runtime, causing the same OOM.
+
+Crucially, `allow-jit` must be declared in **both** plists. Electron's helper
+processes (Renderer / GPU / Plugin) each spin up their own V8 isolate and
+allocate the CodeRange per-process, and they are signed with the **inherit**
+plist. `com.apple.security.inherit` only inherits *sandbox* permissions, **not**
+code-signing entitlements like `allow-jit` — so it must be repeated in
+`entitlements.mac.inherit.plist`, otherwise the helpers (not the main process)
+are what OOMs. A command-line launch of the main binary may look fine; the crash
+shows up once the fully-signed, hardened bundle runs its helpers.
+
+### Verify a finished build
+
+```bash
+xcrun stapler validate "release/<version>/Easy Code.app"      # ticket stapled?
+spctl -a -vvv -t install "release/<version>/Easy Code-<version>-arm64.dmg"
+# expect: source=Notarized Developer ID  →  accepted
+```
+
+> ⚠️ Notarization (`notarytool ... --wait`) uploads to Apple and **blocks with no
+> terminal output** while Apple's servers review — this can take minutes to tens
+> of minutes. No output ≠ stuck. If it truly hangs, the usual cause is a hidden
+> Keychain-access authorization prompt; the runner must execute as a logged-in
+> GUI user so `codesign` can reach the private key.
 
 > Note: `deepv-code-core` is a `file:` workspace dep (symlinked, hoisted to the
 > repo-root `node_modules`). electron-builder can't pack a symlink whose realpath
