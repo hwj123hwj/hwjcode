@@ -2,6 +2,26 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-18] ingest | 上游同步版本号策略修复 & 1.1.31 发版
+
+从对话中提取 fork 版本号独立领先策略、sync-upstream.sh 版本号对齐逻辑修复、cron 定时任务调整、1.1.31 发版流程。
+
+### Pages Created
+- `wiki/source-upstream-sync-version-strategy.md` — 源文档摘要：上游同步详情、版本号策略修复（只升不降）、cron 调整、1.1.31 发版、冲突处理
+- `wiki/release-process.md` — 重建发版流程规范（原文件在上游同步中丢失）：版本号独立领先、只升不降、标准发版步骤、红线纪律
+
+### Pages Updated
+- `wiki/source-hwjcode-rename.md` — sync-upstream.sh 防护机制章节：版本号策略从"对齐上游 tag"更新为"只升不降"，新增版本号策略变更警告，新增 [[source-upstream-sync-version-strategy]] 和 [[release-process]] 交叉引用
+- `wiki/development-workflow.md` — 上游同步章节扩充：新增定时任务（cron 0 12）、版本号策略、上游同步后必须手动发版、已知限制（VPN 依赖、网络抖动）
+- `wiki/build-system.md` — npm Publishing 章节扩充：新增 npm 账号、版本号策略、发布流程、发版指南引用；Sources 新增 [[source-upstream-sync-version-strategy]] 和 [[release-process]]
+- `wiki/self-update.md` — Related 新增 [[release-process]] 和 [[source-upstream-sync-version-strategy]] 交叉引用
+- `index.md` — Sources 表新增 #11，Guides & Checklists 新增 release-process 条目
+
+### Contradictions
+- `source-hwjcode-rename.md` 原记载 sync-upstream.sh "版本号对齐到上游最新 tag" — 已过时，现为"取较大值，只升不降"策略，已修正
+- `release-process.md` 在 log 中有两次记录（2026-05-29 创建、2026-06-12 更新）但文件丢失 — 原因是上游同步合并时上游删除了部分 wiki 页面，已重建
+- `development-workflow.md` 上游同步章节原仅一句话 — 已补充 cron 时间、版本号策略、VPN 依赖等关键信息
+
 ## [2026-06-17] ingest | 飞书 /model favorites 子命令 & esbuild 陈旧 JS 产物 Bug
 
 从对话中提取两个关键知识点：飞书端 `/model favorites` 子命令缺失修复，以及 esbuild 在 NodeNext 模块解析下打包 src 目录陈旧 `.js` 产物导致源码修改不生效的严重构建 Bug。
