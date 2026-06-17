@@ -97,6 +97,27 @@ function responseText(resp: GenerateContentResponse | undefined): string {
 }
 
 /**
+ * Collapse function calls that share an `id` down to a single (last) entry,
+ * preserving first-seen order. Guards against streaming proxies that replay the
+ * cumulative candidate on every chunk — without this the same tool runs twice
+ * and the ACP client renders a duplicate row. Calls with no `id` are passed
+ * through untouched so legitimate distinct parallel calls all survive.
+ */
+function dedupeFunctionCallsById(calls: FunctionCall[]): FunctionCall[] {
+  const indexById = new Map<string, number>();
+  const ordered: FunctionCall[] = [];
+  for (const fc of calls) {
+    if (fc.id != null && indexById.has(fc.id)) {
+      ordered[indexById.get(fc.id)!] = fc;
+      continue;
+    }
+    if (fc.id != null) indexById.set(fc.id, ordered.length);
+    ordered.push(fc);
+  }
+  return ordered;
+}
+
+/**
  * Turn a raw model title into a clean one-line label: first non-empty line,
  * surrounding quotes/brackets stripped, trailing punctuation removed, clamped
  * to a sane length. Returns '' if nothing usable remains.
@@ -790,8 +811,18 @@ export class Session {
         await this.emitUsageUpdate(streamChunks);
 
         if (functionCalls.length > 0) {
+          // De-duplicate by `id` before running. Some streaming proxies replay
+          // the cumulative candidate on every chunk (not just its delta), so
+          // `functionCalls` can hold several entries sharing one `id`. Running
+          // each would fire a duplicate `tool_call` (pending) update for the
+          // same `toolCallId`, and the desktop renderer — which appends a fresh
+          // row per `tool_call` — would show the same tool twice. Collapse
+          // same-id repeats to their last (most complete) occurrence; calls
+          // without an `id` are left untouched so genuinely distinct parallel
+          // calls all still run.
+          const deduped = dedupeFunctionCallsById(functionCalls);
           const responseParts: Part[] = [];
-          for (const fc of functionCalls) {
+          for (const fc of deduped) {
             const resp = await this.runTool(abort.signal, promptId, fc);
             const arr = Array.isArray(resp) ? resp : [resp];
             for (const part of arr) {
@@ -904,12 +935,18 @@ export class Session {
       : iconToAcpKind((tool as unknown as { icon?: Icon }).icon);
 
     // Announce the tool call to the IDE.
+    //
+    // `rawInput` carries the unmodified tool arguments so rich clients (the
+    // desktop app) can render parameter-aware summaries ("Found N matches for
+    // …", "Read file, N lines") instead of just the generic title. Thin ACP
+    // clients ignore the field.
     await this.sendUpdate({
       sessionUpdate: 'tool_call',
       toolCallId,
       title: tool.getDescription?.(args) ?? fc.name,
       kind: toolKind,
       status: 'pending',
+      rawInput: args,
       locations: tool.toolLocations?.(args) ?? undefined,
     });
 
@@ -1018,6 +1055,17 @@ export class Session {
     }
 
     // Execute.
+    //
+    // Flip the call to `in_progress` the moment confirmation clears and we
+    // actually start running. Without this the desktop UI sits on `pending`
+    // (a static "queued" look) for the entire execution and only ever jumps
+    // straight to `completed`/`failed` — the running/spinner state never shows.
+    await this.sendUpdate({
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status: 'in_progress',
+    });
+
     try {
       const result: ToolResult = await tool.execute(args, signal);
       const content = toToolCallContent(result);

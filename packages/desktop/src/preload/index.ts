@@ -40,6 +40,10 @@ import type {
   SessionEventEnvelope,
   SessionMeta,
   SessionStatusEnvelope,
+  ThemeMode,
+  UpdateCheckResult,
+  UpdateDownloadProgress,
+  UpdateState,
 } from '../shared/ipc.js';
 
 /** Subscribe to a push channel; returns an unsubscribe fn. */
@@ -102,6 +106,9 @@ const bridge: EasycodeBridge = {
     update: (patch: DesktopUserSettings) =>
       ipcRenderer.invoke(IpcInvoke.SettingsUpdate, patch) as Promise<DesktopUserSettings>,
   },
+  theme: {
+    set: (mode: ThemeMode) => ipcRenderer.invoke(IpcInvoke.ThemeSet, mode) as Promise<void>,
+  },
   agents: {
     detect: () =>
       ipcRenderer.invoke(IpcInvoke.AgentsDetect) as Promise<ExternalAgentAvailability>,
@@ -155,6 +162,18 @@ const bridge: EasycodeBridge = {
   },
   backend: {
     onLog: (cb) => on<string>(IpcEvent.BackendLog, cb),
+  },
+  updater: {
+    getState: () => ipcRenderer.invoke(IpcInvoke.UpdateGetState) as Promise<UpdateState>,
+    check: (manual) =>
+      ipcRenderer.invoke(IpcInvoke.UpdateCheck, manual) as Promise<UpdateCheckResult>,
+    download: () => ipcRenderer.invoke(IpcInvoke.UpdateDownload) as Promise<UpdateState>,
+    cancelDownload: () => ipcRenderer.invoke(IpcInvoke.UpdateCancelDownload) as Promise<void>,
+    install: () => ipcRenderer.invoke(IpcInvoke.UpdateInstall) as Promise<void>,
+    skip: (version) => ipcRenderer.invoke(IpcInvoke.UpdateSkip, version) as Promise<void>,
+    snooze: () => ipcRenderer.invoke(IpcInvoke.UpdateSnooze) as Promise<void>,
+    onStatus: (cb) => on<UpdateState>(IpcEvent.UpdateStatus, cb),
+    onProgress: (cb) => on<UpdateDownloadProgress>(IpcEvent.UpdateProgress, cb),
   },
 };
 
