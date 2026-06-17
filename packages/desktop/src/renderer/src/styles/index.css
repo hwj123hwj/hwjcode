@@ -3,8 +3,13 @@
  *
  * Anthropic / Claude visual language: warm neutral palette, terracotta accent,
  * restrained typography, soft layered shadows, flat (non-bubble) transcript.
- * Dark theme is the default; a light theme is applied under
- * `prefers-color-scheme: light`.
+ *
+ * Dark is the default palette (`:root`). The light palette is applied either
+ * (a) explicitly when the user picks "light" — `:root[data-theme='light']`, or
+ * (b) implicitly in "system" mode (no explicit dark/light choice) when the OS
+ * prefers light. An explicit `data-theme='dark'` always wins over the OS, which
+ * is why the media query is scoped to `:not([data-theme='dark']):not([data-theme='light'])`.
+ * The `--theme-light` declaration block below is shared by both cases.
  */
 
 :root {
@@ -53,8 +58,43 @@
   --ring: 0 0 0 3px var(--accent-weak);
 }
 
+/* Light palette — explicit user choice. */
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-elev: #faf9f5;
+  --bg-raised: #ffffff;
+  --bg-sunken: #f3f1ea;
+  --bg-hover: rgba(20, 18, 14, 0.04);
+  --bg-active: rgba(20, 18, 14, 0.06);
+  --border: #e9e6dd;
+  --border-strong: #d6d2c6;
+  --text: #1f1e1c;
+  --text-dim: #6a685f;
+  --text-faint: #9b988d;
+
+  --accent: #c25a3c;
+  --accent-hover: #b04e32;
+  --accent-text: #ffffff;
+  --accent-weak: rgba(194, 90, 60, 0.1);
+  --accent-border: rgba(194, 90, 60, 0.35);
+
+  --green: #2f8a4e;
+  --green-weak: rgba(47, 138, 78, 0.1);
+  --red: #c2403b;
+  --red-weak: rgba(194, 64, 59, 0.1);
+  --amber: #9a6f12;
+  --amber-weak: rgba(154, 111, 18, 0.12);
+  --blue: #2f6fd6;
+  --blue-weak: rgba(47, 111, 214, 0.1);
+
+  --shadow-sm: 0 1px 2px rgba(20, 18, 14, 0.06);
+  --shadow: 0 2px 6px rgba(20, 18, 14, 0.06), 0 8px 24px rgba(20, 18, 14, 0.09);
+  --shadow-lg: 0 8px 16px rgba(20, 18, 14, 0.08), 0 24px 56px rgba(20, 18, 14, 0.16);
+}
+
+/* Light palette — system mode (no explicit choice) following the OS preference. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme='dark']):not([data-theme='light']) {
     --bg: #ffffff;
     --bg-elev: #faf9f5;
     --bg-raised: #ffffff;

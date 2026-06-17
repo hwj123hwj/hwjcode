@@ -58,6 +58,8 @@ export const IpcInvoke = {
   // user settings (shared ~/.easycode-user/settings.json)
   SettingsGet: 'settings:get',
   SettingsUpdate: 'settings:update',
+  // color theme (renderer preference → native window chrome)
+  ThemeSet: 'theme:set',
   // permission reply
   PermissionRespond: 'permission:respond',
   // workspace helpers
@@ -259,6 +261,13 @@ export interface SaveCustomModelResult {
 
 /** Project-memory loading mode — mirrors the CLI's `projectMemoryMode`. */
 export type ProjectMemoryMode = 'all' | 'deepv-only' | 'none';
+
+/**
+ * Desktop GUI color theme. Distinct from the CLI's terminal theme (ANSI palette)
+ * below — this is a renderer-only preference persisted in localStorage, not in
+ * the shared settings file. 'system' follows the OS color scheme.
+ */
+export type ThemeMode = 'system' | 'light' | 'dark';
 
 /**
  * The subset of the CLI's user settings the desktop exposes in its Settings
@@ -670,6 +679,13 @@ export interface EasycodeBridge {
      * language back to the model default. Returns the new state.
      */
     update(patch: DesktopUserSettings): Promise<DesktopUserSettings>;
+  };
+  theme: {
+    /**
+     * Mirror the renderer's color-theme choice to the native window chrome by
+     * setting `nativeTheme.themeSource`. 'system' restores OS-follow behaviour.
+     */
+    set(mode: ThemeMode): Promise<void>;
   };
   agents: {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */
