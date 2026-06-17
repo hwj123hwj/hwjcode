@@ -63,13 +63,15 @@ tags: [npm, rename, hwjcode, packaging, release, fork]
 - `.github/workflows/release.yml` — tgz 文件名
 - `package-lock.json` — 重建
 
-## sync-upstream.sh 防护机制
+### sync-upstream.sh 防护机制
 
 每次上游同步后，脚本自动检查并修复：
 1. root/cli/core/desktop 四个 package.json 的 `name` 字段
 2. root/cli 的 `bin` 字段
 3. `self-update.ts` 中的 `SELF_UPDATE_PACKAGE` 和 `SELF_UPDATE_RELAUNCH_COMMAND`
-4. 版本号对齐到上游最新 tag（扩展为4个 package.json 统一对齐）
+4. 版本号策略：**取本地版本和上游 tag 的较大值，只升不降**（`sort -V | tail -1`）
+
+> ⚠️ **版本号策略变更**（2026-06-18）：原逻辑为"强制对齐上游最新 tag"，会导致 fork 版本号被降级（如 1.1.30 → 1.1.27）。已改为"取较大值，只升不降"。详见 [[source-upstream-sync-version-strategy]] 和 [[release-process]]。
 
 ## Cross-References
 
@@ -78,5 +80,7 @@ tags: [npm, rename, hwjcode, packaging, release, fork]
 - [[core-module]] — Core 模块包名变更
 - [[self-update]] — 自更新工具
 - [[development-workflow]] — 开发工作流
+- [[release-process]] — 发版流程规范
 - [[paths]] — 数据目录体系（解耦原理）
 - [[source-data-directory-decoupling]] — CLI 命名与数据存储解耦详解
+- [[source-upstream-sync-version-strategy]] — 版本号策略修复详情

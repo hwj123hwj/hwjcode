@@ -16,6 +16,7 @@
 | 08 | feat/rename-to-hwjcode (commit 2fb40e12) | [source-hwjcode-rename](wiki/source-hwjcode-rename.md) | npm 包名 easycode-ai → hwjcode, CLI 命令 easycode → hwjcode, 发布到 npmjs.org | 2026-06-17 |
 | 09 | conversation-2026-06-17 | [source-data-directory-decoupling](wiki/source-data-directory-decoupling.md) | CLI 命名与数据存储解耦原理 — 所有持久化路径与包名无关 | 2026-06-17 |
 | 10 | conversation-2026-06-17-feishu-model-favorites | [source-feishu-model-favorites](wiki/source-feishu-model-favorites.md) | 飞书 /model favorites 子命令新增 & esbuild 陈旧 JS 产物 Bug 修复 | 2026-06-17 |
+| 11 | conversation-2026-06-18-upstream-sync | [source-upstream-sync-version-strategy](wiki/source-upstream-sync-version-strategy.md) | 上游同步版本号策略修复（只升不降）& 1.1.31 发版 & cron 时间调整 | 2026-06-18 |
 
 
 ## Entities
@@ -85,6 +86,7 @@
 |------|-------------|
 | [adding-builtin-tool-checklist](wiki/adding-builtin-tool-checklist.md) | Checklist & pitfalls when adding a built-in tool to `core/src/tools/` (derived from `local_time` debugging) |
 | [development-workflow](wiki/development-workflow.md) | 独立仓库开发工作流规范 —分支、MR、提交格式、红线 |
+| [release-process](wiki/release-process.md) | Fork 发版流程规范 — 版本号策略、npm 发布、tag 规范、红线纪律 |
 
 ## Synthesis
 <!-- Cross-cutting analysis pages will be listed here -->

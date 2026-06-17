@@ -41,4 +41,28 @@ docs(wiki): update repo references
 
 ## 上游同步
 
-上游同步走 `scripts/sync-upstream.sh`（cron自动），不进入本工作流。
+上游同步走 `scripts/sync-upstream.sh`（cron 自动），不进入本工作流。
+
+### 定时任务
+
+```cron
+# 每天中午 12:00 执行（避免凌晨休眠不触发）
+0 12 * * * /Users/weijian/codex_work/DeepVcodeClient/scripts/sync-upstream.sh >> /tmp/sync-upstream.log 2>&1
+```
+
+> macOS crontab 在系统休眠时不补执行。原设凌晨 0:00 频繁漏触发，已改至中午 12:00。
+
+### 版本号策略
+
+- **只升不降**：取本地版本和上游 tag 的较大值（`sort -V | tail -1`）
+- Fork 版本号独立领先，不受上游 tag 限制
+- 详见 [[source-upstream-sync-version-strategy]] 和 [[release-process]]
+
+### 上游同步后必须手动发版
+
+合并上游代码后需手动升 patch 版本号并 `npm publish`，详见 [[release-process]]。
+
+### 已知限制
+
+- `git fetch upstream` 需要挂公司 VPN（内网 GitLab 仓库）
+- 网络抖动可能导致 fetch 失败（如 -61 错误），脚本会静默继续
