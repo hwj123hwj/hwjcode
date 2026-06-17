@@ -16,6 +16,7 @@ import type {
   CreateSessionOptions,
   CustomModelEntry,
   CustomModelInput,
+  DesktopUserSettings,
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
@@ -39,6 +40,10 @@ import type {
   SessionEventEnvelope,
   SessionMeta,
   SessionStatusEnvelope,
+  ThemeMode,
+  UpdateCheckResult,
+  UpdateDownloadProgress,
+  UpdateState,
 } from '../shared/ipc.js';
 
 /** Subscribe to a push channel; returns an unsubscribe fn. */
@@ -63,12 +68,16 @@ const bridge: EasycodeBridge = {
     list: () => ipcRenderer.invoke(IpcInvoke.SessionList) as Promise<SessionMeta[]>,
     create: (opts: CreateSessionOptions) =>
       ipcRenderer.invoke(IpcInvoke.SessionCreate, opts) as Promise<SessionMeta>,
+    createChat: (opts?: Omit<CreateSessionOptions, 'cwd'>) =>
+      ipcRenderer.invoke(IpcInvoke.SessionCreateChat, opts) as Promise<SessionMeta>,
     resume: (id, cwd) => ipcRenderer.invoke(IpcInvoke.SessionResume, id, cwd) as Promise<SessionMeta>,
     close: (id) => ipcRenderer.invoke(IpcInvoke.SessionClose, id) as Promise<void>,
     archive: (id, archived) =>
       ipcRenderer.invoke(IpcInvoke.SessionArchive, id, archived) as Promise<void>,
     rename: (id, title) =>
       ipcRenderer.invoke(IpcInvoke.SessionRename, id, title) as Promise<SessionMeta>,
+    setTitleProvisional: (id, title) =>
+      ipcRenderer.invoke(IpcInvoke.SessionSetTitleProvisional, id, title) as Promise<SessionMeta>,
     prompt: (opts: PromptOptions) => ipcRenderer.invoke(IpcInvoke.SessionPrompt, opts) as Promise<void>,
     cancel: (id) => ipcRenderer.invoke(IpcInvoke.SessionCancel, id) as Promise<void>,
     setModel: (id, modelId) =>
@@ -91,6 +100,14 @@ const bridge: EasycodeBridge = {
       ) as Promise<SaveCustomModelResult>,
     deleteCustom: (displayName) =>
       ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,
+    update: (patch: DesktopUserSettings) =>
+      ipcRenderer.invoke(IpcInvoke.SettingsUpdate, patch) as Promise<DesktopUserSettings>,
+  },
+  theme: {
+    set: (mode: ThemeMode) => ipcRenderer.invoke(IpcInvoke.ThemeSet, mode) as Promise<void>,
   },
   agents: {
     detect: () =>
@@ -128,6 +145,8 @@ const bridge: EasycodeBridge = {
     listDir: (p) => ipcRenderer.invoke(IpcInvoke.ListDir, p) as Promise<DirEntry[]>,
     gitDiff: (cwd, sessionId) =>
       ipcRenderer.invoke(IpcInvoke.GitDiff, cwd, sessionId) as Promise<GitFileDiff[]>,
+    gitBranch: (cwd) =>
+      ipcRenderer.invoke(IpcInvoke.GitBranch, cwd) as Promise<{ branch: string; dirty: boolean } | null>,
     openExternal: (url) => ipcRenderer.invoke(IpcInvoke.OpenExternal, url) as Promise<void>,
     saveClipboardImage: (cwd, mimeType, data, name) =>
       ipcRenderer.invoke(
@@ -144,6 +163,40 @@ const bridge: EasycodeBridge = {
   backend: {
     onLog: (cb) => on<string>(IpcEvent.BackendLog, cb),
   },
+  updater: {
+    getState: () => ipcRenderer.invoke(IpcInvoke.UpdateGetState) as Promise<UpdateState>,
+    check: (manual) =>
+      ipcRenderer.invoke(IpcInvoke.UpdateCheck, manual) as Promise<UpdateCheckResult>,
+    download: () => ipcRenderer.invoke(IpcInvoke.UpdateDownload) as Promise<UpdateState>,
+    cancelDownload: () => ipcRenderer.invoke(IpcInvoke.UpdateCancelDownload) as Promise<void>,
+    install: () => ipcRenderer.invoke(IpcInvoke.UpdateInstall) as Promise<void>,
+    skip: (version) => ipcRenderer.invoke(IpcInvoke.UpdateSkip, version) as Promise<void>,
+    snooze: () => ipcRenderer.invoke(IpcInvoke.UpdateSnooze) as Promise<void>,
+    onStatus: (cb) => on<UpdateState>(IpcEvent.UpdateStatus, cb),
+    onProgress: (cb) => on<UpdateDownloadProgress>(IpcEvent.UpdateProgress, cb),
+  },
 };
 
 contextBridge.exposeInMainWorld('easycode', bridge);
+
+// Tag the document root with the OS so the renderer's CSS can adapt platform
+// chrome — e.g. reserve space for macOS' traffic-light window controls under
+// `hiddenInset` so they don't overlap the sidebar logo. (`tsconfig.node.json`
+// has no DOM lib, so describe the tiny surface we touch with a local type.)
+{
+  type MinimalDoc = {
+    readyState: string;
+    documentElement: { setAttribute(name: string, value: string): void };
+    addEventListener(type: string, cb: () => void, opts?: { once?: boolean }): void;
+  };
+  const doc = (globalThis as { document?: MinimalDoc }).document;
+  if (doc) {
+    const setPlatform = () =>
+      doc.documentElement.setAttribute('data-platform', process.platform);
+    if (doc.readyState === 'loading') {
+      doc.addEventListener('DOMContentLoaded', setPlatform, { once: true });
+    } else {
+      setPlatform();
+    }
+  }
+}

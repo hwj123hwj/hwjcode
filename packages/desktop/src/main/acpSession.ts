@@ -23,6 +23,8 @@ import { buildBackendSpec } from './backendLocator.js';
 import { buildExternalAgentSpec } from './externalAgents.js';
 import type {
   AgentKind,
+  AskAnswersPayload,
+  AskQuestion,
   DesktopSessionEvent,
   ModelInfo,
   PermissionMode,
@@ -91,6 +93,38 @@ function terminalFromMeta(meta: unknown): string | undefined {
   const exit = m.terminal_exit?.exit_code;
   if (!data) return typeof exit === 'number' ? `[exit code: ${exit}]` : undefined;
   return typeof exit === 'number' ? `${data}\n[exit code: ${exit}]` : data;
+}
+
+/**
+ * Pull the ask_user_question payload out of a `requestPermission` request's
+ * `toolCall._meta.dvcode.askUserQuestion` channel (set by the backend's
+ * `questionMetaFor`). Returns `undefined` for ordinary tool approvals so they
+ * keep showing the plain Allow/Reject dialog.
+ */
+function questionsFromToolCall(toolCall: unknown): AskQuestion[] | undefined {
+  const meta = (toolCall as { _meta?: unknown } | undefined)?._meta as
+    | { dvcode?: { askUserQuestion?: { questions?: unknown } } }
+    | undefined;
+  const raw = meta?.dvcode?.askUserQuestion?.questions;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: AskQuestion[] = [];
+  for (const q of raw as Array<Record<string, unknown>>) {
+    if (!q || typeof q.question !== 'string') continue;
+    const opts = Array.isArray(q.options) ? q.options : [];
+    out.push({
+      question: q.question,
+      header: typeof q.header === 'string' ? q.header : 'Question',
+      multiSelect: q.multiSelect === true,
+      options: (opts as Array<Record<string, unknown>>)
+        .filter((o) => o && typeof o.label === 'string')
+        .map((o) => ({
+          label: o.label as string,
+          description: typeof o.description === 'string' ? o.description : undefined,
+          preview: typeof o.preview === 'string' ? o.preview : undefined,
+        })),
+    });
+  }
+  return out.length ? out : undefined;
 }
 
 /**
@@ -188,12 +222,18 @@ class DesktopAcpClient implements acp.Client {
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
+    // ask_user_question carries its multi-choice payload out-of-band in
+    // `_meta`. It must ALWAYS reach the user — auto-approving it (yolo /
+    // external-agent autoApprove) would answer the question with an empty
+    // selection, so we detect it first and skip the auto-approve shortcut.
+    const questions = questionsFromToolCall(params.toolCall);
+
     // Auto-approve when the backend is configured to always auto-approve
     // (external agents) or the session is in YOLO mode: select the most
     // permissive allow option without bothering the user, exactly like the
     // CLI's headless runDelegatedTask({ autoApprove: true }). `default` mode on
     // Easy Code still prompts the UI.
-    if (this.autoApprove() || this.mode() === 'yolo') {
+    if (!questions && (this.autoApprove() || this.mode() === 'yolo')) {
       const option = pickAllowOption(params.options);
       if (option) {
         const title = params.toolCall?.title ?? 'tool call';
@@ -216,12 +256,20 @@ class DesktopAcpClient implements acp.Client {
       content: normalizeToolContent(
         (params.toolCall as { content?: unknown } | undefined)?.content,
       ),
+      ...(questions ? { questions } : {}),
     });
     this.cb.setStatus('thinking');
     if (response.outcome === 'cancelled') {
       return { outcome: { outcome: 'cancelled' } };
     }
-    return { outcome: { outcome: 'selected', optionId: response.optionId } };
+    // For ask_user_question the UI collected the user's selections; forward
+    // them to the backend in `_meta.dvcode` (the contract the backend's
+    // `extractAskAnswers` parses). Plain approvals carry no `answers`.
+    const answers = (response as { answers?: AskAnswersPayload }).answers;
+    return {
+      outcome: { outcome: 'selected', optionId: response.optionId },
+      ...(answers ? { _meta: { dvcode: answers } } : {}),
+    };
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
@@ -266,6 +314,10 @@ class DesktopAcpClient implements acp.Client {
               }))
             : undefined,
           content: normalizeToolContent(u.content),
+          rawInput:
+            u.rawInput && typeof u.rawInput === 'object' && !Array.isArray(u.rawInput)
+              ? (u.rawInput as Record<string, unknown>)
+              : undefined,
         });
         break;
       }

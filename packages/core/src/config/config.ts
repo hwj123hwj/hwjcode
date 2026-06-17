@@ -53,6 +53,7 @@ import { LocalTimeTool } from '../tools/local-time.js';
 import { LarkCliTool } from '../tools/lark-cli.js';
 import { DelegateToAgentTool } from '../tools/delegate-agent.js';
 import { CheckDelegateStatusTool } from '../tools/delegate-status.js';
+import { hasAnyLocalAgent } from '../acp-client/localAgentDetection.js';
 import { ProjectSettingsManager } from './projectSettings.js';
 import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
@@ -236,6 +237,7 @@ export interface ConfigParameters {
   silentMode?: boolean;
   vsCodePluginMode?: boolean;
   feishuMode?: boolean;
+  desktopMode?: boolean;
   memoryTokenCount?: number; // 新增
   hooks?: { [K in HookEventName]?: HookDefinition[] };
   healthyUse?: boolean;
@@ -315,6 +317,7 @@ export class Config {
   private readonly silentMode: boolean;
   private readonly vsCodePluginMode: boolean;
   private readonly feishuMode: boolean;
+  private readonly desktopMode: boolean;
   private projectSettingsManager: ProjectSettingsManager;
   private planModeActive: boolean = false;
   private readonly hooks: { [K in HookEventName]?: HookDefinition[] };
@@ -395,8 +398,11 @@ export class Config {
     this.ideClient = params.ideClient;
     this.vsCodePluginMode = params.vsCodePluginMode ?? false;
     this.feishuMode = params.feishuMode ?? false;
+    // Desktop client flag: explicit param wins, else inferred from the
+    // EASYCODE_DESKTOP=1 env the desktop app sets when spawning the backend.
+    this.desktopMode = params.desktopMode ?? process.env.EASYCODE_DESKTOP === '1';
     this.hooks = params.hooks ?? {};
-    this.healthyUse = params.healthyUse ?? true;
+    this.healthyUse = params.healthyUse ?? false;
     this.preferredLanguage = params.preferredLanguage;
 
     if (params.contextFileName) {
@@ -1052,6 +1058,10 @@ export class Config {
     return this.feishuMode;
   }
 
+  getDesktopMode(): boolean {
+    return this.desktopMode;
+  }
+
   getHooks(): { [K in HookEventName]?: HookDefinition[] } {
     return this.hooks;
   }
@@ -1145,10 +1155,15 @@ export class Config {
     registerCoreTool(LocalTimeTool, this);
     registerCoreTool(LarkCliTool, this);
 
-    // Delegate-to-external-agent (ACP client). Drives the user's local Claude
-    // Code; gracefully reports a readable error if the bridge isn't installed.
-    registerCoreTool(DelegateToAgentTool, this);
-    registerCoreTool(CheckDelegateStatusTool, this);
+    // Delegate-to-external-agent (ACP client). Only register when at least
+    // one external agent (Claude Code or Codex) is detected on the user's
+    // machine — otherwise the AI would blindly call the tool and pretend the
+    // task was dispatched when in fact nothing happened.
+    const hasAgent = await hasAnyLocalAgent();
+    if (hasAgent) {
+      registerCoreTool(DelegateToAgentTool, this);
+      registerCoreTool(CheckDelegateStatusTool, this);
+    }
 
     // TaskTool (SubAgent) is available in both CLI and VSCode environments
     registerCoreTool(TaskTool, this, registry);

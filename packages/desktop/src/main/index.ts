@@ -11,8 +11,10 @@ import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
+import { ensurePathFromLoginShell } from './shellPath.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
+import type { UpdateManager } from './updater.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
 // taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
 // from the packaged .app bundle, so this is harmless there.
@@ -23,6 +25,47 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
+let updater: UpdateManager | null = null;
+
+/**
+ * macOS application menu. The first submenu's title is the app name shown in the
+ * menu bar; building it explicitly guarantees "Easy Code" instead of the default
+ * "Electron". Includes the standard Edit/Window items so copy/paste/quit and the
+ * usual shortcuts keep working.
+ */
+function setMacAppMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Easy Code',
+      submenu: [
+        { role: 'about', label: 'About Easy Code' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Hide Easy Code' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Easy Code' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -68,15 +111,31 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setName('Easy Code');
+  // GUI launches on macOS/Linux (Finder/Dock/launcher) bypass the login shell
+  // and inherit only a minimal PATH (e.g. /usr/bin:/bin:/usr/sbin:/sbin),
+  // missing /usr/local/bin, /opt/homebrew/bin, nvm shims, etc. Restore the real
+  // PATH from the login shell BEFORE registerIpc()/createWindow() so external
+  // agent detection (claude/codex) and the `npx` ACP bridge spawns can find
+  // their binaries. No-op on Windows.
+  ensurePathFromLoginShell();
   // Windows shows toast notifications under this AppUserModelID; without it the
   // turn-complete notifications either don't appear or show as an unbranded
   // "electron.app.…" sender. Must match electron-builder.yml's `appId`.
   if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
-  // Drop the default application menu on Windows/Linux entirely. On macOS we
-  // keep it so standard shortcuts (copy/paste/quit) and the app menu survive.
-  if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
-  ({ hub, feishu } = registerIpc(() => mainWindow));
+  if (process.platform === 'darwin') {
+    // Build the app menu explicitly so its first item reads "Easy Code" — the
+    // default macOS menu shows "Electron" in dev/unpackaged runs regardless of
+    // app.setName. Keep the standard edit/window shortcuts working.
+    setMacAppMenu();
+  } else {
+    // Drop the default application menu on Windows/Linux entirely.
+    Menu.setApplicationMenu(null);
+  }
+  ({ hub, feishu, updater } = registerIpc(() => mainWindow));
   createWindow();
+  // Kick off the version-update lifecycle (startup check + periodic poll). It
+  // delays its first check internally so it never competes with boot.
+  updater.start();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -92,4 +151,6 @@ app.on('before-quit', () => {
   // Tear down the desktop-managed Feishu gateway so we never leave an orphan
   // gateway behind (which the next launch would otherwise detect + kill).
   feishu?.dispose();
+  // Stop the update poll timer and abort any in-flight download.
+  updater?.dispose();
 });

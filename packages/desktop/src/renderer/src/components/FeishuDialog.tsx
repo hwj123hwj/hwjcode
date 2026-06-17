@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Icon } from './Icon';
+import { useT, type TFunc } from '../i18n/useT';
 import type {
   FeishuBinding,
   FeishuDomain,
@@ -11,24 +12,24 @@ import type {
 
 const api = window.easycode;
 
-function uptime(startedAt?: number): string {
+function uptime(t: TFunc, startedAt?: number): string {
   if (!startedAt) return '';
   const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  if (s < 60) return `${s} 秒`;
+  if (s < 60) return t('time.seconds', { s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟`;
-  return `${Math.floor(m / 60)} 小时 ${m % 60} 分钟`;
+  if (m < 60) return t('time.minutes', { m });
+  return t('time.hoursMinutes', { h: Math.floor(m / 60), m: m % 60 });
 }
 
-function relTime(ts?: number): string {
-  if (!ts) return '从未';
+function relTime(t: TFunc, ts?: number): string {
+  if (!ts) return t('time.never');
   const diff = Date.now() - ts;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return '刚刚';
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 1) return t('time.justNow');
+  if (m < 60) return t('time.minutesAgo', { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  return `${Math.floor(h / 24)} 天前`;
+  if (h < 24) return t('time.hoursAgo', { h });
+  return t('time.daysAgo', { d: Math.floor(h / 24) });
 }
 
 /** Label for a binding's backing agent. */
@@ -44,16 +45,16 @@ function agentLabel(agent?: string): string {
 }
 
 /** Friendly chat label: group name → P2P → trimmed chatId. */
-function chatLabel(b: FeishuBinding): string {
+function chatLabel(t: TFunc, b: FeishuBinding): string {
   if (b.chatName) return b.chatName;
-  if (b.isP2p) return '与机器人的私聊';
+  if (b.isP2p) return t('feishu.p2pChat');
   const id = b.chatId || '';
-  return id.length > 12 ? `…${id.slice(-8)}` : id || '未知会话';
+  return id.length > 12 ? `…${id.slice(-8)}` : id || t('feishu.unknownChat');
 }
 
 /** Last two path segments of a project root, for a compact display. */
-function shortProject(root?: string): string {
-  if (!root) return '未绑定项目';
+function shortProject(t: TFunc, root?: string): string {
+  if (!root) return t('feishu.noProject');
   const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
   return parts.length <= 2 ? root : `…/${parts.slice(-2).join('/')}`;
 }
@@ -67,6 +68,7 @@ function shortProject(root?: string): string {
  * run exactly one gateway.
  */
 export function FeishuDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [status, setStatus] = useState<FeishuStatus | null>(null);
   const [external, setExternal] = useState<FeishuExternalProcess[]>([]);
   const [bindings, setBindings] = useState<FeishuBinding[]>([]);
@@ -112,7 +114,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
   const submitManual = async () => {
     if (!appId.trim() || !appSecret.trim()) {
-      setError('请填写 App ID 与 App Secret。');
+      setError(t('feishu.fillAppIdSecret'));
       return;
     }
     setBusy(true);
@@ -121,14 +123,14 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     const res = await api.feishu.saveManual({ appId, appSecret, domain });
     setBusy(false);
     if (!res.ok) {
-      setError(res.error ?? '保存失败');
+      setError(res.error ?? t('feishu.saveFailed'));
       return;
     }
     if (res.status) setStatus(res.status);
     setMode('idle');
     setAppId('');
     setAppSecret('');
-    setInfo('凭证已验证并保存。');
+    setInfo(t('feishu.credsSaved'));
   };
 
   const startQr = async () => {
@@ -141,7 +143,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     if (!beginRes.ok || !beginRes.begin) {
       setBusy(false);
       setMode('idle');
-      setError(beginRes.error ?? '发起扫码失败');
+      setError(beginRes.error ?? t('feishu.qrStartFailed'));
       return;
     }
     setQr(beginRes.begin);
@@ -151,11 +153,11 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     setQr(null);
     setMode('idle');
     if (!pollRes.ok) {
-      setError(pollRes.error ?? '扫码失败');
+      setError(pollRes.error ?? t('feishu.qrFailed'));
       return;
     }
     if (pollRes.status) setStatus(pollRes.status);
-    setInfo('扫码登录成功，凭证已保存。');
+    setInfo(t('feishu.qrSuccess'));
   };
 
   const cancelQr = async () => {
@@ -173,13 +175,13 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     setBusy(false);
     if (res.status) setStatus(res.status);
     if (!res.ok) {
-      setError(res.error ?? '启动失败');
+      setError(res.error ?? t('feishu.startFailed'));
       return;
     }
     setInfo(
       res.killedExternal
-        ? `已接管：关闭了 ${res.killedExternal} 个外部网关并启动桌面版网关。`
-        : '飞书网关已启动。',
+        ? t('feishu.takeoverStarted', { n: res.killedExternal })
+        : t('feishu.gatewayStarted'),
     );
     void refreshExternal();
   };
@@ -190,7 +192,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     const s = await api.feishu.stop();
     setStatus(s);
     setBusy(false);
-    setInfo('飞书网关已停止。');
+    setInfo(t('feishu.gatewayStopped'));
   };
 
   const takeover = async () => {
@@ -198,7 +200,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     const n = await api.feishu.killExternal();
     setBusy(false);
     setExternal([]);
-    setInfo(`已关闭 ${n} 个外部网关进程，现在可由桌面版启动并管理。`);
+    setInfo(t('feishu.externalKilled', { n }));
   };
 
   const clearCreds = async () => {
@@ -207,7 +209,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     const s = await api.feishu.clear();
     setStatus(s);
     setBusy(false);
-    setInfo('已清除飞书凭证。');
+    setInfo(t('feishu.credsCleared'));
   };
 
   const openQrUrl = () => {
@@ -220,11 +222,9 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
         <div className="modal-head">
           <h3>
             <Icon name="feishu" size={17} />
-            飞书 / Lark 网关
+            {t('feishu.title')}
           </h3>
-          <div className="sub">
-            桌面版内置飞书网关，负责配置凭证与启停管理。
-          </div>
+          <div className="sub">{t('feishu.subtitle')}</div>
         </div>
 
         <div className="modal-body">
@@ -246,11 +246,10 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
             <div className="feishu-warn">
               <div className="feishu-warn-text">
                 <Icon name="alert" size={15} />
-                检测到 {external.length} 个由 CLI 独立启动的飞书网关。一台机器只能运行一个网关，
-                否则消息路由会混乱。建议关闭它们并改由桌面版管理。
+                {t('feishu.externalWarn', { n: external.length })}
               </div>
               <button className="btn primary" disabled={busy} onClick={() => void takeover()}>
-                关闭并接管
+                {t('feishu.takeover')}
               </button>
             </div>
           )}
@@ -260,25 +259,33 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
             <div className="feishu-status-row">
               <span className={`status-dot ${running ? 'idle' : 'exited'}`} />
               <span className="feishu-status-title">
-                {running ? '网关运行中' : configured ? '网关已停止' : '尚未配置'}
+                {running
+                  ? t('feishu.gatewayRunning')
+                  : configured
+                    ? t('feishu.gatewayStoppedStatus')
+                    : t('feishu.notConfigured')}
               </span>
               {running && status?.pid != null && (
                 <span className="feishu-meta">pid {status.pid}</span>
               )}
               {running && status?.startedAt && (
-                <span className="feishu-meta">已运行 {uptime(status.startedAt)}</span>
+                <span className="feishu-meta">{t('feishu.uptime', { time: uptime(t, status.startedAt) })}</span>
               )}
             </div>
             {configured && (
               <div className="feishu-status-sub">
-                {status?.botName && <span>Bot：{status.botName}</span>}
-                <span>平台：{status?.platform === 'lark' ? 'Lark' : '飞书'}</span>
+                {status?.botName && <span>{t('feishu.bot', { name: status.botName })}</span>}
+                <span>
+                  {t('feishu.platform', {
+                    name: status?.platform === 'lark' ? 'Lark' : t('feishu.platformFeishu'),
+                  })}
+                </span>
                 {status?.ownerOpenId && (
                   <span title={status.ownerOpenId}>
-                    Owner：{status.ownerOpenId.slice(0, 10)}…
+                    {t('feishu.owner', { id: status.ownerOpenId.slice(0, 10) })}
                   </span>
                 )}
-                {!!status?.allowlistCount && <span>白名单：{status.allowlistCount}</span>}
+                {!!status?.allowlistCount && <span>{t('feishu.allowlist', { n: status.allowlistCount })}</span>}
               </div>
             )}
           </div>
@@ -289,13 +296,11 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
             <div className="feishu-lobby">
               <div className="feishu-lobby-head">
                 <Icon name="chat" size={14} />
-                <span>项目 / 群绑定</span>
+                <span>{t('feishu.bindings')}</span>
                 <span className="feishu-lobby-count">{bindings.length}</span>
               </div>
               {bindings.length === 0 ? (
-                <div className="feishu-lobby-empty">
-                  暂无绑定。在飞书中 @ 机器人并发送消息，即可把当前群与一个项目自动绑定。
-                </div>
+                <div className="feishu-lobby-empty">{t('feishu.noBindings')}</div>
               ) : (
                 <div className="feishu-lobby-list">
                   {bindings.map((b) => {
@@ -307,18 +312,18 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                         <div className="feishu-bind-row">
                           <span className={`status-dot ${active ? 'idle' : 'exited'}`} />
                           <span className="feishu-bind-name" title={b.chatId}>
-                            {chatLabel(b)}
+                            {chatLabel(t, b)}
                           </span>
-                          {b.isP2p && <span className="feishu-bind-tag">私聊</span>}
-                          {active && <span className="feishu-bind-tag live">活跃</span>}
+                          {b.isP2p && <span className="feishu-bind-tag">{t('feishu.p2pTag')}</span>}
+                          {active && <span className="feishu-bind-tag live">{t('feishu.activeTag')}</span>}
                           <span className="feishu-bind-time">
-                            {active ? '运行中' : relTime(b.lastSessionAt)}
+                            {active ? t('feishu.runningTag') : relTime(t, b.lastSessionAt)}
                           </span>
                         </div>
                         <div className="feishu-bind-row sub">
                           <span className="feishu-bind-proj" title={b.projectRoot}>
                             <Icon name="folder" size={12} />
-                            {shortProject(b.projectRoot)}
+                            {shortProject(t, b.projectRoot)}
                           </span>
                           <span className="feishu-bind-chip">{agentLabel(b.agent)}</span>
                           {b.model && <span className="feishu-bind-chip">{b.model}</span>}
@@ -337,19 +342,19 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               {running ? (
                 <button className="btn danger" disabled={busy} onClick={() => void stop()}>
                   <Icon name="stop" size={14} />
-                  停止网关
+                  {t('feishu.stopGateway')}
                 </button>
               ) : (
                 <button className="btn primary" disabled={busy} onClick={() => void start()}>
                   <Icon name="play" size={14} />
-                  启动网关
+                  {t('feishu.startGateway')}
                 </button>
               )}
               <button className="btn" disabled={busy} onClick={() => setMode('manual')}>
-                重新配置
+                {t('feishu.reconfigure')}
               </button>
               <button className="btn ghost" disabled={busy || running} onClick={() => void clearCreds()}>
-                退出登录
+                {t('common.logout')}
               </button>
             </div>
           )}
@@ -358,7 +363,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
           {!configured && mode === 'idle' && (
             <div className="feishu-setup">
               <div className="feishu-domain">
-                <span className="field-label">平台</span>
+                <span className="field-label">{t('feishu.platformLabel')}</span>
                 <div className="seg">
                   {(['feishu', 'lark'] as const).map((d) => (
                     <button
@@ -366,7 +371,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                       className={domain === d ? 'active' : ''}
                       onClick={() => setDomain(d)}
                     >
-                      {d === 'feishu' ? '飞书' : 'Lark'}
+                      {d === 'feishu' ? t('feishu.platformFeishu') : 'Lark'}
                     </button>
                   ))}
                 </div>
@@ -374,10 +379,10 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               <div className="feishu-methods">
                 <button className="btn primary" disabled={busy} onClick={() => void startQr()}>
                   <Icon name="feishu" size={14} />
-                  扫码登录（自动建应用）
+                  {t('feishu.qrLogin')}
                 </button>
                 <button className="btn" disabled={busy} onClick={() => setMode('manual')}>
-                  手动输入凭据
+                  {t('feishu.manualEntry')}
                 </button>
               </div>
             </div>
@@ -392,27 +397,27 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                     <QRCodeSVG value={qr.qrUrl} size={184} includeMargin />
                   </div>
                   <div className="feishu-qr-hint">
-                    使用{domain === 'lark' ? ' Lark ' : '飞书'}扫描二维码并授权创建应用。
+                    {t('feishu.qrHint', { platform: domain === 'lark' ? 'Lark' : t('feishu.platformFeishu') })}
                     {qr.userCode && (
                       <>
                         {' '}
-                        验证码 <code>{qr.userCode}</code>
+                        {t('feishu.verifyCode')} <code>{qr.userCode}</code>
                       </>
                     )}
                   </div>
                   <div className="feishu-actions">
                     <button className="btn" onClick={openQrUrl}>
                       <Icon name="globe" size={14} />
-                      在浏览器打开
+                      {t('feishu.openInBrowser')}
                     </button>
                     <button className="btn ghost" onClick={() => void cancelQr()}>
-                      取消
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="cm-empty">
-                  <span className="spinner" /> 正在发起扫码…
+                  <span className="spinner" /> {t('feishu.qrStarting')}
                 </div>
               )}
             </div>
@@ -421,11 +426,11 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
           {/* Manual credential entry. */}
           {mode === 'manual' && (
             <div className="cm-form">
-              <label className="field-label">平台</label>
+              <label className="field-label">{t('feishu.platformLabel')}</label>
               <div className="seg">
                 {(['feishu', 'lark'] as const).map((d) => (
                   <button key={d} className={domain === d ? 'active' : ''} onClick={() => setDomain(d)}>
-                    {d === 'feishu' ? '飞书' : 'Lark'}
+                    {d === 'feishu' ? t('feishu.platformFeishu') : 'Lark'}
                   </button>
                 ))}
               </div>
@@ -442,7 +447,7 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               <input
                 className="prompt-input cm-input"
                 type="password"
-                placeholder="应用密钥"
+                placeholder={t('feishu.appSecretPlaceholder')}
                 value={appSecret}
                 onChange={(e) => setAppSecret(e.target.value)}
               />
@@ -450,10 +455,10 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
               <div className="feishu-actions">
                 <button className="btn primary" disabled={busy} onClick={() => void submitManual()}>
                   {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
-                  验证并保存
+                  {t('feishu.verifyAndSave')}
                 </button>
                 <button className="btn ghost" disabled={busy} onClick={() => setMode('idle')}>
-                  返回
+                  {t('common.back')}
                 </button>
               </div>
             </div>
@@ -461,14 +466,14 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
           {status?.lastError && (
             <div className="feishu-logtail" title={status.lastError}>
-              最近错误：{status.lastError}
+              {t('feishu.lastError', { msg: status.lastError })}
             </div>
           )}
         </div>
 
         <div className="modal-foot">
           <button className="btn" onClick={onClose}>
-            关闭
+            {t('common.close')}
           </button>
         </div>
       </div>

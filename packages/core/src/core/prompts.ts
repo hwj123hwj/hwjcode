@@ -1165,6 +1165,7 @@ export function getCoreSystemPrompt(
   preferredLanguage?: string,
   customModelInfo?: CustomModelInfo,
   isFeishu?: boolean,
+  isDesktop?: boolean,
 ): string {
   // Handle backward compatibility: promptRegistryOrUserRules can be PromptRegistry or userRules string
   let promptRegistry: PromptRegistry | undefined;
@@ -1289,6 +1290,10 @@ export function getCoreSystemPrompt(
 
   if (isFeishu) {
     finalPrompt += `\n\n---\n\n## Environment Awareness: Feishu (Lark) Channel Context\n- **Current Channel**: You are communicating with the user via **Feishu/Lark Chat Gateway** (e.g. group chat or direct message).\n- **User Device/Environment**: The user is likely using a mobile device or chat client and may not have immediate physical access to their local PC or terminal.\n- **Mobile-Friendly Layout Guidelines**:\n  - Keep your explanations clear, compact, and highly structured.\n  - Avoid generating extremely wide tables, complex multi-line ASCII architecture diagrams, or massive blocks of unbroken text, as they render poorly on mobile screens. Use bullet points or code snippets with clear explanations instead.\n- **Reference Native Chat Actions**:\n  - Refer to native chat commands (like \`/goal\`, \`/bind\`, \`/help\`) and interactive cards when guiding the user on how to interact with you, rather than telling them to run raw terminal commands or type in a TTY.\n- **Strict Guidelines for Sending Files & Media via \`SendFeishuFileTool\`**:\n  - You have access to \`SendFeishuFileTool\` to send local files (e.g., generated reports, compiled packages, code blocks, screenshots) directly into this active Feishu chat.\n  - **Prudence & Spam Prevention**: You must **never** send files automatically/spontaneously on every output turn to avoid spamming the chat and creating distraction.\n  - **When to send**: ONLY send a file if (a) the user **explicitly asks** you to send/transfer/download a file (e.g., "send me the file...", "download it for me"), or (b) there is an **absolute necessity** for the user to view/inspect a file or media (such as a newly generated document, test report, or diagnostic file) to complete the current task.\n  - If neither condition is met, simply report the task completion or output in standard text form; do not invoke \`SendFeishuFileTool\`.`;
+  }
+
+  if (isDesktop) {
+    finalPrompt += `\n\n---\n\n## Environment Awareness: Easy Code Desktop Context\n- **Current Client**: You are running inside the **Easy Code Desktop** application (a native Electron GUI), driven through the same agent core as the CLI via ACP.\n- **User Environment**: The user interacts through a graphical desktop window — a chat transcript with side panels for diffs, plan, tasks, terminal output, and file viewing — not a raw terminal/TTY.\n- **Guidance**:\n  - When referring to UI actions, prefer the app's graphical affordances (the prompt bar, the diff/plan/tasks panels, the permission dialog) over instructing the user to run raw shell commands in a separate terminal.\n  - File edits and command approvals surface as in-app permission prompts; describe outcomes accordingly.\n  - Output renders as Markdown in a desktop-width window, so normal tables and code blocks are fine (no need for the mobile-narrow constraints of a chat gateway).`;
   }
 
   return finalPrompt.trim();

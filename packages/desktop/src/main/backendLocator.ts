@@ -83,6 +83,14 @@ export function buildBackendSpec(): BackendSpec {
     args: [entry, '--acp'],
     env: {
       ELECTRON_RUN_AS_NODE: '1',
+      // Declare to core that this backend is driven by Easy Code Desktop.
+      // - CLI_VERSION drives the User-Agent client segment (core's userAgent.ts
+      //   maps a `Desktop-` prefix to `EasyCode/Desktop/<ver>`, mirroring the
+      //   VSCode-`/`CLI handling).
+      // - EASYCODE_DESKTOP=1 is the environment flag core uses to enable the
+      //   desktop system-prompt environment context (mirrors VSCODE_PLUGIN=1).
+      CLI_VERSION: `Desktop-${app.getVersion()}`,
+      EASYCODE_DESKTOP: '1',
       // Carry the same proxy/web endpoints the CLI uses. Production has these
       // baked in; we only forward overrides when present so dev (api-code/dvcode)
       // and prod both work without special-casing here.
