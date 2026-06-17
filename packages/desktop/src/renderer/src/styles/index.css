@@ -2994,6 +2994,52 @@ select {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* minimized download progress — a tiny floating pill, click to expand */
+.update-pill {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 13px 6px 7px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 99px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  animation: pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.15s ease;
+}
+.update-pill:hover {
+  border-color: var(--accent);
+}
+.update-pill-ring {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--accent);
+  /* donut ring: accent arc up to --p%, track for the rest, hole in the middle */
+  background:
+    radial-gradient(closest-side, var(--bg-raised) 68%, transparent 70%),
+    conic-gradient(var(--accent) calc(var(--p, 0) * 1%), var(--bg-elev) 0);
+}
+.update-pill-ring.indeterminate {
+  background: var(--accent-weak);
+}
+.update-pill-ring.indeterminate svg {
+  animation: spin 0.9s linear infinite;
+}
+.update-pill-pct {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .btn.sm {
   padding: 5px 11px;
   font-size: 12px;
