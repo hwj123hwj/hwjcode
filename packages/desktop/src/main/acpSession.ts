@@ -314,6 +314,10 @@ class DesktopAcpClient implements acp.Client {
               }))
             : undefined,
           content: normalizeToolContent(u.content),
+          rawInput:
+            u.rawInput && typeof u.rawInput === 'object' && !Array.isArray(u.rawInput)
+              ? (u.rawInput as Record<string, unknown>)
+              : undefined,
         });
         break;
       }
