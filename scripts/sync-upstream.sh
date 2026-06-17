@@ -34,12 +34,13 @@ fi
 rm -f packages/cli/src/package.json
 rm -f packages/cli/dist/src/package.json
 
-# 获取上游最新 tag 版本号
+# 版本号策略：fork 版本号独立领先，只升不降
+# 取本地版本和上游 tag 的较大值
 git fetch upstream --tags 2>/dev/null || true
 LATEST_TAG=$(git tag -l 'cli-release-*' | sort -V | tail -1 | sed 's/cli-release-v//')
 echo "🏷️ 上游最新 tag: $LATEST_TAG"
 
-# 确保版本号对齐 tag（同步到 root、cli、core、desktop 四个 package.json）
+# 确保版本号只升不降（同步到 root、cli、core、desktop 四个 package.json）
 ROOT_PKG="package.json"
 CLI_PKG="packages/cli/package.json"
 CORE_PKG="packages/core/package.json"
@@ -47,10 +48,12 @@ DESKTOP_PKG="packages/desktop/package.json"
 
 for PKG in "$ROOT_PKG" "$CLI_PKG" "$CORE_PKG" "$DESKTOP_PKG"; do
   CURRENT=$(node -p "require('./$PKG').version")
-  if [ "$CURRENT" != "$LATEST_TAG" ]; then
-    echo "📝 $PKG 版本: $CURRENT → $LATEST_TAG"
+  # 取较大值（只升不降）
+  TARGET=$(printf '%s\n%s\n' "$CURRENT" "$LATEST_TAG" | sort -V | tail -1)
+  if [ "$CURRENT" != "$TARGET" ]; then
+    echo "📝 $PKG 版本: $CURRENT → $TARGET"
     node -e "
-      const p=require('./$PKG');p.version='$LATEST_TAG';
+      const p=require('./$PKG');p.version='$TARGET';
       require('fs').writeFileSync('./$PKG',JSON.stringify(p,null,2)+'\n')
     "
   fi
