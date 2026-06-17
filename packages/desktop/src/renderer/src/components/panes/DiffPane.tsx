@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../../store';
 import { Icon } from '../Icon';
+import { useT, type TFunc } from '../../i18n/useT';
 import type { GitFileDiff } from '@shared/ipc';
 
 interface Comment {
@@ -12,6 +13,7 @@ interface Comment {
 export function DiffPane({ view }: { view: SessionView }) {
   const refreshDiff = useStore((s) => s.refreshDiff);
   const sendPrompt = useStore((s) => s.sendPrompt);
+  const t = useT();
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [draftLine, setDraftLine] = useState<number | null>(null);
@@ -38,46 +40,42 @@ export function DiffPane({ view }: { view: SessionView }) {
   const submitReview = async () => {
     if (comments.length === 0) return;
     const text =
-      '请处理以下针对当前改动的代码评审意见：\n\n' +
+      t('diff.reviewPrompt') +
       comments.map((c) => `- ${c.file}:${c.line} — ${c.body}`).join('\n');
     await sendPrompt(view.meta.id, text, []);
     setComments([]);
   };
 
   const reviewSelf = async () => {
-    await sendPrompt(
-      view.meta.id,
-      '请自审当前未提交的改动，找出编译错误、逻辑错误、安全问题或明显 bug（忽略风格/lint），并直接修复。',
-      [],
-    );
+    await sendPrompt(view.meta.id, t('diff.selfReviewPrompt'), []);
   };
 
   return (
     <div className="pane">
       <div className="pane-head">
         <Icon name="diff" size={15} />
-        <span>改动</span>
+        <span>{t('pane.diff')}</span>
         <span className="diff-chip">
           <span className="add">+{totals(diffs).added}</span>
           <span className="del">-{totals(diffs).removed}</span>
         </span>
         <span className="grow" />
-        <button className="icon-btn" title="刷新" onClick={() => void refreshDiff(view.meta.id)}>
+        <button className="icon-btn" title={t('common.refresh')} onClick={() => void refreshDiff(view.meta.id)}>
           <Icon name="refresh" size={15} />
         </button>
-        <button className="icon-btn" title="自审改动" onClick={reviewSelf}>
+        <button className="icon-btn" title={t('diff.selfReviewTitle')} onClick={reviewSelf}>
           <Icon name="review" size={15} />
         </button>
         {comments.length > 0 && (
           <button className="btn primary" style={{ padding: '5px 11px' }} onClick={submitReview}>
             <Icon name="comment" size={14} />
-            提交 {comments.length} 条评论
+            {t('diff.submitComments', { n: comments.length })}
           </button>
         )}
       </div>
       <div className="diff-layout">
         <div className="diff-files">
-          {diffs.length === 0 && <div className="group-label">无未提交改动</div>}
+          {diffs.length === 0 && <div className="group-label">{t('diff.noChanges')}</div>}
           {diffs.map((d) => (
             <div
               key={d.path}
@@ -99,6 +97,7 @@ export function DiffPane({ view }: { view: SessionView }) {
           {current ? (
             <DiffBody
               diff={current}
+              t={t}
               comments={comments.filter((c) => c.file === current.path)}
               draftLine={draftLine}
               draftBody={draftBody}
@@ -110,7 +109,7 @@ export function DiffPane({ view }: { view: SessionView }) {
               onAdd={addComment}
             />
           ) : (
-            <div className="empty">选择一个文件查看 diff</div>
+            <div className="empty">{t('diff.pickFile')}</div>
           )}
         </div>
       </div>
@@ -127,6 +126,7 @@ function totals(diffs: GitFileDiff[]) {
 
 function DiffBody({
   diff,
+  t,
   comments,
   draftLine,
   draftBody,
@@ -135,6 +135,7 @@ function DiffBody({
   onAdd,
 }: {
   diff: GitFileDiff;
+  t: TFunc;
   comments: Comment[];
   draftLine: number | null;
   draftBody: string;
@@ -160,7 +161,7 @@ function DiffBody({
               className={`diff-line ${cls}`}
               onClick={() => onPickLine(i)}
               style={{ cursor: 'pointer' }}
-              title="点击行添加评论"
+              title={t('diff.addCommentTitle')}
             >
               <span className="diff-gutter">{i}</span>
               <span>{line || ' '}</span>
@@ -176,7 +177,7 @@ function DiffBody({
                 <textarea
                   autoFocus
                   rows={2}
-                  placeholder="写下评审意见，回车提交…"
+                  placeholder={t('diff.commentPlaceholder')}
                   value={draftBody}
                   onChange={(e) => onDraftChange(e.target.value)}
                   onKeyDown={(e) => {

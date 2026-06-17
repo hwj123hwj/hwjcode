@@ -9,8 +9,9 @@
  *
  * Format: `EasyCode/<client>/<version> (<platform>; <arch>)`
  *   - client:  `VSCode` when the version is prefixed with `VSCode-`
- *              (set by the VS Code extension), otherwise `CLI`.
- *   - version: the resolved version with any `VSCode-` prefix stripped.
+ *              (set by the VS Code extension), `Desktop` when prefixed with
+ *              `Desktop-` (set by the desktop app), otherwise `CLI`.
+ *   - version: the resolved version with any client prefix stripped.
  *
  * Examples:
  *   EasyCode/CLI/1.0.399 (win32; x64)
@@ -33,6 +34,12 @@ export function getUserAgent(version?: string): string {
   if (resolved.startsWith('VSCode-')) {
     const actualVersion = resolved.slice('VSCode-'.length) || 'unknown';
     return `${USER_AGENT_BRAND}/VSCode/${actualVersion} (${platform}; ${arch})`;
+  }
+
+  // The desktop app sets CLI_VERSION as `Desktop-<appVersion>`.
+  if (resolved.startsWith('Desktop-')) {
+    const actualVersion = resolved.slice('Desktop-'.length) || 'unknown';
+    return `${USER_AGENT_BRAND}/Desktop/${actualVersion} (${platform}; ${arch})`;
   }
 
   return `${USER_AGENT_BRAND}/CLI/${resolved} (${platform}; ${arch})`;

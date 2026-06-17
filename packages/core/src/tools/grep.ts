@@ -654,7 +654,12 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
    */
   private parseStandardOutput(output: string, basePath: string, searchPath?: string): GrepMatch[] {
     const results: GrepMatch[] = [];
-    const lines = output.split('\n').filter(line => line.trim());
+    // Split on \r?\n so Windows CRLF output doesn't leave a trailing \r on each
+    // line. The match regexes below are `$`-anchored with `(.*)$`; in JS `.` does
+    // not match `\r` and `$` (no /m) does not match before a `\r`, so a stray
+    // trailing `\r` makes every line fail to parse → 0 matches even when ripgrep
+    // found plenty. This was the cause of "search returns empty" on Windows.
+    const lines = output.split(/\r?\n/).filter(line => line.trim());
 
     // Determine if this is a single file search (cache the stat call once)
     let isSearchingFile = false;

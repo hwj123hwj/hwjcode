@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { Icon, type IconName } from './Icon';
 import { AgentIcon } from './AgentIcon';
+import { useT } from '../i18n/useT';
 import {
   PERMISSION_MODES,
   type AgentKind,
@@ -10,6 +11,19 @@ import {
 } from '@shared/ipc';
 
 const api = window.easycode;
+
+/**
+ * The clipboard-paste shortcut, by platform: ⌘V on macOS, Ctrl+V elsewhere.
+ * Computed once from the user agent (the renderer is a browser context, so
+ * `navigator` is reliable; `data-platform` on <html> is set by preload too but
+ * only consumed by CSS). Used in the prompt hint so the label matches the key
+ * the user actually presses.
+ */
+const PASTE_SHORTCUT = /Mac|iPhone|iPad/i.test(
+  typeof navigator !== 'undefined' ? navigator.userAgent : '',
+)
+  ? '⌘V'
+  : 'Ctrl+V';
 
 /** Label + icon for the agent chip shown on external-agent sessions. */
 const AGENT_BADGE: Record<Exclude<AgentKind, 'easy-code'>, { label: string; icon: IconName }> = {
@@ -93,6 +107,7 @@ export function PromptBar({ view }: { view: SessionView }) {
   const cancel = useStore((s) => s.cancel);
   const setMode = useStore((s) => s.setMode);
   const setModel = useStore((s) => s.setModel);
+  const t = useT();
 
   const [text, setText] = useState('');
   const [atPaths, setAtPaths] = useState<Record<string, string>>({}); // name -> abs path
@@ -101,6 +116,31 @@ export function PromptBar({ view }: { view: SessionView }) {
     null,
   );
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // True while an IME (e.g. Chinese pinyin) is composing. Using a ref — not
+  // state — so onKeyDown reads the latest value synchronously without a
+  // re-render race. macOS IMEs fire Enter to "commit" the composition; we must
+  // NOT treat that Enter as a send.
+  const isComposingRef = useRef(false);
+
+  // Current git branch (+ dirty flag) of this session's working folder, shown
+  // after the folder name as "name (branch*)". Re-queried when the cwd changes.
+  const cwd = view.meta.cwd;
+  const isChat = view.meta.kind === 'chat';
+  const [git, setGit] = useState<{ branch: string; dirty: boolean } | null>(null);
+  useEffect(() => {
+    // Chat sessions have a throwaway, git-less cwd — skip the probe entirely.
+    if (isChat) {
+      setGit(null);
+      return;
+    }
+    let alive = true;
+    void api.workspace.gitBranch(cwd).then((g) => {
+      if (alive) setGit(g);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [cwd, isChat]);
 
   const addImageFromUrl = async (url: string, origMime: string, name: string) => {
     const { mimeType, data } = await compressImage(url, origMime);
@@ -236,6 +276,17 @@ export function PromptBar({ view }: { view: SessionView }) {
     await sendPrompt(meta.id, finalText, [...mentionPaths, ...filePaths], images);
   };
 
+  /**
+   * Whether this keydown is the IME "commit" Enter rather than a real submit.
+   * Triple-guarded because no single signal is reliable across macOS WebKit:
+   *  - `nativeEvent.isComposing`: the standard, but on macOS it can already be
+   *    false on the very Enter that ends composition.
+   *  - `keyCode === 229`: legacy "in composition" sentinel still emitted here.
+   *  - `isComposingRef`: our own compositionstart/end tracking as a backstop.
+   */
+  const isImeCommit = (e: React.KeyboardEvent<HTMLTextAreaElement>) =>
+    e.nativeEvent.isComposing || e.keyCode === 229 || isComposingRef.current;
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (mention && mention.entries.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -252,6 +303,9 @@ export function PromptBar({ view }: { view: SessionView }) {
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
+        // While composing, Enter commits the IME candidate — don't hijack it to
+        // pick a @-mention. (Tab still selects, IMEs don't use it to commit.)
+        if (e.key === 'Enter' && isImeCommit(e)) return;
         e.preventDefault();
         pickMention(mention.entries[mention.active]);
         return;
@@ -262,6 +316,9 @@ export function PromptBar({ view }: { view: SessionView }) {
       }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Let the IME's commit-Enter fall through to the textarea (upscreen the
+      // candidate) instead of sending a half-typed message.
+      if (isImeCommit(e)) return;
       e.preventDefault();
       void submit();
     }
@@ -278,14 +335,29 @@ export function PromptBar({ view }: { view: SessionView }) {
         <div className="prompt-config">
           <span className="chip">
             <Icon name="laptop" size={14} />
-            本地
+            {t('common.local')}
           </span>
-          <span className="chip" title={meta.cwd}>
-            <Icon name="folder" size={14} />
-            {projectName(meta.cwd)}
-          </span>
+          {/* Directory chip is meaningless for directory-less chat sessions
+              (their cwd is an internal ~/.easycode-user/chats/<id> folder), so
+              only show it for project-bound sessions. */}
+          {meta.kind !== 'chat' && (
+            <span
+              className="chip interactive"
+              title={meta.cwd}
+              onClick={() => window.alert(t('prompt.cwdHint'))}
+            >
+              <Icon name="folder" size={14} />
+              {projectName(meta.cwd)}
+              {git && (
+                <span className="chip-branch">
+                  ({git.branch}
+                  {git.dirty ? '*' : ''})
+                </span>
+              )}
+            </span>
+          )}
           {meta.agentType && meta.agentType !== 'easy-code' && (
-            <span className="chip accent" title="驱动此会话的外部 agent">
+            <span className="chip accent" title={t('prompt.externalAgentTitle')}>
               <AgentIcon agent={meta.agentType} size={15} />
               {AGENT_BADGE[meta.agentType].label}
             </span>
@@ -293,7 +365,7 @@ export function PromptBar({ view }: { view: SessionView }) {
           <span className="chip">
             <Icon name="cpu" size={14} />
             <select value={meta.model ?? ''} onChange={(e) => void setModel(meta.id, e.target.value)}>
-              {!meta.model && <option value="">默认模型</option>}
+              {!meta.model && <option value="">{t('prompt.defaultModel')}</option>}
               {(meta.availableModels ?? []).map((m) => (
                 <option key={m.modelId} value={m.modelId}>
                   {m.name}
@@ -311,15 +383,15 @@ export function PromptBar({ view }: { view: SessionView }) {
                 onChange={(e) => void setMode(meta.id, e.target.value as PermissionMode)}
               >
                 {PERMISSION_MODES.map((m) => (
-                  <option key={m.id} value={m.id} title={m.hint}>
-                    {m.label}
+                  <option key={m.id} value={m.id} title={t(`permMode.${m.id}.hint`)}>
+                    {t(`permMode.${m.id}`)}
                   </option>
                 ))}
               </select>
             </span>
           )}
           {ctxPct != null ? (
-            <span className="chip" title="上下文用量">
+            <span className="chip" title={t('prompt.contextUsage')}>
               <span className="token-bar">
                 <div style={{ width: `${Math.min(100, ctxPct)}%` }} />
               </span>
@@ -336,7 +408,7 @@ export function PromptBar({ view }: { view: SessionView }) {
                   <img src={a.url} alt={a.name} />
                   <button
                     className="attach-remove"
-                    title="移除"
+                    title={t('common.remove')}
                     onClick={() => removeAttachment(a.id)}
                   >
                     <Icon name="x" size={11} />
@@ -348,7 +420,7 @@ export function PromptBar({ view }: { view: SessionView }) {
                   <span className="attach-name">{a.name}</span>
                   <button
                     className="attach-remove inline"
-                    title="移除"
+                    title={t('common.remove')}
                     onClick={() => removeAttachment(a.id)}
                   >
                     <Icon name="x" size={11} />
@@ -381,19 +453,25 @@ export function PromptBar({ view }: { view: SessionView }) {
             ref={taRef}
             className="prompt-input"
             rows={1}
-            placeholder={busy ? '回复将在当前动作结束后被读取…（边跑边纠偏）' : '输入指令，@ 引用文件，/ 使用命令…'}
+            placeholder={busy ? t('prompt.busyPlaceholder') : t('prompt.placeholder')}
             value={text}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+            }}
             onPaste={onPaste}
           />
-          <button className="btn-attach" title="添加附件 / 图片" onClick={() => void pickAttachments()}>
+          <button className="btn-attach" title={t('prompt.addAttachment')} onClick={() => void pickAttachments()}>
             <Icon name="paperclip" size={16} />
           </button>
           {busy ? (
             <button className="btn-stop" onClick={() => void cancel(meta.id)}>
               <Icon name="stop" size={14} />
-              停止
+              {t('common.stop')}
             </button>
           ) : null}
           <button
@@ -404,7 +482,7 @@ export function PromptBar({ view }: { view: SessionView }) {
             <Icon name="send" size={16} />
           </button>
         </div>
-        <div className="hint">Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴图片 · 点击回形针添加附件</div>
+        <div className="hint">{t('prompt.hint', { paste: PASTE_SHORTCUT })}</div>
       </div>
     </div>
   );

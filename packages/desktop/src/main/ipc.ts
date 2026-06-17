@@ -8,10 +8,11 @@
  * the renderer.
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, nativeTheme } from 'electron';
 import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
 import { TurnNotifier } from './notifications.js';
+import { UpdateManager } from './updater.js';
 import {
   cancelBrowserLogin,
   getAuthStatus,
@@ -22,6 +23,7 @@ import {
 } from './auth.js';
 import {
   gitDiff,
+  gitBranch,
   listDir,
   openExternal,
   pickFiles,
@@ -32,6 +34,7 @@ import {
   saveClipboardImage,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
+import { getUserSettings, updateUserSettings } from './userSettings.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
@@ -39,18 +42,21 @@ import type {
   BrowserLoginResult,
   CreateSessionOptions,
   CustomModelInput,
+  DesktopUserSettings,
   FeishuDomain,
   FeishuManualInput,
   FeishuQrBegin,
   PermissionMode,
   PermissionResponse,
   PromptOptions,
+  ThemeMode,
 } from '../shared/ipc.js';
 
 /** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
 export interface IpcServices {
   hub: SessionHub;
   feishu: FeishuManager;
+  updater: UpdateManager;
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
@@ -102,6 +108,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   // ── sessions ────────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.SessionList, () => hub.list());
   ipcMain.handle(IpcInvoke.SessionCreate, (_e, opts: CreateSessionOptions) => hub.create(opts));
+  ipcMain.handle(IpcInvoke.SessionCreateChat, (_e, opts?: Omit<CreateSessionOptions, 'cwd'>) =>
+    hub.createChat(opts),
+  );
   ipcMain.handle(IpcInvoke.SessionResume, (_e, id: string, cwd: string) => hub.resume(id, cwd));
   ipcMain.handle(IpcInvoke.SessionClose, (_e, id: string) => hub.close(id));
   ipcMain.handle(IpcInvoke.SessionArchive, (_e, id: string, archived: boolean) =>
@@ -109,6 +118,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.SessionRename, (_e, id: string, title: string) =>
     hub.rename(id, title),
+  );
+  ipcMain.handle(IpcInvoke.SessionSetTitleProvisional, (_e, id: string, title: string) =>
+    hub.setTitleProvisional(id, title),
   );
   ipcMain.handle(IpcInvoke.SessionPrompt, (_e, opts: PromptOptions) =>
     hub.prompt(opts.sessionId, opts.text, opts.atPaths, opts.images),
@@ -155,6 +167,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     deleteCustomModel(displayName),
   );
 
+  // ── user settings (shared with CLI's /config) ─────────────────────────────
+  ipcMain.handle(IpcInvoke.SettingsGet, () => getUserSettings());
+  ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
+    updateUserSettings(patch),
+  );
+
+  // ── color theme ───────────────────────────────────────────────────────────
+  // Mirror the renderer's GUI theme onto the native window chrome (title bar,
+  // scrollbars, form controls). 'system' restores OS-follow. The visible app
+  // palette itself is driven by CSS in the renderer; this just keeps the native
+  // shell consistent. The preference is persisted renderer-side (localStorage).
+  ipcMain.handle(IpcInvoke.ThemeSet, (_e, mode: ThemeMode) => {
+    nativeTheme.themeSource = mode;
+  });
+
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(
     IpcInvoke.PermissionRespond,
@@ -180,6 +207,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     return diffs;
   });
   ipcMain.handle(IpcInvoke.OpenExternal, (_e, url: string) => openExternal(url));
+  ipcMain.handle(IpcInvoke.GitBranch, (_e, cwd: string) => gitBranch(cwd));
   ipcMain.handle(
     IpcInvoke.SaveClipboardImage,
     (_e, cwd: string, mimeType: string, data: string, name?: string) =>
@@ -189,5 +217,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   // ── clipboard ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ReadClipboardImage, () => readClipboardImage());
 
-  return { hub, feishu };
+  // ── version update ────────────────────────────────────────────────────────
+  const updater = new UpdateManager({
+    onStatus: (state) => send(IpcEvent.UpdateStatus, state),
+    // Carry the live progress on the status payload too, so a late subscriber
+    // re-rendering from `onStatus` still sees the bar; the dedicated channel
+    // just avoids a full re-render storm during the download.
+    onProgress: (state) => send(IpcEvent.UpdateProgress, state.progress),
+  });
+  ipcMain.handle(IpcInvoke.UpdateGetState, () => updater.getState());
+  ipcMain.handle(IpcInvoke.UpdateCheck, (_e, manual?: boolean) => updater.check(!!manual));
+  ipcMain.handle(IpcInvoke.UpdateDownload, () => updater.download());
+  ipcMain.handle(IpcInvoke.UpdateCancelDownload, () => updater.cancelDownload());
+  ipcMain.handle(IpcInvoke.UpdateInstall, () => updater.install());
+  ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
+  ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
+
+  return { hub, feishu, updater };
 }
