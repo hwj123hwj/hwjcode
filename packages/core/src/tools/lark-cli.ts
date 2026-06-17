@@ -437,13 +437,14 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
           }
         }
 
-        // Project-level scope exclusion: allow per-project customization.
-        // No hardcoded default excludes — scopes must be applicable to the
-        // target domain, otherwise auth login fails (e.g. im:* scopes don't
-        // exist in the base domain). Users can add project-level excludes via
-        // feishu.excludeScopes in .easycode/settings.json.
+        // Scope exclusion: always exclude the high-risk send_as_user scope
+        // (company-policy-prohibited for many orgs) plus any project-level
+        // excludes from .easycode/settings.json → feishu.excludeScopes.
+        // The --exclude flag filters scopes out of the request list; excluding
+        // a scope that isn't applicable to the target domain is a no-op.
+        const DEFAULT_EXCLUDE_SCOPES = ['im:message.send_as_user'];
         const configuredExcludes = feishuSettings?.excludeScopes || [];
-        const uniqueExcludes = [...configuredExcludes];
+        const uniqueExcludes = [...new Set([...DEFAULT_EXCLUDE_SCOPES, ...configuredExcludes])];
 
         if (feishuSettings?.recommend && !authCmd.includes('--recommend')) {
           authCmd += ' --recommend';
