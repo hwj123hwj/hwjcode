@@ -1,6 +1,6 @@
 {
   "name": "hwjcode-desktop",
-  "version": "1.1.32",
+  "version": "1.1.33",
   "description": "Easy Code Desktop - a Claude Code Desktop-style GUI driving the same agent core via ACP",
   "type": "module",
   "main": "out/main/index.js",

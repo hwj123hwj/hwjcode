@@ -115,6 +115,7 @@ type NLTriggerRule = ModelSwitchRule | CommandRule | ToolToggleRule;
  */
 const NOISE_WORDS = [
   '模型', '的', '一下', '帮我', '给我', '帮忙', '现在', '然后', '那个', '这个', '请', '麻烦',
+  '换', '切换', '切换至', '换为', '换到',
 ];
 
 function stripNoise(input: string): string {
@@ -144,8 +145,8 @@ const NL_TRIGGER_RULES: NLTriggerRule[] = [
     type: 'modelSwitch',
     priority: 1,
     keywords: [
-      '切换模型', '切换为', '切换到', '切到', '换成', '换为', '换到',
-      '切换至', '换成模型', '用模型', '使用模型', '用', '换', '切',
+      '切换模型', '切换为', '切换到', '切换至', '切换', '切到',
+      '换成', '换为', '换到', '换成模型', '用模型', '使用模型', '用', '换', '切',
     ],
     vendorAliases: {
       '智谱': 'glm',
