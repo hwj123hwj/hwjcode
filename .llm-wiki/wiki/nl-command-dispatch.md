@@ -47,6 +47,8 @@ sources: [packages/cli/src/ui/hooks/useNLCommandDispatch.ts, packages/cli/src/ui
 
 **限制**：仅匹配用户收藏模型（`/model favorites add` 添加，最多5个）
 
+> **配置文件**：`~/.easycode-user/settings.json` 的 `favoriteModels` 字段，存储完整模型 ID（非简称）。4层匹配策略、厂商别名表、add 不支持简称等细节详见 [[source-feishu-model-favorites]] 的「模型配置存储机制」章节。
+
 > **重要**：飞书端 `/model favorites` 子命令于 1.1.30 版本新增。此前飞书端 `/model` 是独立实现（不与 CLI 端 `modelCommand.ts` 共享代码），只支持 `/model`（列表）和 `/model <name>`（切换），输入 `/model favorites add xxx` 会被当成模型名查找而报错。详见 [[source-feishu-model-favorites]]。
 
 **CLI vs 飞书差异**：

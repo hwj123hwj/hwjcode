@@ -56,13 +56,45 @@ npx cross-env BUILD_ENV=production node esbuild.config.js
 
 | 配置项 | 位置 | 说明 |
 |--------|------|------|
-| `cloudModels` | `~/.easycode-user/settings.json` | 服务端 `/web-api/models` 下发的缓存 |
-| `favoriteModels` | `~/.easycode-user/settings.json` | 用户收藏列表，最多5个，NL切换依赖此列表 |
+| `cloudModels` | `~/.easycode-user/settings.json` | 服务端 `/web-api/models` 下发的缓存，含 name/displayName/creditsPerRequest/maxToken |
+| `favoriteModels` | `~/.easycode-user/settings.json` | 用户收藏列表，存**完整模型 ID**（如 `deepseek-v4-pro`），最多5个 |
 | `preferredModel` | `~/.easycode-user/settings.json` | 偏好模型 |
 
-- 模型列表完全由服务端动态下发，客户端零硬编码
-- GLM 厂商别名：`智谱`/`zhipu`/`chatglm` → `glm`
-- NL 切换"用智谱"匹配 favorites 中第一个 `glm` 开头的模型
+#### favoriteModels 存储格式
+
+```json
+"favoriteModels": [
+  "glm-5.2",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "claude-sonnet-4-6"
+]
+```
+
+存的是**完整模型 ID**（即 `cloudModels[].name`），不是简称。
+
+#### NL 切换的 4 层匹配策略（`matchModelName`）
+
+用户说简称能切换，是因为 NL 匹配有4层策略（代码：`useNLTriggerRegistry.ts:245`）：
+
+| 层级 | 逻辑 | 示例 |
+|------|------|------|
+| 1 | 精确匹配 model name（不区分大小写） | `deepseek-v4-pro` → 命中 |
+| 2 | 精确匹配 displayName | `DeepSeek-V4-Pro` → 命中 |
+| 3 | **拆词模糊匹配**：查询词按空格拆分，所有关键词都出现在 name 或 displayName 中即命中 | 说 `deepseek pro` → 拆成 `deepseek`+`pro`，`deepseek-v4-pro` 包含两者 → 命中 |
+| 4 | 厂商别名：映射到前缀，匹配第一个该前缀的收藏模型 | 说 `深度求索` → 映射 `deepseek` 前缀 → 命中第一个 `deepseek-*` |
+
+**厂商别名表**：
+
+| 别名 | 映射前缀 |
+|------|----------|
+| `智谱` / `zhipu` / `chatglm` | `glm` |
+| `深度求索` / `ds` | `deepseek` |
+| `双子星` / `谷歌` | `gemini` |
+
+#### /model favorites add 的匹配方式
+
+`add` 子命令支持填 **displayName 或 name**，通过 `getModelNameFromDisplayName` 解析成完整 ID 存入。但**不支持简称**——add 走精确匹配，不走4层模糊。
 
 ### 4. 服务端数据问题
 
