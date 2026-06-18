@@ -120,9 +120,12 @@ const NOISE_WORDS = [
 
 function stripNoise(input: string): string {
   let clean = input;
+  // 去除中英文标点符号（用户输入常带句号、感叹号等）
+  clean = clean.replace(/[。，！？.,!?；;：:、~～\s]+$/g, '');
   for (const noise of NOISE_WORDS) {
     clean = clean.replace(noise, '');
   }
+  // 去标点后可能暴露的尾部空格再 trim 一次
   return clean.trim();
 }
 
