@@ -2073,7 +2073,14 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 问题: 当工具批准菜单显示时, InputPrompt 仍然捕获键盘输入，导致无法通过 Enter 确认
   // 解决: 检测是否有工具处于确认状态，将菜单状态传给 InputPrompt
   // 关键: 需要同时检查 history 和 pendingHistoryItems，因为正在等待审批的工具在 pendingHistoryItems 中
+  // 🔒 防御: 当 streamingState 为 Idle（AI 已回复完毕）时，不可能有工具在等待确认。
+  //   如果工具状态因竞态卡在 Confirming，不应对输入框造成永久锁定。
   const isToolConfirmationMenuOpen = useMemo(() => {
+    // AI 已回复完毕时，不应有工具处于确认状态
+    if (streamingState === StreamingState.Idle) {
+      return false;
+    }
+
     // 递归检查工具及其子工具调用
     const hasConfirmingTool = (tools: IndividualToolCallDisplay[]): boolean => {
       return tools.some((tool) =>
@@ -2099,7 +2106,7 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     });
 
     return inHistory || inPending;
-  }, [history, pendingHistoryItems]);
+  }, [history, pendingHistoryItems, streamingState]);
 
   const { elapsedTime, currentLoadingPhrase, estimatedInputTokens: loadingEstimatedTokens } =
     useLoadingIndicator(streamingState, estimatedInputTokens);
