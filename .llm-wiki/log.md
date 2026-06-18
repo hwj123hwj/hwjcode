@@ -2,6 +2,17 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-18] update | 收藏模型配置文件与4层匹配策略补全
+
+用户指出每次问收藏模型都要重新查代码，wiki 里没有把配置文件结构和匹配机制记清楚。检查发现 `source-feishu-model-favorites.md` 有存储位置表格但缺4层匹配策略细节，`nl-command-dispatch.md` 有匹配算法但没引用配置文件。
+
+### Pages Updated
+- `wiki/source-feishu-model-favorites.md` — 模型配置存储机制章节扩充：新增 favoriteModels JSON 格式示例、4层匹配策略表格（精确name → 精确displayName → 拆词模糊 → 厂商别名）、厂商别名表、add 不支持简称说明
+- `wiki/nl-command-dispatch.md` — 模型切换章节新增配置文件位置引用和 [[source-feishu-model-favorites]] 交叉引用
+
+### Contradictions
+- 无新增矛盾。原 wiki 内容正确但不完整，本次为补充性更新
+
 ## [2026-06-18] ingest | 上游同步版本号策略修复 & 1.1.31 发版
 
 从对话中提取 fork 版本号独立领先策略、sync-upstream.sh 版本号对齐逻辑修复、cron 定时任务调整、1.1.31 发版流程。
