@@ -3432,9 +3432,9 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const favorites = favoriteModelIds
         .map((id) => {
           const model = cloudModels.find((m: any) => m.name === id);
-          return model ? { name: model.name, displayName: model.displayName } : null;
-        })
-        .filter((f): f is { name: string; displayName: string } => f !== null);
+          // fallback: cloudModels 查不到时用 ID 本身，不丢弃
+          return { name: id, displayName: model?.displayName || id };
+        });
 
       const nlResult = await import('../hooks/useNLTriggerRegistry.js').then(m =>
         m.detectNLTrigger(trimmed, { favorites }),
