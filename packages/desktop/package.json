@@ -42,5 +42,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient.git"
   }
 }
