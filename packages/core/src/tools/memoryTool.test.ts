@@ -23,7 +23,7 @@ vi.mock('fs/promises');
 vi.mock('os');
 vi.mock('glob');
 
-const MEMORY_SECTION_HEADER = '## DeepV Code Added Memories';
+const MEMORY_SECTION_HEADER = '## Easy Code Added Memories';
 
 // Define a type for our fsAdapter to ensure consistency
 interface FsAdapter {
