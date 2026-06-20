@@ -108,6 +108,7 @@ import { ExtensionCommandLoader } from '../../services/ExtensionCommandLoader.js
 import { FileCommandLoader } from '../../services/FileCommandLoader.js';
 import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command-loader.js';
 import { SettingScope } from '../../config/settings.js';
+import { loadCustomModels } from '../../config/customModelsStorage.js';
 import { getAvailableModels, refreshModelsInBackground, getModelDisplayName, getModelNameFromDisplayName } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
 import { launchGoalMode } from '../hooks/launchGoalMode.js';
@@ -3269,7 +3270,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
         userMemory: sessionMemory.userMemory,
         memoryTokenCount: sessionMemory.memoryTokenCount,
         geminiMdFileCount: sessionMemory.geminiMdFileCount,
-        customModels: activeConfig?.getCustomModels() || [],
+        customModels: loadCustomModels(),
         cloudModels: activeConfig?.getCloudModels() || [],
         proxy: activeConfig?.getProxy(),
         customProxyServerUrl: activeConfig?.getCustomProxyServerUrl(),
