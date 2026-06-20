@@ -2062,12 +2062,10 @@ export class DeepVServerAdapter implements ContentGenerator {
    */
   async countTokens(request: CountTokensParameters): Promise<CountTokensResponse> {
     try {
-      // 🔧 自定义模型返回 0 token，不进行估算
-      // 这样可以清楚地看到自定义模型不支持 token 计数
       const modelToUse = request.model || this.config?.getModel() || 'auto';
       if (isCustomModel(modelToUse)) {
-        console.log('[DeepV Server] Custom model detected, token counting not supported');
-        return { totalTokens: 0 };
+        console.log('[DeepV Server] Custom model detected, using character-based token estimation');
+        return this.estimateTokensAsFailback(request);
       }
 
       // 构建统一的GenAI格式请求，包含 systemInstruction 和 tools（如果有）
