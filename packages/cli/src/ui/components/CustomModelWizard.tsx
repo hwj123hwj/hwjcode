@@ -27,6 +27,11 @@ import {
   fetchEasyRouterModels,
   EasyRouterFetchError,
 } from '../../config/easyRouterClient.js';
+import {
+  fetchOpenAICompatibleModels,
+  OpenAIModelFetchError,
+  type OpenAIModelEntry,
+} from '../../config/openAICompatibleClient.js';
 import { fetchEasyClawMetadata } from '../../config/easyClawMetadataClient.js';
 import { t } from '../utils/i18n.js';
 
@@ -47,6 +52,9 @@ enum ManualStep {
   DISPLAY_NAME = 'displayName',
   BASE_URL = 'baseUrl',
   API_KEY = 'apiKey',
+  FETCH_MODELS = 'fetchModels',
+  SELECT_MODELS = 'selectModels',
+  BATCH_CONFIRM = 'batchConfirm',
   MODEL_ID = 'modelId',
   MAX_TOKENS = 'maxTokens',
   CONFIRM = 'confirm',
@@ -138,6 +146,11 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
   const [inputValue, setInputValue] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // ---- OpenAI auto-discovery state ----------------------------------------
+  const [fetchedModels, setFetchedModels] = useState<OpenAIModelEntry[]>([]);
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+
   // ---- EasyRouter-specific state -----------------------------------------
   const [easyRouterApiKey, setEasyRouterApiKey] = useState('');
   const [easyRouterModels, setEasyRouterModels] = useState<EasyRouterModelEntry[]>([]);
@@ -222,14 +235,23 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
           return;
         }
         setConfig(prev => ({ ...prev, displayName: trimmedValue }));
-        setInputValue('');
         setValidationError(null);
         setCurrentStep(ManualStep.BASE_URL);
+        // Pre-fill default base URL for OpenAI-compatible providers.
+        setInputValue(config.provider === 'openai' ? 'http://localhost:4001/v1' : '');
         break;
 
       case ManualStep.BASE_URL:
         if (!trimmedValue) {
-          setValidationError('Base URL cannot be empty');
+          if (config.provider === 'openai') {
+            // Accept default.
+            setConfig(prev => ({ ...prev, baseUrl: 'http://localhost:4001/v1' }));
+            setInputValue('');
+            setValidationError(null);
+            setCurrentStep(ManualStep.API_KEY);
+          } else {
+            setValidationError('Base URL cannot be empty');
+          }
           return;
         }
         if (!trimmedValue.startsWith('http://') && !trimmedValue.startsWith('https://')) {
@@ -250,7 +272,13 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
         setConfig(prev => ({ ...prev, apiKey: trimmedValue }));
         setInputValue('');
         setValidationError(null);
-        setCurrentStep(ManualStep.MODEL_ID);
+        // For OpenAI-compatible providers, try auto-discovery first.
+        if (config.provider === 'openai') {
+          setFetchModelsError(null);
+          setCurrentStep(ManualStep.FETCH_MODELS);
+        } else {
+          setCurrentStep(ManualStep.MODEL_ID);
+        }
         break;
 
       case ManualStep.MODEL_ID:
@@ -293,6 +321,41 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
   }, [currentStep]);
 
   // ---- EasyRouter: trigger fetch when entering FETCHING step --------------
+  // ---- OpenAI: trigger auto-discovery fetch when entering FETCH_MODELS -----
+  useEffect(() => {
+    if (currentStep !== ManualStep.FETCH_MODELS) return;
+    if (!config.baseUrl || !config.apiKey) {
+      setFetchModelsError('Missing base URL or API key');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const models = await fetchOpenAICompatibleModels(
+          config.baseUrl!,
+          config.apiKey!,
+        );
+        if (cancelled) return;
+        setFetchedModels(models);
+        setSelectedModelIds(models.map((m) => m.id));
+        setFetchModelsError(null);
+        setCurrentStep(ManualStep.SELECT_MODELS);
+      } catch (e) {
+        if (cancelled) return;
+        const message =
+          e instanceof OpenAIModelFetchError
+            ? `${e.message}${e.status ? ` (HTTP ${e.status})` : ''}`
+            : e instanceof Error
+              ? e.message
+              : String(e);
+        setFetchModelsError(message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep, config.baseUrl, config.apiKey]);
+
   useEffect(() => {
     if (currentStep !== EasyRouterStep.FETCHING) return;
     let cancelled = false;
@@ -350,6 +413,61 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
   );
 
   // ---- EasyRouter: CONFIRM action ----------------------------------------
+  // ---- OpenAI: FETCH_MODELS error handling --------------------------------
+  const handleFetchErrorRetry = useCallback(() => {
+    setFetchModelsError(null);
+    setCurrentStep(ManualStep.FETCH_MODELS);
+  }, []);
+
+  const handleFetchErrorSkipToManual = useCallback(() => {
+    setFetchModelsError(null);
+    setCurrentStep(ManualStep.MODEL_ID);
+  }, []);
+
+  // ---- OpenAI: SELECT_MODELS handler -------------------------------------
+  const handleSelectModelsSubmit = useCallback(
+    (selectedIds: string[]) => {
+      if (selectedIds.length === 0) {
+        setValidationError('Please select at least one model.');
+        return;
+      }
+      setValidationError(null);
+      setSelectedModelIds(selectedIds);
+      setCurrentStep(ManualStep.BATCH_CONFIRM);
+    },
+    [],
+  );
+
+  // ---- OpenAI: BATCH_CONFIRM action --------------------------------------
+  const handleBatchConfirm = useCallback(
+    (value: string) => {
+      if (value !== 'save') {
+        onCancel();
+        return;
+      }
+      const configs: CustomModelConfig[] = selectedModelIds.map((id) => ({
+        displayName: `${config.displayName!}/${id}`,
+        provider: config.provider!,
+        baseUrl: config.baseUrl!,
+        apiKey: config.apiKey!,
+        modelId: id,
+        maxTokens: config.maxTokens,
+        enabled: true,
+      }));
+      for (const cfg of configs) {
+        const errors = validateCustomModelConfig(cfg);
+        if (errors.length > 0) {
+          setValidationError(
+            `Internal error for "${cfg.modelId}": ${errors.join(', ')}`,
+          );
+          return;
+        }
+      }
+      onComplete(configs);
+    },
+    [config, selectedModelIds, onComplete, onCancel],
+  );
+
   const handleEasyRouterConfirm = useCallback(
     (value: string) => {
       if (value !== 'save') {
@@ -400,6 +518,12 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
         return 'Enter API Base URL';
       case ManualStep.API_KEY:
         return 'Enter API Key';
+      case ManualStep.FETCH_MODELS:
+        return 'Discovering Models…';
+      case ManualStep.SELECT_MODELS:
+        return `Select Models (${fetchedModels.length} found)`;
+      case ManualStep.BATCH_CONFIRM:
+        return 'Confirm Batch Import';
       case ManualStep.MODEL_ID:
         return 'Enter Model Name';
       case ManualStep.MAX_TOKENS:
@@ -429,6 +553,14 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
         return 'API endpoint base URL (e.g., https://api.openai.com/v1)';
       case ManualStep.API_KEY:
         return 'Your API key (or use ${ENV_VAR} for environment variable)';
+      case ManualStep.FETCH_MODELS:
+        return fetchModelsError
+          ? `Failed to auto-discover: ${fetchModelsError}`
+          : `Calling GET ${config.baseUrl}/models …`;
+      case ManualStep.SELECT_MODELS:
+        return 'Use ↑/↓ to move, Space to toggle, Enter to confirm. All models are selected by default.';
+      case ManualStep.BATCH_CONFIRM:
+        return `These ${selectedModelIds.length} model(s) will be saved under "${config.displayName}/" prefix.`;
       case ManualStep.MODEL_ID:
         return 'The model name to use with the API (e.g., gpt-4-turbo)';
       case ManualStep.MAX_TOKENS:
@@ -475,6 +607,125 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
     }
   };
 
+  // ---- OpenAI auto-discovery render helpers ---------------------------------
+
+  const renderFetchModels = () => (
+    <Box flexDirection="column">
+      {!fetchModelsError ? (
+        <Box>
+          <Text color={Colors.AccentCyan}>
+            <Spinner type="dots" />
+          </Text>
+          <Text> Fetching models from {config.baseUrl}/models …</Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          <Text color={Colors.AccentRed}>✗ {fetchModelsError}</Text>
+          <Box marginTop={1} flexDirection="column">
+            <RadioButtonSelect
+              items={[
+                { label: '↻ Retry', value: 'retry' },
+                { label: '✎ Enter model ID manually', value: 'manual' },
+                { label: '✗ Cancel', value: 'cancel' },
+              ]}
+              initialIndex={0}
+              onSelect={(value: string) => {
+                if (value === 'retry') handleFetchErrorRetry();
+                else if (value === 'manual') handleFetchErrorSkipToManual();
+                else onCancel();
+              }}
+              onHighlight={() => {}}
+              isFocused={currentStep === ManualStep.FETCH_MODELS}
+            />
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+
+  const renderSelectModels = () => {
+    const items = fetchedModels.map((m) => ({
+      label: m.id,
+      value: m.id,
+    }));
+    return (
+      <Box flexDirection="column">
+        <SelectMulti
+          items={items}
+          defaultValues={selectedModelIds}
+          onChange={setSelectedModelIds}
+          onSubmit={handleSelectModelsSubmit}
+          onCancel={onCancel}
+          isFocused={currentStep === ManualStep.SELECT_MODELS}
+          showNumbers
+        />
+        {validationError && (
+          <Box marginTop={1}>
+            <Text color={Colors.AccentRed}>✗ {validationError}</Text>
+          </Box>
+        )}
+        <Box marginTop={1}>
+          <Text color={Colors.Gray}>
+            Selected: {selectedModelIds.length} / {fetchedModels.length}.
+            Space toggles, Enter confirms, Esc cancels.
+          </Text>
+        </Box>
+      </Box>
+    );
+  };
+
+  const renderBatchConfirm = () => (
+    <Box flexDirection="column">
+      <Box marginBottom={1}>
+        <Text color={Colors.AccentYellow} bold>
+          About to add {selectedModelIds.length} model(s):
+        </Text>
+      </Box>
+      <Box marginLeft={2} flexDirection="column">
+        <Text>
+          <Text color={Colors.AccentCyan} bold>Provider:     </Text>
+          <Text>{PROVIDER_OPTIONS.find((p) => p.value === config.provider)?.label}</Text>
+        </Text>
+        <Text>
+          <Text color={Colors.AccentCyan} bold>Base URL:     </Text>
+          <Text>{config.baseUrl}</Text>
+        </Text>
+        <Text>
+          <Text color={Colors.AccentCyan} bold>API Key:      </Text>
+          <Text>
+            {config.apiKey?.includes('${') ? config.apiKey : '***' + config.apiKey?.slice(-4)}
+          </Text>
+        </Text>
+        <Text>
+          <Text color={Colors.AccentCyan} bold>Name Prefix:  </Text>
+          <Text>{config.displayName}/</Text>
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={Colors.AccentCyan} bold>Models ({selectedModelIds.length}):</Text>
+          {selectedModelIds.map((id) => (
+            <Text key={id} color={Colors.Foreground}>
+              {'  • '}{id}
+            </Text>
+          ))}
+        </Box>
+      </Box>
+      {validationError && (
+        <Box marginTop={1}>
+          <Text color={Colors.AccentRed}>✗ {validationError}</Text>
+        </Box>
+      )}
+      <Box marginTop={2}>
+        <RadioButtonSelect
+          items={confirmMenuItems}
+          initialIndex={0}
+          onSelect={handleBatchConfirm}
+          onHighlight={() => {}}
+          isFocused={currentStep === ManualStep.BATCH_CONFIRM}
+        />
+      </Box>
+    </Box>
+  );
+
   const renderProviderSelection = () => (
     <Box flexDirection="column">
       {PROVIDER_OPTIONS.map((option, index) => {
@@ -518,6 +769,12 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
     currentStep === ManualStep.MODEL_ID ||
     currentStep === ManualStep.MAX_TOKENS ||
     currentStep === EasyRouterStep.API_KEY;
+
+  // Determine if we're in an auto-discovery step for OpenAI.
+  const isOpenAIAutoStep =
+    currentStep === ManualStep.FETCH_MODELS ||
+    currentStep === ManualStep.SELECT_MODELS ||
+    currentStep === ManualStep.BATCH_CONFIRM;
 
   const renderTextInput = () => {
     const example = getStepExample(currentStep);
@@ -779,13 +1036,46 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
     currentStep === EasyRouterStep.CONFIRM;
 
   // Step counter:
-  //   manual: 7 steps (provider, displayName, baseUrl, apiKey, modelId, maxTokens, confirm)
-  //   easy-router: 4 steps (provider, apiKey, fetch+select, confirm) — collapse fetch+select into one for the user's mental model.
+  //   manual (non-openai):      7 steps  (provider, displayName, baseUrl, apiKey, modelId, maxTokens, confirm)
+  //   manual (openai auto):     7 steps  (provider, displayName, baseUrl, apiKey, fetchModels, selectModels, batchConfirm)
+  //   easy-router:              4 steps  (provider, apiKey, fetch+select, confirm)
   let stepNumber = 1;
   let totalSteps = 7;
-  if (isManualStep(currentStep)) {
-    stepNumber = Object.values(ManualStep).indexOf(currentStep) + 1;
-    totalSteps = Object.values(ManualStep).length;
+  if (currentStep === ManualStep.FETCH_MODELS ||
+      currentStep === ManualStep.SELECT_MODELS ||
+      currentStep === ManualStep.BATCH_CONFIRM) {
+    // OpenAI auto-discovery path — sequential numbering.
+    const autoOrder = [
+      ManualStep.PROVIDER,
+      ManualStep.DISPLAY_NAME,
+      ManualStep.BASE_URL,
+      ManualStep.API_KEY,
+      ManualStep.FETCH_MODELS,
+      ManualStep.SELECT_MODELS,
+      ManualStep.BATCH_CONFIRM,
+    ];
+    stepNumber = autoOrder.indexOf(currentStep) + 1;
+    totalSteps = autoOrder.length;
+  } else if (
+    isManualStep(currentStep) &&
+    config.provider === 'openai'
+  ) {
+    // OpenAI fallback after fetch error: MODEL_ID / MAX_TOKENS / CONFIRM
+    // come after FETCH_MODELS in the actual walk.
+    if (currentStep === ManualStep.MODEL_ID) stepNumber = 5;
+    else if (currentStep === ManualStep.MAX_TOKENS) stepNumber = 6;
+    else if (currentStep === ManualStep.CONFIRM) stepNumber = 7;
+    else stepNumber = Object.values(ManualStep)
+      .filter(s => s !== ManualStep.FETCH_MODELS && s !== ManualStep.SELECT_MODELS && s !== ManualStep.BATCH_CONFIRM)
+      .indexOf(currentStep) + 1;
+    totalSteps = 7;
+  } else if (isManualStep(currentStep)) {
+    // Non-openai manual path — skip auto-discovery steps.
+    const manualFiltered = Object.values(ManualStep).filter(
+      s => s !== ManualStep.FETCH_MODELS && s !== ManualStep.SELECT_MODELS && s !== ManualStep.BATCH_CONFIRM
+    );
+    stepNumber = manualFiltered.indexOf(currentStep) + 1;
+    totalSteps = manualFiltered.length;
   } else if (isEasyRouterFlow) {
     totalSteps = 4;
     if (currentStep === EasyRouterStep.API_KEY) stepNumber = 2;
@@ -832,6 +1122,9 @@ export function CustomModelWizard({ onComplete, onCancel }: CustomModelWizardPro
         {currentStep === ManualStep.PROVIDER && renderProviderSelection()}
         {isTextInputStep && renderTextInput()}
         {currentStep === ManualStep.CONFIRM && renderConfirmation()}
+        {currentStep === ManualStep.FETCH_MODELS && renderFetchModels()}
+        {currentStep === ManualStep.SELECT_MODELS && renderSelectModels()}
+        {currentStep === ManualStep.BATCH_CONFIRM && renderBatchConfirm()}
         {currentStep === EasyRouterStep.FETCHING && renderEasyRouterFetching()}
         {currentStep === EasyRouterStep.SELECT_MODELS && renderEasyRouterSelectModels()}
         {currentStep === EasyRouterStep.CONFIRM && renderEasyRouterConfirm()}
