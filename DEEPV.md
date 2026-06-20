@@ -115,10 +115,10 @@ Easy Code (Monorepo)
 ## DeepV Code Added Memories
 - 本仓库是上游 Easy Code 项目的个人 fork，不走上游 CI 发版流程。版本号与上游 release tag 完全一致（同步脚本 `scripts/sync-upstream.sh` 会自动对齐），不存在「版本号必须严格低于 tag」的约束。
 - 演示了工具调用能力，用户要求尽可能多地展示可用工具
-- 独立 GitLab仓库: `https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient`（项目ID: 9774），Personal Access Token: `glpat-myrVXWAg5e7HF-RGRYFv`（全局），可用 GitLab API 创建/合并 MR。上游仓库: `https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient`。开发规范见 `.llm-wiki/wiki/development-workflow.md`，同步脚本见 `scripts/sync-upstream.sh`。
+- 独立 GitLab仓库: `https://gitlab.liebaopay.com/huangweijian/DeepVcodeClient`（项目ID: 9774），可用 GitLab API 创建/合并 MR。上游仓库: `https://gitlab.liebaopay.com/ai_native/DeepVCode/DeepVcodeClient`。开发规范见 `.llm-wiki/wiki/development-workflow.md`，同步脚本见 `scripts/sync-upstream.sh`。Token 等敏感信息见 `.secrets` 文件。
 - hwjcode 已发布到 npmjs.org，包名 hwjcode，CLI 命令名 hwjcode，bin 指向 bundle/easycode.js（内部文件名未改），自更新常量 SELF_UPDATE_PACKAGE='hwjcode', SELF_UPDATE_RELAUNCH_COMMAND='hwjcode'。安装命令：npm i -g hwjcode。npm 账号 hwj123weijian。
 - DeepV Code fork 的 npm 版本号独立领先于上游 tag。sync-upstream.sh 版本号对齐策略为"取本地版本和上游 tag 的较大值，只升不降"（sort -V | tail -1），不会因上游 tag 较低而降版本。每次上游同步后需要手动升 patch 版本号并 npm publish 发版。
-- npm发布token（Automation类型）：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，用户名 hwj123weijian，可用于 hwjcode 包发版无需OTP。
+- npm 发布 token 见 `.secrets` 文件。npm 账号 hwj123weijian。
 
 ## Easy Code Added Memories (upstream)
 - 本项目曾叫 DeepV Code，现已品牌升级为 Easy Code。记忆文件仍沿用 `DEEPV.md` 文件名，主要是为了对存量用户兼容，不要改名。

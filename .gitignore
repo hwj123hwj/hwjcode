@@ -3,6 +3,7 @@
 .env~
 .env.backup.*
 .gemini_security
+.secrets
 1
 # deepv-code settings
 .deepv/
