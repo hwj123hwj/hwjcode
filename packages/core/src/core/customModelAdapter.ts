@@ -1804,6 +1804,7 @@ export async function* callOpenAICompatibleModelStream(
 
   try {
     let isDone = false;
+    let chunkCount = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
@@ -1823,6 +1824,11 @@ export async function* callOpenAICompatibleModelStream(
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+        if (process.env.DEEPV_DEBUG_CUSTOM_MODEL && chunkCount < 5) {
+          console.log(`[CustomModel] SSE raw line[${chunkCount}]: ${trimmed.substring(0, 200)}`);
+        }
+        chunkCount++;
         const dataStr = trimmed.slice(6);
         if (dataStr === '[DONE]') {
           // OpenAI 明确表示流结束，此时应该 flush 所有待完成的工具调用
@@ -1834,6 +1840,17 @@ export async function* callOpenAICompatibleModelStream(
         try {
           const chunk = JSON.parse(dataStr);
           const choice = chunk.choices?.[0];
+
+          if (process.env.DEEPV_DEBUG_CUSTOM_MODEL) {
+            const parts = [];
+            if (choice?.delta?.content) parts.push(`content="${choice.delta.content.substring(0, 40)}"`);
+            if (choice?.delta?.reasoning_content) parts.push(`reasoning="${choice.delta.reasoning_content.substring(0, 40)}"`);
+            if (choice?.delta?.tool_calls?.length) parts.push(`tool_calls(${choice.delta.tool_calls.length})`);
+            if (choice?.finish_reason) parts.push(`finish=${choice.finish_reason}`);
+            if (chunk.usage) parts.push(`usage(tok=${chunk.usage.total_tokens})`);
+            if (parts.length === 0) parts.push('(empty/role-only)');
+            console.log(`[CustomModel] SSE chunk → ${parts.join(', ')}`);
+          }
 
           if (choice) {
             const delta = choice.delta;
