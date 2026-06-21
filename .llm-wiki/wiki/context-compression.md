@@ -68,6 +68,16 @@ After the compression service reduces the message chain to a brief summary, the 
 | SubAgent 压缩 | `subAgent.ts` `tryCompressHistory()` | SubAgent history 超限 |
 | 模型切换压缩 | `client.ts` `switchModel()` | 切换到更小上下文窗口的模型 |
 
+### 6. Custom Model Scene Routing
+
+> 修复于 1.1.43：`createTemporaryChat()` 中的 fallback 逻辑区分了系统场景和工具场景。
+
+当使用自定义模型时，`createTemporaryChat()` 对 `gemini-2.5-flash` 场景的处理：
+- **系统场景**（压缩、摘要等）：找不到自定义 Gemini Flash → fallback 到主自定义模型
+- **工具场景**（IMAGE_READER、WEB_FETCH 等）：保留内置模型名 `'gemini-2.5-flash'`，通过 DeepV 代理直接调用
+
+这意味着自定义模型用户无需配置 Gemini Flash 也能使用识图等工具。
+
 ## Related Pages
 - [[core-module]]
 - [[goal-driven-mode]]
