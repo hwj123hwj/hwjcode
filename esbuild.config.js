@@ -14,7 +14,7 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
-const pkg = require(path.resolve(__dirname, 'package.json'));
+const pkg = require(path.resolve(__dirname, 'packages/cli/package.json'));
 
 // 根据环境变量或命令行参数确定环境
 const buildEnv = process.env.BUILD_ENV || process.env.NODE_ENV || 'development';
