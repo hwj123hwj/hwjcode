@@ -251,7 +251,9 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
         resolvedModel = generateCustomModelId(geminiFlashModel);
       }
       // If no Gemini Flash in custom models, resolvedModel stays undefined.
-      // createTemporaryChat will fallback to the main custom model.
+      // createTemporaryChat will use the scene-recommended model (gemini-2.5-flash).
+      // DeepVServerAdapter.generateContent() will NOT override it for IMAGE_READER
+      // scenes (protected by BUILTIN_ONLY_SCENES).
     }
 
     const filePath = params.absolute_path;

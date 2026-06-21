@@ -293,7 +293,7 @@ describe('ImageReaderTool', () => {
       expect(result.llmContent).toContain('via custom model');
     });
 
-    it('returns tool unavailable when custom models are used but no custom Gemini Flash is found', async () => {
+    it('falls back to scene-recommended model when custom models are used but no custom Gemini Flash is found', async () => {
       const getModelMock = vi.fn().mockReturnValue('custom:openai:gpt-4o@hash');
       const getCustomModelsMock = vi.fn().mockReturnValue([
         {
@@ -321,8 +321,11 @@ describe('ImageReaderTool', () => {
         abortSignal,
       );
 
-      expect(result.llmContent).toContain('is currently unavailable because you are using custom models');
-      expect(result.returnDisplay).toBe('Tool unavailable: Gemini Flash required');
+      // With the fix, IMAGE_READER scene is protected from custom model override
+      // in DeepVServerAdapter, so it uses the scene-recommended model (gemini-2.5-flash).
+      // The mock createTemporaryChat returns a successful response.
+      expect(result.llmContent).toContain('Image description for pic.png');
+      expect(result.llmContent).toContain('via custom model');
     });
   });
 });

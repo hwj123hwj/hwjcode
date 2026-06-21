@@ -688,6 +688,20 @@ export class DeepVServerAdapter implements ContentGenerator {
 
       // 🆕 如果用户使用自定义模型，辅助场景（非主对话场景）应该也使用用户的自定义模型
       // 这样可以避免在使用自定义模型时仍然调用 DeepV API
+      //
+      // ⚠️ 例外：以下场景必须使用内置模型，不能被自定义模型覆盖：
+      // - IMAGE_READER: 需要 gemini-2.5-flash 的视觉能力来识别图片
+      // - WEB_FETCH: 需要 gemini-2.5-flash 的能力来解析网页内容
+      // - WEB_SEARCH: 需要 gemini-2.5-flash 来处理搜索结果
+      // - GOAL_EVALUATION: 需要 deepseek-v4-flash 来评估目标达成
+      // 如果这些场景也被覆盖为用户的自定义模型，当自定义模型不支持视觉/特定能力时会失败。
+      const BUILTIN_ONLY_SCENES = new Set([
+        SceneType.IMAGE_READER,
+        SceneType.WEB_FETCH,
+        SceneType.WEB_SEARCH,
+        SceneType.GOAL_EVALUATION,
+      ]);
+
       let modelToUse: string;
       if (userModel && isCustomModel(userModel)) {
         // 用户使用自定义模型时：
@@ -695,10 +709,14 @@ export class DeepVServerAdapter implements ContentGenerator {
         // - 否则使用用户的自定义模型（忽略场景固定模型）
         if (request.model && isCustomModel(request.model)) {
           modelToUse = request.model;
+        } else if (scene && BUILTIN_ONLY_SCENES.has(scene)) {
+          // 必须使用内置模型的场景，保留 scene 推荐的模型
+          modelToUse = sceneModel || 'gemini-2.5-flash';
+          console.log(`[DeepV Server] Scene ${scene} requires builtin model, using: ${modelToUse} (user custom model preserved for main chat only)`);
         } else {
           modelToUse = userModel;
+          console.log(`[DeepV Server] User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
         }
-        console.log(`[DeepV Server] User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
       } else {
         // 模型解析优先级：request.model > sceneModel > userModel > 'auto'
         // 这样固定值场景（如 'gemini-2.5-flash'）会优先，'auto' 场景会回退到用户模型
@@ -1100,15 +1118,24 @@ export class DeepVServerAdapter implements ContentGenerator {
     const userModel = this.config?.getModel();
 
     // 🆕 如果用户使用自定义模型，辅助场景应该也使用用户的自定义模型
+    const BUILTIN_ONLY_SCENES = new Set([
+      SceneType.IMAGE_READER,
+      SceneType.WEB_FETCH,
+      SceneType.WEB_SEARCH,
+      SceneType.GOAL_EVALUATION,
+    ]);
+
     let modelToUse: string;
     if (userModel && isCustomModel(userModel)) {
-      // 用户使用自定义模型时：忽略场景固定模型，使用用户的自定义模型
       if (request.model && isCustomModel(request.model)) {
         modelToUse = request.model;
+      } else if (scene && BUILTIN_ONLY_SCENES.has(scene)) {
+        modelToUse = sceneModel || 'gemini-2.5-flash';
+        console.log(`[DeepV Server] (Stream) Scene ${scene} requires builtin model, using: ${modelToUse}`);
       } else {
         modelToUse = userModel;
+        console.log(`[DeepV Server] (Stream) User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
       }
-      console.log(`[DeepV Server] (Stream) User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
     } else {
       modelToUse = request.model || sceneModel || userModel || 'auto';
     }
@@ -1161,15 +1188,24 @@ export class DeepVServerAdapter implements ContentGenerator {
       const userModel = this.config?.getModel();
 
       // 🆕 如果用户使用自定义模型，辅助场景应该也使用用户的自定义模型
+      const BUILTIN_ONLY_SCENES = new Set([
+        SceneType.IMAGE_READER,
+        SceneType.WEB_FETCH,
+        SceneType.WEB_SEARCH,
+        SceneType.GOAL_EVALUATION,
+      ]);
+
       let modelToUse: string;
       if (userModel && isCustomModel(userModel)) {
-        // 用户使用自定义模型时：忽略场景固定模型，使用用户的自定义模型
         if (request.model && isCustomModel(request.model)) {
           modelToUse = request.model;
+        } else if (scene && BUILTIN_ONLY_SCENES.has(scene)) {
+          modelToUse = sceneModel || 'gemini-2.5-flash';
+          console.log(`[DeepV Server] (_Stream) Scene ${scene} requires builtin model, using: ${modelToUse}`);
         } else {
           modelToUse = userModel;
+          console.log(`[DeepV Server] (_Stream) User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
         }
-        console.log(`[DeepV Server] (_Stream) User is using custom model, overriding scene model for ${scene}: ${modelToUse}`);
       } else {
         // 模型解析优先级：request.model > sceneModel > userModel > 'auto'
         // 这样固定值场景（如 'gemini-2.5-flash'）会优先，'auto' 场景会回退到用户模型
@@ -2022,10 +2058,19 @@ export class DeepVServerAdapter implements ContentGenerator {
     const userModel = this.config?.getModel();
 
     // 🆕 如果用户使用自定义模型，忽略场景固定模型
+    const BUILTIN_ONLY_SCENES = new Set([
+      SceneType.IMAGE_READER,
+      SceneType.WEB_FETCH,
+      SceneType.WEB_SEARCH,
+      SceneType.GOAL_EVALUATION,
+    ]);
+
     let modelToUse: string;
     if (userModel && isCustomModel(userModel)) {
       if (request.model && isCustomModel(request.model)) {
         modelToUse = request.model;
+      } else if (scene && BUILTIN_ONLY_SCENES.has(scene)) {
+        modelToUse = sceneModel || 'gemini-2.5-flash';
       } else {
         modelToUse = userModel;
       }
