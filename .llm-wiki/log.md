@@ -2,6 +2,26 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-21] ingest | CLI 版本锁死 & 自定义模型压缩 token=0 & 自更新缓存问题
+
+从对话中提取三个互相关联的 Bug：esbuild define 将根 package.json 版本烙入 bundle 导致版本号锁死、DeepVServerAdapter.countTokens 对自定义模型返回 0 导致压缩失效、self-update 外挂脚本未清除 npm cache。
+
+### Pages Created
+- `wiki/source-version-build-bugs-2026-06-21.md` — 源文档摘要：三个 Bug 的完整症状、根因链路、修复方案和版本时间线
+
+### Pages Updated
+- `wiki/context-compression.md` — 新增第4节"Token Counting for Custom Models"：countTokens 路由逻辑、自定义模型 Bug 修复说明、token 估算精度、压缩入口点表格
+- `wiki/self-update.md` — 新增"Known Issues"章节：npm 缓存问题、无版本验证、login shell PATH 不一致；新增 source 交叉引用
+- `wiki/build-system.md` — 新增"关键陷阱 2"警告（esbuild define 版本注入）、新增"esbuild define 与版本注入"小节（含代码示例和运行时读取优先级）、新增"npm Token 管理"和手动发布步骤、新增 source 交叉引用
+- `wiki/DeepVServerAdapter.md` — 大幅扩充：更新日期和 tags、新增 Key Methods 章节（countTokens 路由逻辑、estimateTokensAsFailback 精度、cleanContents 清理逻辑）、Bug 修复交叉引用
+- `wiki/esbuild-stale-js-bug.md` — Related Pages 新增 [[source-version-build-bugs-2026-06-21]] 交叉引用
+- `wiki/overview.md` — 版本号从 1.1.26 更新为 1.1.41
+- `index.md` — Sources 表新增 #12；修正 Entities 表中 EasyCodeServerAdapter → DeepVServerAdapter（原为死链）
+
+### Contradictions
+- `index.md` 原引用 `EasyCodeServerAdapter` 但实际文件名为 `DeepVServerAdapter.md` — 已修正
+- `overview.md` 原记录 version 为 1.1.26 — 已更新为 1.1.41
+
 ## [2026-06-18] update | 收藏模型配置文件与4层匹配策略补全
 
 用户指出每次问收藏模型都要重新查代码，wiki 里没有把配置文件结构和匹配机制记清楚。检查发现 `source-feishu-model-favorites.md` 有存储位置表格但缺4层匹配策略细节，`nl-command-dispatch.md` 有匹配算法但没引用配置文件。

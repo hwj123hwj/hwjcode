@@ -107,3 +107,4 @@ grep -c "新代码标识符" bundle/easycode.js
 - [[build-system]] — 构建系统概述
 - [[adding-builtin-tool-checklist]] — 已有"rebuild bundle"经验，本次扩展
 - [[source-feishu-model-favorites]] — 本次 Bug 的完整上下文
+- [[source-version-build-bugs-2026-06-21]] — esbuild 相关的另一个版本锁死 Bug（define 版本注入）

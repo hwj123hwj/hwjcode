@@ -1,8 +1,8 @@
 ---
 type: entity
-date: 2026-06-17
-tags: [self-update, npm, tool, feishu, restart]
-sources: [source-hwjcode-rename]
+date: 2026-06-21
+tags: [self-update, npm, tool, feishu, restart, cache]
+sources: [source-hwjcode-rename, source-version-build-bugs-2026-06-21]
 ---
 
 # SelfUpdateTool
@@ -54,6 +54,29 @@ SelfUpdateTool 仅在飞书网关模式下动态注册，支持从 npm 安装最
 - sourcePath: 本地 .tgz 绝对路径（source=local 时必须）
 - reason: 日志备注
 
+## Known Issues
+
+### npm 缓存导致安装旧版本
+
+> 详见 [[source-version-build-bugs-2026-06-21]] Bug 3。
+
+外挂脚本执行 `npm install -g hwjcode@latest` 时未清除 npm cache。npm 可能直接使用本地缓存的旧版本 tarball，导致"更新"后实际版本未变。
+
+**当前缓解**：用户手动执行自更新前可先运行 `npm cache clean --force`。
+
+**建议修复方向**：
+- 外挂脚本在 install 前执行 `spawnSync('npm', ['cache', 'clean', '--force'])`
+- 或使用 `npm install -g hwjcode@latest --prefer-online` 强制联网校验
+- 安装后验证版本号
+
+### 外挂脚本无版本验证
+
+install 成功后仅检查 `exitCode === 0`，不验证实际安装的版本是否为目标版本。建议添加 `hwjcode --version` 验证步骤。
+
+### Login Shell PATH 不一致
+
+macOS 上 nvm/homebrew 安装的 Node.js 可能导致 login shell 的 `hwjcode` 路径与当前进程不同，从而运行到旧版本的二进制。
+
 ## Related
 
 - [[feishu-integration]] — 飞书网关模式
@@ -61,3 +84,4 @@ SelfUpdateTool 仅在飞书网关模式下动态注册，支持从 npm 安装最
 - [[source-hwjcode-rename]] — 包名重命名记录
 - [[release-process]] — 发版流程规范
 - [[source-upstream-sync-version-strategy]] — 版本号策略与最新版本
+- [[source-version-build-bugs-2026-06-21]] — npm 缓存问题详情

@@ -15,7 +15,7 @@ Easy Code 是一款 AI 驱动的智能编程助手，通过深度整合人工智
 ## Key Facts
 
 - **Package name:** `hwjcode` (npmjs.org) — 2026-06-17 从 `easycode-ai` 重命名
-- **Version:** 1.1.26
+- **Version:** 1.1.41
 - **CLI binary:** `hwjcode`
 - **License:** Apache-2.0
 - **Runtime:** Node.js >= 20.0.0

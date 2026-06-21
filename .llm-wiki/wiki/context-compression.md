@@ -1,8 +1,8 @@
 ---
 type: entity
-date: 2026-05-30
-tags: [compression, context, micro-compact, token-optimization]
-sources: [packages/core/src/services/compressionService.ts, packages/core/src/services/microCompactService.ts, packages/core/src/services/postCompactRestorationService.ts]
+date: 2026-06-21
+tags: [compression, context, micro-compact, token-optimization, custom-model]
+sources: [packages/core/src/services/compressionService.ts, packages/core/src/services/microCompactService.ts, packages/core/src/services/postCompactRestorationService.ts, source-version-build-bugs-2026-06-21]
 ---
 
 # Context Compression & Restoration
@@ -46,7 +46,31 @@ After the compression service reduces the message chain to a brief summary, the 
 - Re-establishes the current files-in-context bindings.
 - Restores localized system configurations without polluting the model's chat history.
 
+### 4. Token Counting for Custom Models
+
+> ⚠️ **Known Bug (fixed in 1.1.41)**: `DeepVServerAdapter.countTokens()` 对自定义模型返回 `{ totalTokens: 0 }`，导致压缩阈值检查永远不触发。详见 [[source-version-build-bugs-2026-06-21]]。
+
+`CompressionService.shouldCompress()` 通过 `contentGenerator.countTokens()` 计算当前 history 的 token 数。对于内置模型（Gemini/Claude），计数通过 DeepV 代理服务端 API 实现；对于自定义模型，改为使用客户端字符估算（`estimateTokensAsFailback`）。
+
+**自定义模型的 token 估算精度**：
+- 英文：~4 字符/token
+- 中文：~2 字符/token
+- 代码：~3 字符/token
+
+该估算足以正确触发自动压缩，但精确度低于服务端 API。
+
+### 5. Compression Entry Points
+
+| 入口 | 文件 | 触发条件 |
+|------|------|----------|
+| 自动压缩 | `client.ts` `sendMessageStream()` | `sessionTokenCount / tokenLimit > 0.8` |
+| 手动压缩 | `feishuCommand.ts` `/compress` | 用户手动触发 |
+| SubAgent 压缩 | `subAgent.ts` `tryCompressHistory()` | SubAgent history 超限 |
+| 模型切换压缩 | `client.ts` `switchModel()` | 切换到更小上下文窗口的模型 |
+
 ## Related Pages
 - [[core-module]]
 - [[goal-driven-mode]]
 - [[tools-system]]
+- [[EasyCodeServerAdapter]] — countTokens 实现
+- [[source-version-build-bugs-2026-06-21]] — 自定义模型 token 计数 Bug

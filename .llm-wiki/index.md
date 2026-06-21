@@ -17,6 +17,7 @@
 | 09 | conversation-2026-06-17 | [source-data-directory-decoupling](wiki/source-data-directory-decoupling.md) | CLI 命名与数据存储解耦原理 — 所有持久化路径与包名无关 | 2026-06-17 |
 | 10 | conversation-2026-06-17-feishu-model-favorites | [source-feishu-model-favorites](wiki/source-feishu-model-favorites.md) | 飞书 /model favorites 子命令新增 & esbuild 陈旧 JS 产物 Bug 修复 | 2026-06-17 |
 | 11 | conversation-2026-06-18-upstream-sync | [source-upstream-sync-version-strategy](wiki/source-upstream-sync-version-strategy.md) | 上游同步版本号策略修复（只升不降）& 1.1.31 发版 & cron 时间调整 | 2026-06-18 |
+| 12 | conversation-2026-06-21 | [source-version-build-bugs-2026-06-21](wiki/source-version-build-bugs-2026-06-21.md) | CLI 版本号锁死、自定义模型压缩 token=0、自更新 npm 缓存问题 | 2026-06-21 |
 
 
 ## Entities
@@ -44,7 +45,7 @@
 |------|------|---------|----------|
 | [GeminiClient](wiki/GeminiClient.md) | entity | Facade | `core/src/core/client.ts` |
 | [ContentGenerator](wiki/ContentGenerator.md) | entity | Strategy/Adapter | `core/src/core/contentGenerator.ts` |
-| [EasyCodeServerAdapter](wiki/EasyCodeServerAdapter.md) | entity | Adapter | `core/src/core/` |
+| [DeepVServerAdapter](wiki/DeepVServerAdapter.md) | entity | Adapter | `core/src/core/DeepVServerAdapter.ts` |
 | [SceneManager](wiki/SceneManager.md) | entity | Strategy | `core/src/core/sceneManager.ts` |
 | [Turn](wiki/Turn.md) | entity | State Machine | `core/src/core/turn.ts` |
 | [SubAgent](wiki/SubAgent.md) | entity | Agent | `core/src/core/subAgent.ts` |
