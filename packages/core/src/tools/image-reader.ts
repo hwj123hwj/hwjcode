@@ -247,13 +247,11 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
                (displayNameLower.includes('gemini') && displayNameLower.includes('flash'));
       });
 
-      if (!geminiFlashModel) {
-        return {
-          llmContent: `This tool (${ImageReaderTool.Name}) is currently unavailable because you are using custom models, but no custom Gemini Flash model (e.g., gemini-2.5-flash) was found in your custom models list to execute this tool. Please configure a custom Gemini Flash model to use this feature.`,
-          returnDisplay: `Tool unavailable: Gemini Flash required`
-        };
+      if (geminiFlashModel) {
+        resolvedModel = generateCustomModelId(geminiFlashModel);
       }
-      resolvedModel = generateCustomModelId(geminiFlashModel);
+      // If no Gemini Flash in custom models, resolvedModel stays undefined.
+      // createTemporaryChat will fallback to the main custom model.
     }
 
     const filePath = params.absolute_path;
