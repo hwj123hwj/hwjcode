@@ -440,10 +440,14 @@ export class GeminiClient {
 
         if (geminiFlashModel) {
           modelToUse = generateCustomModelId(geminiFlashModel);
-        } else {
-          // Fallback to the main custom model for system scenes
+        } else if (isSystemScene) {
+          // System scenes (compression, summary, etc.) must use a real model —
+          // fallback to main custom model when no custom Gemini Flash is configured.
           modelToUse = currentModel;
         }
+        // For non-system scenes (IMAGE_READER, WEB_FETCH, etc.): keep the built-in
+        // model name (e.g. 'gemini-2.5-flash'). The DeepV proxy handles it directly,
+        // even when the user's main chat model is a custom model.
       }
     }
 
