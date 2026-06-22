@@ -20,7 +20,18 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
-import type { DesktopUserSettings } from '../shared/ipc.js';
+import type { DesktopUserSettings, TerminalShellKind } from '../shared/ipc.js';
+
+const TERMINAL_SHELL_KINDS: TerminalShellKind[] = [
+  'default',
+  'powershell',
+  'cmd',
+  'gitbash',
+  'wsl',
+  'bash',
+  'zsh',
+  'fish',
+];
 
 const SETTINGS_DIRECTORY_NAME = '.easycode-user';
 const SETTINGS_FILE = 'settings.json';
@@ -63,6 +74,12 @@ function project(raw: Record<string, unknown>): DesktopUserSettings {
   ) {
     out.projectMemoryMode = raw.projectMemoryMode;
   }
+  if (
+    typeof raw.terminalShell === 'string' &&
+    TERMINAL_SHELL_KINDS.includes(raw.terminalShell as TerminalShellKind)
+  ) {
+    out.terminalShell = raw.terminalShell as TerminalShellKind;
+  }
   return out;
 }
 
@@ -89,6 +106,10 @@ export function updateUserSettings(patch: DesktopUserSettings): DesktopUserSetti
   }
   if ('projectMemoryMode' in patch && patch.projectMemoryMode) {
     raw.projectMemoryMode = patch.projectMemoryMode;
+  }
+  if ('terminalShell' in patch && patch.terminalShell) {
+    if (patch.terminalShell === 'default') delete raw.terminalShell;
+    else raw.terminalShell = patch.terminalShell;
   }
 
   writeRaw(raw);

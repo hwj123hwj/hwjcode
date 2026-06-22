@@ -15,6 +15,7 @@ import { ensurePathFromLoginShell } from './shellPath.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
 import type { UpdateManager } from './updater.js';
+import type { TerminalManager } from './terminals.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
 // taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
 // from the packaged .app bundle, so this is harmless there.
@@ -26,6 +27,7 @@ let mainWindow: BrowserWindow | null = null;
 let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
 let updater: UpdateManager | null = null;
+let terminals: TerminalManager | null = null;
 
 /**
  * macOS application menu. The first submenu's title is the app name shown in the
@@ -89,6 +91,10 @@ function createWindow(): void {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // Enable the <webview> tag used by the built-in browser panel. The guest
+      // page runs out-of-process in its own session partition (persist:browser),
+      // so it can't reach Node or the easycode bridge.
+      webviewTag: true,
     },
   });
 
@@ -131,7 +137,7 @@ app.whenReady().then(() => {
     // Drop the default application menu on Windows/Linux entirely.
     Menu.setApplicationMenu(null);
   }
-  ({ hub, feishu, updater } = registerIpc(() => mainWindow));
+  ({ hub, feishu, updater, terminals } = registerIpc(() => mainWindow));
   createWindow();
   // Kick off the version-update lifecycle (startup check + periodic poll). It
   // delays its first check internally so it never competes with boot.
@@ -153,4 +159,6 @@ app.on('before-quit', () => {
   feishu?.dispose();
   // Stop the update poll timer and abort any in-flight download.
   updater?.dispose();
+  // Kill any integrated-terminal shells so we never orphan a child process.
+  terminals?.disposeAll();
 });

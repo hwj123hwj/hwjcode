@@ -13,6 +13,7 @@ import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
 import { TurnNotifier } from './notifications.js';
 import { UpdateManager } from './updater.js';
+import { TerminalManager, listShells } from './terminals.js';
 import {
   cancelBrowserLogin,
   getAuthStatus,
@@ -31,11 +32,13 @@ import {
   readClipboardImage,
   readFile,
   readFileBase64,
+  revealInFolder,
   saveClipboardImage,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { getUserSettings, updateUserSettings } from './userSettings.js';
 import { detectExternalAgents } from './externalAgents.js';
+import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
   ApiKeyLoginResult,
@@ -57,6 +60,7 @@ export interface IpcServices {
   hub: SessionHub;
   feishu: FeishuManager;
   updater: UpdateManager;
+  terminals: TerminalManager;
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
@@ -137,6 +141,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   // ── external agents ───────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.AgentsDetect, () => detectExternalAgents());
 
+  // ── external IDEs ("Open in" menu) ─────────────────────────────────────────
+  ipcMain.handle(IpcInvoke.IdeDetect, () => detectIdes());
+  ipcMain.handle(IpcInvoke.IdeOpen, (_e, ideId: string, target: string) =>
+    openInIde(ideId, target),
+  );
+
   // ── feishu gateway ────────────────────────────────────────────────────────
   const feishu = new FeishuManager(
     (status) => send(IpcEvent.FeishuChanged, status),
@@ -195,6 +205,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.ReadFile, (_e, p: string) => readFile(p));
   ipcMain.handle(IpcInvoke.ReadFileBase64, (_e, p: string) => readFileBase64(p));
   ipcMain.handle(IpcInvoke.ListDir, (_e, p: string) => listDir(p));
+  ipcMain.handle(IpcInvoke.RevealInFolder, (_e, p: string) => revealInFolder(p));
+  ipcMain.handle(IpcInvoke.OpenInTerminal, (_e, dir: string) => openInTerminal(dir));
   ipcMain.handle(IpcInvoke.GitDiff, async (_e, cwd: string, sessionId?: string) => {
     const diffs = await gitDiff(cwd);
     if (sessionId) {
@@ -213,6 +225,24 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     (_e, cwd: string, mimeType: string, data: string, name?: string) =>
       saveClipboardImage(cwd, mimeType, data, name),
   );
+
+  // ── integrated terminal ─────────────────────────────────────────────────────
+  const terminals = new TerminalManager({
+    onData: (id, data) => send(IpcEvent.TerminalData, { id, data }),
+    onExit: (id, code) => send(IpcEvent.TerminalExit, { id, code }),
+    getShellPref: () => getUserSettings().terminalShell,
+  });
+  ipcMain.handle(IpcInvoke.TerminalListShells, () => listShells());
+  ipcMain.handle(IpcInvoke.TerminalCreate, (_e, cwd?: string, cols?: number, rows?: number) =>
+    terminals.create(cwd, cols, rows),
+  );
+  ipcMain.handle(IpcInvoke.TerminalInput, (_e, id: string, data: string) =>
+    terminals.input(id, data),
+  );
+  ipcMain.handle(IpcInvoke.TerminalResize, (_e, id: string, cols: number, rows: number) =>
+    terminals.resize(id, cols, rows),
+  );
+  ipcMain.handle(IpcInvoke.TerminalClose, (_e, id: string) => terminals.close(id));
 
   // ── clipboard ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ReadClipboardImage, () => readClipboardImage());
@@ -233,5 +263,5 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
   ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
 
-  return { hub, feishu, updater };
+  return { hub, feishu, updater, terminals };
 }

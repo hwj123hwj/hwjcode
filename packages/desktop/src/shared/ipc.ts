@@ -39,6 +39,9 @@ export const IpcInvoke = {
   SessionSetTitleProvisional: 'session:set-title-provisional',
   // external agents
   AgentsDetect: 'agents:detect',
+  // external IDEs / editors ("Open in" menu)
+  IdeDetect: 'ide:detect',
+  IdeOpen: 'ide:open',
   // feishu gateway
   FeishuStatus: 'feishu:status',
   FeishuSaveManual: 'feishu:save-manual',
@@ -68,10 +71,18 @@ export const IpcInvoke = {
   ReadFile: 'workspace:read-file',
   ReadFileBase64: 'workspace:read-file-base64',
   ListDir: 'workspace:list-dir',
+  RevealInFolder: 'workspace:reveal-in-folder',
+  OpenInTerminal: 'workspace:open-in-terminal',
   GitDiff: 'workspace:git-diff',
   GitBranch: 'workspace:git-branch',
   OpenExternal: 'workspace:open-external',
   SaveClipboardImage: 'workspace:save-clipboard-image',
+  // integrated terminal (real PTY shell)
+  TerminalListShells: 'terminal:list-shells',
+  TerminalCreate: 'terminal:create',
+  TerminalInput: 'terminal:input',
+  TerminalResize: 'terminal:resize',
+  TerminalClose: 'terminal:close',
   // clipboard
   ReadClipboardImage: 'clipboard:read-image',
   // version update
@@ -98,6 +109,10 @@ export const IpcEvent = {
   UpdateStatus: 'update:status',
   /** Streamed download progress for an in-flight update download. */
   UpdateProgress: 'update:progress',
+  /** A chunk of output from an integrated-terminal shell. */
+  TerminalData: 'terminal:data',
+  /** An integrated-terminal shell process exited. */
+  TerminalExit: 'terminal:exit',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -198,6 +213,17 @@ export interface ModelInfo {
   name: string;
 }
 
+/**
+ * A locally-installed external editor/IDE detected for the file browser's
+ * "Open in" menu. `id` is a stable key the renderer passes back to `ide.open`;
+ * `name` is the display label. The concrete launch command stays in the main
+ * process (resolved during detection) and never crosses the bridge.
+ */
+export interface DetectedIde {
+  id: string;
+  name: string;
+}
+
 export interface SessionMeta {
   /** Stable desktop-side id (also the ACP sessionId once created). */
   id: string;
@@ -275,6 +301,35 @@ export interface SaveCustomModelResult {
 export type ProjectMemoryMode = 'all' | 'deepv-only' | 'none';
 
 /**
+ * Which shell the integrated terminal launches. `default` lets the main process
+ * pick the platform default (PowerShell on Windows, $SHELL elsewhere). The rest
+ * are explicit choices the user can pin in Settings. Cross-platform: the Windows
+ * options (powershell/cmd/gitbash/wsl) and POSIX options (bash/zsh/fish) are both
+ * declared here; `terminal.listShells()` returns only the ones valid + available
+ * on the current machine.
+ */
+export type TerminalShellKind =
+  | 'default'
+  | 'powershell'
+  | 'cmd'
+  | 'gitbash'
+  | 'wsl'
+  | 'bash'
+  | 'zsh'
+  | 'fish';
+
+/**
+ * A shell offered for the current platform, with whether its executable was
+ * actually found. The renderer renders the dropdown from this list and i18n's the
+ * label from `id`; unavailable shells are shown disabled.
+ */
+export interface ShellOption {
+  id: TerminalShellKind;
+  /** True when the shell's executable was located on this machine. */
+  available: boolean;
+}
+
+/**
  * Desktop GUI color theme. Distinct from the CLI's terminal theme (ANSI palette)
  * below — this is a renderer-only preference persisted in localStorage, not in
  * the shared settings file. 'system' follows the OS color scheme.
@@ -298,6 +353,11 @@ export interface DesktopUserSettings {
   healthyUse?: boolean;
   /** How project memory (DEEPV.md / AGENTS.md) is loaded. Undefined = "all". */
   projectMemoryMode?: ProjectMemoryMode;
+  /**
+   * Which shell the integrated terminal launches. Undefined = `default` (the
+   * platform default). Desktop-only key; the CLI ignores it but preserves it.
+   */
+  terminalShell?: TerminalShellKind;
 }
 
 export interface CreateSessionOptions {
@@ -626,6 +686,35 @@ export interface RewindResult {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Integrated terminal (real PTY shell, rendered with xterm.js)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** A spawned integrated-terminal shell handle. */
+export interface TerminalHandle {
+  id: string;
+  /** Display label, e.g. the shell name ("PowerShell" / "bash"). */
+  shell: string;
+  /**
+   * Optional human-readable notice the renderer prints as a dim banner before
+   * the shell's first output — e.g. when the user's chosen shell wasn't found and
+   * we fell back to the platform default.
+   */
+  notice?: string;
+}
+
+/** A chunk of raw PTY output (carries ANSI escapes; xterm.js renders it). */
+export interface TerminalDataEvent {
+  id: string;
+  data: string;
+}
+
+/** A terminal shell process exit notification. */
+export interface TerminalExitEvent {
+  id: string;
+  code: number;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Version updates
 //
 // The desktop checks `…/api/desktop/version` for a newer build, downloads the
@@ -788,6 +877,12 @@ export interface EasycodeBridge {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */
     detect(): Promise<ExternalAgentAvailability>;
   };
+  ide: {
+    /** Detect locally-installed editors/IDEs for the file browser's "Open in" menu. */
+    detect(): Promise<DetectedIde[]>;
+    /** Launch a detected IDE (by id) on a file or folder path. */
+    open(ideId: string, target: string): Promise<void>;
+  };
   feishu: {
     status(): Promise<FeishuStatus>;
     /** Validate + persist manually-entered App ID / App Secret. */
@@ -824,6 +919,10 @@ export interface EasycodeBridge {
     /** Read a file as base64 + mime (used to inline picked images). */
     readFileBase64(path: string): Promise<FileBase64 | null>;
     listDir(path: string): Promise<DirEntry[]>;
+    /** Reveal a file/folder in the OS file manager (Explorer / Finder). */
+    revealInFolder(path: string): Promise<void>;
+    /** Open a terminal at the given directory (best-effort per platform). */
+    openInTerminal(dir: string): Promise<void>;
     /** Pass `sessionId` to also refresh that session's +N/-M chip in the sidebar. */
     gitDiff(cwd: string, sessionId?: string): Promise<GitFileDiff[]>;
     /** Current git branch + dirty flag for `cwd`, or null if not a git work tree. */
@@ -847,6 +946,27 @@ export interface EasycodeBridge {
   };
   backend: {
     onLog(cb: (line: string) => void): () => void;
+  };
+  terminal: {
+    /**
+     * List the shells valid for this platform, each flagged with whether its
+     * executable was found. Drives the Settings "integrated terminal shell" picker.
+     */
+    listShells(): Promise<ShellOption[]>;
+    /**
+     * Spawn a PTY shell. `cwd` defaults to the user's home directory; `cols`/
+     * `rows` seed the initial PTY grid (the renderer resizes it once xterm fits).
+     * The shell launched follows the user's `terminalShell` setting.
+     */
+    create(cwd?: string, cols?: number, rows?: number): Promise<TerminalHandle>;
+    /** Write raw input (keystrokes, incl. control chars) to a shell's PTY. */
+    input(id: string, data: string): Promise<void>;
+    /** Resize a shell's PTY grid to match the rendered xterm. */
+    resize(id: string, cols: number, rows: number): Promise<void>;
+    /** Terminate a shell. */
+    close(id: string): Promise<void>;
+    onData(cb: (e: TerminalDataEvent) => void): () => void;
+    onExit(cb: (e: TerminalExitEvent) => void): () => void;
   };
   updater: {
     /** Read the current update snapshot (e.g. to render the banner on mount). */

@@ -142,6 +142,11 @@ export async function openExternal(url: string): Promise<void> {
   await shell.openExternal(url);
 }
 
+/** Reveal a file/folder in the OS file manager (Explorer / Finder / etc.). */
+export function revealInFolder(target: string): void {
+  shell.showItemInFolder(target);
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
     const { stdout } = await exec('git', args, { cwd, maxBuffer: 64 * 1024 * 1024 });

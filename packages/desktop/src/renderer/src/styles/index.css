@@ -191,6 +191,13 @@ select {
   display: inline-block;
   vertical-align: middle;
 }
+/* Colourful file/folder icons (FileIcons.tsx) — self-coloured, so unlike .ic
+ * they ignore `color`; just keep them from shrinking and align them. */
+.file-ic {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
 .ic-spin {
   animation: spin 0.8s linear infinite;
 }
@@ -3053,4 +3060,597 @@ select {
 }
 .update-check-row .setting-desc {
   margin: 0;
+}
+
+/* ── workspace layout: right feature sidebar + bottom terminal ───────────── */
+/* The second grid column now hosts a vertical stack: the session row (chat +
+   right sidebar) above the optional bottom terminal. */
+.workspace-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-row {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-row > .main {
+  flex: 1 1 0;
+  min-width: 300px;
+}
+
+/* draggable dividers between resizable regions (sidebar / terminal / file tree) */
+.resizer {
+  flex: none;
+  position: relative;
+  z-index: 6;
+  background: transparent;
+  transition: background 0.12s;
+}
+.resizer-x {
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+}
+.resizer-y {
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+.resizer:hover {
+  background: var(--accent);
+}
+/* while dragging any divider, suppress text selection across the app */
+body.resizing,
+body.resizing * {
+  user-select: none !important;
+}
+
+/* top-right layout toggles (left of the OS window controls) */
+.ws-toggles {
+  display: inline-flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.empty-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+.empty-titlebar .grow {
+  flex: 1;
+}
+.ws-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 6px;
+  border-radius: var(--radius-xs);
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.ws-toggle:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.ws-toggle.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* right feature sidebar: content panel (flex) + rail (fixed list) */
+.rsidebar {
+  display: flex;
+  /* width comes from an inline flex-basis (user-draggable, persisted); these
+     guards mirror WORKSPACE_SIZE_LIMITS.rightWidth in the store. */
+  flex: 0 0 auto;
+  max-width: 900px;
+  min-width: 340px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  min-height: 0;
+}
+.rsidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.rsidebar-rail {
+  flex: none;
+  width: 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elev);
+  overflow-y: auto;
+}
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.rail-item .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.rail-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.rail-item.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.rail-item.active .ic {
+  color: var(--accent);
+}
+.rail-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-shortcut {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+/* generic content-panel scaffolding shared by the feature panels */
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.ws-panel-flush {
+  /* panels that embed a full .pane (e.g. Review) shouldn't double their chrome */
+  overflow: hidden;
+}
+.ws-panel-flush .pane {
+  border-right: none;
+}
+.ws-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  min-height: 40px;
+}
+.ws-panel-head .ic {
+  color: var(--text-faint);
+}
+.ws-panel-head .grow {
+  flex: 1;
+}
+
+/* side chat reuses ChatPane + PromptBar inside the panel */
+.sidechat-panel {
+  height: 100%;
+}
+.sidechat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* bottom terminal — always dark, regardless of the app theme */
+.bottom-terminal {
+  flex: none;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  min-height: 0;
+}
+.bterm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.bterm-tabs > .ic {
+  color: var(--text-faint);
+  margin: 0 4px 0 4px;
+}
+.bterm-tabs .grow {
+  flex: 1;
+}
+.bterm-tabs .icon-btn {
+  color: var(--text-faint);
+}
+.bterm-tabs .icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.bterm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.bterm-tab:hover {
+  background: var(--bg-hover);
+}
+.bterm-tab.active {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.bterm-tab-name {
+  white-space: nowrap;
+}
+.bterm-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 1px;
+  border-radius: 3px;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+.bterm-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+/* xterm.js host — the live PTY renders into a child .xterm-host div here. */
+.bterm-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 8px 6px 10px;
+  position: relative;
+}
+.xterm-host {
+  width: 100%;
+  height: 100%;
+}
+/* xterm injects its own .xterm wrapper; make it fill the host. */
+.bterm-body .xterm {
+  height: 100%;
+}
+.bterm-body .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* integrated-terminal shell picker (Settings → 通用) */
+.shell-select {
+  position: relative;
+  display: inline-block;
+}
+.shell-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.shell-select-trigger:hover {
+  background: var(--bg-hover);
+}
+.shell-select-trigger .grow {
+  flex: 1;
+  text-align: left;
+}
+.shell-select-trigger .ic:first-child {
+  color: var(--text-faint);
+}
+.shell-select .menu-pop button {
+  justify-content: flex-start;
+}
+.shell-select .menu-pop button .grow {
+  flex: 1;
+  text-align: left;
+}
+.shell-select .menu-pop .shell-check {
+  color: var(--accent);
+}
+.shell-na {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* shared dropdown separator (menu-pop) */
+.menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 4px;
+}
+
+/* ── files panel (VSCode-style multi-tab file browser) ───────────────────── */
+.files-panel {
+  height: 100%;
+}
+.file-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  min-height: 36px;
+}
+.file-tabs-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.file-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 200px;
+}
+.file-tab .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.file-tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+.file-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+.file-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.files-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+/* explorer tree now lives on the RIGHT of the viewer (border on its left). */
+.file-tree {
+  flex: none;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elev);
+  min-height: 0;
+}
+.file-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.file-tree-body {
+  flex: 1;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+.tree-row .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.tree-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.tree-row.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.tree-row.active .ic {
+  color: var(--accent);
+}
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-loading {
+  color: var(--text-faint);
+}
+.files-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+}
+.file-toolbar .grow {
+  flex: 1;
+}
+.file-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  min-width: 0;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.crumb .ic {
+  color: var(--text-faint);
+}
+.crumb-leaf {
+  color: var(--text);
+  font-weight: 600;
+}
+.file-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.file-content-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+}
+.file-md {
+  padding: 8px 18px 32px;
+}
+.file-code {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  color: var(--text);
+}
+.file-image-wrap {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.file-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(var(--bg-sunken) 0 25%, transparent 0 50%) 50% / 20px 20px;
+}
+
+/* ── built-in browser ────────────────────────────────────────────────────── */
+.browser-panel {
+  height: 100%;
+}
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  min-height: 44px;
+}
+.browser-bar .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.browser-address {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+.browser-address .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.browser-address input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.browser-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: #fff;
+}
+.browser-view .empty {
+  flex: 1;
+}
+.browser-view webview {
+  flex: 1;
 }

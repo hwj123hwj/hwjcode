@@ -8,7 +8,9 @@ import { useT, type TFunc } from '../../i18n/useT';
 
 export function ChatPane({ view }: { view: SessionView }) {
   const density = view.density;
-  const openFile = useStore((s) => s.openFile);
+  // Clicking a file location in the transcript opens it in the Codex-style
+  // Files panel (multi-tab viewer) rather than the legacy single-file pane.
+  const openFile = useStore((s) => s.openFileTab);
   const rewindTo = useStore((s) => s.rewindTo);
   const t = useT();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ export function ChatPane({ view }: { view: SessionView }) {
               density={density}
               t={t}
               userIndex={item.kind === 'user' ? userIndex : undefined}
-              onOpenFile={(p) => void openFile(view.meta.id, p)}
+              onOpenFile={(p) => openFile(p)}
               onRewind={(idx) => void rewindTo(view.meta.id, idx)}
             />
           );

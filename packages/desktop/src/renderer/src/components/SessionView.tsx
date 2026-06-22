@@ -5,6 +5,7 @@ import { SessionTodoPanel } from './StickyTodoPanel';
 import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
+import { WorkspaceToggles } from './workspace/WorkspaceToggles';
 import { Icon, type IconName } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/ipc';
@@ -103,6 +104,8 @@ export function SessionView() {
             </div>
           )}
         </div>
+
+        <WorkspaceToggles />
       </div>
 
       <div className="workspace">
@@ -286,8 +289,13 @@ function EmptyState() {
   return (
     <main className="main">
       {/* Draggable strip so the window can be moved from the empty/home screen,
-          matching the .toolbar drag region used once a session is open. */}
-      <div className="empty-titlebar" />
+          matching the .toolbar drag region used once a session is open. The
+          workspace toggles sit at its right end (no-drag), so the bottom/right
+          panels are reachable even before a session is open. */}
+      <div className="empty-titlebar">
+        <span className="grow" />
+        <WorkspaceToggles />
+      </div>
       <div className="empty">
         <div className="empty-inner">
           <div className="empty-title">{t('session.emptyPrompt')}</div>
