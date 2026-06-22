@@ -21,7 +21,7 @@ import { SystemNotificationMessage } from './SystemNotificationMessage';
 import { SubAgentDisplayRenderer } from './renderers/SubAgentDisplayRenderer';
 import { messageContentToString } from '../utils/messageContentUtils';
 import { linkifyTextNode } from '../utils/filePathLinkifier';
-import { rehabGluedSingleLineFences } from '../utils/markdownPreprocess';
+import { rehabGluedSingleLineFences, escapeRawHtmlAngles } from '../utils/markdownPreprocess';
 import './ToolCalls.css';
 import './MessageMarkdown.css';
 import './ChatInterface.css'; // 🎯 导入确认对话框样式
@@ -371,7 +371,7 @@ const ThinkingBlock: React.FC<{
             rehypePlugins={[rehypeRaw, rehypeKatex, rehypeHighlight]}
             components={markdownComponents}
           >
-            {content}
+            {escapeRawHtmlAngles(content)}
           </ReactMarkdown>
         </div>
       )}
@@ -569,7 +569,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeRaw, rehypeKatex, rehypeHighlight]}
             >
-              {messageContentToString(message.content)}
+              {escapeRawHtmlAngles(messageContentToString(message.content))}
             </ReactMarkdown>
           </div>
         ) : (
@@ -723,6 +723,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
                         />
                       );
                     } else {
+                      // Escape raw `<` in prose text so rehypeRaw doesn't
+                      // swallow pseudo-HTML like <sessionScope> or <T>.
+                      // Code blocks / inline code are preserved verbatim.
+                      const escapedContent = escapeRawHtmlAngles(part.content);
                       return (
                         <ReactMarkdown
                           key={`text-${index}`}
@@ -730,7 +734,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onToolCon
                           rehypePlugins={[rehypeRaw, rehypeKatex, rehypeHighlight]}
                           components={markdownComponents as any}
                         >
-                          {part.content}
+                          {escapedContent}
                         </ReactMarkdown>
                       );
                     }

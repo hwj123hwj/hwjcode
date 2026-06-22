@@ -127,3 +127,126 @@ export function rehabGluedSingleLineFences(text: string): string {
     },
   );
 }
+
+/**
+ * Escape raw `<` characters in markdown text that are NOT inside code blocks
+ * or inline code spans.
+ *
+ * Why: `rehypeRaw` treats raw `<tag>` in markdown as HTML and strips/hides
+ * unknown tags. When an LLM writes prose like "key: `xunxiashi:...:​<sessionScope>`"
+ * or "use <T> as a type parameter", the `<sessionScope>` / `<T>` fragment is
+ * silently swallowed, making part of the answer invisible — the user sees an
+ * empty gap.
+ *
+ * By escaping only the `<` that appear in normal prose (never inside fenced or
+ * inline code), we let `rehypeRaw` render legitimate HTML while preventing
+ * pseudo-HTML angle brackets from eating content.
+ *
+ * `>` is left untouched so that markdown blockquotes (`> quote`) still work.
+ */
+export function escapeRawHtmlAngles(text: string): string {
+  if (!text || !text.includes('<')) return text;
+
+  // IMPORTANT: This is a strictly linear O(n) single-pass scanner.
+  //
+  // A previous implementation used a regex with an inline-code branch like
+  // `(`+)(?:[^`]|(?!\2).)*?\2`, whose overlapping alternatives caused
+  // catastrophic backtracking (ReDoS). While streaming an unclosed code
+  // fence, that regex went exponential and froze the whole webview. Never
+  // reintroduce a regex with overlapping `[^`]` / `(?!\2).` branches here.
+  //
+  // The scanner walks each character exactly once, skipping over code regions
+  // (fenced blocks and inline spans) verbatim and escaping `<` -> `&lt;` only
+  // in prose. `>` is intentionally left untouched so blockquotes keep working.
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  let atLineStart = true; // true at string start and right after a newline
+
+  while (i < n) {
+    const ch = text[i];
+
+    // 1) Fenced code block: a run of >=3 ` or ~ at the start of a line.
+    if (atLineStart && (ch === '`' || ch === '~')) {
+      let j = i;
+      while (j < n && text[j] === ch) j++;
+      const runLen = j - i;
+      if (runLen >= 3) {
+        const fenceChar = ch;
+        // Find a closing fence (>= runLen of the same char) at a line start.
+        let closeEnd = -1;
+        let k = j;
+        while (k < n) {
+          const nl = text.indexOf('\n', k);
+          const lineFrom = nl === -1 ? n : nl + 1;
+          if (lineFrom < n) {
+            let p = lineFrom;
+            // CommonMark allows up to 3 leading spaces; be lenient.
+            while (p < n && text[p] === ' ') p++;
+            if (text[p] === fenceChar) {
+              let q = p;
+              while (q < n && text[q] === fenceChar) q++;
+              if (q - p >= runLen) {
+                closeEnd = q;
+                break;
+              }
+            }
+          }
+          if (nl === -1) break;
+          k = nl + 1;
+        }
+        if (closeEnd === -1) {
+          // Unclosed (still streaming): treat the rest as code, do not escape.
+          out += text.slice(i);
+          return out;
+        }
+        out += text.slice(i, closeEnd);
+        i = closeEnd;
+        atLineStart = false;
+        continue;
+      }
+    }
+
+    // 2) Inline code span: a run of N backticks closed by exactly N backticks.
+    if (ch === '`') {
+      let j = i;
+      while (j < n && text[j] === '`') j++;
+      const runLen = j - i;
+      let k = j;
+      let closed = false;
+      while (k < n) {
+        if (text[k] === '`') {
+          let q = k;
+          while (q < n && text[q] === '`') q++;
+          if (q - k === runLen) {
+            out += text.slice(i, q); // verbatim, including any `<` inside
+            i = q;
+            closed = true;
+            break;
+          }
+          k = q; // wrong-length run, keep scanning
+        } else {
+          k++;
+        }
+      }
+      if (!closed) {
+        // Unclosed inline code while streaming: rest is code, do not escape.
+        out += text.slice(i);
+        i = n;
+      }
+      atLineStart = false;
+      continue;
+    }
+
+    // 3) Plain prose character.
+    if (ch === '<') {
+      out += '&lt;';
+    } else {
+      out += ch;
+    }
+    atLineStart = ch === '\n';
+    i++;
+  }
+
+  return out;
+}

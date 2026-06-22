@@ -1480,6 +1480,7 @@ export const translations = {
     'feishu.setup.qr.next_step_start': '  Next: run /feishu start to start the Bot',
     'feishu.setup.qr.failed_title': '❌ Failed to create app via QR scan:',
     'feishu.setup.qr.fallback_hint': '  Try /feishu setup --manual <AppId> <AppSecret> to enter credentials manually',
+    'feishu.setup.cheetah_hint': '🐆 Detected that you are a Cheetah Mobile employee. Visit {url} for the internal "Feishu Agent Quick Start Guide".',
 
     // Manual setup flow (Mode 3)
     'feishu.setup.manual.title': '📝 Mode 3: Manual credentials',
@@ -3149,6 +3150,7 @@ export const translations = {
     'feishu.setup.qr.next_step_start': '  下一步: 输入 /feishu start 启动 Bot',
     'feishu.setup.qr.failed_title': '❌ 扫码建应用失败:',
     'feishu.setup.qr.fallback_hint': '  可尝试 /feishu setup --manual <AppId> <AppSecret> 手动输入凭证',
+    'feishu.setup.cheetah_hint': '🐆 检测到您是猎豹集团员工，可点击 {url} 访问本组织内的“飞书 Agent 快速创建指南”。',
 
     // Manual setup flow (Mode 3)
     'feishu.setup.manual.title': '📝 档 3: 手动输入凭证',
