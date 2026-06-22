@@ -691,6 +691,10 @@ export const translations = {
     'cloud.health.check.cleared': '💓 Health check timer cleared',
     'cloud.cli.register.success': '✅ CLI registration successful: {message}',
     'cloud.remote.access.ready': '🌐 You can now access cloud mode from anywhere at: {url}',
+    'cloud.qr.title': '📱 Scan to connect from Easy Code Mobile App',
+    'cloud.qr.hint': 'Download the Easy Code Mobile App and scan the QR code below to sign in instantly.',
+    'cloud.qr.expires': '⏳ This QR code expires in {minutes} minutes.',
+    'cloud.qr.generate.failed': '⚠️  Failed to generate mobile login QR code: {status}',
 
     // Exit confirmation messages
     'exit.confirm.ctrl.c': 'Press Ctrl+C again to exit.',
@@ -2369,6 +2373,10 @@ export const translations = {
     'cloud.health.check.cleared': '💓 健康检查定时器已清理',
     'cloud.cli.register.success': '✅ CLI注册成功：{message}',
     'cloud.remote.access.ready': '🌐 现在可以在任何地方访问云端模式：{url}',
+    'cloud.qr.title': '📱 用 Easy Code 手机 App 扫码连接',
+    'cloud.qr.hint': '下载 Easy Code Mobile App，扫描下方二维码即可一键登录。',
+    'cloud.qr.expires': '⏳ 二维码 {minutes} 分钟后失效。',
+    'cloud.qr.generate.failed': '⚠️  生成手机扫码登录二维码失败：{status}',
 
     // Exit confirmation messages
     'exit.confirm.ctrl.c': '再次按 Ctrl+C 退出。',
