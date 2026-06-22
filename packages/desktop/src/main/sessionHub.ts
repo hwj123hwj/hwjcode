@@ -254,6 +254,37 @@ export class SessionHub {
     this.touch(id, { archived });
   }
 
+  /**
+   * Permanently remove a session. Disposes any live bridge, drops the in-memory
+   * record + acp id mapping, and rewrites `sessions.json` without it. For a
+   * directory-less "just chat" session we also delete its throwaway working
+   * directory (`~/.easycode-user/chats/<id>`) — but ONLY when the cwd still
+   * matches that exact, app-owned path, so a project session can never take its
+   * real source tree down with it. No-ops if the id is unknown.
+   */
+  async delete(id: string): Promise<void> {
+    const rec = this.records.get(id);
+    if (!rec) return;
+    await this.close(id).catch(() => undefined);
+    this.records.delete(id);
+    this.acpIds.delete(id);
+    this.persist();
+
+    // Only a chat session owns a disposable cwd we minted. Guard hard: the path
+    // must be exactly `<chatsRoot>/<sessionId>` before we recursively remove it.
+    if (rec.kind === 'chat') {
+      const expected = path.resolve(path.join(chatsRoot(), id));
+      const actual = path.resolve(rec.cwd);
+      if (actual === expected && isChatCwd(actual)) {
+        try {
+          fs.rmSync(actual, { recursive: true, force: true });
+        } catch {
+          /* best effort — the record is already gone */
+        }
+      }
+    }
+  }
+
   /** Rename a session's display title. Empty/blank falls back to the cwd name. */
   rename(id: string, title: string): SessionMeta {
     const rec = this.records.get(id);

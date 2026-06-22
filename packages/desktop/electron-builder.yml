@@ -51,9 +51,10 @@ mac:
   # 当未提供这些环境变量时，公证步骤会自动跳过，保证未配置公证的普通本地构建也能完成。
   notarize: true
 win:
-  # electron-builder converts this PNG (>=256x256) into a multi-size .ico used
-  # for the .exe and, by default, the NSIS installer/uninstaller too.
-  icon: build/icon.png
+  # A hand-authored multi-size .ico (16/24/32/48/64/72/96/128/256) — sharper
+  # than letting electron-builder downscale a single PNG. Used for the .exe and,
+  # by default, the NSIS installer/uninstaller too.
+  icon: build/windows-icons.ico
   target:
     - nsis
   # No spaces + a build timestamp so successive installers don't collide.

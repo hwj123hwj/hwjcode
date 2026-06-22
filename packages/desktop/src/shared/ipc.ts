@@ -35,6 +35,7 @@ export const IpcInvoke = {
   SessionSetMode: 'session:set-mode',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
+  SessionDelete: 'session:delete',
   SessionRename: 'session:rename',
   SessionSetTitleProvisional: 'session:set-title-provisional',
   // external agents
@@ -821,6 +822,11 @@ export interface EasycodeBridge {
     resume(sessionId: string, cwd: string): Promise<SessionMeta>;
     close(sessionId: string): Promise<void>;
     archive(sessionId: string, archived: boolean): Promise<void>;
+    /**
+     * Permanently delete a session: remove its persisted record (and, for a
+     * directory-less chat, its throwaway working directory). Irreversible.
+     */
+    delete(sessionId: string): Promise<void>;
     /** Rename a session's display title. Empty title falls back to the folder name. */
     rename(sessionId: string, title: string): Promise<SessionMeta>;
     /**

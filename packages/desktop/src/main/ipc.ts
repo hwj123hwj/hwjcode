@@ -120,6 +120,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.SessionArchive, (_e, id: string, archived: boolean) =>
     hub.archive(id, archived),
   );
+  ipcMain.handle(IpcInvoke.SessionDelete, (_e, id: string) => hub.delete(id));
   ipcMain.handle(IpcInvoke.SessionRename, (_e, id: string, title: string) =>
     hub.rename(id, title),
   );
