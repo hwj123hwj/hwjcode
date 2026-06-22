@@ -3764,6 +3764,17 @@ body.resizing * {
   padding: 0;
 }
 
+/* The code viewer needs a clearly-visible selection colour: the global
+   ::selection (accent-weak, ~0.1 alpha) is nearly invisible, and it fades to
+   nothing once a context menu opens and the selection goes "inactive". A
+   stronger translucent blue stays readable in both themes and both states. */
+.file-code-scroll ::selection {
+  background: rgba(74, 134, 232, 0.4);
+}
+.file-code-scroll ::-moz-selection {
+  background: rgba(74, 134, 232, 0.4);
+}
+
 /* right-click menu over the code viewer (Search with Google / Copy / Select All) */
 .code-context-menu {
   z-index: 1000;

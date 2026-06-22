@@ -555,15 +555,44 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
   const html = useMemo(() => highlightCode(body, fileName).html, [body, fileName]);
   const lineCount = useMemo(() => body.split('\n').length, [body]);
   const codeRef = useRef<HTMLElement>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+  // The right-click that opens the menu can COLLAPSE the live selection before
+  // `contextmenu` fires, so by then `getSelection()` is often already empty —
+  // that's why the highlight "disappeared". We continuously remember the last
+  // non-empty selection inside this code block and restore it when the menu
+  // opens (see CodeContextMenu), so it stays visible and Copy/Search still work.
+  const lastSelRef = useRef<{ text: string; range: Range | null }>({ text: '', range: null });
+  const [menu, setMenu] = useState<
+    { x: number; y: number; selection: string; range: Range | null } | null
+  >(null);
+
+  useEffect(() => {
+    const onSelChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const code = codeRef.current;
+      if (code && code.contains(range.commonAncestorContainer)) {
+        lastSelRef.current = { text: sel.toString(), range: range.cloneRange() };
+      }
+    };
+    document.addEventListener('selectionchange', onSelChange);
+    return () => document.removeEventListener('selectionchange', onSelChange);
+  }, []);
 
   return (
     <div
       className="file-code-scroll"
       onContextMenu={(e: ReactMouseEvent<HTMLDivElement>) => {
         e.preventDefault();
-        const selection = window.getSelection()?.toString() ?? '';
-        setMenu({ x: e.clientX, y: e.clientY, selection });
+        // Prefer the live selection; fall back to the last tracked one if the
+        // right-click already collapsed it.
+        const live = window.getSelection();
+        const liveText = live?.toString() ?? '';
+        const captured =
+          liveText && live && live.rangeCount > 0
+            ? { text: liveText, range: live.getRangeAt(0).cloneRange() }
+            : lastSelRef.current;
+        setMenu({ x: e.clientX, y: e.clientY, selection: captured.text, range: captured.range });
       }}
     >
       <div className="file-code-rows">
@@ -581,6 +610,7 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
           x={menu.x}
           y={menu.y}
           selection={menu.selection}
+          range={menu.range}
           codeRef={codeRef}
           onClose={() => setMenu(null)}
           t={t}
@@ -595,6 +625,7 @@ function CodeContextMenu({
   x,
   y,
   selection,
+  range,
   codeRef,
   onClose,
   t,
@@ -602,12 +633,27 @@ function CodeContextMenu({
   x: number;
   y: number;
   selection: string;
+  range: Range | null;
   codeRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   t: TFunc;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const hasSelection = selection.trim().length > 0;
+
+  // Re-show the user's selection that the right-click may have collapsed, so
+  // the highlight stays visible the whole time the menu is open.
+  useEffect(() => {
+    if (!range) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {
+      /* range nodes may have changed — best effort */
+    }
+  }, [range]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -653,7 +699,15 @@ function CodeContextMenu({
   };
 
   return (
-    <div ref={ref} className="menu-pop code-context-menu" style={style}>
+    <div
+      ref={ref}
+      className="menu-pop code-context-menu"
+      style={style}
+      // Keep the text selection intact while the menu is up: mousedown on the
+      // menu would otherwise blur the selection (greying its highlight) before
+      // the click fires.
+      onMouseDown={(e) => e.preventDefault()}
+    >
       <button onClick={searchGoogle} disabled={!hasSelection}>
         {t('files.searchGoogle')}
       </button>
