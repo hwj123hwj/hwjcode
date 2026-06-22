@@ -1,6 +1,6 @@
 {
   "name": "easycode-desktop",
-  "version": "1.1.28",
+  "version": "1.1.29",
   "description": "Easy Code Desktop - AI-powered coding assistant with multi-model chat, code generation, tool integration, and Feishu collaboration",
   "type": "module",
   "main": "out/main/index.js",
@@ -26,6 +26,8 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "deepv-code-core": "file:../core",
+    "fuzzysort": "^3.1.0",
+    "highlight.js": "^11.11.1",
     "mermaid": "^11.15.0",
     "qrcode.react": "^4.2.0"
   },

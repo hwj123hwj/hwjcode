@@ -30,10 +30,12 @@ import {
   pickFiles,
   pickFolder,
   readClipboardImage,
+  writeClipboardText,
   readFile,
   readFileBase64,
   revealInFolder,
   saveClipboardImage,
+  searchFiles,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { getUserSettings, updateUserSettings } from './userSettings.js';
@@ -206,6 +208,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.ReadFile, (_e, p: string) => readFile(p));
   ipcMain.handle(IpcInvoke.ReadFileBase64, (_e, p: string) => readFileBase64(p));
   ipcMain.handle(IpcInvoke.ListDir, (_e, p: string) => listDir(p));
+  ipcMain.handle(IpcInvoke.SearchFiles, (_e, root: string) => searchFiles(root));
   ipcMain.handle(IpcInvoke.RevealInFolder, (_e, p: string) => revealInFolder(p));
   ipcMain.handle(IpcInvoke.OpenInTerminal, (_e, dir: string) => openInTerminal(dir));
   ipcMain.handle(IpcInvoke.GitDiff, async (_e, cwd: string, sessionId?: string) => {
@@ -247,6 +250,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
 
   // ── clipboard ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ReadClipboardImage, () => readClipboardImage());
+  ipcMain.handle(IpcInvoke.WriteClipboardText, (_e, text: string) => writeClipboardText(text));
 
   // ── version update ────────────────────────────────────────────────────────
   const updater = new UpdateManager({

@@ -349,6 +349,12 @@ export const en = {
   'files.loadFailed': 'Could not read this file',
   'files.closeTab': 'Close',
   'files.noIde': 'No external editors detected',
+  'files.searchPlaceholder': 'Search files…',
+  'files.searchClear': 'Clear',
+  'files.searchNoResults': 'No matching files',
+  'files.searchGoogle': 'Search with Google',
+  'files.copy': 'Copy',
+  'files.selectAll': 'Select All',
 
   // ── built-in browser ───────────────────────────────────────────────────────────────────────────
   'browser.title': 'Browser',

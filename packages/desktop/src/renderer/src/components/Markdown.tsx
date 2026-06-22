@@ -1,5 +1,18 @@
 import { Fragment, type ReactNode } from 'react';
 import { Mermaid } from './Mermaid';
+import { useStore } from '../store';
+
+/**
+ * Open a link from rendered Markdown. Web links (http/https) open in the
+ * built-in browser panel (sidebar); anything else falls back to the OS handler.
+ */
+function openMarkdownLink(url: string): void {
+  if (/^https?:\/\//i.test(url)) {
+    useStore.getState().openInBrowser(url);
+  } else {
+    void window.easycode.workspace.openExternal(url);
+  }
+}
 
 /**
  * A compact, dependency-free Markdown renderer. Handles the subset that shows up
@@ -227,7 +240,10 @@ function renderEmphasis(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   // Image `![alt](src)` must come before the link alternative so the leading
   // `!` is consumed as part of the image rather than left as literal text.
-  const re = /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  // Order matters: image/bold/italic/explicit-link tokens are matched before the
+  // bare-URL autolink so a URL inside `[text](url)` isn't double-linked.
+  const re =
+    /(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>()]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let key = 0;
@@ -252,6 +268,24 @@ function renderEmphasis(text: string): ReactNode[] {
       nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('*')) {
       nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);
+    } else if (/^https?:\/\//i.test(token)) {
+      // Bare URL autolink. Trailing sentence punctuation isn't part of the link
+      // ("see https://x.com." → link "https://x.com", literal ".").
+      const trail = token.match(/[.,;:!?]+$/);
+      const href = trail ? token.slice(0, -trail[0].length) : token;
+      nodes.push(
+        <a
+          key={key++}
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            openMarkdownLink(href);
+          }}
+        >
+          {href}
+        </a>,
+      );
+      if (trail) nodes.push(trail[0]);
     } else {
       const lm = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (lm) {
@@ -261,7 +295,7 @@ function renderEmphasis(text: string): ReactNode[] {
             href={lm[2]}
             onClick={(e) => {
               e.preventDefault();
-              void window.easycode.workspace.openExternal(lm[2]);
+              openMarkdownLink(lm[2]);
             }}
           >
             {lm[1]}

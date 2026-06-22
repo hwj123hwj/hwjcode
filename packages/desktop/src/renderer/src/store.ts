@@ -56,7 +56,12 @@ export interface WorkspaceUiState {
   /** Width (px) of the left session-list sidebar — user-draggable, persisted. */
   sidebarWidth: number;
   rightOpen: boolean;
-  rightView: RightView;
+  /**
+   * Which feature panel is open, or `null` for "launcher" mode: the right rail
+   * is shown with full labels and no content panel. Selecting a feature sets a
+   * view (content shows, rail collapses to icons); re-selecting it returns here.
+   */
+  rightView: RightView | null;
   bottomOpen: boolean;
   /** Width (px) of the right feature sidebar — user-draggable, persisted. */
   rightWidth: number;
@@ -69,6 +74,12 @@ export interface WorkspaceUiState {
   activeFileTab?: string;
   /** Lazily-created directory-less chat session backing the Side chat panel. */
   sideChatId?: string;
+  /**
+   * A navigation request for the built-in browser panel (set when the user
+   * clicks a link in the transcript). `seq` increments per request so clicking
+   * the same URL twice re-navigates. In-memory only (not persisted).
+   */
+  browserNav?: { url: string; seq: number };
 }
 
 /** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
@@ -225,6 +236,8 @@ interface StoreState {
   toggleWorkspaceBottom: () => void;
   /** Reveal the right sidebar on a specific feature view. */
   openWorkspaceView: (view: RightView) => void;
+  /** Open a URL in the built-in browser panel (reveals it on the browser view). */
+  openInBrowser: (url: string) => void;
   /**
    * Resize one of the draggable regions (right sidebar / bottom terminal / file
    * tree). The value is clamped to the region's limits and persisted.
@@ -257,7 +270,7 @@ function loadWorkspaceUi(): WorkspaceUiState {
     sidebarOpen: true,
     sidebarWidth: WORKSPACE_SIZE_LIMITS.sidebarWidth.default,
     rightOpen: false,
-    rightView: 'files',
+    rightView: null,
     bottomOpen: false,
     rightWidth: WORKSPACE_SIZE_LIMITS.rightWidth.default,
     bottomHeight: WORKSPACE_SIZE_LIMITS.bottomHeight.default,
@@ -274,7 +287,7 @@ function loadWorkspaceUi(): WorkspaceUiState {
         sidebarOpen: p.sidebarOpen ?? true,
         sidebarWidth: clampSize(p.sidebarWidth, 'sidebarWidth'),
         rightOpen: !!p.rightOpen,
-        rightView: p.rightView ?? 'files',
+        rightView: p.rightView ?? null,
         bottomOpen: !!p.bottomOpen,
         rightWidth: clampSize(p.rightWidth, 'rightWidth'),
         bottomHeight: clampSize(p.bottomHeight, 'bottomHeight'),
@@ -740,10 +753,28 @@ export const useStore = create<StoreState>((set, get) => ({
 
   openWorkspaceView: (view) =>
     set((s) => {
-      // Clicking the active view while the sidebar is open collapses it (a
-      // familiar VSCode activity-bar toggle); otherwise reveal it on that view.
+      // Selecting the currently-open feature returns to "launcher" mode (rail
+      // expands with labels, content panel hides) without fully closing the
+      // sidebar — the top-right toggle is the way to hide it entirely. Selecting
+      // any other feature opens it (content shows, rail collapses to icons).
       const same = s.workspace.rightOpen && s.workspace.rightView === view;
-      const workspace = { ...s.workspace, rightOpen: !same, rightView: view };
+      const workspace = same
+        ? { ...s.workspace, rightView: null }
+        : { ...s.workspace, rightOpen: true, rightView: view };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  openInBrowser: (url) =>
+    set((s) => {
+      const seq = (s.workspace.browserNav?.seq ?? 0) + 1;
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        rightOpen: true,
+        rightView: 'browser',
+        browserNav: { url, seq },
+      };
+      // browserNav is in-memory; persistWorkspaceUi only saves the layout keys.
       persistWorkspaceUi(workspace);
       return { workspace };
     }),

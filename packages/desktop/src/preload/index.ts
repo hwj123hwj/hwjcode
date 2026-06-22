@@ -154,6 +154,7 @@ const bridge: EasycodeBridge = {
     readFileBase64: (p) =>
       ipcRenderer.invoke(IpcInvoke.ReadFileBase64, p) as Promise<FileBase64 | null>,
     listDir: (p) => ipcRenderer.invoke(IpcInvoke.ListDir, p) as Promise<DirEntry[]>,
+    searchFiles: (root) => ipcRenderer.invoke(IpcInvoke.SearchFiles, root) as Promise<string[]>,
     revealInFolder: (p) => ipcRenderer.invoke(IpcInvoke.RevealInFolder, p) as Promise<void>,
     openInTerminal: (dir) => ipcRenderer.invoke(IpcInvoke.OpenInTerminal, dir) as Promise<void>,
     gitDiff: (cwd, sessionId) =>
@@ -172,6 +173,7 @@ const bridge: EasycodeBridge = {
   },
   clipboard: {
     readImage: () => ipcRenderer.invoke(IpcInvoke.ReadClipboardImage) as Promise<FileBase64 | null>,
+    writeText: (text) => ipcRenderer.invoke(IpcInvoke.WriteClipboardText, text) as Promise<void>,
   },
   backend: {
     onLog: (cb) => on<string>(IpcEvent.BackendLog, cb),

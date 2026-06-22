@@ -347,6 +347,12 @@ export const zh = {
   'files.loadFailed': '无法读取此文件',
   'files.closeTab': '关闭',
   'files.noIde': '未检测到外部编辑器',
+  'files.searchPlaceholder': '搜索文件…',
+  'files.searchClear': '清除',
+  'files.searchNoResults': '未找到匹配的文件',
+  'files.searchGoogle': '使用 Google 搜索',
+  'files.copy': '复制',
+  'files.selectAll': '全选',
 
   // ── 内置浏览器 ───────────────────────────────────────────────────────────────
   'browser.title': '浏览器',

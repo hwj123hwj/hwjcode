@@ -50,13 +50,22 @@ export function RightSidebar() {
   else if (rightView === 'files') content = <FilesPanel />;
   else if (rightView === 'sidechat') content = <SideChatPanel />;
 
+  // With a feature open the rail shrinks to an icon-only activity bar (labels
+  // live in tooltips) and the content panel takes the draggable width; in
+  // launcher mode (no view) the rail expands with labels and sizes itself.
+  const hasContent = rightView != null;
+
   return (
-    <div className="rsidebar" style={{ flexBasis: rightWidth, width: rightWidth }}>
-      <div className="rsidebar-content">{content}</div>
+    <div
+      className={`rsidebar ${hasContent ? '' : 'launcher'}`}
+      style={hasContent ? { flexBasis: rightWidth, width: rightWidth } : undefined}
+    >
+      {hasContent && <div className="rsidebar-content">{content}</div>}
       <RightRail
         items={RAIL}
         rightView={rightView}
         bottomOpen={bottomOpen}
+        collapsed={hasContent}
         onSelect={(item) => (item.view ? openView(item.view) : toggleBottom())}
         t={t}
       />
@@ -68,17 +77,19 @@ function RightRail({
   items,
   rightView,
   bottomOpen,
+  collapsed,
   onSelect,
   t,
 }: {
   items: RailItem[];
-  rightView: RightView;
+  rightView: RightView | null;
   bottomOpen: boolean;
+  collapsed: boolean;
   onSelect: (item: RailItem) => void;
   t: TFunc;
 }) {
   return (
-    <nav className="rsidebar-rail">
+    <nav className={`rsidebar-rail ${collapsed ? 'collapsed' : ''}`}>
       {items.map((item) => {
         const active = item.view ? rightView === item.view : bottomOpen;
         return (

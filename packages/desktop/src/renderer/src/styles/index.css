@@ -3308,6 +3308,27 @@ body.resizing * {
   white-space: nowrap;
 }
 
+/* Launcher mode: no content panel, the rail sizes itself (full labels). */
+.rsidebar.launcher {
+  min-width: 0;
+  max-width: none;
+}
+/* Activity-bar mode: a feature is open, so the rail collapses to icons only
+   (labels + shortcuts move into the button tooltip). */
+.rsidebar-rail.collapsed {
+  width: 48px;
+  padding: 8px 6px;
+}
+.rsidebar-rail.collapsed .rail-item {
+  justify-content: center;
+  gap: 0;
+  padding: 9px 0;
+}
+.rsidebar-rail.collapsed .rail-label,
+.rsidebar-rail.collapsed .rail-shortcut {
+  display: none;
+}
+
 /* generic content-panel scaffolding shared by the feature panels */
 .ws-panel {
   display: flex;
@@ -3626,12 +3647,35 @@ body.resizing * {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Lets the "Open in" chip collapse to an icon when the viewer is narrow. */
+  container-type: inline-size;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
   min-height: 38px;
 }
 .file-toolbar .grow {
   flex: 1;
+}
+/* The "Open in" chip must never shrink/wrap into a vertical column ("打/开/方/
+   式"); keep it on one line and let the breadcrumb give way instead. */
+.file-toolbar .chip {
+  flex: none;
+  white-space: nowrap;
+}
+.file-open-in .chip-label {
+  white-space: nowrap;
+}
+/* Too narrow for the label → show just the icon (label + caret drop out). */
+@container (max-width: 300px) {
+  .file-open-in .chip-label,
+  .file-open-in .chip-caret {
+    display: none;
+  }
+  .file-open-in {
+    gap: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }
 .file-breadcrumb {
   display: flex;
@@ -3669,7 +3713,42 @@ body.resizing * {
 .file-md {
   padding: 8px 18px 32px;
 }
+/* code viewer: gutter + code share one scroll box so the line numbers stay
+   aligned and pinned (sticky-left) while the code scrolls horizontally. */
+.file-code-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.file-code-rows {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+.file-gutter {
+  flex: none;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  padding: 14px 10px 14px 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-faint);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+.file-gutter span {
+  display: block;
+}
 .file-code {
+  flex: none;
   margin: 0;
   padding: 14px 16px;
   font-family: var(--mono);
@@ -3677,6 +3756,143 @@ body.resizing * {
   line-height: 1.55;
   white-space: pre;
   color: var(--text);
+}
+.file-code code {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* right-click menu over the code viewer (Search with Google / Copy / Select All) */
+.code-context-menu {
+  z-index: 1000;
+  min-width: 180px;
+}
+.code-context-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* highlight.js token palette — mapped to the app's theme vars so it follows
+   the light/dark palette (used by the file viewer's <pre.file-code.hljs>). */
+.hljs-comment,
+.hljs-quote {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-meta .hljs-keyword {
+  color: var(--accent);
+}
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-type {
+  color: var(--amber);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-attr {
+  color: var(--blue);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--green);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: var(--amber);
+}
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--text);
+}
+.hljs-tag,
+.hljs-meta {
+  color: var(--text-faint);
+}
+.hljs-deletion {
+  color: var(--red);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* explorer fuzzy file finder (VSCode Ctrl+P style) */
+.file-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+}
+.file-search:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: var(--ring);
+}
+.file-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+}
+.file-search-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.file-search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.file-search-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+}
+.tree-row.search-row {
+  gap: 7px;
+}
+.search-name {
+  flex: none;
+  color: var(--text);
+}
+.search-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 .file-image-wrap {
   flex: 1;

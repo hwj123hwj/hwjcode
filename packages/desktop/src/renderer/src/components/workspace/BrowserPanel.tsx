@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../Icon';
+import { useStore } from '../../store';
 import { useT } from '../../i18n/useT';
 import type { WebviewElement } from '../../webview';
 
@@ -48,6 +49,14 @@ export function BrowserPanel() {
     if (url !== null && ref.current) void ref.current.loadURL(next);
     else setUrl(next);
   };
+
+  // External navigation requests (e.g. clicking a link in the transcript). The
+  // `seq` bumps per request so clicking the same URL twice still re-navigates.
+  const browserNav = useStore((s) => s.workspace.browserNav);
+  useEffect(() => {
+    if (browserNav?.url) navigate(browserNav.url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browserNav?.seq]);
 
   // Wire webview lifecycle events once it mounts (and re-wire if it remounts).
   useEffect(() => {
