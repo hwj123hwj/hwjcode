@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
-import { useT } from '../i18n/useT';
+import { useT, type TFunc } from '../i18n/useT';
 import type { TranslationKey } from '../i18n/i18n';
 import { useStore } from '../store';
 import type {
@@ -9,6 +9,8 @@ import type {
   CustomModelProvider,
   DesktopUserSettings,
   ProjectMemoryMode,
+  ShellOption,
+  TerminalShellKind,
   ThemeMode,
 } from '@shared/ipc';
 
@@ -44,6 +46,18 @@ const THEME_MODES: Array<{ id: ThemeMode; labelKey: TranslationKey }> = [
   { id: 'light', labelKey: 'settings.themeLight' },
   { id: 'dark', labelKey: 'settings.themeDark' },
 ];
+
+/** i18n label key for each integrated-terminal shell kind. */
+const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
+  default: 'settings.shellDefault',
+  powershell: 'settings.shellPowershell',
+  cmd: 'settings.shellCmd',
+  gitbash: 'settings.shellGitbash',
+  wsl: 'settings.shellWsl',
+  bash: 'settings.shellBash',
+  zsh: 'settings.shellZsh',
+  fish: 'settings.shellFish',
+};
 
 type Tab = 'general' | 'models';
 
@@ -115,6 +129,7 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<DesktopUserSettings | null>(null);
   const [replyLang, setReplyLang] = useState('');
   const [saved, setSaved] = useState(false);
+  const [shells, setShells] = useState<ShellOption[]>([]);
 
   const runCheck = async () => {
     setChecking(true);
@@ -143,7 +158,13 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     void load();
+    void api.terminal.listShells().then(setShells).catch(() => undefined);
   }, []);
+
+  // Options for the shell picker: always offer "default" first, then the
+  // platform's shells (each flagged available/unavailable by the main process).
+  const shellOptions: ShellOption[] = [{ id: 'default', available: true }, ...shells];
+  const shellValue: TerminalShellKind = settings?.terminalShell ?? 'default';
 
   const patch = async (p: DesktopUserSettings) => {
     const next = await api.settings.update(p);
@@ -196,6 +217,17 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           <div className="setting-desc">{t('settings.themeDesc')}</div>
+        </div>
+
+        <div className="setting-item">
+          <label className="field-label">{t('settings.terminalShell')}</label>
+          <ShellSelect
+            value={shellValue}
+            options={shellOptions}
+            onChange={(id) => void patch({ terminalShell: id })}
+            t={t}
+          />
+          <div className="setting-desc">{t('settings.terminalShellDesc')}</div>
         </div>
 
         <div className="setting-item">
@@ -269,6 +301,69 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
         </button>
       </div>
     </>
+  );
+}
+
+/**
+ * Dropdown for the integrated-terminal shell. Shows the current selection with a
+ * trailing check; unavailable shells (executable not found on this machine) are
+ * listed but disabled, so the user understands why they can't pick them.
+ */
+function ShellSelect({
+  value,
+  options,
+  onChange,
+  t,
+}: {
+  value: TerminalShellKind;
+  options: ShellOption[];
+  onChange: (id: TerminalShellKind) => void;
+  t: TFunc;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="shell-select" ref={ref}>
+      <button className="shell-select-trigger" onClick={() => setOpen((o) => !o)}>
+        <Icon name="terminal" size={14} />
+        <span className="grow">{t(SHELL_LABEL[value])}</span>
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open && (
+        <div className="menu-pop" style={{ left: 0, top: '110%', minWidth: 240 }}>
+          {options.map((o) => (
+            <button
+              key={o.id}
+              disabled={!o.available}
+              onClick={() => {
+                if (!o.available) return;
+                onChange(o.id);
+                setOpen(false);
+              }}
+            >
+              <span className="grow">{t(SHELL_LABEL[o.id])}</span>
+              {!o.available && <span className="shell-na">{t('settings.shellUnavailable')}</span>}
+              <Icon name="check" className={value === o.id ? 'shell-check' : 'placeholder'} size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

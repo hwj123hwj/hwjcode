@@ -66,7 +66,22 @@ export type IconName =
   | 'copy'
   | 'maximize'
   | 'minimize'
-  | 'code';
+  | 'code'
+  // workspace layout + browser + file-browser
+  | 'panel-right'
+  | 'panel-bottom'
+  | 'external-link'
+  | 'arrow-left'
+  | 'arrow-right'
+  | 'rotate'
+  | 'home'
+  | 'lock'
+  | 'file-text'
+  | 'file-code'
+  | 'file-json'
+  | 'braces'
+  | 'image-file'
+  | 'split';
 
 /** Path/shape markup for each icon, drawn on a 24×24 canvas. */
 const PATHS: Record<IconName, string> = {
@@ -154,6 +169,29 @@ const PATHS: Record<IconName, string> = {
   minimize:
     '<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/>',
   code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+  'panel-right':
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/>',
+  'panel-bottom':
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15h18"/>',
+  'external-link':
+    '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  'arrow-left': '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  rotate:
+    '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  'file-text':
+    '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/>',
+  'file-code':
+    '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 13-2 2 2 2"/><path d="m14 13 2 2-2 2"/>',
+  'file-json':
+    '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 13a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M15 13a1 1 0 0 1 1 1v1a1 1 0 0 0 1 1 1 1 0 0 0-1 1v1a1 1 0 0 1-1 1"/>',
+  braces:
+    '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
+  'image-file':
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.81.01L6 21"/>',
+  split: '<path d="M8 19H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3"/><path d="M16 5h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-3"/><path d="M12 4v16"/>',
 };
 
 export interface IconProps {
@@ -184,6 +222,52 @@ export function Icon({ name, size = 16, strokeWidth = 2, className, spin }: Icon
       dangerouslySetInnerHTML={{ __html: PATHS[name] }}
     />
   );
+}
+
+/** Maps a file name/extension to a representative icon for the file browser. */
+export function fileIcon(name: string): IconName {
+  const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+  switch (ext) {
+    case '.md':
+    case '.markdown':
+    case '.txt':
+    case '.log':
+      return 'file-text';
+    case '.json':
+    case '.jsonc':
+      return 'file-json';
+    case '.js':
+    case '.jsx':
+    case '.ts':
+    case '.tsx':
+    case '.mjs':
+    case '.cjs':
+    case '.py':
+    case '.go':
+    case '.rs':
+    case '.java':
+    case '.c':
+    case '.cpp':
+    case '.h':
+    case '.css':
+    case '.html':
+    case '.sh':
+      return 'file-code';
+    case '.yml':
+    case '.yaml':
+    case '.toml':
+      return 'braces';
+    case '.png':
+    case '.jpg':
+    case '.jpeg':
+    case '.gif':
+    case '.webp':
+    case '.bmp':
+    case '.svg':
+      return 'image-file';
+    default:
+      return 'file';
+  }
 }
 
 /** Maps an ACP tool kind to its icon. Kept here so every surface agrees. */

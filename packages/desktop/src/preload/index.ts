@@ -17,6 +17,7 @@ import type {
   CustomModelEntry,
   CustomModelInput,
   DesktopUserSettings,
+  DetectedIde,
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
@@ -40,6 +41,10 @@ import type {
   SessionEventEnvelope,
   SessionMeta,
   SessionStatusEnvelope,
+  ShellOption,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalHandle,
   ThemeMode,
   UpdateCheckResult,
   UpdateDownloadProgress,
@@ -74,6 +79,7 @@ const bridge: EasycodeBridge = {
     close: (id) => ipcRenderer.invoke(IpcInvoke.SessionClose, id) as Promise<void>,
     archive: (id, archived) =>
       ipcRenderer.invoke(IpcInvoke.SessionArchive, id, archived) as Promise<void>,
+    delete: (id) => ipcRenderer.invoke(IpcInvoke.SessionDelete, id) as Promise<void>,
     rename: (id, title) =>
       ipcRenderer.invoke(IpcInvoke.SessionRename, id, title) as Promise<SessionMeta>,
     setTitleProvisional: (id, title) =>
@@ -113,6 +119,11 @@ const bridge: EasycodeBridge = {
     detect: () =>
       ipcRenderer.invoke(IpcInvoke.AgentsDetect) as Promise<ExternalAgentAvailability>,
   },
+  ide: {
+    detect: () => ipcRenderer.invoke(IpcInvoke.IdeDetect) as Promise<DetectedIde[]>,
+    open: (ideId, target) =>
+      ipcRenderer.invoke(IpcInvoke.IdeOpen, ideId, target) as Promise<void>,
+  },
   feishu: {
     status: () => ipcRenderer.invoke(IpcInvoke.FeishuStatus) as Promise<FeishuStatus>,
     saveManual: (input: FeishuManualInput) =>
@@ -143,6 +154,9 @@ const bridge: EasycodeBridge = {
     readFileBase64: (p) =>
       ipcRenderer.invoke(IpcInvoke.ReadFileBase64, p) as Promise<FileBase64 | null>,
     listDir: (p) => ipcRenderer.invoke(IpcInvoke.ListDir, p) as Promise<DirEntry[]>,
+    searchFiles: (root) => ipcRenderer.invoke(IpcInvoke.SearchFiles, root) as Promise<string[]>,
+    revealInFolder: (p) => ipcRenderer.invoke(IpcInvoke.RevealInFolder, p) as Promise<void>,
+    openInTerminal: (dir) => ipcRenderer.invoke(IpcInvoke.OpenInTerminal, dir) as Promise<void>,
     gitDiff: (cwd, sessionId) =>
       ipcRenderer.invoke(IpcInvoke.GitDiff, cwd, sessionId) as Promise<GitFileDiff[]>,
     gitBranch: (cwd) =>
@@ -159,9 +173,21 @@ const bridge: EasycodeBridge = {
   },
   clipboard: {
     readImage: () => ipcRenderer.invoke(IpcInvoke.ReadClipboardImage) as Promise<FileBase64 | null>,
+    writeText: (text) => ipcRenderer.invoke(IpcInvoke.WriteClipboardText, text) as Promise<void>,
   },
   backend: {
     onLog: (cb) => on<string>(IpcEvent.BackendLog, cb),
+  },
+  terminal: {
+    listShells: () => ipcRenderer.invoke(IpcInvoke.TerminalListShells) as Promise<ShellOption[]>,
+    create: (cwd, cols, rows) =>
+      ipcRenderer.invoke(IpcInvoke.TerminalCreate, cwd, cols, rows) as Promise<TerminalHandle>,
+    input: (id, data) => ipcRenderer.invoke(IpcInvoke.TerminalInput, id, data) as Promise<void>,
+    resize: (id, cols, rows) =>
+      ipcRenderer.invoke(IpcInvoke.TerminalResize, id, cols, rows) as Promise<void>,
+    close: (id) => ipcRenderer.invoke(IpcInvoke.TerminalClose, id) as Promise<void>,
+    onData: (cb) => on<TerminalDataEvent>(IpcEvent.TerminalData, cb),
+    onExit: (cb) => on<TerminalExitEvent>(IpcEvent.TerminalExit, cb),
   },
   updater: {
     getState: () => ipcRenderer.invoke(IpcInvoke.UpdateGetState) as Promise<UpdateState>,

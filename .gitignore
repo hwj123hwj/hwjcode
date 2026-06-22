@@ -104,3 +104,4 @@ packages/desktop/*.tsbuildinfo
 desktop-dev.log
 desktop-prod.log
 desktop-prod.log.err
+.codex/ 

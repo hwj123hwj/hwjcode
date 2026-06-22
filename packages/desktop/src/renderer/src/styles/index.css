@@ -191,6 +191,13 @@ select {
   display: inline-block;
   vertical-align: middle;
 }
+/* Colourful file/folder icons (FileIcons.tsx) — self-coloured, so unlike .ic
+ * they ignore `color`; just keep them from shrinking and align them. */
+.file-ic {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
 .ic-spin {
   animation: spin 0.8s linear infinite;
 }
@@ -202,21 +209,77 @@ select {
 
 /* ── app shell ─────────────────────────────────────────────────────────── */
 .app {
-  display: grid;
-  grid-template-columns: 272px 1fr;
+  display: flex;
+  position: relative;
   height: 100vh;
   background: var(--bg);
+  /* Width of the left session-list sidebar — set inline from the store so a
+     drag-resize / persisted value flows straight into the layout. */
+  --sidebar-w: 272px;
+}
+.app > .workspace-shell {
+  flex: 1;
 }
 
 /* ── sidebar ───────────────────────────────────────────────────────────── */
 .sidebar {
+  flex: none;
+  width: var(--sidebar-w);
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   min-height: 0;
 }
+/* Collapsed: the workspace fills the window; a thin hot zone + floating overlay
+   (below) bring the sidebar back. */
+.sidebar-reveal-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 100%;
+  z-index: 8;
+}
+.sidebar-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: var(--sidebar-w);
+  z-index: 40;
+  display: flex;
+  box-shadow: var(--shadow-lg, 0 8px 30px rgba(0, 0, 0, 0.35));
+  animation: sidebar-slide-in 0.14s ease-out;
+}
+.sidebar-overlay .sidebar {
+  width: 100%;
+  height: 100%;
+}
+@keyframes sidebar-slide-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+/* The collapse button sits at the top-right of the sidebar head, above the
+   draggable region so it stays clickable. */
+.sidebar-collapse-btn {
+  position: absolute;
+  right: 8px;
+  top: 12px;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+}
+[data-platform='darwin'] .sidebar-collapse-btn {
+  top: 38px;
+}
 .sidebar-head {
+  position: relative;
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
@@ -401,12 +464,14 @@ select {
 
 .session-item {
   position: relative;
-  padding: 9px 10px;
+  /* Tightened from 9px/10px so cards pack more densely and the active
+     highlight hugs the content instead of floating in padding. */
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
   border: 1px solid transparent;
   transition: background 0.12s;
 }
@@ -421,6 +486,28 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* The project card's second row (time + diff + backend badge): smaller and
+   tighter than the title row so the card stays compact. */
+.session-meta {
+  gap: 6px;
+}
+.session-meta .session-sub {
+  font-size: 10.5px;
+}
+.session-meta .diff-chip {
+  font-size: 10px;
+}
+/* Chat cards collapse to a single line: title (ellipsis) + right-aligned time. */
+.session-item.chat-item {
+  padding: 3px 8px;
+}
+.session-time {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
 }
 .session-title {
   font-weight: 500;
@@ -534,6 +621,10 @@ select {
 .icon-btn:hover {
   background: var(--bg-active);
   color: var(--text);
+}
+.icon-btn.danger:hover {
+  background: var(--red-weak);
+  color: var(--red);
 }
 .diff-chip {
   font-family: var(--mono);
@@ -1931,6 +2022,13 @@ select {
     transform: translateY(8px) scale(0.98);
   }
 }
+/* Compact confirm dialog (e.g. delete a session). */
+.modal.modal-sm {
+  width: min(420px, 90vw);
+}
+.modal.modal-sm .modal-head h3 .ic {
+  color: var(--red);
+}
 .modal-head {
   padding: 18px 22px 8px;
 }
@@ -3053,4 +3151,914 @@ select {
 }
 .update-check-row .setting-desc {
   margin: 0;
+}
+
+/* ── workspace layout: right feature sidebar + bottom terminal ───────────── */
+/* The second grid column now hosts a vertical stack: the session row (chat +
+   right sidebar) above the optional bottom terminal. */
+.workspace-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-row {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-row > .main {
+  flex: 1 1 0;
+  min-width: 300px;
+}
+
+/* draggable dividers between resizable regions (sidebar / terminal / file tree) */
+.resizer {
+  flex: none;
+  position: relative;
+  z-index: 6;
+  background: transparent;
+  transition: background 0.12s;
+}
+.resizer-x {
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+}
+.resizer-y {
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+.resizer:hover {
+  background: var(--accent);
+}
+/* while dragging any divider, suppress text selection across the app */
+body.resizing,
+body.resizing * {
+  user-select: none !important;
+}
+
+/* top-right layout toggles (left of the OS window controls) */
+.ws-toggles {
+  display: inline-flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.empty-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+.empty-titlebar .grow {
+  flex: 1;
+}
+.ws-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 6px;
+  border-radius: var(--radius-xs);
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.ws-toggle:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.ws-toggle.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* right feature sidebar: content panel (flex) + rail (fixed list) */
+.rsidebar {
+  display: flex;
+  /* width comes from an inline flex-basis (user-draggable, persisted); these
+     guards mirror WORKSPACE_SIZE_LIMITS.rightWidth in the store. */
+  flex: 0 0 auto;
+  max-width: 900px;
+  min-width: 340px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  min-height: 0;
+}
+.rsidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.rsidebar-rail {
+  flex: none;
+  width: 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elev);
+  overflow-y: auto;
+}
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.rail-item .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.rail-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.rail-item.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.rail-item.active .ic {
+  color: var(--accent);
+}
+.rail-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-shortcut {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+/* Launcher mode: no content panel, the rail sizes itself (full labels). */
+.rsidebar.launcher {
+  min-width: 0;
+  max-width: none;
+}
+/* Activity-bar mode: a feature is open, so the rail collapses to icons only
+   (labels + shortcuts move into the button tooltip). */
+.rsidebar-rail.collapsed {
+  width: 48px;
+  padding: 8px 6px;
+}
+.rsidebar-rail.collapsed .rail-item {
+  justify-content: center;
+  gap: 0;
+  padding: 9px 0;
+}
+.rsidebar-rail.collapsed .rail-label,
+.rsidebar-rail.collapsed .rail-shortcut {
+  display: none;
+}
+
+/* generic content-panel scaffolding shared by the feature panels */
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.ws-panel-flush {
+  /* panels that embed a full .pane (e.g. Review) shouldn't double their chrome */
+  overflow: hidden;
+}
+.ws-panel-flush .pane {
+  border-right: none;
+}
+.ws-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  min-height: 40px;
+}
+.ws-panel-head .ic {
+  color: var(--text-faint);
+}
+.ws-panel-head .grow {
+  flex: 1;
+}
+
+/* side chat reuses ChatPane + PromptBar inside the panel */
+.sidechat-panel {
+  height: 100%;
+}
+.sidechat-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* bottom terminal — always dark, regardless of the app theme */
+.bottom-terminal {
+  flex: none;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text);
+  min-height: 0;
+}
+.bterm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.bterm-tabs > .ic {
+  color: var(--text-faint);
+  margin: 0 4px 0 4px;
+}
+.bterm-tabs .grow {
+  flex: 1;
+}
+.bterm-tabs .icon-btn {
+  color: var(--text-faint);
+}
+.bterm-tabs .icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.bterm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.bterm-tab:hover {
+  background: var(--bg-hover);
+}
+.bterm-tab.active {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.bterm-tab-name {
+  white-space: nowrap;
+}
+.bterm-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 1px;
+  border-radius: 3px;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+.bterm-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+/* xterm.js host — the live PTY renders into a child .xterm-host div here. */
+.bterm-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 8px 6px 10px;
+  position: relative;
+}
+.xterm-host {
+  width: 100%;
+  height: 100%;
+}
+/* xterm injects its own .xterm wrapper; make it fill the host. */
+.bterm-body .xterm {
+  height: 100%;
+}
+.bterm-body .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/* integrated-terminal shell picker (Settings → 通用) */
+.shell-select {
+  position: relative;
+  display: inline-block;
+}
+.shell-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.shell-select-trigger:hover {
+  background: var(--bg-hover);
+}
+.shell-select-trigger .grow {
+  flex: 1;
+  text-align: left;
+}
+.shell-select-trigger .ic:first-child {
+  color: var(--text-faint);
+}
+.shell-select .menu-pop button {
+  justify-content: flex-start;
+}
+.shell-select .menu-pop button .grow {
+  flex: 1;
+  text-align: left;
+}
+.shell-select .menu-pop .shell-check {
+  color: var(--accent);
+}
+.shell-na {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* shared dropdown separator (menu-pop) */
+.menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 4px;
+}
+
+/* ── files panel (VSCode-style multi-tab file browser) ───────────────────── */
+.files-panel {
+  height: 100%;
+}
+.file-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  min-height: 36px;
+}
+.file-tabs-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.file-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 200px;
+}
+.file-tab .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.file-tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+.file-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+}
+.file-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.files-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+/* explorer tree now lives on the RIGHT of the viewer (border on its left). */
+.file-tree {
+  flex: none;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-elev);
+  min-height: 0;
+}
+.file-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.file-tree-body {
+  flex: 1;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+.tree-row .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.tree-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.tree-row.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.tree-row.active .ic {
+  color: var(--accent);
+}
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-loading {
+  color: var(--text-faint);
+}
+.files-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Lets the "Open in" chip collapse to an icon when the viewer is narrow. */
+  container-type: inline-size;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+}
+.file-toolbar .grow {
+  flex: 1;
+}
+/* The "Open in" chip must never shrink/wrap into a vertical column ("打/开/方/
+   式"); keep it on one line and let the breadcrumb give way instead. */
+.file-toolbar .chip {
+  flex: none;
+  white-space: nowrap;
+}
+.file-open-in .chip-label {
+  white-space: nowrap;
+}
+/* Too narrow for the label → show just the icon (label + caret drop out). */
+@container (max-width: 300px) {
+  .file-open-in .chip-label,
+  .file-open-in .chip-caret {
+    display: none;
+  }
+  .file-open-in {
+    gap: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+.file-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  min-width: 0;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.crumb .ic {
+  color: var(--text-faint);
+}
+.crumb-leaf {
+  color: var(--text);
+  font-weight: 600;
+}
+.file-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.file-content-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+}
+.file-md {
+  padding: 8px 18px 32px;
+}
+/* code viewer: gutter + code share one scroll box so the line numbers stay
+   aligned and pinned (sticky-left) while the code scrolls horizontally. */
+.file-code-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.file-code-rows {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  min-width: 100%;
+}
+.file-gutter {
+  flex: none;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  padding: 14px 10px 14px 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-faint);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+.file-gutter span {
+  display: block;
+}
+.file-code {
+  flex: none;
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  color: var(--text);
+}
+.file-code code {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* The code viewer needs a clearly-visible selection colour: the global
+   ::selection (accent-weak, ~0.1 alpha) is nearly invisible, and it fades to
+   nothing once a context menu opens and the selection goes "inactive". A
+   stronger translucent blue stays readable in both themes and both states. */
+.file-code-scroll ::selection {
+  background: rgba(74, 134, 232, 0.4);
+}
+.file-code-scroll ::-moz-selection {
+  background: rgba(74, 134, 232, 0.4);
+}
+/* Our own selection highlight, drawn as click-through blue rects over the
+   selected text while the right-click menu is open. This does NOT depend on the
+   browser's selection focus/collapse state (which drops the native highlight on
+   right-click), so it's reliable across OSes and Chromium quirks. */
+.code-sel-overlay {
+  pointer-events: none;
+  z-index: 900;
+  background: rgba(74, 134, 232, 0.4);
+  border-radius: 1px;
+}
+
+/* right-click menu over the code viewer (Search with Google / Copy / Select All) */
+.code-context-menu {
+  z-index: 1000;
+  min-width: 180px;
+}
+.code-context-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* highlight.js token palette — mapped to the app's theme vars so it follows
+   the light/dark palette (used by the file viewer's <pre.file-code.hljs>). */
+.hljs-comment,
+.hljs-quote {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-meta .hljs-keyword {
+  color: var(--accent);
+}
+.hljs-built_in,
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-type {
+  color: var(--amber);
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-attr {
+  color: var(--blue);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute,
+.hljs-meta .hljs-string {
+  color: var(--green);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: var(--amber);
+}
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--text);
+}
+.hljs-tag,
+.hljs-meta {
+  color: var(--text-faint);
+}
+.hljs-deletion {
+  color: var(--red);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* explorer fuzzy file finder (VSCode Ctrl+P style) */
+.file-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+}
+.file-search:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: var(--ring);
+}
+.file-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+}
+.file-search-clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.file-search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.file-search-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+}
+.tree-row.search-row {
+  gap: 7px;
+}
+.search-name {
+  flex: none;
+  color: var(--text);
+}
+.search-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.file-image-wrap {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.file-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(var(--bg-sunken) 0 25%, transparent 0 50%) 50% / 20px 20px;
+}
+
+/* ── built-in browser ────────────────────────────────────────────────────── */
+.browser-panel {
+  height: 100%;
+}
+/* tab strip */
+.browser-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px 0;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.browser-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 180px;
+  min-width: 90px;
+  max-width: 200px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.browser-tab .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.browser-tab:hover {
+  background: var(--bg-hover);
+}
+.browser-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+.browser-tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-tab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.browser-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.browser-tab-new {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.browser-tab-new:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.browser-tab-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  min-height: 44px;
+}
+.browser-bar .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.browser-address {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+.browser-address .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.browser-address input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.browser-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: #fff;
+}
+.browser-view .empty {
+  flex: 1;
+}
+.browser-view webview {
+  flex: 1;
 }

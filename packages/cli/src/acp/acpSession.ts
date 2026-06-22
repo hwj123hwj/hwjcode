@@ -614,10 +614,20 @@ export class Session {
     for (const raw of messages) {
       const msg = raw as {
         role?: string;
+        type?: string;
         parts?: Part[];
         content?: PartListUnion;
+        text?: string;
       };
       if (!msg) continue;
+
+      // Two persisted shapes exist on disk and BOTH must rehydrate (which one a
+      // session has depends on the save path that last wrote history.json):
+      //   - Gemini `Content`:  { role: 'user'|'model', parts: [{ text }] }
+      //   - client / display:  { type: 'user'|'gemini'|..., text: '...' }
+      // The display shape has no `parts`/`content`, so the old extraction below
+      // produced an empty string and silently skipped EVERY row — that was the
+      // "project history doesn't restore on resume" bug.
       const parts = Array.isArray(msg.parts)
         ? msg.parts
         : msg.content !== undefined
@@ -629,21 +639,36 @@ export class Session {
                   : [msg.content as Part],
             )
           : [];
-      const text = parts
+      let text = parts
         .map((p) => (typeof (p as { text?: string }).text === 'string'
           ? (p as { text: string }).text
           : ''))
         .join('');
+      // Fall back to the client/display shape's flat `text` field.
+      if (!text && typeof msg.text === 'string') text = msg.text;
       if (!text) continue;
+
+      // Normalize the author across both shapes. For the display shape, only
+      // user/assistant message rows are chat bubbles — skip tool/error/info/etc.
+      let role: 'user' | 'assistant';
+      if (msg.role) {
+        role = msg.role === 'user' ? 'user' : 'assistant';
+      } else {
+        const t = msg.type;
+        if (t === 'user') role = 'user';
+        else if (t === 'gemini' || t === 'model' || t === 'assistant') role = 'assistant';
+        else continue; // non-message display row (tool/error/info/about/…)
+      }
+
       // Skip the synthetic environment-context preamble that
       // `GeminiClient.startChat` prepends to every conversation (a user
       // "CRITICAL SYSTEM CONTEXT…" block + the model's "Got it. Thanks for the
       // context!" ack). It is genuine model context, but it is never shown as a
       // chat bubble in the live turn, so it must not surface as one when an IDE
       // rehydrates the transcript on session/load either.
-      if (isInjectedEnvPreamble(msg.role, text)) continue;
+      if (isInjectedEnvPreamble(role === 'user' ? 'user' : 'model', text)) continue;
       await this.sendUpdate(
-        msg.role === 'user'
+        role === 'user'
           ? {
               sessionUpdate: 'user_message_chunk',
               content: { type: 'text', text },

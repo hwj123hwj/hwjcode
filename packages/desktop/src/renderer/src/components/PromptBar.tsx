@@ -333,10 +333,6 @@ export function PromptBar({ view }: { view: SessionView }) {
     <div className="promptbar">
       <div className="promptbar-inner">
         <div className="prompt-config">
-          <span className="chip">
-            <Icon name="laptop" size={14} />
-            {t('common.local')}
-          </span>
           {/* Directory chip is meaningless for directory-less chat sessions
               (their cwd is an internal ~/.easycode-user/chats/<id> folder), so
               only show it for project-bound sessions. */}

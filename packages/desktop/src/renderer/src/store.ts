@@ -37,6 +37,67 @@ export type ViewDensity = 'normal' | 'verbose' | 'summary';
 
 export type PaneKind = 'chat' | 'diff' | 'plan' | 'tasks' | 'terminal' | 'file';
 
+/**
+ * Which feature the right workspace sidebar is showing (Codex-style). The bottom
+ * terminal is toggled separately (it is a bottom bar, not a right-sidebar view).
+ */
+export type RightView = 'review' | 'browser' | 'files' | 'sidechat';
+
+/**
+ * Global workspace layout — the right feature sidebar + the bottom terminal.
+ * App-level (NOT per-session) so the chosen layout survives session switches.
+ * The three layout toggles + active view are persisted to localStorage; the
+ * open file tabs and the side-chat session id stay in memory (paths may be
+ * stale across runs, and the side chat is re-minted on demand).
+ */
+export interface WorkspaceUiState {
+  /** Whether the left session-list sidebar is expanded (vs. collapsed). */
+  sidebarOpen: boolean;
+  /** Width (px) of the left session-list sidebar — user-draggable, persisted. */
+  sidebarWidth: number;
+  rightOpen: boolean;
+  /**
+   * Which feature panel is open, or `null` for "launcher" mode: the right rail
+   * is shown with full labels and no content panel. Selecting a feature sets a
+   * view (content shows, rail collapses to icons); re-selecting it returns here.
+   */
+  rightView: RightView | null;
+  bottomOpen: boolean;
+  /** Width (px) of the right feature sidebar — user-draggable, persisted. */
+  rightWidth: number;
+  /** Height (px) of the bottom terminal panel — user-draggable, persisted. */
+  bottomHeight: number;
+  /** Width (px) of the file explorer tree inside the Files panel — persisted. */
+  fileTreeWidth: number;
+  /** Absolute paths of files open in the Files panel (VSCode-style tabs). */
+  fileTabs: string[];
+  activeFileTab?: string;
+  /** Lazily-created directory-less chat session backing the Side chat panel. */
+  sideChatId?: string;
+  /**
+   * Built-in browser tabs (multi-tab). Each opened URL becomes/focuses a tab.
+   * In-memory only (not persisted — URLs go stale across runs and webviews are
+   * re-minted on demand).
+   */
+  browserTabs: BrowserTab[];
+  activeBrowserTab?: string;
+}
+
+/** One built-in-browser tab. `url` is its current/last-navigated address. */
+export interface BrowserTab {
+  id: string;
+  url: string;
+  title?: string;
+}
+
+/** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
+export const WORKSPACE_SIZE_LIMITS = {
+  sidebarWidth: { min: 220, max: 480, default: 272 },
+  rightWidth: { min: 340, max: 900, default: 560 },
+  bottomHeight: { min: 120, max: 720, default: 300 },
+  fileTreeWidth: { min: 160, max: 480, default: 240 },
+} as const;
+
 export type ChatItem =
   | { kind: 'user'; id: string; text: string; images?: string[] }
   | { kind: 'assistant'; id: string; text: string }
@@ -148,6 +209,8 @@ interface StoreState {
   ) => Promise<string>;
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
+  /** Permanently delete a session (irreversible). Drops it from the store too. */
+  deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   sendPrompt: (
     id: string,
@@ -170,6 +233,113 @@ interface StoreState {
   refreshDiff: (id: string) => Promise<void>;
   openFile: (id: string, path: string) => Promise<void>;
   setSidebarFilter: (patch: Partial<StoreState['sidebarFilter']>) => void;
+
+  // ── workspace layout (Codex-style right sidebar + bottom terminal) ────────
+  workspace: WorkspaceUiState;
+  /** Expand/collapse the left session-list sidebar. */
+  toggleSidebar: () => void;
+  /** Show/hide the right feature sidebar (rail + content panel). */
+  toggleWorkspaceRight: () => void;
+  /** Show/hide the bottom terminal panel. */
+  toggleWorkspaceBottom: () => void;
+  /** Reveal the right sidebar on a specific feature view. */
+  openWorkspaceView: (view: RightView) => void;
+  /**
+   * Open a URL in the built-in browser: focuses an existing tab with the same
+   * URL, otherwise opens a new tab. Reveals the browser view.
+   */
+  openInBrowser: (url: string) => void;
+  /** Open a fresh blank browser tab. */
+  newBrowserTab: () => void;
+  closeBrowserTab: (id: string) => void;
+  setActiveBrowserTab: (id: string) => void;
+  /** Update a tab's current url/title (from webview navigation events). */
+  updateBrowserTab: (id: string, patch: Partial<Omit<BrowserTab, 'id'>>) => void;
+  /** Transient right-click menu for a URL in the transcript (null = closed). */
+  linkMenu: { url: string; x: number; y: number } | null;
+  openLinkMenu: (url: string, x: number, y: number) => void;
+  closeLinkMenu: () => void;
+  /**
+   * Resize one of the draggable regions (right sidebar / bottom terminal / file
+   * tree). The value is clamped to the region's limits and persisted.
+   */
+  setWorkspaceSize: (key: keyof typeof WORKSPACE_SIZE_LIMITS, value: number) => void;
+  /** Open a file in the Files panel: add a tab, focus it, reveal the panel. */
+  openFileTab: (path: string) => void;
+  closeFileTab: (path: string) => void;
+  setActiveFileTab: (path: string) => void;
+  /** Remember the lazily-created side-chat session id. */
+  setSideChatId: (id: string) => void;
+}
+
+/**
+ * Workspace layout is persisted (just the three toggles + the active view) so a
+ * relaunch restores the user's Codex-style layout. File tabs / side-chat id are
+ * intentionally not persisted.
+ */
+const WORKSPACE_KEY = 'easycode.workspace';
+
+/** Clamp a persisted size into its allowed range, falling back to the default. */
+function clampSize(v: unknown, key: keyof typeof WORKSPACE_SIZE_LIMITS): number {
+  const { min, max, default: dflt } = WORKSPACE_SIZE_LIMITS[key];
+  if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
+  return Math.min(max, Math.max(min, v));
+}
+
+function loadWorkspaceUi(): WorkspaceUiState {
+  const base: WorkspaceUiState = {
+    sidebarOpen: true,
+    sidebarWidth: WORKSPACE_SIZE_LIMITS.sidebarWidth.default,
+    rightOpen: false,
+    rightView: null,
+    bottomOpen: false,
+    rightWidth: WORKSPACE_SIZE_LIMITS.rightWidth.default,
+    bottomHeight: WORKSPACE_SIZE_LIMITS.bottomHeight.default,
+    fileTreeWidth: WORKSPACE_SIZE_LIMITS.fileTreeWidth.default,
+    fileTabs: [],
+    browserTabs: [],
+  };
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<WorkspaceUiState>;
+      return {
+        ...base,
+        // Default the sidebar to open when the key was never persisted.
+        sidebarOpen: p.sidebarOpen ?? true,
+        sidebarWidth: clampSize(p.sidebarWidth, 'sidebarWidth'),
+        rightOpen: !!p.rightOpen,
+        rightView: p.rightView ?? null,
+        bottomOpen: !!p.bottomOpen,
+        rightWidth: clampSize(p.rightWidth, 'rightWidth'),
+        bottomHeight: clampSize(p.bottomHeight, 'bottomHeight'),
+        fileTreeWidth: clampSize(p.fileTreeWidth, 'fileTreeWidth'),
+      };
+    }
+  } catch {
+    /* localStorage unavailable / malformed — fall through to defaults */
+  }
+  return base;
+}
+
+function persistWorkspaceUi(w: WorkspaceUiState): void {
+  try {
+    localStorage.setItem(
+      WORKSPACE_KEY,
+      JSON.stringify({
+        sidebarOpen: w.sidebarOpen,
+        sidebarWidth: w.sidebarWidth,
+        rightOpen: w.rightOpen,
+        rightView: w.rightView,
+        bottomOpen: w.bottomOpen,
+        rightWidth: w.rightWidth,
+        bottomHeight: w.bottomHeight,
+        fileTreeWidth: w.fileTreeWidth,
+      }),
+    );
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** One-time guard so `init()` wires backend IPC listeners exactly once. */
@@ -221,6 +391,8 @@ export const useStore = create<StoreState>((set, get) => ({
   permissionQueue: [],
   backendLog: [],
   sidebarFilter: { status: 'active', query: '' },
+  linkMenu: null,
+  workspace: loadWorkspaceUi(),
   lang: loadStoredLang(),
   setLang: (lang) => {
     persistLang(lang);
@@ -432,6 +604,25 @@ export const useStore = create<StoreState>((set, get) => ({
     await get().refreshSessions();
   },
 
+  deleteSession: async (id) => {
+    await api.sessions.delete(id);
+    liveSessions.delete(id);
+    resumingSessions.delete(id);
+    pendingEvents.delete(id);
+    // Drop it locally up front so the row disappears immediately, then clear the
+    // active selection if it was the deleted session.
+    set((s) => {
+      const sessions = { ...s.sessions };
+      delete sessions[id];
+      return {
+        sessions,
+        order: s.order.filter((x) => x !== id),
+        activeSessionId: s.activeSessionId === id ? undefined : s.activeSessionId,
+      };
+    });
+    await get().refreshSessions();
+  },
+
   renameSession: async (id, title) => {
     const meta = await api.sessions.rename(id, title);
     patchMeta(set, id, { title: meta.title });
@@ -553,6 +744,139 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setSidebarFilter: (patch) =>
     set((s) => ({ sidebarFilter: { ...s.sidebarFilter, ...patch } })),
+
+  // ── workspace layout ───────────────────────────────────────────────────────
+  toggleSidebar: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, sidebarOpen: !s.workspace.sidebarOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  toggleWorkspaceRight: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, rightOpen: !s.workspace.rightOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  toggleWorkspaceBottom: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, bottomOpen: !s.workspace.bottomOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  setWorkspaceSize: (key, value) =>
+    set((s) => {
+      const workspace = { ...s.workspace, [key]: clampSize(value, key) };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  openWorkspaceView: (view) =>
+    set((s) => {
+      // Selecting the currently-open feature returns to "launcher" mode (rail
+      // expands with labels, content panel hides) without fully closing the
+      // sidebar — the top-right toggle is the way to hide it entirely. Selecting
+      // any other feature opens it (content shows, rail collapses to icons).
+      const same = s.workspace.rightOpen && s.workspace.rightView === view;
+      const workspace = same
+        ? { ...s.workspace, rightView: null }
+        : { ...s.workspace, rightOpen: true, rightView: view };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  openInBrowser: (url) =>
+    set((s) => {
+      const tabs = s.workspace.browserTabs;
+      const existing = tabs.find((t) => t.url === url);
+      const browserTabs = existing ? tabs : [...tabs, { id: newId(), url }];
+      const activeBrowserTab = existing ? existing.id : browserTabs[browserTabs.length - 1].id;
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        rightOpen: true,
+        rightView: 'browser',
+        browserTabs,
+        activeBrowserTab,
+      };
+      // Tabs are in-memory; persistWorkspaceUi only saves the layout keys.
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  newBrowserTab: () =>
+    set((s) => {
+      const id = newId();
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        rightOpen: true,
+        rightView: 'browser',
+        browserTabs: [...s.workspace.browserTabs, { id, url: '' }],
+        activeBrowserTab: id,
+      };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  closeBrowserTab: (id) =>
+    set((s) => {
+      const browserTabs = s.workspace.browserTabs.filter((t) => t.id !== id);
+      let activeBrowserTab = s.workspace.activeBrowserTab;
+      if (activeBrowserTab === id) {
+        const idx = s.workspace.browserTabs.findIndex((t) => t.id === id);
+        activeBrowserTab = browserTabs[Math.min(idx, browserTabs.length - 1)]?.id;
+      }
+      return { workspace: { ...s.workspace, browserTabs, activeBrowserTab } };
+    }),
+
+  setActiveBrowserTab: (id) =>
+    set((s) => ({ workspace: { ...s.workspace, activeBrowserTab: id } })),
+
+  updateBrowserTab: (id, patch) =>
+    set((s) => ({
+      workspace: {
+        ...s.workspace,
+        browserTabs: s.workspace.browserTabs.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      },
+    })),
+
+  openLinkMenu: (url, x, y) => set({ linkMenu: { url, x, y } }),
+  closeLinkMenu: () => set({ linkMenu: null }),
+
+  openFileTab: (path) =>
+    set((s) => {
+      const fileTabs = s.workspace.fileTabs.includes(path)
+        ? s.workspace.fileTabs
+        : [...s.workspace.fileTabs, path];
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        fileTabs,
+        activeFileTab: path,
+        rightOpen: true,
+        rightView: 'files',
+      };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  closeFileTab: (path) =>
+    set((s) => {
+      const fileTabs = s.workspace.fileTabs.filter((p) => p !== path);
+      // When closing the active tab, fall back to the neighbour (or none).
+      let activeFileTab = s.workspace.activeFileTab;
+      if (activeFileTab === path) {
+        const idx = s.workspace.fileTabs.indexOf(path);
+        activeFileTab = fileTabs[Math.min(idx, fileTabs.length - 1)];
+      }
+      return { workspace: { ...s.workspace, fileTabs, activeFileTab } };
+    }),
+
+  setActiveFileTab: (path) =>
+    set((s) => ({ workspace: { ...s.workspace, activeFileTab: path } })),
+
+  setSideChatId: (id) => set((s) => ({ workspace: { ...s.workspace, sideChatId: id } })),
 }));
 
 // ── helpers ──────────────────────────────────────────────────────────────
