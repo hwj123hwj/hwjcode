@@ -70,4 +70,49 @@ describe('escapeRawHtmlAngles', () => {
     // Plain text angle bracket should be escaped
     expect(result).toContain('&lt;other>');
   });
+
+  // --- ReDoS / catastrophic-backtracking regression guards ---
+  //
+  // A previous regex-based implementation went exponential while streaming an
+  // unclosed code fence, freezing the entire VS Code webview. These guards
+  // ensure the scanner stays linear and never hangs on pathological input.
+
+  it('does not hang on an unclosed inline-code span full of < (streaming)', () => {
+    const input = '`' + 'a<'.repeat(50000);
+    const t0 = Date.now();
+    const result = escapeRawHtmlAngles(input);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(1000);
+    // Unclosed code while streaming: treated as code, angles left verbatim.
+    expect(result).toBe(input);
+  });
+
+  it('does not hang on an unclosed fenced code block full of < (streaming)', () => {
+    const input = '```js\n' + 'x<'.repeat(50000);
+    const t0 = Date.now();
+    const result = escapeRawHtmlAngles(input);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(1000);
+    expect(result).toBe(input);
+  });
+
+  it('does not hang on long prose with many < and scattered backticks', () => {
+    const input = ('<a> `b` ').repeat(50000);
+    const t0 = Date.now();
+    const result = escapeRawHtmlAngles(input);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(1000);
+    // Prose angles escaped, inline code `b` preserved.
+    expect(result).toContain('&lt;a>');
+    expect(result).toContain('`b`');
+  });
+
+  it('closes a streaming fence correctly once the closing fence arrives', () => {
+    const input = 'before <x>\n```js\n<div>\n```\nafter <y>';
+    const result = escapeRawHtmlAngles(input);
+    expect(result).toContain('before &lt;x>');
+    expect(result).toContain('<div>'); // inside fence: verbatim
+    expect(result).toContain('after &lt;y>');
+  });
 });
+
