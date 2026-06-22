@@ -1,0 +1,451 @@
+/**
+ * @license
+ * Copyright 2026 Easy Code team
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Files — a VSCode-style file browser for the right sidebar: a lazy-loading
+ * explorer tree, multiple open-file tabs, a path breadcrumb, per-extension
+ * icons, Markdown preview, and an "Open in" menu (external IDEs / reveal in
+ * folder / open in terminal). Open file tabs live in the global store so they
+ * survive sidebar view switches.
+ */
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from '../../store';
+import { Icon } from '../Icon';
+import { FileIcon } from './FileIcons';
+import { Markdown } from '../Markdown';
+import { Resizer } from './Resizer';
+import { useT, type TFunc } from '../../i18n/useT';
+import type { DetectedIde, DirEntry } from '@shared/ipc';
+
+const api = window.easycode;
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const MARKDOWN_EXT = /\.(md|markdown)$/i;
+
+/** The last path segment, tolerating both separators. */
+function baseName(p: string): string {
+  const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+/** Breadcrumb segments of `file` relative to `root` (root's own name first). */
+function breadcrumb(root: string, file: string): string[] {
+  const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+  const r = norm(root);
+  const f = norm(file);
+  const rel = f.startsWith(r + '/') ? f.slice(r.length + 1) : baseName(f);
+  return [baseName(r), ...rel.split('/').filter(Boolean)];
+}
+
+export function FilesPanel() {
+  const activeId = useStore((s) => s.activeSessionId);
+  const meta = useStore((s) => (activeId ? s.sessions[activeId]?.meta : undefined));
+  const tabs = useStore((s) => s.workspace.fileTabs);
+  const activeTab = useStore((s) => s.workspace.activeFileTab);
+  const openFileTab = useStore((s) => s.openFileTab);
+  const closeFileTab = useStore((s) => s.closeFileTab);
+  const setActiveFileTab = useStore((s) => s.setActiveFileTab);
+  const fileTreeWidth = useStore((s) => s.workspace.fileTreeWidth);
+  const setWorkspaceSize = useStore((s) => s.setWorkspaceSize);
+  const t = useT();
+
+  // Browse the active session's working folder. Chat sessions use a throwaway
+  // internal cwd, so only project sessions get a useful tree.
+  const root = meta && meta.kind === 'project' ? meta.cwd : undefined;
+
+  if (!root) {
+    return (
+      <div className="ws-panel">
+        <div className="ws-panel-head">
+          <Icon name="folder" size={15} />
+          <span>{t('files.title')}</span>
+        </div>
+        <div className="empty">{t('files.noProject')}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ws-panel files-panel">
+      <FileTabs
+        tabs={tabs}
+        activeTab={activeTab}
+        onSelect={setActiveFileTab}
+        onClose={closeFileTab}
+        t={t}
+      />
+      {/* Viewer on the LEFT, explorer tree on the RIGHT (VSCode-mirrored). */}
+      <div className="files-body">
+        <div className="files-main">
+          {activeTab ? (
+            <>
+              <FileToolbar root={root} file={activeTab} t={t} />
+              <FileContent path={activeTab} t={t} />
+            </>
+          ) : (
+            <div className="empty">{t('files.noOpenTabs')}</div>
+          )}
+        </div>
+        <Resizer
+          axis="x"
+          getValue={() => useStore.getState().workspace.fileTreeWidth}
+          onChange={(v) => setWorkspaceSize('fileTreeWidth', v)}
+        />
+        <FileTree root={root} activeTab={activeTab} onOpen={openFileTab} width={fileTreeWidth} />
+      </div>
+    </div>
+  );
+}
+
+// ── tab bar ──────────────────────────────────────────────────────────────────
+
+function FileTabs({
+  tabs,
+  activeTab,
+  onSelect,
+  onClose,
+  t,
+}: {
+  tabs: string[];
+  activeTab?: string;
+  onSelect: (p: string) => void;
+  onClose: (p: string) => void;
+  t: TFunc;
+}) {
+  if (tabs.length === 0) {
+    return (
+      <div className="file-tabs">
+        <span className="file-tabs-empty">
+          <Icon name="folder" size={14} />
+          {t('files.title')}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="file-tabs">
+      {tabs.map((p) => (
+        <div
+          key={p}
+          className={`file-tab ${activeTab === p ? 'active' : ''}`}
+          title={p}
+          onClick={() => onSelect(p)}
+        >
+          <FileIcon name={baseName(p)} size={14} />
+          <span className="file-tab-name">{baseName(p)}</span>
+          <button
+            className="file-tab-close"
+            title={t('files.closeTab')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose(p);
+            }}
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── breadcrumb + "Open in" toolbar ─────────────────────────────────────────────
+
+function FileToolbar({ root, file, t }: { root: string; file: string; t: TFunc }) {
+  const crumbs = useMemo(() => breadcrumb(root, file), [root, file]);
+  const [ides, setIdes] = useState<DetectedIde[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void api.ide.detect().then((list) => alive && setIdes(list)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
+  const dir = file.replace(/[\\/][^\\/]*$/, '');
+
+  return (
+    <div className="file-toolbar">
+      <div className="file-breadcrumb">
+        {crumbs.map((c, i) => (
+          <span key={i} className="crumb">
+            {i > 0 && <Icon name="chevron-right" size={12} />}
+            <span className={i === crumbs.length - 1 ? 'crumb-leaf' : ''}>{c}</span>
+          </span>
+        ))}
+      </div>
+      <span className="grow" />
+      <div ref={menuRef} style={{ position: 'relative' }}>
+        <button className="chip interactive" onClick={() => setMenuOpen((o) => !o)}>
+          <Icon name="external-link" size={13} />
+          {t('files.openIn')}
+          <Icon name="chevron-down" size={12} />
+        </button>
+        {menuOpen && (
+          <div className="menu-pop" style={{ right: 0, top: '120%' }}>
+            {ides.length === 0 && <div className="empty-menu-label">{t('files.noIde')}</div>}
+            {ides.map((ide) => (
+              <button
+                key={ide.id}
+                onClick={() => {
+                  void api.ide.open(ide.id, file);
+                  setMenuOpen(false);
+                }}
+              >
+                <Icon name="code" size={14} />
+                {ide.name}
+              </button>
+            ))}
+            <div className="menu-sep" />
+            <button
+              onClick={() => {
+                void api.workspace.revealInFolder(file);
+                setMenuOpen(false);
+              }}
+            >
+              <Icon name="folder-open" size={14} />
+              {t('files.openInFolder')}
+            </button>
+            <button
+              onClick={() => {
+                void api.workspace.openInTerminal(dir);
+                setMenuOpen(false);
+              }}
+            >
+              <Icon name="terminal" size={14} />
+              {t('files.openInTerminal')}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── explorer tree ──────────────────────────────────────────────────────────────
+
+function FileTree({
+  root,
+  activeTab,
+  onOpen,
+  width,
+}: {
+  root: string;
+  activeTab?: string;
+  onOpen: (p: string) => void;
+  width: number;
+}) {
+  const t = useT();
+  return (
+    <div className="file-tree" style={{ width }}>
+      <div className="file-tree-head">
+        <Icon name="folder" size={13} />
+        <span>{t('files.explorer')}</span>
+      </div>
+      <div className="file-tree-body">
+        <TreeNode path={root} name={baseName(root)} isDir depth={0} activeTab={activeTab} onOpen={onOpen} defaultOpen />
+      </div>
+    </div>
+  );
+}
+
+function TreeNode({
+  path,
+  name,
+  isDir,
+  depth,
+  activeTab,
+  onOpen,
+  defaultOpen,
+}: {
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+  activeTab?: string;
+  onOpen: (p: string) => void;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const [children, setChildren] = useState<DirEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isDir || !open || children) return;
+    setLoading(true);
+    void api.workspace
+      .listDir(path)
+      .then((entries) => setChildren(entries))
+      .catch(() => setChildren([]))
+      .finally(() => setLoading(false));
+  }, [isDir, open, children, path]);
+
+  const active = !isDir && activeTab === path;
+  const indent = 8 + depth * 13;
+
+  if (!isDir) {
+    return (
+      <button
+        className={`tree-row ${active ? 'active' : ''}`}
+        style={{ paddingLeft: indent }}
+        onClick={() => onOpen(path)}
+        title={path}
+      >
+        <FileIcon name={name} size={15} />
+        <span className="tree-name">{name}</span>
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="tree-row"
+        style={{ paddingLeft: indent }}
+        onClick={() => setOpen((o) => !o)}
+        title={path}
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+        <FileIcon name={name} isDir open={open} size={15} />
+        <span className="tree-name">{name}</span>
+      </button>
+      {open &&
+        (loading && !children ? (
+          <div className="tree-row tree-loading" style={{ paddingLeft: indent + 19 }}>
+            <Icon name="loader" size={13} spin />
+          </div>
+        ) : (
+          (children ?? []).map((c) => (
+            <TreeNode
+              key={c.path}
+              path={c.path}
+              name={c.name}
+              isDir={c.isDir}
+              depth={depth + 1}
+              activeTab={activeTab}
+              onOpen={onOpen}
+            />
+          ))
+        ))}
+    </>
+  );
+}
+
+// ── content viewer ─────────────────────────────────────────────────────────────
+
+type Loaded =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; url: string }
+  | { kind: 'binary' }
+  | { kind: 'error' };
+
+function FileContent({ path, t }: { path: string; t: TFunc }) {
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const isMarkdown = MARKDOWN_EXT.test(path);
+  const [preview, setPreview] = useState(true);
+
+  useEffect(() => {
+    setLoaded(null);
+    setPreview(true);
+    let alive = true;
+    if (IMAGE_EXT.test(path)) {
+      void api.workspace
+        .readFileBase64(path)
+        .then((b64) =>
+          alive && setLoaded(b64 ? { kind: 'image', url: `data:${b64.mimeType};base64,${b64.data}` } : { kind: 'binary' }),
+        )
+        .catch(() => alive && setLoaded({ kind: 'binary' }));
+      return () => {
+        alive = false;
+      };
+    }
+    void api.workspace
+      .readFile(path)
+      .then((text) => {
+        if (!alive) return;
+        // Heuristic binary sniff: a NUL byte means it isn't text.
+        setLoaded(text.includes(String.fromCharCode(0)) ? { kind: 'binary' } : { kind: 'text', text });
+      })
+      .catch(() => alive && setLoaded({ kind: 'error' }));
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+
+  if (!loaded) {
+    return (
+      <div className="file-content">
+        <div className="empty">
+          <Icon name="loader" size={18} spin />
+        </div>
+      </div>
+    );
+  }
+  if (loaded.kind === 'error') {
+    return (
+      <div className="file-content">
+        <div className="empty">{t('files.loadFailed')}</div>
+      </div>
+    );
+  }
+  if (loaded.kind === 'binary') {
+    return (
+      <div className="file-content">
+        <div className="empty">{t('files.binary')}</div>
+      </div>
+    );
+  }
+  if (loaded.kind === 'image') {
+    return (
+      <div className="file-content">
+        <div className="file-image-wrap">
+          <img className="file-image" src={loaded.url} alt={baseName(path)} />
+        </div>
+      </div>
+    );
+  }
+
+  // text
+  return (
+    <div className="file-content">
+      {isMarkdown && (
+        <div className="file-content-toolbar">
+          <div className="views-menu">
+            <button className={preview ? 'active' : ''} onClick={() => setPreview(true)}>
+              {t('files.preview')}
+            </button>
+            <button className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>
+              {t('files.source')}
+            </button>
+          </div>
+        </div>
+      )}
+      {isMarkdown && preview ? (
+        <div className="file-md">
+          <Markdown text={loaded.text} />
+        </div>
+      ) : (
+        <pre className="file-code">{loaded.text}</pre>
+      )}
+    </div>
+  );
+}

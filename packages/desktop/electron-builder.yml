@@ -13,8 +13,16 @@ extraResources:
     to: backend
     filter:
       - '**/*'
+# `@lydell/node-pty` ships N-API prebuilt binaries (the .node addon plus, on
+# Windows, conpty.dll + OpenConsole.exe). N-API is ABI-stable, so they load in
+# Electron with no rebuild — keep npmRebuild off so packaging needs no native
+# toolchain (matches the desktop build memory). The binaries can't be dlopen'd /
+# spawned from inside the asar, so unpack the whole @lydell tree + any .node.
+npmRebuild: false
 asarUnpack:
   - resources/**
+  - '**/*.node'
+  - '**/node_modules/@lydell/**'
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png

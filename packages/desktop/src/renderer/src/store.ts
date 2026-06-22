@@ -37,6 +37,43 @@ export type ViewDensity = 'normal' | 'verbose' | 'summary';
 
 export type PaneKind = 'chat' | 'diff' | 'plan' | 'tasks' | 'terminal' | 'file';
 
+/**
+ * Which feature the right workspace sidebar is showing (Codex-style). The bottom
+ * terminal is toggled separately (it is a bottom bar, not a right-sidebar view).
+ */
+export type RightView = 'review' | 'browser' | 'files' | 'sidechat';
+
+/**
+ * Global workspace layout — the right feature sidebar + the bottom terminal.
+ * App-level (NOT per-session) so the chosen layout survives session switches.
+ * The three layout toggles + active view are persisted to localStorage; the
+ * open file tabs and the side-chat session id stay in memory (paths may be
+ * stale across runs, and the side chat is re-minted on demand).
+ */
+export interface WorkspaceUiState {
+  rightOpen: boolean;
+  rightView: RightView;
+  bottomOpen: boolean;
+  /** Width (px) of the right feature sidebar — user-draggable, persisted. */
+  rightWidth: number;
+  /** Height (px) of the bottom terminal panel — user-draggable, persisted. */
+  bottomHeight: number;
+  /** Width (px) of the file explorer tree inside the Files panel — persisted. */
+  fileTreeWidth: number;
+  /** Absolute paths of files open in the Files panel (VSCode-style tabs). */
+  fileTabs: string[];
+  activeFileTab?: string;
+  /** Lazily-created directory-less chat session backing the Side chat panel. */
+  sideChatId?: string;
+}
+
+/** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
+export const WORKSPACE_SIZE_LIMITS = {
+  rightWidth: { min: 340, max: 900, default: 560 },
+  bottomHeight: { min: 120, max: 720, default: 300 },
+  fileTreeWidth: { min: 160, max: 480, default: 240 },
+} as const;
+
 export type ChatItem =
   | { kind: 'user'; id: string; text: string; images?: string[] }
   | { kind: 'assistant'; id: string; text: string }
@@ -170,6 +207,88 @@ interface StoreState {
   refreshDiff: (id: string) => Promise<void>;
   openFile: (id: string, path: string) => Promise<void>;
   setSidebarFilter: (patch: Partial<StoreState['sidebarFilter']>) => void;
+
+  // ── workspace layout (Codex-style right sidebar + bottom terminal) ────────
+  workspace: WorkspaceUiState;
+  /** Show/hide the right feature sidebar (rail + content panel). */
+  toggleWorkspaceRight: () => void;
+  /** Show/hide the bottom terminal panel. */
+  toggleWorkspaceBottom: () => void;
+  /** Reveal the right sidebar on a specific feature view. */
+  openWorkspaceView: (view: RightView) => void;
+  /**
+   * Resize one of the draggable regions (right sidebar / bottom terminal / file
+   * tree). The value is clamped to the region's limits and persisted.
+   */
+  setWorkspaceSize: (key: keyof typeof WORKSPACE_SIZE_LIMITS, value: number) => void;
+  /** Open a file in the Files panel: add a tab, focus it, reveal the panel. */
+  openFileTab: (path: string) => void;
+  closeFileTab: (path: string) => void;
+  setActiveFileTab: (path: string) => void;
+  /** Remember the lazily-created side-chat session id. */
+  setSideChatId: (id: string) => void;
+}
+
+/**
+ * Workspace layout is persisted (just the three toggles + the active view) so a
+ * relaunch restores the user's Codex-style layout. File tabs / side-chat id are
+ * intentionally not persisted.
+ */
+const WORKSPACE_KEY = 'easycode.workspace';
+
+/** Clamp a persisted size into its allowed range, falling back to the default. */
+function clampSize(v: unknown, key: keyof typeof WORKSPACE_SIZE_LIMITS): number {
+  const { min, max, default: dflt } = WORKSPACE_SIZE_LIMITS[key];
+  if (typeof v !== 'number' || !Number.isFinite(v)) return dflt;
+  return Math.min(max, Math.max(min, v));
+}
+
+function loadWorkspaceUi(): WorkspaceUiState {
+  const base: WorkspaceUiState = {
+    rightOpen: false,
+    rightView: 'files',
+    bottomOpen: false,
+    rightWidth: WORKSPACE_SIZE_LIMITS.rightWidth.default,
+    bottomHeight: WORKSPACE_SIZE_LIMITS.bottomHeight.default,
+    fileTreeWidth: WORKSPACE_SIZE_LIMITS.fileTreeWidth.default,
+    fileTabs: [],
+  };
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<WorkspaceUiState>;
+      return {
+        ...base,
+        rightOpen: !!p.rightOpen,
+        rightView: p.rightView ?? 'files',
+        bottomOpen: !!p.bottomOpen,
+        rightWidth: clampSize(p.rightWidth, 'rightWidth'),
+        bottomHeight: clampSize(p.bottomHeight, 'bottomHeight'),
+        fileTreeWidth: clampSize(p.fileTreeWidth, 'fileTreeWidth'),
+      };
+    }
+  } catch {
+    /* localStorage unavailable / malformed — fall through to defaults */
+  }
+  return base;
+}
+
+function persistWorkspaceUi(w: WorkspaceUiState): void {
+  try {
+    localStorage.setItem(
+      WORKSPACE_KEY,
+      JSON.stringify({
+        rightOpen: w.rightOpen,
+        rightView: w.rightView,
+        bottomOpen: w.bottomOpen,
+        rightWidth: w.rightWidth,
+        bottomHeight: w.bottomHeight,
+        fileTreeWidth: w.fileTreeWidth,
+      }),
+    );
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** One-time guard so `init()` wires backend IPC listeners exactly once. */
@@ -221,6 +340,7 @@ export const useStore = create<StoreState>((set, get) => ({
   permissionQueue: [],
   backendLog: [],
   sidebarFilter: { status: 'active', query: '' },
+  workspace: loadWorkspaceUi(),
   lang: loadStoredLang(),
   setLang: (lang) => {
     persistLang(lang);
@@ -553,6 +673,71 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setSidebarFilter: (patch) =>
     set((s) => ({ sidebarFilter: { ...s.sidebarFilter, ...patch } })),
+
+  // ── workspace layout ───────────────────────────────────────────────────────
+  toggleWorkspaceRight: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, rightOpen: !s.workspace.rightOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  toggleWorkspaceBottom: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, bottomOpen: !s.workspace.bottomOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  setWorkspaceSize: (key, value) =>
+    set((s) => {
+      const workspace = { ...s.workspace, [key]: clampSize(value, key) };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  openWorkspaceView: (view) =>
+    set((s) => {
+      // Clicking the active view while the sidebar is open collapses it (a
+      // familiar VSCode activity-bar toggle); otherwise reveal it on that view.
+      const same = s.workspace.rightOpen && s.workspace.rightView === view;
+      const workspace = { ...s.workspace, rightOpen: !same, rightView: view };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  openFileTab: (path) =>
+    set((s) => {
+      const fileTabs = s.workspace.fileTabs.includes(path)
+        ? s.workspace.fileTabs
+        : [...s.workspace.fileTabs, path];
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        fileTabs,
+        activeFileTab: path,
+        rightOpen: true,
+        rightView: 'files',
+      };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  closeFileTab: (path) =>
+    set((s) => {
+      const fileTabs = s.workspace.fileTabs.filter((p) => p !== path);
+      // When closing the active tab, fall back to the neighbour (or none).
+      let activeFileTab = s.workspace.activeFileTab;
+      if (activeFileTab === path) {
+        const idx = s.workspace.fileTabs.indexOf(path);
+        activeFileTab = fileTabs[Math.min(idx, fileTabs.length - 1)];
+      }
+      return { workspace: { ...s.workspace, fileTabs, activeFileTab } };
+    }),
+
+  setActiveFileTab: (path) =>
+    set((s) => ({ workspace: { ...s.workspace, activeFileTab: path } })),
+
+  setSideChatId: (id) => set((s) => ({ workspace: { ...s.workspace, sideChatId: id } })),
 }));
 
 // ── helpers ──────────────────────────────────────────────────────────────
