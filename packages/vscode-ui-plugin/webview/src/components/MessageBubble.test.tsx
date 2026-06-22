@@ -165,4 +165,55 @@ describe('MessageBubble', () => {
     const codeBody = container.querySelector('pre.code-block code')?.textContent ?? '';
     expect(codeBody.trim()).toBe('./ci/run_ios_prod.sh release');
   });
+
+  // --- Raw HTML angle bracket escaping tests (rehypeRaw content-swallow bug) ---
+
+  it('renders prose with angle brackets like <sessionScope> instead of swallowing them', () => {
+    // Before the fix, rehypeRaw treated <sessionScope> as an HTML tag and
+    // silently removed it — the user saw an empty gap.
+    const message: ChatMessage = {
+      id: 'angle-1',
+      type: 'assistant',
+      content: [
+        {
+          type: 'text',
+          value: '会重新读取这个 localStorage key: xunxiashi:skillCreatorAI:sessionModel:<sessionScope>',
+        },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    // The text must be visible — not swallowed by rehypeRaw.
+    expect(container.textContent).toContain('sessionScope');
+    expect(container.textContent).toContain('xunxiashi');
+  });
+
+  it('preserves angle brackets inside inline code spans', () => {
+    const message: ChatMessage = {
+      id: 'angle-2',
+      type: 'assistant',
+      content: [
+        { type: 'text', value: 'Use the key `xunxiashi:...:<sessionScope>` directly.' },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    // Inline code content must keep the literal angle brackets.
+    expect(container.textContent).toContain('<sessionScope>');
+  });
+
+  it('preserves angle brackets inside fenced code blocks', () => {
+    const message: ChatMessage = {
+      id: 'angle-3',
+      type: 'assistant',
+      content: [
+        { type: 'text', value: '```html\n<div class="test">content</div>\n```' },
+      ],
+      timestamp: Date.now(),
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    const codeBody = container.querySelector('pre.code-block code')?.textContent ?? '';
+    expect(codeBody).toContain('<div');
+    expect(codeBody).toContain('</div>');
+  });
 });
