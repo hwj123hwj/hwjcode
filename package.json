@@ -96,7 +96,8 @@
     "clean": "node scripts/clean.js",
     "env:production": "./scripts/switch-env.sh production",
     "env:development": "./scripts/switch-env.sh development",
-    "env:test": "./scripts/switch-env.sh test"
+    "env:test": "./scripts/switch-env.sh test",
+    "sync-upstream": "bash scripts/sync-upstream.sh"
   },
   "bin": {
     "hwjcode": "bundle/easycode.js"
