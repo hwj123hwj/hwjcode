@@ -562,7 +562,7 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
   // opens (see CodeContextMenu), so it stays visible and Copy/Search still work.
   const lastSelRef = useRef<{ text: string; range: Range | null }>({ text: '', range: null });
   const [menu, setMenu] = useState<
-    { x: number; y: number; selection: string; range: Range | null } | null
+    { x: number; y: number; selection: string; range: Range | null; rects: SelRect[] } | null
   >(null);
 
   useEffect(() => {
@@ -582,10 +582,9 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
   return (
     <div
       className="file-code-scroll"
-      // THE fix for "right-click clears the highlight": a right-button mousedown
-      // would otherwise move the caret and collapse the current selection before
-      // `contextmenu` even fires. Preventing its default keeps the selection (and
-      // its highlight + focus) fully intact; contextmenu still fires afterwards.
+      // Right-button mousedown would move the caret and collapse the selection
+      // before contextmenu fires; preventing its default helps keep it, but the
+      // robust visible-highlight guarantee is the overlay below.
       onMouseDown={(e: ReactMouseEvent<HTMLDivElement>) => {
         if (e.button === 2) e.preventDefault();
       }}
@@ -599,7 +598,18 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
           liveText && live && live.rangeCount > 0
             ? { text: liveText, range: live.getRangeAt(0).cloneRange() }
             : lastSelRef.current;
-        setMenu({ x: e.clientX, y: e.clientY, selection: captured.text, range: captured.range });
+        // Capture the selection's geometry NOW so we can paint our own highlight
+        // (overlay rects) while the menu is open — independent of the browser's
+        // selection focus/collapse behaviour, which can't be relied on here.
+        const rects = captured.range
+          ? Array.from(captured.range.getClientRects()).map((r) => ({
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+            }))
+          : [];
+        setMenu({ x: e.clientX, y: e.clientY, selection: captured.text, range: captured.range, rects });
       }}
     >
       <div className="file-code-rows">
@@ -612,6 +622,18 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
           <code ref={codeRef} dangerouslySetInnerHTML={{ __html: html }} />
         </pre>
       </div>
+      {/* Our own selection highlight: blue rects over the selected text, shown
+          while the menu is open. Fixed-positioned (rects are viewport coords),
+          click-through, so it survives whatever the browser does to the real
+          selection. */}
+      {menu?.rects.map((r, i) => (
+        <div
+          key={i}
+          className="code-sel-overlay"
+          aria-hidden="true"
+          style={{ position: 'fixed', left: r.left, top: r.top, width: r.width, height: r.height }}
+        />
+      ))}
       {menu && (
         <CodeContextMenu
           x={menu.x}
@@ -625,6 +647,14 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
       )}
     </div>
   );
+}
+
+/** A captured selection rectangle in viewport coordinates. */
+interface SelRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 /** The code viewer's right-click menu. Positioned at the cursor (fixed). */
@@ -648,35 +678,19 @@ function CodeContextMenu({
   const ref = useRef<HTMLDivElement>(null);
   const hasSelection = selection.trim().length > 0;
 
-  // Paint OUR OWN highlight over the selected range while the menu is open.
-  // The browser's native selection highlight vanishes here (the right-click
-  // collapses/deactivates it), but the underlying text is still known — so we
-  // render it ourselves via the CSS Custom Highlight API (`::highlight(...)` in
-  // index.css), which is independent of the browser's selection focus state.
-  // We also re-assert the native selection as a best-effort bonus.
+  // Re-assert the native selection so it's restored once the menu closes (the
+  // visible highlight WHILE the menu is open is drawn by the overlay rects in
+  // HighlightedCode — the browser's own selection rendering can't be relied on).
   useEffect(() => {
     if (!range) return;
-    const reg = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
-    const HL = (window as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
-    if (reg && HL) {
-      try {
-        reg.set('code-selection', new HL(range.cloneRange()));
-      } catch {
-        /* ignore — fall back to the native selection below */
-      }
-    }
     const sel = window.getSelection();
-    if (sel) {
-      try {
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } catch {
-        /* best effort */
-      }
+    if (!sel) return;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {
+      /* range nodes may have changed — best effort */
     }
-    return () => {
-      if (reg) reg.delete('code-selection');
-    };
   }, [range]);
 
   useEffect(() => {

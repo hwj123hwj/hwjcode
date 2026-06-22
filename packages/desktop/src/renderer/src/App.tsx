@@ -4,6 +4,7 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { LinkContextMenu } from './components/LinkContextMenu';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { RightSidebar } from './components/workspace/RightSidebar';
@@ -186,6 +187,7 @@ export function App() {
           )}
         </div>
         <PermissionDialog />
+        <LinkContextMenu />
         <UpdateBanner />
       </div>
     </ErrorBoundary>

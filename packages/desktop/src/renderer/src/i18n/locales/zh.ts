@@ -363,6 +363,13 @@ export const zh = {
   'browser.home': '主页',
   'browser.openExternal': '在系统浏览器中打开',
   'browser.blank': '在上方输入网址开始浏览',
+  'browser.newTab': '新建标签页',
+  'browser.newTabTitle': '新标签页',
+  'browser.closeTab': '关闭标签页',
+  // 会话内 URL 的右键菜单
+  'link.openHere': '在浏览器中打开',
+  'link.openExternal': '在外部浏览器中打开',
+  'link.copy': '复制链接',
 
   // ── 底部终端 ─────────────────────────────────────────────────────────────────
   'terminalPanel.title': '终端',

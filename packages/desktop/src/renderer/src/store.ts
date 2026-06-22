@@ -75,11 +75,19 @@ export interface WorkspaceUiState {
   /** Lazily-created directory-less chat session backing the Side chat panel. */
   sideChatId?: string;
   /**
-   * A navigation request for the built-in browser panel (set when the user
-   * clicks a link in the transcript). `seq` increments per request so clicking
-   * the same URL twice re-navigates. In-memory only (not persisted).
+   * Built-in browser tabs (multi-tab). Each opened URL becomes/focuses a tab.
+   * In-memory only (not persisted — URLs go stale across runs and webviews are
+   * re-minted on demand).
    */
-  browserNav?: { url: string; seq: number };
+  browserTabs: BrowserTab[];
+  activeBrowserTab?: string;
+}
+
+/** One built-in-browser tab. `url` is its current/last-navigated address. */
+export interface BrowserTab {
+  id: string;
+  url: string;
+  title?: string;
 }
 
 /** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
@@ -236,8 +244,21 @@ interface StoreState {
   toggleWorkspaceBottom: () => void;
   /** Reveal the right sidebar on a specific feature view. */
   openWorkspaceView: (view: RightView) => void;
-  /** Open a URL in the built-in browser panel (reveals it on the browser view). */
+  /**
+   * Open a URL in the built-in browser: focuses an existing tab with the same
+   * URL, otherwise opens a new tab. Reveals the browser view.
+   */
   openInBrowser: (url: string) => void;
+  /** Open a fresh blank browser tab. */
+  newBrowserTab: () => void;
+  closeBrowserTab: (id: string) => void;
+  setActiveBrowserTab: (id: string) => void;
+  /** Update a tab's current url/title (from webview navigation events). */
+  updateBrowserTab: (id: string, patch: Partial<Omit<BrowserTab, 'id'>>) => void;
+  /** Transient right-click menu for a URL in the transcript (null = closed). */
+  linkMenu: { url: string; x: number; y: number } | null;
+  openLinkMenu: (url: string, x: number, y: number) => void;
+  closeLinkMenu: () => void;
   /**
    * Resize one of the draggable regions (right sidebar / bottom terminal / file
    * tree). The value is clamped to the region's limits and persisted.
@@ -276,6 +297,7 @@ function loadWorkspaceUi(): WorkspaceUiState {
     bottomHeight: WORKSPACE_SIZE_LIMITS.bottomHeight.default,
     fileTreeWidth: WORKSPACE_SIZE_LIMITS.fileTreeWidth.default,
     fileTabs: [],
+    browserTabs: [],
   };
   try {
     const raw = localStorage.getItem(WORKSPACE_KEY);
@@ -369,6 +391,7 @@ export const useStore = create<StoreState>((set, get) => ({
   permissionQueue: [],
   backendLog: [],
   sidebarFilter: { status: 'active', query: '' },
+  linkMenu: null,
   workspace: loadWorkspaceUi(),
   lang: loadStoredLang(),
   setLang: (lang) => {
@@ -767,17 +790,60 @@ export const useStore = create<StoreState>((set, get) => ({
 
   openInBrowser: (url) =>
     set((s) => {
-      const seq = (s.workspace.browserNav?.seq ?? 0) + 1;
+      const tabs = s.workspace.browserTabs;
+      const existing = tabs.find((t) => t.url === url);
+      const browserTabs = existing ? tabs : [...tabs, { id: newId(), url }];
+      const activeBrowserTab = existing ? existing.id : browserTabs[browserTabs.length - 1].id;
       const workspace: WorkspaceUiState = {
         ...s.workspace,
         rightOpen: true,
         rightView: 'browser',
-        browserNav: { url, seq },
+        browserTabs,
+        activeBrowserTab,
       };
-      // browserNav is in-memory; persistWorkspaceUi only saves the layout keys.
+      // Tabs are in-memory; persistWorkspaceUi only saves the layout keys.
       persistWorkspaceUi(workspace);
       return { workspace };
     }),
+
+  newBrowserTab: () =>
+    set((s) => {
+      const id = newId();
+      const workspace: WorkspaceUiState = {
+        ...s.workspace,
+        rightOpen: true,
+        rightView: 'browser',
+        browserTabs: [...s.workspace.browserTabs, { id, url: '' }],
+        activeBrowserTab: id,
+      };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
+  closeBrowserTab: (id) =>
+    set((s) => {
+      const browserTabs = s.workspace.browserTabs.filter((t) => t.id !== id);
+      let activeBrowserTab = s.workspace.activeBrowserTab;
+      if (activeBrowserTab === id) {
+        const idx = s.workspace.browserTabs.findIndex((t) => t.id === id);
+        activeBrowserTab = browserTabs[Math.min(idx, browserTabs.length - 1)]?.id;
+      }
+      return { workspace: { ...s.workspace, browserTabs, activeBrowserTab } };
+    }),
+
+  setActiveBrowserTab: (id) =>
+    set((s) => ({ workspace: { ...s.workspace, activeBrowserTab: id } })),
+
+  updateBrowserTab: (id, patch) =>
+    set((s) => ({
+      workspace: {
+        ...s.workspace,
+        browserTabs: s.workspace.browserTabs.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+      },
+    })),
+
+  openLinkMenu: (url, x, y) => set({ linkMenu: { url, x, y } }),
+  closeLinkMenu: () => set({ linkMenu: null }),
 
   openFileTab: (path) =>
     set((s) => {

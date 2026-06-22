@@ -365,6 +365,13 @@ export const en = {
   'browser.home': 'Home',
   'browser.openExternal': 'Open in system browser',
   'browser.blank': 'Type a URL above to start browsing',
+  'browser.newTab': 'New tab',
+  'browser.newTabTitle': 'New tab',
+  'browser.closeTab': 'Close tab',
+  // right-click menu for a URL in the transcript
+  'link.openHere': 'Open in browser',
+  'link.openExternal': 'Open in external browser',
+  'link.copy': 'Copy link',
 
   // ── bottom terminal ────────────────────────────────────────────────────────────────────────────
   'terminalPanel.title': 'Terminal',

@@ -281,6 +281,10 @@ function renderEmphasis(text: string): ReactNode[] {
             e.preventDefault();
             openMarkdownLink(href);
           }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            useStore.getState().openLinkMenu(href, e.clientX, e.clientY);
+          }}
         >
           {href}
         </a>,
@@ -296,6 +300,10 @@ function renderEmphasis(text: string): ReactNode[] {
             onClick={(e) => {
               e.preventDefault();
               openMarkdownLink(lm[2]);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              useStore.getState().openLinkMenu(lm[2], e.clientX, e.clientY);
             }}
           >
             {lm[1]}

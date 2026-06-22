@@ -3774,11 +3774,15 @@ body.resizing * {
 .file-code-scroll ::-moz-selection {
   background: rgba(74, 134, 232, 0.4);
 }
-/* Our own highlight, painted from the captured range while the right-click menu
-   is open (the native selection highlight disappears there). Custom Highlight
-   API — independent of the browser's selection focus state. */
-::highlight(code-selection) {
+/* Our own selection highlight, drawn as click-through blue rects over the
+   selected text while the right-click menu is open. This does NOT depend on the
+   browser's selection focus/collapse state (which drops the native highlight on
+   right-click), so it's reliable across OSes and Chromium quirks. */
+.code-sel-overlay {
+  pointer-events: none;
+  z-index: 900;
   background: rgba(74, 134, 232, 0.4);
+  border-radius: 1px;
 }
 
 /* right-click menu over the code viewer (Search with Google / Copy / Select All) */
@@ -3928,6 +3932,86 @@ body.resizing * {
 /* ── built-in browser ────────────────────────────────────────────────────── */
 .browser-panel {
   height: 100%;
+}
+/* tab strip */
+.browser-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px 0;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.browser-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 180px;
+  min-width: 90px;
+  max-width: 200px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.browser-tab .ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.browser-tab:hover {
+  background: var(--bg-hover);
+}
+.browser-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+}
+.browser-tab-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-tab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.browser-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.browser-tab-new {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.browser-tab-new:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.browser-tab-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 .browser-bar {
   display: flex;
