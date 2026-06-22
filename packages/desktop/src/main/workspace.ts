@@ -110,6 +110,11 @@ export async function saveClipboardImage(
  * clipboard is far more reliable than the renderer's `ClipboardEvent` on
  * Windows, where a "copy image" often exposes no `image/*` DataTransferItem.
  */
+/** Write plain text to the OS clipboard (code viewer "Copy" menu item). */
+export function writeClipboardText(text: string): void {
+  clipboard.writeText(text);
+}
+
 export function readClipboardImage(): FileBase64 | null {
   try {
     const img = clipboard.readImage();
@@ -136,6 +141,54 @@ export async function listDir(dir: string): Promise<DirEntry[]> {
       isDir: e.isDirectory(),
     }))
     .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1));
+}
+
+/**
+ * Directory names skipped while walking the tree for the fuzzy file finder —
+ * the usual heavy / generated / VCS folders that VSCode's quick-open also hides.
+ * Hidden dirs (`.foo`) are skipped too, except the project-relevant ones.
+ */
+const SEARCH_SKIP_DIRS = new Set([
+  'node_modules', '.git', '.hg', '.svn', 'dist', 'out', 'build', 'release',
+  'coverage', '.next', '.nuxt', '.cache', '.turbo', '.parcel-cache', 'target',
+  'vendor', '.venv', 'venv', '__pycache__', '.idea', '.vscode-test', 'bin', 'obj',
+]);
+const SEARCH_KEEP_HIDDEN = new Set(['.claude', '.easycode', '.github', '.vscode']);
+/** Hard cap so a giant repo can't freeze the walk / blow up the renderer list. */
+const SEARCH_FILE_CAP = 20000;
+
+/**
+ * Recursively collect every file under `root` as a forward-slash relative path,
+ * skipping the heavy/generated dirs above. Breadth-ish DFS with a file cap; the
+ * renderer ranks the result with fuzzysort, so order here is just stable-ish.
+ */
+export async function searchFiles(root: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (dir: string, rel: string): Promise<void> => {
+    if (files.length >= SEARCH_FILE_CAP) return;
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable dir (permissions / vanished) — skip
+    }
+    // Files first (cheap), then descend — keeps shallow matches near the top.
+    const subdirs: Array<{ abs: string; rel: string }> = [];
+    for (const e of entries) {
+      if (files.length >= SEARCH_FILE_CAP) return;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (SEARCH_SKIP_DIRS.has(e.name)) continue;
+        if (e.name.startsWith('.') && !SEARCH_KEEP_HIDDEN.has(e.name)) continue;
+        subdirs.push({ abs: path.join(dir, e.name), rel: childRel });
+      } else if (e.isFile()) {
+        files.push(childRel);
+      }
+    }
+    for (const sd of subdirs) await walk(sd.abs, sd.rel);
+  };
+  await walk(root, '');
+  return files;
 }
 
 export async function openExternal(url: string): Promise<void> {

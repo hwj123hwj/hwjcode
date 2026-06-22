@@ -10,12 +10,22 @@
  * survive sidebar view switches.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from 'react';
+import fuzzysort from 'fuzzysort';
 import { useStore } from '../../store';
 import { Icon } from '../Icon';
 import { FileIcon } from './FileIcons';
 import { Markdown } from '../Markdown';
 import { Resizer } from './Resizer';
+import { highlightCode } from './codeHighlight';
 import { useT, type TFunc } from '../../i18n/useT';
 import type { DetectedIde, DirEntry } from '@shared/ipc';
 
@@ -195,10 +205,16 @@ function FileToolbar({ root, file, t }: { root: string; file: string; t: TFunc }
       </div>
       <span className="grow" />
       <div ref={menuRef} style={{ position: 'relative' }}>
-        <button className="chip interactive" onClick={() => setMenuOpen((o) => !o)}>
+        <button
+          className="chip interactive file-open-in"
+          title={t('files.openIn')}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
           <Icon name="external-link" size={13} />
-          {t('files.openIn')}
-          <Icon name="chevron-down" size={12} />
+          {/* Label + caret collapse away (icon only) when the toolbar is too
+              narrow — see the container query in index.css. */}
+          <span className="chip-label">{t('files.openIn')}</span>
+          <Icon name="chevron-down" size={12} className="chip-caret" />
         </button>
         {menuOpen && (
           <div className="menu-pop" style={{ right: 0, top: '120%' }}>
@@ -243,6 +259,11 @@ function FileToolbar({ root, file, t }: { root: string; file: string; t: TFunc }
 
 // ── explorer tree ──────────────────────────────────────────────────────────────
 
+/** Join a forward-slash relative path onto the (possibly Windows) root. */
+function joinRoot(root: string, rel: string): string {
+  return `${root.replace(/[\\/]+$/, '')}/${rel}`;
+}
+
 function FileTree({
   root,
   activeTab,
@@ -255,14 +276,87 @@ function FileTree({
   width: number;
 }) {
   const t = useT();
+  const [query, setQuery] = useState('');
+  // The flat file list backing the fuzzy finder, loaded lazily per root.
+  const [files, setFiles] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Build the file index the first time the user searches in this root (and
+  // refresh it whenever the root changes).
+  useEffect(() => {
+    setFiles(null);
+    setQuery('');
+  }, [root]);
+
+  const searching = query.trim().length > 0;
+  useEffect(() => {
+    if (!searching || files !== null || loading) return;
+    setLoading(true);
+    void api.workspace
+      .searchFiles(root)
+      .then((list) => setFiles(list))
+      .catch(() => setFiles([]))
+      .finally(() => setLoading(false));
+  }, [searching, files, loading, root]);
+
+  const results = useMemo(() => {
+    if (!searching || !files) return [];
+    return fuzzysort.go(query.trim(), files, { limit: 80 }).map((r) => r.target);
+  }, [query, files, searching]);
+
   return (
     <div className="file-tree" style={{ width }}>
       <div className="file-tree-head">
         <Icon name="folder" size={13} />
         <span>{t('files.explorer')}</span>
       </div>
+      <div className="file-search">
+        <Icon name="search" size={13} />
+        <input
+          className="file-search-input"
+          placeholder={t('files.searchPlaceholder')}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          spellCheck={false}
+        />
+        {query && (
+          <button className="file-search-clear" title={t('files.searchClear')} onClick={() => setQuery('')}>
+            <Icon name="x" size={12} />
+          </button>
+        )}
+      </div>
       <div className="file-tree-body">
-        <TreeNode path={root} name={baseName(root)} isDir depth={0} activeTab={activeTab} onOpen={onOpen} defaultOpen />
+        {searching ? (
+          loading && !files ? (
+            <div className="tree-row tree-loading" style={{ paddingLeft: 10 }}>
+              <Icon name="loader" size={13} spin />
+            </div>
+          ) : results.length === 0 ? (
+            <div className="empty file-search-empty">{t('files.searchNoResults')}</div>
+          ) : (
+            results.map((rel) => {
+              const abs = joinRoot(root, rel);
+              const slash = rel.lastIndexOf('/');
+              const fname = slash < 0 ? rel : rel.slice(slash + 1);
+              const dir = slash < 0 ? '' : rel.slice(0, slash);
+              return (
+                <button
+                  key={rel}
+                  className={`tree-row search-row ${activeTab === abs ? 'active' : ''}`}
+                  style={{ paddingLeft: 10 }}
+                  onClick={() => onOpen(abs)}
+                  title={rel}
+                >
+                  <FileIcon name={fname} size={15} />
+                  <span className="search-name">{fname}</span>
+                  {dir && <span className="search-dir">{dir}</span>}
+                </button>
+              );
+            })
+          )
+        ) : (
+          <TreeNode path={root} name={baseName(root)} isDir depth={0} activeTab={activeTab} onOpen={onOpen} defaultOpen />
+        )}
       </div>
     </div>
   );
@@ -444,8 +538,222 @@ function FileContent({ path, t }: { path: string; t: TFunc }) {
           <Markdown text={loaded.text} />
         </div>
       ) : (
-        <pre className="file-code">{loaded.text}</pre>
+        <HighlightedCode text={loaded.text} fileName={baseName(path)} />
       )}
+    </div>
+  );
+}
+
+/** A read-only, syntax-highlighted code view with a line-number gutter and a
+ *  right-click menu (Search with Google / Copy / Select All). Highlighting is
+ *  memoised per (text, file) so re-renders (e.g. tab focus) don't re-run hljs. */
+function HighlightedCode({ text, fileName }: { text: string; fileName: string }) {
+  const t = useT();
+  // Drop a single trailing newline so the gutter line count matches the rows
+  // the <pre> actually renders (editors don't number the phantom final line).
+  const body = useMemo(() => (text.endsWith('\n') ? text.slice(0, -1) : text), [text]);
+  const html = useMemo(() => highlightCode(body, fileName).html, [body, fileName]);
+  const lineCount = useMemo(() => body.split('\n').length, [body]);
+  const codeRef = useRef<HTMLElement>(null);
+  // The right-click that opens the menu can COLLAPSE the live selection before
+  // `contextmenu` fires, so by then `getSelection()` is often already empty —
+  // that's why the highlight "disappeared". We continuously remember the last
+  // non-empty selection inside this code block and restore it when the menu
+  // opens (see CodeContextMenu), so it stays visible and Copy/Search still work.
+  const lastSelRef = useRef<{ text: string; range: Range | null }>({ text: '', range: null });
+  const [menu, setMenu] = useState<
+    { x: number; y: number; selection: string; range: Range | null; rects: SelRect[] } | null
+  >(null);
+
+  useEffect(() => {
+    const onSelChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const code = codeRef.current;
+      if (code && code.contains(range.commonAncestorContainer)) {
+        lastSelRef.current = { text: sel.toString(), range: range.cloneRange() };
+      }
+    };
+    document.addEventListener('selectionchange', onSelChange);
+    return () => document.removeEventListener('selectionchange', onSelChange);
+  }, []);
+
+  return (
+    <div
+      className="file-code-scroll"
+      // Right-button mousedown would move the caret and collapse the selection
+      // before contextmenu fires; preventing its default helps keep it, but the
+      // robust visible-highlight guarantee is the overlay below.
+      onMouseDown={(e: ReactMouseEvent<HTMLDivElement>) => {
+        if (e.button === 2) e.preventDefault();
+      }}
+      onContextMenu={(e: ReactMouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        // Prefer the live selection; fall back to the last tracked one if the
+        // right-click already collapsed it.
+        const live = window.getSelection();
+        const liveText = live?.toString() ?? '';
+        const captured =
+          liveText && live && live.rangeCount > 0
+            ? { text: liveText, range: live.getRangeAt(0).cloneRange() }
+            : lastSelRef.current;
+        // Capture the selection's geometry NOW so we can paint our own highlight
+        // (overlay rects) while the menu is open — independent of the browser's
+        // selection focus/collapse behaviour, which can't be relied on here.
+        const rects = captured.range
+          ? Array.from(captured.range.getClientRects()).map((r) => ({
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+            }))
+          : [];
+        setMenu({ x: e.clientX, y: e.clientY, selection: captured.text, range: captured.range, rects });
+      }}
+    >
+      <div className="file-code-rows">
+        <div className="file-gutter" aria-hidden="true">
+          {Array.from({ length: Math.max(lineCount, 1) }, (_, i) => (
+            <span key={i}>{i + 1}</span>
+          ))}
+        </div>
+        <pre className="file-code hljs">
+          <code ref={codeRef} dangerouslySetInnerHTML={{ __html: html }} />
+        </pre>
+      </div>
+      {/* Our own selection highlight: blue rects over the selected text, shown
+          while the menu is open. Fixed-positioned (rects are viewport coords),
+          click-through, so it survives whatever the browser does to the real
+          selection. */}
+      {menu?.rects.map((r, i) => (
+        <div
+          key={i}
+          className="code-sel-overlay"
+          aria-hidden="true"
+          style={{ position: 'fixed', left: r.left, top: r.top, width: r.width, height: r.height }}
+        />
+      ))}
+      {menu && (
+        <CodeContextMenu
+          x={menu.x}
+          y={menu.y}
+          selection={menu.selection}
+          range={menu.range}
+          codeRef={codeRef}
+          onClose={() => setMenu(null)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A captured selection rectangle in viewport coordinates. */
+interface SelRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The code viewer's right-click menu. Positioned at the cursor (fixed). */
+function CodeContextMenu({
+  x,
+  y,
+  selection,
+  range,
+  codeRef,
+  onClose,
+  t,
+}: {
+  x: number;
+  y: number;
+  selection: string;
+  range: Range | null;
+  codeRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  t: TFunc;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const hasSelection = selection.trim().length > 0;
+
+  // Re-assert the native selection so it's restored once the menu closes (the
+  // visible highlight WHILE the menu is open is drawn by the overlay rects in
+  // HighlightedCode — the browser's own selection rendering can't be relied on).
+  useEffect(() => {
+    if (!range) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {
+      /* range nodes may have changed — best effort */
+    }
+  }, [range]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    // Capture phase so a click anywhere dismisses before it does other work.
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const searchGoogle = () => {
+    void api.workspace.openExternal(
+      `https://www.google.com/search?q=${encodeURIComponent(selection)}`,
+    );
+    onClose();
+  };
+  const copy = () => {
+    void api.clipboard.writeText(selection);
+    onClose();
+  };
+  const selectAll = () => {
+    const el = codeRef.current;
+    const sel = window.getSelection();
+    if (el && sel) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    onClose();
+  };
+
+  // Keep the menu inside the viewport (flip up/left near the edges).
+  const style: CSSProperties = {
+    position: 'fixed',
+    left: Math.min(x, window.innerWidth - 200),
+    top: Math.min(y, window.innerHeight - 140),
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="menu-pop code-context-menu"
+      style={style}
+      // Keep the text selection intact while the menu is up: mousedown on the
+      // menu would otherwise blur the selection (greying its highlight) before
+      // the click fires.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <button onClick={searchGoogle} disabled={!hasSelection}>
+        {t('files.searchGoogle')}
+      </button>
+      <div className="menu-sep" />
+      <button onClick={copy} disabled={!hasSelection}>
+        {t('files.copy')}
+      </button>
+      <button onClick={selectAll}>{t('files.selectAll')}</button>
     </div>
   );
 }

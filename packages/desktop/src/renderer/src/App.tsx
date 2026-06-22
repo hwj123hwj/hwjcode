@@ -4,6 +4,7 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
+import { LinkContextMenu } from './components/LinkContextMenu';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { RightSidebar } from './components/workspace/RightSidebar';
@@ -157,11 +158,15 @@ export function App() {
             </ErrorBoundary>
             {workspace.rightOpen && (
               <>
-                <Resizer
-                  axis="x"
-                  getValue={() => useStore.getState().workspace.rightWidth}
-                  onChange={(v) => setWorkspaceSize('rightWidth', v)}
-                />
+                {/* The resizer only applies when a content panel is open; in
+                    launcher mode the rail is fixed-width. */}
+                {workspace.rightView && (
+                  <Resizer
+                    axis="x"
+                    getValue={() => useStore.getState().workspace.rightWidth}
+                    onChange={(v) => setWorkspaceSize('rightWidth', v)}
+                  />
+                )}
                 <ErrorBoundary label="right-sidebar">
                   <RightSidebar />
                 </ErrorBoundary>
@@ -182,6 +187,7 @@ export function App() {
           )}
         </div>
         <PermissionDialog />
+        <LinkContextMenu />
         <UpdateBanner />
       </div>
     </ErrorBoundary>

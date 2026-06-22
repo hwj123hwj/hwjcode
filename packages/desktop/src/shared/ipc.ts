@@ -72,6 +72,7 @@ export const IpcInvoke = {
   ReadFile: 'workspace:read-file',
   ReadFileBase64: 'workspace:read-file-base64',
   ListDir: 'workspace:list-dir',
+  SearchFiles: 'workspace:search-files',
   RevealInFolder: 'workspace:reveal-in-folder',
   OpenInTerminal: 'workspace:open-in-terminal',
   GitDiff: 'workspace:git-diff',
@@ -86,6 +87,7 @@ export const IpcInvoke = {
   TerminalClose: 'terminal:close',
   // clipboard
   ReadClipboardImage: 'clipboard:read-image',
+  WriteClipboardText: 'clipboard:write-text',
   // version update
   UpdateGetState: 'update:get-state',
   UpdateCheck: 'update:check',
@@ -925,6 +927,12 @@ export interface EasycodeBridge {
     /** Read a file as base64 + mime (used to inline picked images). */
     readFileBase64(path: string): Promise<FileBase64 | null>;
     listDir(path: string): Promise<DirEntry[]>;
+    /**
+     * Recursively list all files under `root` as forward-slash relative paths
+     * (skips node_modules/.git/build dirs; capped), for the VSCode-style fuzzy
+     * file finder in the Files panel.
+     */
+    searchFiles(root: string): Promise<string[]>;
     /** Reveal a file/folder in the OS file manager (Explorer / Finder). */
     revealInFolder(path: string): Promise<void>;
     /** Open a terminal at the given directory (best-effort per platform). */
@@ -949,6 +957,8 @@ export interface EasycodeBridge {
   clipboard: {
     /** Read a bitmap from the OS clipboard as base64 PNG (null when empty). */
     readImage(): Promise<FileBase64 | null>;
+    /** Write plain text to the OS clipboard (used by the code viewer's Copy). */
+    writeText(text: string): Promise<void>;
   };
   backend: {
     onLog(cb: (line: string) => void): () => void;

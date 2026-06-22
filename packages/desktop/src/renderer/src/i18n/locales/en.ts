@@ -349,6 +349,12 @@ export const en = {
   'files.loadFailed': 'Could not read this file',
   'files.closeTab': 'Close',
   'files.noIde': 'No external editors detected',
+  'files.searchPlaceholder': 'Search files…',
+  'files.searchClear': 'Clear',
+  'files.searchNoResults': 'No matching files',
+  'files.searchGoogle': 'Search with Google',
+  'files.copy': 'Copy',
+  'files.selectAll': 'Select All',
 
   // ── built-in browser ───────────────────────────────────────────────────────────────────────────
   'browser.title': 'Browser',
@@ -359,6 +365,13 @@ export const en = {
   'browser.home': 'Home',
   'browser.openExternal': 'Open in system browser',
   'browser.blank': 'Type a URL above to start browsing',
+  'browser.newTab': 'New tab',
+  'browser.newTabTitle': 'New tab',
+  'browser.closeTab': 'Close tab',
+  // right-click menu for a URL in the transcript
+  'link.openHere': 'Open in browser',
+  'link.openExternal': 'Open in external browser',
+  'link.copy': 'Copy link',
 
   // ── bottom terminal ────────────────────────────────────────────────────────────────────────────
   'terminalPanel.title': 'Terminal',

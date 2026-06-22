@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, type PaneKind, type SessionView as SV, type ViewDensity } from '../store';
+import { useStore, type PaneKind, type SessionView as SV } from '../store';
 import { ChatPane } from './panes/ChatPane';
 import { SessionTodoPanel } from './StickyTodoPanel';
 import { DiffPane } from './panes/DiffPane';
@@ -30,7 +30,6 @@ const PANE_ICON: Record<PaneKind, IconName> = {
 export function SessionView() {
   const activeId = useStore((s) => s.activeSessionId);
   const view = useStore((s) => (activeId ? s.sessions[activeId] : undefined));
-  const setDensity = useStore((s) => s.setDensity);
   const togglePane = useStore((s) => s.togglePane);
   const resume = useStore((s) => s.resumeSession);
   const t = useT();
@@ -110,7 +109,7 @@ export function SessionView() {
 
       <div className="workspace">
         {view.panes.map((p) => (
-          <PaneHost key={p} kind={p} view={view} t={t} onDensity={(d) => setDensity(meta.id, d)} />
+          <PaneHost key={p} kind={p} view={view} t={t} />
         ))}
       </div>
 
@@ -125,33 +124,16 @@ function PaneHost({
   kind,
   view,
   t,
-  onDensity,
 }: {
   kind: PaneKind;
   view: SV;
   t: TFunc;
-  onDensity: (d: ViewDensity) => void;
 }) {
   if (kind === 'chat') {
+    // No chat header: density is fixed at 'normal' (the default) to save the
+    // vertical space the old [对话 · 摘要/正常/详细] bar took.
     return (
       <div className="pane">
-        <div className="pane-head">
-          <Icon name={PANE_ICON.chat} size={15} />
-          <span>{t('pane.chat')}</span>
-          <span className="grow" />
-          <div className="views-menu">
-            {(['summary', 'normal', 'verbose'] as ViewDensity[]).map((d) => (
-              <button
-                key={d}
-                className={view.density === d ? 'active' : ''}
-                onClick={() => onDensity(d)}
-                title={t('density.title')}
-              >
-                {t(`density.${d}`)}
-              </button>
-            ))}
-          </div>
-        </div>
         <ChatPane view={view} />
       </div>
     );
