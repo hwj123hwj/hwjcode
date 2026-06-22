@@ -56,6 +56,19 @@ import { handleSessionsCommand } from '../../services/feishu/sessionsCommand.js'
 import { feishuToolEmoji } from '../../services/feishu/toolEmoji.js';
 import { CreateProjectGroupTool } from '../../services/feishu/createProjectGroupTool.js';
 import {
+  isFeishuAuthError,
+  buildFeishuAuthErrorMessage,
+} from '../../services/feishu/authError.js';
+import {
+  isCheetahEmail,
+  highlightHintLine,
+  CHEETAH_WIKI_URL,
+} from '../../services/feishu/cheetahHint.js';
+import {
+  performJwtKeepAlive,
+  FEISHU_JWT_KEEPALIVE_INTERVAL_MS,
+} from '../../services/feishu/jwtKeepAlive.js';
+import {
   detectLocalAgents,
   buildLocalAgentWelcomeHints,
 } from '../../services/feishu/localAgentDetection.js';
@@ -456,6 +469,26 @@ export function applyDelegateFooterMetrics(
 /** 当前全局网关实例（进程内单例） */
 let activeGateway: FeishuGateway | null = null;
 let feishuLoopInterval: NodeJS.Timeout | null = null;
+/** JWT 主动保活定时器：空闲 bot 也能后台续期，避免登录态因长期空闲而过期 */
+let feishuJwtKeepAliveInterval: NodeJS.Timeout | null = null;
+
+/**
+ * 集中清理飞书网关相关的所有周期性定时器（/loop 看门狗 + JWT 保活）。
+ *
+ * 网关停止有多条路径：onDisconnect 回调、/feishu stop、/feishu restart 等显式
+ * disconnect。disconnect() 是否一定触发 onDisconnect 不可依赖，故所有停止路径
+ * 都显式调用本函数。clearInterval(null) 是安全的，重复调用幂等。
+ */
+function stopFeishuTimers(): void {
+  if (feishuLoopInterval) {
+    clearInterval(feishuLoopInterval);
+    feishuLoopInterval = null;
+  }
+  if (feishuJwtKeepAliveInterval) {
+    clearInterval(feishuJwtKeepAliveInterval);
+    feishuJwtKeepAliveInterval = null;
+  }
+}
 
 /** 正在处理的飞书消息计数器 */
 let activeProcessingCount = 0;
@@ -1179,6 +1212,7 @@ async function gracefulRestartThenExit(install: RelaunchInstallMode): Promise<vo
 
   // 3) 优雅关闭飞书网关（发送 WebSocket close frame，而非硬断）
   if (activeGateway) {
+    stopFeishuTimers();
     try { await activeGateway.disconnect(); } catch { /* ignore */ }
     activeGateway = null;
   }
@@ -1249,11 +1283,31 @@ async function handleSetup(args: string, ctx?: CommandContext): Promise<string> 
     const parts = rest.split(/\s+/).filter(Boolean);
     const appId = parts[0];
     const appSecret = parts[1];
-    return await handleManualSetup(appId, appSecret, ctx);
+    return appendCheetahHint(await handleManualSetup(appId, appSecret, ctx));
   }
 
   // 没有 --manual 则走 QR
-  return await handleQrSetup(ctx);
+  return appendCheetahHint(await handleQrSetup(ctx));
+}
+
+/**
+ * 若当前登录用户是猎豹集团（@cmcm.com）员工，在 setup 输出末尾追加一行高亮提示，
+ * 引导其访问组织内部的「飞书 Agent 快速创建指南」wiki。
+ *
+ * 放在最后一行并以 ANSI RESET 收尾，避免高亮色泄漏到后续输出。非猎豹用户原样返回。
+ */
+function appendCheetahHint(result: string): string {
+  try {
+    const email = ProxyAuthManager.getInstance().getUserInfo()?.email;
+    if (!isCheetahEmail(email)) return result;
+    const hint = highlightHintLine(
+      tp('feishu.setup.cheetah_hint', { url: CHEETAH_WIKI_URL }),
+    );
+    return `${result}\n\n${hint}`;
+  } catch {
+    // 取用户信息失败不应影响 setup 主流程
+    return result;
+  }
 }
 
 /**
@@ -4276,19 +4330,31 @@ async function handleStart(context?: CommandContext): Promise<string> {
         return null;
       }
       derror('Feishu Agent processing error:', err.message);
-      const errorReply = `❌ 处理消息时出错: ${err.message}`;
+      // 🔐 认证失效特殊处理：JWT 登录状态失效时，后端返回的原始英文错误
+      //    "Authentication required - please re-authenticate" 用户看不懂。统一
+      //    替换为中文友好提示，引导用户去 easycode 终端执行 /auth 重新登录。
+      const isAuthErr = isFeishuAuthError(err);
+      const displayMessage = isAuthErr
+        ? buildFeishuAuthErrorMessage(err?.message)
+        : err.message;
+      const errorReply = isAuthErr
+        ? `🔐 ${displayMessage}`
+        : `❌ 处理消息时出错: ${displayMessage}`;
+      const cardErrorLine = isAuthErr
+        ? `\n\n🔐 ${displayMessage}`
+        : `\n\n❌ ${displayMessage}`;
       if (activeCardId && streaming) {
         const errorFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         errorFooterMetrics.status = '出错';
-        await streaming.finalize(renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
+        await streaming.finalize(renderCurrentDisplay(blocks) + cardErrorLine, errorFooterMetrics);
         streaming = null;
       } else if (activeCardId && !streaming) {
         const errorFooterMetrics = await getFeishuStatusMetrics(config, geminiClient, lastRequestTokenUsage);
         errorFooterMetrics.status = '出错';
-        await gateway.updateCard(activeCardId, 'Easy Code (出错)', renderCurrentDisplay(blocks) + `\n\n❌ ${err.message}`, errorFooterMetrics);
+        await gateway.updateCard(activeCardId, 'Easy Code (出错)', renderCurrentDisplay(blocks) + cardErrorLine, errorFooterMetrics);
       }
       // 注：错误信息改由飞书仪表板 message log 展示，不再回显主 TUI。
-      emitFeishuMessageLog(msg.chatId, `❌ ${err.message}`, 'tool');
+      emitFeishuMessageLog(msg.chatId, isAuthErr ? `🔐 ${displayMessage}` : `❌ ${displayMessage}`, 'tool');
       return errorReply;
     } finally {
       // FIX: 只删除属于本次任务调用的控制器，避免误删新任务的控制器
@@ -4701,15 +4767,31 @@ async function handleStart(context?: CommandContext): Promise<string> {
   gateway.onDisconnect = () => {
     dlog('Feishu connection closed');
     resetProcessingCount();
-    if (feishuLoopInterval) {
-      clearInterval(feishuLoopInterval);
-      feishuLoopInterval = null;
-    }
+    stopFeishuTimers();
   };
 
   try {
     await gateway.connect();
     activeGateway = gateway;
+
+    // 🔐 启动 JWT 主动保活：core 的续期是「请求时惰性触发」的，空闲 bot 不发请求
+    //    就不会续期。这里周期性主动调用 getAccessToken()，借用 core 已有的「临近
+    //    过期即 refresh」逻辑，让长期空闲的 bot 也能在后台持续续期，从根源减少
+    //    登录态失效。performJwtKeepAlive 绝不抛错，不会拖垮定时器。
+    if (feishuJwtKeepAliveInterval) {
+      clearInterval(feishuJwtKeepAliveInterval);
+    }
+    {
+      const jwtAuthManager = ProxyAuthManager.getInstance();
+      feishuJwtKeepAliveInterval = setInterval(() => {
+        void performJwtKeepAlive(
+          () => jwtAuthManager.getAccessToken(),
+          (m) => dlog(m),
+        );
+      }, FEISHU_JWT_KEEPALIVE_INTERVAL_MS);
+      // 不阻塞进程退出
+      feishuJwtKeepAliveInterval.unref?.();
+    }
 
     // 🎯 启动飞书看门狗 /loop 周期性任务调度器
     if (feishuLoopInterval) {
@@ -4836,6 +4918,7 @@ async function handleStart(context?: CommandContext): Promise<string> {
           activeAbortControllers.clear();
           clearMessageQueue();
           if (activeGateway) {
+            stopFeishuTimers();
             try { await activeGateway.disconnect(); } catch { /* ignore */ }
             activeGateway = null;
           }
@@ -5015,6 +5098,7 @@ async function handleStop(context?: CommandContext): Promise<string> {
   clearMessageQueue();
 
   resetProcessingCount();
+  stopFeishuTimers();
   await activeGateway.disconnect();
   activeGateway = null;
   appEvents.emit(AppEvent.FeishuBotStopped);
@@ -5287,6 +5371,7 @@ async function handleLogout(context?: CommandContext): Promise<string> {
         // ignore
       }
     }
+    stopFeishuTimers();
     await activeGateway.disconnect();
     activeGateway = null;
     appEvents.emit(AppEvent.FeishuBotStopped);
