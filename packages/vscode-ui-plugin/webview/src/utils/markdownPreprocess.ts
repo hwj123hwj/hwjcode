@@ -127,3 +127,54 @@ export function rehabGluedSingleLineFences(text: string): string {
     },
   );
 }
+
+/**
+ * Escape raw `<` characters in markdown text that are NOT inside code blocks
+ * or inline code spans.
+ *
+ * Why: `rehypeRaw` treats raw `<tag>` in markdown as HTML and strips/hides
+ * unknown tags. When an LLM writes prose like "key: `xunxiashi:...:​<sessionScope>`"
+ * or "use <T> as a type parameter", the `<sessionScope>` / `<T>` fragment is
+ * silently swallowed, making part of the answer invisible — the user sees an
+ * empty gap.
+ *
+ * By escaping only the `<` that appear in normal prose (never inside fenced or
+ * inline code), we let `rehypeRaw` render legitimate HTML while preventing
+ * pseudo-HTML angle brackets from eating content.
+ *
+ * `>` is left untouched so that markdown blockquotes (`> quote`) still work.
+ */
+export function escapeRawHtmlAngles(text: string): string {
+  if (!text || !text.includes('<')) return text;
+
+  // Split on fenced code blocks (```...```) and inline code spans (`...`),
+  // only transforming the non-code segments.
+  //
+  // We use a single regex that matches either a fenced block or an inline code
+  // span, and replace `<` → `&lt;` only in the text between them.
+  const parts: string[] = [];
+  let lastIndex = 0;
+
+  // Matches fenced code blocks (``` or ~~~, multi-line) or inline code spans
+  // (single backtick pairs on the same line).
+  const codeTokenRe =
+    /(`{3,}|~{3,})[\s\S]*?\1|(`+)(?:[^`]|(?!\2).)*?\2/g;
+  let m: RegExpExecArray | null;
+
+  while ((m = codeTokenRe.exec(text)) !== null) {
+    // Escape `<` in the prose text before this code token.
+    if (m.index > lastIndex) {
+      parts.push(text.slice(lastIndex, m.index).replace(/</g, '&lt;'));
+    }
+    // Push the code token verbatim — do NOT escape inside code.
+    parts.push(m[0]);
+    lastIndex = m.index + m[0].length;
+  }
+
+  // Escape `<` in the remaining trailing prose.
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex).replace(/</g, '&lt;'));
+  }
+
+  return parts.join('');
+}
