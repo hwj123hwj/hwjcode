@@ -3774,6 +3774,12 @@ body.resizing * {
 .file-code-scroll ::-moz-selection {
   background: rgba(74, 134, 232, 0.4);
 }
+/* Our own highlight, painted from the captured range while the right-click menu
+   is open (the native selection highlight disappears there). Custom Highlight
+   API — independent of the browser's selection focus state. */
+::highlight(code-selection) {
+  background: rgba(74, 134, 232, 0.4);
+}
 
 /* right-click menu over the code viewer (Search with Google / Copy / Select All) */
 .code-context-menu {

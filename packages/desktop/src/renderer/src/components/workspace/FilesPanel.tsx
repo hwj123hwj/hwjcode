@@ -648,18 +648,35 @@ function CodeContextMenu({
   const ref = useRef<HTMLDivElement>(null);
   const hasSelection = selection.trim().length > 0;
 
-  // Re-show the user's selection that the right-click may have collapsed, so
-  // the highlight stays visible the whole time the menu is open.
+  // Paint OUR OWN highlight over the selected range while the menu is open.
+  // The browser's native selection highlight vanishes here (the right-click
+  // collapses/deactivates it), but the underlying text is still known — so we
+  // render it ourselves via the CSS Custom Highlight API (`::highlight(...)` in
+  // index.css), which is independent of the browser's selection focus state.
+  // We also re-assert the native selection as a best-effort bonus.
   useEffect(() => {
     if (!range) return;
-    const sel = window.getSelection();
-    if (!sel) return;
-    try {
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch {
-      /* range nodes may have changed — best effort */
+    const reg = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights;
+    const HL = (window as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
+    if (reg && HL) {
+      try {
+        reg.set('code-selection', new HL(range.cloneRange()));
+      } catch {
+        /* ignore — fall back to the native selection below */
+      }
     }
+    const sel = window.getSelection();
+    if (sel) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch {
+        /* best effort */
+      }
+    }
+    return () => {
+      if (reg) reg.delete('code-selection');
+    };
   }, [range]);
 
   useEffect(() => {
