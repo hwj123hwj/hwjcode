@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { ensurePathFromLoginShell } from './shellPath.js';
+import { createTray, destroyTray } from './tray.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
 import type { UpdateManager } from './updater.js';
@@ -28,6 +29,33 @@ let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
 let updater: UpdateManager | null = null;
 let terminals: TerminalManager | null = null;
+
+// Distinguishes "user clicked X / Cmd+W" (→ hide to tray) from "the app is
+// really quitting" (→ let the window close). Set true by the only paths that
+// should actually exit: the tray Quit item, and `before-quit` (which fires for
+// Cmd+Q, the updater's `app.quit()` on restart, etc.).
+let isQuitting = false;
+
+/**
+ * Bring the main window to the foreground from any state: recreate it if it was
+ * destroyed, restore it if minimized, show it if hidden to the tray, then focus.
+ * Used by the tray, the second-instance handler, and macOS dock activation.
+ */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+/** Flag a real quit so the window's close handler lets it through, then exit. */
+function quitApp(): void {
+  isQuitting = true;
+  app.quit();
+}
 
 /**
  * macOS application menu. The first submenu's title is the app name shown in the
@@ -100,6 +128,17 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show());
 
+  // Closing the window (X on Windows/Linux, red button / Cmd+W on macOS) hides
+  // it to the tray rather than quitting — the standard "stays running in the
+  // tray" desktop behavior. Only a genuine quit (tray Quit, Cmd+Q, updater
+  // restart) sets `isQuitting` and is allowed to actually close the window.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   // Open target=_blank / external links in the system browser, never in-app.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
@@ -115,44 +154,69 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  app.setName('Easy Code');
-  // GUI launches on macOS/Linux (Finder/Dock/launcher) bypass the login shell
-  // and inherit only a minimal PATH (e.g. /usr/bin:/bin:/usr/sbin:/sbin),
-  // missing /usr/local/bin, /opt/homebrew/bin, nvm shims, etc. Restore the real
-  // PATH from the login shell BEFORE registerIpc()/createWindow() so external
-  // agent detection (claude/codex) and the `npx` ACP bridge spawns can find
-  // their binaries. No-op on Windows.
-  ensurePathFromLoginShell();
-  // Windows shows toast notifications under this AppUserModelID; without it the
-  // turn-complete notifications either don't appear or show as an unbranded
-  // "electron.app.…" sender. Must match electron-builder.yml's `appId`.
-  if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
-  if (process.platform === 'darwin') {
-    // Build the app menu explicitly so its first item reads "Easy Code" — the
-    // default macOS menu shows "Electron" in dev/unpackaged runs regardless of
-    // app.setName. Keep the standard edit/window shortcuts working.
-    setMacAppMenu();
-  } else {
-    // Drop the default application menu on Windows/Linux entirely.
-    Menu.setApplicationMenu(null);
-  }
-  ({ hub, feishu, updater, terminals } = registerIpc(() => mainWindow));
-  createWindow();
-  // Kick off the version-update lifecycle (startup check + periodic poll). It
-  // delays its first check internally so it never competes with boot.
-  updater.start();
+// Single-instance lock: only the first launch owns the app. A second launch
+// fails to get the lock, so it forwards its intent to the running instance (via
+// the `second-instance` event below) and exits immediately.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  // The already-running instance gets this when another launch is attempted —
+  // surface its window to the foreground (it may be minimized or in the tray).
+  app.on('second-instance', () => showMainWindow());
+  bootstrap();
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+function bootstrap(): void {
+  app.whenReady().then(() => {
+    app.setName('Easy Code');
+    // GUI launches on macOS/Linux (Finder/Dock/launcher) bypass the login shell
+    // and inherit only a minimal PATH (e.g. /usr/bin:/bin:/usr/sbin:/sbin),
+    // missing /usr/local/bin, /opt/homebrew/bin, nvm shims, etc. Restore the
+    // real PATH from the login shell BEFORE registerIpc()/createWindow() so
+    // external agent detection (claude/codex) and the `npx` ACP bridge spawns
+    // can find their binaries. No-op on Windows.
+    ensurePathFromLoginShell();
+    // Windows shows toast notifications under this AppUserModelID; without it
+    // the turn-complete notifications either don't appear or show as an
+    // unbranded "electron.app.…" sender. Must match electron-builder.yml's
+    // `appId`.
+    if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
+    if (process.platform === 'darwin') {
+      // Build the app menu explicitly so its first item reads "Easy Code" — the
+      // default macOS menu shows "Electron" in dev/unpackaged runs regardless
+      // of app.setName. Keep the standard edit/window shortcuts working.
+      setMacAppMenu();
+    } else {
+      // Drop the default application menu on Windows/Linux entirely.
+      Menu.setApplicationMenu(null);
+    }
+    ({ hub, feishu, updater, terminals } = registerIpc(() => mainWindow));
+    createWindow();
+    // System tray: closing the window hides it here, so the tray is the way
+    // back to a visible window (and to an explicit Quit).
+    createTray({ showWindow: showMainWindow, quit: quitApp });
+    // Kick off the version-update lifecycle (startup check + periodic poll). It
+    // delays its first check internally so it never competes with boot.
+    updater.start();
+
+    app.on('activate', () => {
+      // Dock/taskbar re-activation: recreate the window if it's gone, otherwise
+      // just surface the existing (possibly tray-hidden) one.
+      showMainWindow();
+    });
   });
-});
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
+  // This fires for every real exit path — Cmd+Q, the updater's restart
+  // `app.quit()`, the tray Quit item — so it's the single place that authorizes
+  // the window's close handler to actually close instead of hiding to the tray.
+  isQuitting = true;
   hub?.disposeAll();
   // Tear down the desktop-managed Feishu gateway so we never leave an orphan
   // gateway behind (which the next launch would otherwise detect + kill).
@@ -161,4 +225,6 @@ app.on('before-quit', () => {
   updater?.dispose();
   // Kill any integrated-terminal shells so we never orphan a child process.
   terminals?.disposeAll();
+  // Remove the tray icon so it doesn't linger after the windows are gone.
+  destroyTray();
 });

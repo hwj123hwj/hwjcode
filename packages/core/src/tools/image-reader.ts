@@ -92,6 +92,9 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
         'filtered. ... Try using image_reader tool to assist.]"). If you can ' +
         'already see and understand the image content yourself, just answer ' +
         'directly and do NOT call this tool. ' +
+        'If you are a Claude, Gemini, or GPT series model (or any multimodal ' +
+        'model with native vision capability), do NOT use this tool — use ' +
+        'read_many_files instead to read the image directly. ' +
         'Supports PNG / JPG / JPEG / GIF / WEBP / BMP / SVG.',
       Icon.FileSearch,
       {

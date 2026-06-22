@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, type RightView } from './store';
 import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
@@ -24,6 +24,15 @@ export function App() {
   const lang = useStore((s) => s.lang);
   const theme = useStore((s) => s.theme);
   const t = useT();
+
+  // When the sidebar is collapsed, hovering the far-left edge "auto-reveals" it
+  // as a floating overlay (VSCode-style); it retracts when the pointer leaves.
+  const [revealed, setRevealed] = useState(false);
+  const sidebarOpen = workspace.sidebarOpen;
+  useEffect(() => {
+    // Reset the transient reveal whenever the pinned-open state flips.
+    setRevealed(false);
+  }, [sidebarOpen]);
 
   useEffect(() => {
     void init();
@@ -100,8 +109,42 @@ export function App() {
 
   return (
     <ErrorBoundary label="app">
-      <div className="app">
-        <Sidebar />
+      <div
+        className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}
+        style={{ '--sidebar-w': `${workspace.sidebarWidth}px` } as React.CSSProperties}
+      >
+        {sidebarOpen ? (
+          <>
+            <ErrorBoundary label="sidebar">
+              <Sidebar />
+            </ErrorBoundary>
+            <Resizer
+              axis="x"
+              sign={1}
+              title={t('sidebar.resize')}
+              getValue={() => useStore.getState().workspace.sidebarWidth}
+              onChange={(v) => setWorkspaceSize('sidebarWidth', v)}
+            />
+          </>
+        ) : (
+          <>
+            {/* Far-left hot zone: hovering it floats the collapsed sidebar out. */}
+            <div
+              className="sidebar-reveal-zone"
+              onMouseEnter={() => setRevealed(true)}
+            />
+            {revealed && (
+              <div
+                className="sidebar-overlay"
+                onMouseLeave={() => setRevealed(false)}
+              >
+                <ErrorBoundary label="sidebar">
+                  <Sidebar />
+                </ErrorBoundary>
+              </div>
+            )}
+          </>
+        )}
         {/* The workspace shell stacks the session row (chat + right feature
             sidebar) over the optional bottom terminal panel. */}
         <div className="workspace-shell">

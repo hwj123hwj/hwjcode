@@ -209,21 +209,77 @@ select {
 
 /* ── app shell ─────────────────────────────────────────────────────────── */
 .app {
-  display: grid;
-  grid-template-columns: 272px 1fr;
+  display: flex;
+  position: relative;
   height: 100vh;
   background: var(--bg);
+  /* Width of the left session-list sidebar — set inline from the store so a
+     drag-resize / persisted value flows straight into the layout. */
+  --sidebar-w: 272px;
+}
+.app > .workspace-shell {
+  flex: 1;
 }
 
 /* ── sidebar ───────────────────────────────────────────────────────────── */
 .sidebar {
+  flex: none;
+  width: var(--sidebar-w);
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   min-height: 0;
 }
+/* Collapsed: the workspace fills the window; a thin hot zone + floating overlay
+   (below) bring the sidebar back. */
+.sidebar-reveal-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 10px;
+  height: 100%;
+  z-index: 8;
+}
+.sidebar-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: var(--sidebar-w);
+  z-index: 40;
+  display: flex;
+  box-shadow: var(--shadow-lg, 0 8px 30px rgba(0, 0, 0, 0.35));
+  animation: sidebar-slide-in 0.14s ease-out;
+}
+.sidebar-overlay .sidebar {
+  width: 100%;
+  height: 100%;
+}
+@keyframes sidebar-slide-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+/* The collapse button sits at the top-right of the sidebar head, above the
+   draggable region so it stays clickable. */
+.sidebar-collapse-btn {
+  position: absolute;
+  right: 8px;
+  top: 12px;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+}
+[data-platform='darwin'] .sidebar-collapse-btn {
+  top: 38px;
+}
 .sidebar-head {
+  position: relative;
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
@@ -408,12 +464,14 @@ select {
 
 .session-item {
   position: relative;
-  padding: 9px 10px;
+  /* Tightened from 9px/10px so cards pack more densely and the active
+     highlight hugs the content instead of floating in padding. */
+  padding: 5px 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
   border: 1px solid transparent;
   transition: background 0.12s;
 }
@@ -428,6 +486,28 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* The project card's second row (time + diff + backend badge): smaller and
+   tighter than the title row so the card stays compact. */
+.session-meta {
+  gap: 6px;
+}
+.session-meta .session-sub {
+  font-size: 10.5px;
+}
+.session-meta .diff-chip {
+  font-size: 10px;
+}
+/* Chat cards collapse to a single line: title (ellipsis) + right-aligned time. */
+.session-item.chat-item {
+  padding: 3px 8px;
+}
+.session-time {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
 }
 .session-title {
   font-weight: 500;
@@ -541,6 +621,10 @@ select {
 .icon-btn:hover {
   background: var(--bg-active);
   color: var(--text);
+}
+.icon-btn.danger:hover {
+  background: var(--red-weak);
+  color: var(--red);
 }
 .diff-chip {
   font-family: var(--mono);
@@ -1937,6 +2021,13 @@ select {
     opacity: 0;
     transform: translateY(8px) scale(0.98);
   }
+}
+/* Compact confirm dialog (e.g. delete a session). */
+.modal.modal-sm {
+  width: min(420px, 90vw);
+}
+.modal.modal-sm .modal-head h3 .ic {
+  color: var(--red);
 }
 .modal-head {
   padding: 18px 22px 8px;

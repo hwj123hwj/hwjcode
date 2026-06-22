@@ -16,10 +16,19 @@ export function WorkspaceToggles() {
   const workspace = useStore((s) => s.workspace);
   const toggleBottom = useStore((s) => s.toggleWorkspaceBottom);
   const toggleRight = useStore((s) => s.toggleWorkspaceRight);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const t = useT();
 
   return (
     <div className="ws-toggles">
+      <button
+        className={`ws-toggle ${workspace.sidebarOpen ? 'active' : ''}`}
+        title={workspace.sidebarOpen ? t('sidebar.collapse') : t('sidebar.expand')}
+        aria-pressed={workspace.sidebarOpen}
+        onClick={toggleSidebar}
+      >
+        <Icon name="panel" size={16} />
+      </button>
       <button
         className={`ws-toggle ${workspace.bottomOpen ? 'active' : ''}`}
         title={t('workspace.toggleBottom')}

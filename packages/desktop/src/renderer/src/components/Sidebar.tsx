@@ -55,7 +55,9 @@ export function Sidebar() {
   const active = useStore((s) => s.activeSessionId);
   const focusSession = useStore((s) => s.focusSession);
   const archive = useStore((s) => s.archiveSession);
+  const deleteSession = useStore((s) => s.deleteSession);
   const rename = useStore((s) => s.renameSession);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const auth = useStore((s) => s.auth);
   const customModelOnly = useStore((s) => s.customModelOnly);
   const exitCustomModelMode = useStore((s) => s.exitCustomModelMode);
@@ -69,6 +71,9 @@ export function Sidebar() {
   const [feishuRunning, setFeishuRunning] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // The archived session pending a delete confirmation (null = no prompt open).
+  const [confirmDelete, setConfirmDelete] = useState<SessionMeta | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // Project groups the user has collapsed (keyed by full cwd). Default expanded.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleCollapse = (cwd: string) =>
@@ -95,6 +100,17 @@ export function Sidebar() {
     const title = draft.trim();
     setEditingId(null);
     if (title) void rename(id, title);
+  };
+
+  const confirmDeleteNow = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await deleteSession(confirmDelete.id);
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const { chats, projects } = useMemo(() => {
@@ -134,8 +150,79 @@ export function Sidebar() {
     focusSession(meta.id);
   };
 
-  // One session card. `nested` adds left indent for sessions shown under a
-  // project header (vs. the flat Chats list).
+  // Title text, or the inline rename input while this session is being edited.
+  const renderTitle = (v: SessionView) =>
+    editingId === v.meta.id ? (
+      <input
+        className="session-title-edit"
+        value={draft}
+        autoFocus
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => commitEdit(v.meta.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commitEdit(v.meta.id);
+          } else if (e.key === 'Escape') {
+            setEditingId(null);
+          }
+        }}
+      />
+    ) : (
+      <span
+        className="session-title"
+        title={t('sidebar.dblClickRename')}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          startEdit(v.meta);
+        }}
+      >
+        {v.meta.title}
+      </span>
+    );
+
+  // Hover actions pinned to the card's top-right: rename, (un)archive, and —
+  // for archived sessions only — a permanent delete (gated by a confirm).
+  const renderActions = (v: SessionView) => (
+    <div className="session-actions">
+      <button
+        className="icon-btn"
+        title={t('common.rename')}
+        onClick={(e) => {
+          e.stopPropagation();
+          startEdit(v.meta);
+        }}
+      >
+        <Icon name="edit" size={14} />
+      </button>
+      <button
+        className="icon-btn"
+        title={v.meta.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
+        onClick={(e) => {
+          e.stopPropagation();
+          void archive(v.meta.id, !v.meta.archived);
+        }}
+      >
+        <Icon name={v.meta.archived ? 'archive-restore' : 'archive'} size={14} />
+      </button>
+      {v.meta.archived && (
+        <button
+          className="icon-btn danger"
+          title={t('sidebar.delete')}
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmDelete(v.meta);
+          }}
+        >
+          <Icon name="delete" size={14} />
+        </button>
+      )}
+    </div>
+  );
+
+  // A project session card: two rows (status + title; then time + diff +
+  // backend badge). `nested` indents it under its project header.
   const renderCard = (v: SessionView, nested: boolean) => (
     <div
       key={v.meta.id}
@@ -144,37 +231,9 @@ export function Sidebar() {
     >
       <div className="session-row">
         <span className={`status-dot ${v.meta.status}`} />
-        {editingId === v.meta.id ? (
-          <input
-            className="session-title-edit"
-            value={draft}
-            autoFocus
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => commitEdit(v.meta.id)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commitEdit(v.meta.id);
-              } else if (e.key === 'Escape') {
-                setEditingId(null);
-              }
-            }}
-          />
-        ) : (
-          <span
-            className="session-title"
-            title={t('sidebar.dblClickRename')}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              startEdit(v.meta);
-            }}
-          >
-            {v.meta.title}
-          </span>
-        )}
+        {renderTitle(v)}
       </div>
-      <div className="session-row">
+      <div className="session-row session-meta">
         <span className="session-sub">{relTime(t, v.meta.updatedAt)}</span>
         {(v.meta.added > 0 || v.meta.removed > 0) && (
           <span className="diff-chip">
@@ -192,28 +251,23 @@ export function Sidebar() {
           </span>
         )}
       </div>
-      <div className="session-actions">
-        <button
-          className="icon-btn"
-          title={t('common.rename')}
-          onClick={(e) => {
-            e.stopPropagation();
-            startEdit(v.meta);
-          }}
-        >
-          <Icon name="edit" size={14} />
-        </button>
-        <button
-          className="icon-btn"
-          title={v.meta.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
-          onClick={(e) => {
-            e.stopPropagation();
-            void archive(v.meta.id, !v.meta.archived);
-          }}
-        >
-          <Icon name={v.meta.archived ? 'archive-restore' : 'archive'} size={14} />
-        </button>
+      {renderActions(v)}
+    </div>
+  );
+
+  // A chat session card: a single compact line — title left (ellipsis), the
+  // relative time right (small + dim). Hover reveals the same actions.
+  const renderChatCard = (v: SessionView) => (
+    <div
+      key={v.meta.id}
+      className={`session-item chat-item nested ${active === v.meta.id ? 'active' : ''}`}
+      onClick={() => onClick(v.meta)}
+    >
+      <div className="session-row">
+        {renderTitle(v)}
+        <span className="session-time">{relTime(t, v.meta.updatedAt)}</span>
       </div>
+      {renderActions(v)}
     </div>
   );
 
@@ -222,6 +276,13 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
+        <button
+          className="icon-btn sidebar-collapse-btn"
+          title={t('sidebar.collapse')}
+          onClick={toggleSidebar}
+        >
+          <Icon name="panel" size={16} />
+        </button>
         <div className="brand">
           <img className="brand-mark" src={appIcon} alt="Easy Code" />
           Easy Code
@@ -298,7 +359,7 @@ export function Sidebar() {
                     <span className="project-name">{t('sidebar.chatsFolder')}</span>
                     <span className="project-count">{chats.length}</span>
                   </button>
-                  {!isCollapsed && chats.map((v) => renderCard(v, true))}
+                  {!isCollapsed && chats.map((v) => renderChatCard(v))}
                 </div>
               );
             })()}
@@ -349,6 +410,39 @@ export function Sidebar() {
       {showNew && <NewSessionDialog onClose={() => setShowNew(false)} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showFeishu && <FeishuDialog onClose={() => setShowFeishu(false)} />}
+
+      {confirmDelete && (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (!deleting) setConfirmDelete(null);
+          }}
+        >
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>
+                <Icon name="delete" size={17} />
+                {t('sidebar.deleteTitle')}
+              </h3>
+              <div className="sub">
+                {t('sidebar.deleteConfirm', { title: confirmDelete.title })}
+              </div>
+            </div>
+            <div className="modal-body">
+              <div className="sub">{t('sidebar.deleteWarning')}</div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" disabled={deleting} onClick={() => setConfirmDelete(null)}>
+                {t('common.cancel')}
+              </button>
+              <button className="btn danger" disabled={deleting} onClick={() => void confirmDeleteNow()}>
+                {deleting ? <span className="spinner" /> : <Icon name="delete" size={14} />}
+                {t('sidebar.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

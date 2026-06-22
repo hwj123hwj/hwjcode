@@ -51,6 +51,10 @@ export type RightView = 'review' | 'browser' | 'files' | 'sidechat';
  * stale across runs, and the side chat is re-minted on demand).
  */
 export interface WorkspaceUiState {
+  /** Whether the left session-list sidebar is expanded (vs. collapsed). */
+  sidebarOpen: boolean;
+  /** Width (px) of the left session-list sidebar — user-draggable, persisted. */
+  sidebarWidth: number;
   rightOpen: boolean;
   rightView: RightView;
   bottomOpen: boolean;
@@ -69,6 +73,7 @@ export interface WorkspaceUiState {
 
 /** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
 export const WORKSPACE_SIZE_LIMITS = {
+  sidebarWidth: { min: 220, max: 480, default: 272 },
   rightWidth: { min: 340, max: 900, default: 560 },
   bottomHeight: { min: 120, max: 720, default: 300 },
   fileTreeWidth: { min: 160, max: 480, default: 240 },
@@ -185,6 +190,8 @@ interface StoreState {
   ) => Promise<string>;
   resumeSession: (id: string) => Promise<void>;
   archiveSession: (id: string, archived: boolean) => Promise<void>;
+  /** Permanently delete a session (irreversible). Drops it from the store too. */
+  deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   sendPrompt: (
     id: string,
@@ -210,6 +217,8 @@ interface StoreState {
 
   // ── workspace layout (Codex-style right sidebar + bottom terminal) ────────
   workspace: WorkspaceUiState;
+  /** Expand/collapse the left session-list sidebar. */
+  toggleSidebar: () => void;
   /** Show/hide the right feature sidebar (rail + content panel). */
   toggleWorkspaceRight: () => void;
   /** Show/hide the bottom terminal panel. */
@@ -245,6 +254,8 @@ function clampSize(v: unknown, key: keyof typeof WORKSPACE_SIZE_LIMITS): number 
 
 function loadWorkspaceUi(): WorkspaceUiState {
   const base: WorkspaceUiState = {
+    sidebarOpen: true,
+    sidebarWidth: WORKSPACE_SIZE_LIMITS.sidebarWidth.default,
     rightOpen: false,
     rightView: 'files',
     bottomOpen: false,
@@ -259,6 +270,9 @@ function loadWorkspaceUi(): WorkspaceUiState {
       const p = JSON.parse(raw) as Partial<WorkspaceUiState>;
       return {
         ...base,
+        // Default the sidebar to open when the key was never persisted.
+        sidebarOpen: p.sidebarOpen ?? true,
+        sidebarWidth: clampSize(p.sidebarWidth, 'sidebarWidth'),
         rightOpen: !!p.rightOpen,
         rightView: p.rightView ?? 'files',
         bottomOpen: !!p.bottomOpen,
@@ -278,6 +292,8 @@ function persistWorkspaceUi(w: WorkspaceUiState): void {
     localStorage.setItem(
       WORKSPACE_KEY,
       JSON.stringify({
+        sidebarOpen: w.sidebarOpen,
+        sidebarWidth: w.sidebarWidth,
         rightOpen: w.rightOpen,
         rightView: w.rightView,
         bottomOpen: w.bottomOpen,
@@ -552,6 +568,25 @@ export const useStore = create<StoreState>((set, get) => ({
     await get().refreshSessions();
   },
 
+  deleteSession: async (id) => {
+    await api.sessions.delete(id);
+    liveSessions.delete(id);
+    resumingSessions.delete(id);
+    pendingEvents.delete(id);
+    // Drop it locally up front so the row disappears immediately, then clear the
+    // active selection if it was the deleted session.
+    set((s) => {
+      const sessions = { ...s.sessions };
+      delete sessions[id];
+      return {
+        sessions,
+        order: s.order.filter((x) => x !== id),
+        activeSessionId: s.activeSessionId === id ? undefined : s.activeSessionId,
+      };
+    });
+    await get().refreshSessions();
+  },
+
   renameSession: async (id, title) => {
     const meta = await api.sessions.rename(id, title);
     patchMeta(set, id, { title: meta.title });
@@ -675,6 +710,13 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({ sidebarFilter: { ...s.sidebarFilter, ...patch } })),
 
   // ── workspace layout ───────────────────────────────────────────────────────
+  toggleSidebar: () =>
+    set((s) => {
+      const workspace = { ...s.workspace, sidebarOpen: !s.workspace.sidebarOpen };
+      persistWorkspaceUi(workspace);
+      return { workspace };
+    }),
+
   toggleWorkspaceRight: () =>
     set((s) => {
       const workspace = { ...s.workspace, rightOpen: !s.workspace.rightOpen };
