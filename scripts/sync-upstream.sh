@@ -166,22 +166,27 @@ rm -f packages/cli/src/package.json
 rm -f packages/cli/dist/src/package.json
 ok "清理完成"
 
-# ==================== 6. 版本号处理（只升不降） ====================
+# ==================== 6. 版本号处理（同步后自动 bump patch） ====================
 
 LATEST_TAG=$(git tag -l 'cli-release-*' | sort -V | tail -1 | sed 's/cli-release-v//')
 if [ -z "$LATEST_TAG" ]; then
-  warn "未找到上游 release tag，跳过版本号调整"
+  warn "未找到上游 release tag"
   LATEST_TAG="0.0.0"
 else
   info "上游最新 tag: v$LATEST_TAG"
 fi
 
-# 获取合并前的本地版本（从 git 历史中读取，避免被上游覆盖）
-PRE_MERGE_VERSION=$(git show "$ORIGINAL_HEAD:package.json" 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).version))" 2>/dev/null || echo "0.0.0")
-info "合并前本地版本: v$PRE_MERGE_VERSION"
+# 获取合并后的当前版本
+CURRENT_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
+info "合并后当前版本: v$CURRENT_VERSION"
 
-# 计算目标版本（取三者最大值）
-TARGET_VERSION=$(printf '%s\n%s\n%s\n' "$PRE_MERGE_VERSION" "$LATEST_TAG" "0.0.0" | sort -V | tail -1)
+# 同步上游后必须升版本号（patch +1），因为有新代码需要发布
+info "同步上游后自动 bump patch 版本..."
+
+# 计算新版本号（当前版本 patch +1）
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+NEW_PATCH=$((PATCH + 1))
+TARGET_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 info "目标版本: v$TARGET_VERSION"
 
 # 更新所有 package.json
@@ -205,7 +210,7 @@ for PKG in "${PKG_FILES[@]}"; do
     fi
   fi
 done
-ok "版本号处理完成"
+ok "版本号已升级到 v$TARGET_VERSION"
 
 # ==================== 7. 修复 fork 专属字段 ====================
 
@@ -318,10 +323,10 @@ fi
 
 # 检查是否有需要提交的改动
 if ! git diff --quiet; then
-  info "提交版本号和包名修复..."
+  info "提交版本号升级和包名修复..."
   git add -A
-  git commit -m "chore: sync upstream, align version to v$TARGET_VERSION, fix fork-specific fields" --no-verify
-  ok "修复已提交"
+  git commit -m "release: hwjcode@$TARGET_VERSION (sync upstream)" --no-verify
+  ok "已提交: release: hwjcode@$TARGET_VERSION"
 else
   info "无额外改动需要提交"
 fi
@@ -363,6 +368,6 @@ echo "  • 本地版本: v$TARGET_VERSION"
 echo "  • 推送到: origin/master"
 echo ""
 echo "📝 后续操作:"
-echo "  • 发布到 npm: npm run release"
+echo "  • 发布到 npm: npm publish"
 echo "  • 推送到 GitHub: npm run sync-to-github"
 echo ""
