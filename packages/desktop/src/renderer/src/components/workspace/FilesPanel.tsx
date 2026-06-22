@@ -582,6 +582,13 @@ function HighlightedCode({ text, fileName }: { text: string; fileName: string })
   return (
     <div
       className="file-code-scroll"
+      // THE fix for "right-click clears the highlight": a right-button mousedown
+      // would otherwise move the caret and collapse the current selection before
+      // `contextmenu` even fires. Preventing its default keeps the selection (and
+      // its highlight + focus) fully intact; contextmenu still fires afterwards.
+      onMouseDown={(e: ReactMouseEvent<HTMLDivElement>) => {
+        if (e.button === 2) e.preventDefault();
+      }}
       onContextMenu={(e: ReactMouseEvent<HTMLDivElement>) => {
         e.preventDefault();
         // Prefer the live selection; fall back to the last tracked one if the
