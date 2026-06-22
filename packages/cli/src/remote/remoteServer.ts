@@ -849,6 +849,14 @@ export class RemoteServer {
             break;
           }
 
+          // 关键：刷新 session 的回包路由。REQUEST_UI_STATE 是移动端断线重连后的恢复路径
+          // （occupySession 成功 → requestUIState），重连后 webId 会变。若不在此处更新路由引用，
+          // 仍在流式输出的本轮指令其后续 output 与 status:idle 会继续发往旧的、已失效的 webId，
+          // 导致移动端永远收不到收尾消息、卡在"正在思考"。与 COMMAND 分支保持一致。
+          if (uiSessionInfo.cloudRouteRef) {
+            uiSessionInfo.cloudRouteRef.current = buildReplyRoute();
+          }
+
           console.log(tp('cloud.mode.ui.state.get', { sessionId: uiStateSessionId }));
 
           try {

@@ -10,6 +10,7 @@ import { RemoteServer } from './remoteServer.js';
 import { t, tp } from '../ui/utils/i18n.js';
 import chalk from 'chalk';
 import * as os from 'os';
+import qrcode from 'qrcode-terminal';
 
 // ===== 消息类型定义 =====
 
@@ -213,6 +214,68 @@ export class CloudClient {
   }
 
   /**
+   * 渲染移动端扫码登录二维码。
+   *
+   * 向云端申请一个短时有效的登录短码（5 分钟），把 { 服务器地址, 短码 } 编码进二维码，
+   * 用户用 Easy Code Mobile App 扫码即可用自己的身份登录、连接远程会话。
+   * 任何失败都只打印告警，不影响 cloud-mode 主流程。
+   */
+  private async displayMobileLoginQrCode(): Promise<void> {
+    try {
+      const token = await this.getAuthToken();
+      const generateUrl = new URL('/auth/qr-login/generate', this.cloudServerUrl).toString();
+      const resp = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!resp.ok) {
+        console.warn(tp('cloud.qr.generate.failed', { status: String(resp.status) }));
+        return;
+      }
+
+      const data = (await resp.json()) as {
+        success?: boolean;
+        code?: string;
+        expiresIn?: number;
+      };
+      if (!data.success || !data.code) {
+        console.warn(tp('cloud.qr.generate.failed', { status: 'invalid response' }));
+        return;
+      }
+
+      // 二维码载荷：带上服务端地址，App 扫码后免手填
+      const payload = JSON.stringify({
+        v: 1,
+        type: 'easycode-login',
+        server: this.cloudServerUrl,
+        code: data.code,
+      });
+      const minutes = Math.round((data.expiresIn ?? 300) / 60);
+
+      console.log('');
+      console.log(chalk.cyan(t('cloud.qr.title')));
+      console.log(chalk.gray(t('cloud.qr.hint')));
+      console.log('');
+      qrcode.generate(payload, { small: true }, (qr: string) => {
+        console.log(qr);
+      });
+      console.log(chalk.gray(tp('cloud.qr.expires', { minutes: String(minutes) })));
+      console.log('');
+    } catch (error) {
+      console.warn(
+        tp('cloud.qr.generate.failed', {
+          status: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  /**
    * 获取用户信息
    */
   private async getUserInfo(): Promise<any> {
@@ -339,6 +402,8 @@ export class CloudClient {
           console.log(tp('cloud.cli.register.success', { message: message.payload?.message }));
           console.log('');
           console.log('✅🎉🚀 ' + chalk.green(tp('cloud.remote.access.ready', { url: 'https://dvcode.deepvlab.ai/remote' })));
+          // 渲染移动端扫码登录二维码（失败不影响主流程）
+          await this.displayMobileLoginQrCode();
           break;
 
         case 'CLI_HEARTBEAT_RESPONSE':
