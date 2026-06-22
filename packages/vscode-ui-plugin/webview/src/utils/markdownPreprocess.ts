@@ -147,34 +147,106 @@ export function rehabGluedSingleLineFences(text: string): string {
 export function escapeRawHtmlAngles(text: string): string {
   if (!text || !text.includes('<')) return text;
 
-  // Split on fenced code blocks (```...```) and inline code spans (`...`),
-  // only transforming the non-code segments.
+  // IMPORTANT: This is a strictly linear O(n) single-pass scanner.
   //
-  // We use a single regex that matches either a fenced block or an inline code
-  // span, and replace `<` → `&lt;` only in the text between them.
-  const parts: string[] = [];
-  let lastIndex = 0;
+  // A previous implementation used a regex with an inline-code branch like
+  // `(`+)(?:[^`]|(?!\2).)*?\2`, whose overlapping alternatives caused
+  // catastrophic backtracking (ReDoS). While streaming an unclosed code
+  // fence, that regex went exponential and froze the whole webview. Never
+  // reintroduce a regex with overlapping `[^`]` / `(?!\2).` branches here.
+  //
+  // The scanner walks each character exactly once, skipping over code regions
+  // (fenced blocks and inline spans) verbatim and escaping `<` -> `&lt;` only
+  // in prose. `>` is intentionally left untouched so blockquotes keep working.
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  let atLineStart = true; // true at string start and right after a newline
 
-  // Matches fenced code blocks (``` or ~~~, multi-line) or inline code spans
-  // (single backtick pairs on the same line).
-  const codeTokenRe =
-    /(`{3,}|~{3,})[\s\S]*?\1|(`+)(?:[^`]|(?!\2).)*?\2/g;
-  let m: RegExpExecArray | null;
+  while (i < n) {
+    const ch = text[i];
 
-  while ((m = codeTokenRe.exec(text)) !== null) {
-    // Escape `<` in the prose text before this code token.
-    if (m.index > lastIndex) {
-      parts.push(text.slice(lastIndex, m.index).replace(/</g, '&lt;'));
+    // 1) Fenced code block: a run of >=3 ` or ~ at the start of a line.
+    if (atLineStart && (ch === '`' || ch === '~')) {
+      let j = i;
+      while (j < n && text[j] === ch) j++;
+      const runLen = j - i;
+      if (runLen >= 3) {
+        const fenceChar = ch;
+        // Find a closing fence (>= runLen of the same char) at a line start.
+        let closeEnd = -1;
+        let k = j;
+        while (k < n) {
+          const nl = text.indexOf('\n', k);
+          const lineFrom = nl === -1 ? n : nl + 1;
+          if (lineFrom < n) {
+            let p = lineFrom;
+            // CommonMark allows up to 3 leading spaces; be lenient.
+            while (p < n && text[p] === ' ') p++;
+            if (text[p] === fenceChar) {
+              let q = p;
+              while (q < n && text[q] === fenceChar) q++;
+              if (q - p >= runLen) {
+                closeEnd = q;
+                break;
+              }
+            }
+          }
+          if (nl === -1) break;
+          k = nl + 1;
+        }
+        if (closeEnd === -1) {
+          // Unclosed (still streaming): treat the rest as code, do not escape.
+          out += text.slice(i);
+          return out;
+        }
+        out += text.slice(i, closeEnd);
+        i = closeEnd;
+        atLineStart = false;
+        continue;
+      }
     }
-    // Push the code token verbatim — do NOT escape inside code.
-    parts.push(m[0]);
-    lastIndex = m.index + m[0].length;
+
+    // 2) Inline code span: a run of N backticks closed by exactly N backticks.
+    if (ch === '`') {
+      let j = i;
+      while (j < n && text[j] === '`') j++;
+      const runLen = j - i;
+      let k = j;
+      let closed = false;
+      while (k < n) {
+        if (text[k] === '`') {
+          let q = k;
+          while (q < n && text[q] === '`') q++;
+          if (q - k === runLen) {
+            out += text.slice(i, q); // verbatim, including any `<` inside
+            i = q;
+            closed = true;
+            break;
+          }
+          k = q; // wrong-length run, keep scanning
+        } else {
+          k++;
+        }
+      }
+      if (!closed) {
+        // Unclosed inline code while streaming: rest is code, do not escape.
+        out += text.slice(i);
+        i = n;
+      }
+      atLineStart = false;
+      continue;
+    }
+
+    // 3) Plain prose character.
+    if (ch === '<') {
+      out += '&lt;';
+    } else {
+      out += ch;
+    }
+    atLineStart = ch === '\n';
+    i++;
   }
 
-  // Escape `<` in the remaining trailing prose.
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex).replace(/</g, '&lt;'));
-  }
-
-  return parts.join('');
+  return out;
 }
