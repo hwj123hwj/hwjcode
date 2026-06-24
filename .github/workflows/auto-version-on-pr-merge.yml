@@ -1,0 +1,63 @@
+name: Auto Version on PR Merge
+
+# PR 合并到 master 后自动 bump patch 版本号并创建 tag
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  auto-version:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # 使用内置 GITHUB_TOKEN 即可 push tag
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.3'
+
+      - name: 📌 Bump patch version & push tag
+        id: bump
+        run: |
+          # 获取当前版本号并 bump patch
+          CURRENT=$(node -p "require('./package.json').version")
+          # 语义化版本：major.minor.patch → patch +1
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          NEW="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "NEW_VERSION=$NEW" >> $GITHUB_OUTPUT
+          echo "Bump: $CURRENT → v$NEW"
+
+          # 更新 package.json（在 runner 内，不需要 commit）
+          node -e "
+            const fs = require('fs');
+            ['package.json','packages/cli/package.json','packages/core/package.json','packages/desktop/package.json'].forEach(p => {
+              if (fs.existsSync(p)) {
+                const pkg = JSON.parse(fs.readFileSync(p,'utf8'));
+                pkg.version = '$NEW';
+                fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+              }
+            });
+          "
+
+          # 创建并推送 tag（tag 会触发 release workflow）
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$NEW" -m "release: hwjcode@$NEW (auto from PR merge #${{ github.event.pull_request.number }})"
+          git push origin "v$NEW"
+
+      - name: 📋 Summary
+        run: |
+          echo "✅ Tag v${{ steps.bump.outputs.NEW_VERSION }} pushed"
+          echo "🚀 Release workflow will be triggered by the tag automatically"
