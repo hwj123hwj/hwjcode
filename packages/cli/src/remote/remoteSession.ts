@@ -20,7 +20,12 @@ import {
 import { parseAndFormatApiError } from '../ui/utils/errorParsing.js';
 import { remoteLogger } from './remoteLogger.js';
 import { getMCPDiscoveryState, MCPDiscoveryState, getMCPServerStatus, MCPServerStatus } from 'deepv-code-core';
+import { loadServerHierarchicalMemory, FileDiscoveryService } from 'deepv-code-core';
+import { getEncoding } from 'js-tiktoken';
 import { t, tp, isChineseLocale } from '../ui/utils/i18n.js';
+import { CreateRemoteSessionTool } from './createRemoteSessionTool.js';
+// 仅用类型，避免与 remoteServer.ts 形成运行时循环依赖
+import type { RemoteServer } from './remoteServer.js';
 
 /**
  * 格式化时间戳为 yyyy-mm-dd HH:mm:ss 格式
@@ -77,14 +82,37 @@ export class RemoteSession {
   // 必须在轮次结束（status=idle、错误、中断）前发送一条 isComplete=true 收尾。
   private currentThoughtId: string | null = null;
 
+  // 创建时传入的全局/共享 config，用于在隔离模式下继承代理、模型列表、MCP 等配置。
+  // 当绑定了 workspaceRoot 时，initialize() 会基于它派生一个专属隔离 Config 并覆盖 this.config。
+  private readonly sharedConfig: Config;
+
   constructor(
     private ws: WebSocket,
     private config: Config,
-    sessionId?: string
+    sessionId?: string,
+    // 远程服务端引用，供 create_remote_session 工具反向创建新会话使用
+    private readonly remoteServer?: RemoteServer,
+    // 可选：本会话绑定的物理工作目录。设置后会基于它实例化一个完全隔离的 Config
+    private readonly workspaceRoot?: string,
   ) {
+    this.sharedConfig = config;
     this.sessionId = sessionId || `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     // 不要在构造函数中获取 geminiClient，等到 initialize() 时再获取
-    remoteLogger.info('RemoteSession', `创建新会话: ${this.sessionId}`);
+    remoteLogger.info('RemoteSession', `创建新会话: ${this.sessionId}`, {
+      workspaceRoot: this.workspaceRoot || '(shared)',
+    });
+  }
+
+  /**
+   * 获取本会话当前绑定的工作目录（隔离模式下为 workspaceRoot，否则为共享 config 的工作目录）
+   */
+  getWorkspaceRoot(): string {
+    if (this.workspaceRoot) return this.workspaceRoot;
+    try {
+      return this.config.getProjectRoot?.() || process.cwd();
+    } catch {
+      return process.cwd();
+    }
   }
 
   /**
@@ -111,6 +139,13 @@ export class RemoteSession {
     remoteLogger.info('RemoteSession', `开始初始化会话: ${this.sessionId}`);
 
     try {
+      // 🚀 绝对物理隔离：当本会话绑定了 workspaceRoot 时，参照 feishuCommand 的
+      // isolatedConfig 做法，为它派生一个完全专属、隔离的 Config 实例并覆盖 this.config。
+      // 这样每个会话的 Config / ToolRegistry / GeminiClient 各自独立，可并行工作互不污染。
+      if (this.workspaceRoot) {
+        this.config = await this.buildIsolatedConfig(this.workspaceRoot);
+      }
+
       // 初始化配置
 
       await this.config.initialize();
@@ -139,11 +174,24 @@ export class RemoteSession {
 
       this.toolRegistry = await this.config.getToolRegistry();
 
+      // 🆕 专属注册：仅在远程模式下挂载 create_remote_session 工具，
+      // 让 Agent 能在自然语言驱动下新建绑定任意工作目录的隔离会话。
+      this.registerRemoteOnlyTools();
+
+      // 重新生成工具声明，确保新注册的工具对模型可见
+      try {
+        await this.geminiClient.setTools();
+      } catch (toolErr) {
+        remoteLogger.warn('RemoteSession', `刷新工具声明失败: ${this.sessionId}`, toolErr);
+      }
+
       // 创建GeminiChat实例，这个实例会保持整个对话历史
 
       this.geminiChat = await this.geminiClient.getChat();
 
-      remoteLogger.info('RemoteSession', `会话初始化完成: ${this.sessionId}`);
+      remoteLogger.info('RemoteSession', `会话初始化完成: ${this.sessionId}`, {
+        workspaceRoot: this.getWorkspaceRoot(),
+      });
       this.sendMessage(MessageFactory.createStatus('idle', 'Easy Code 远程会话已就绪'));
       // 🎯 启动时拉取限额
       this.fetchAndSendQuota();
@@ -211,6 +259,111 @@ export class RemoteSession {
       discoveryState: getMCPDiscoveryState(),
       configuredServers: serverNames
     });
+  }
+
+  /**
+   * 为绑定了 workspaceRoot 的会话构建一个完全隔离的 Config 实例。
+   *
+   * 完全参照 feishuCommand.ts 的 isolatedConfig 做法：
+   * - 基于 workspaceRoot 加载项目级/全局记忆（DEEPV.md / AGENTS.md）；
+   * - 从共享 config 继承代理、模型列表、MCP 等运行时配置；
+   * - 返回一个未 initialize 的全新 Config（initialize 由调用方统一执行）。
+   */
+  private async buildIsolatedConfig(workspaceRoot: string): Promise<Config> {
+    const sessionMemory = await this.loadIsolatedSessionMemory(workspaceRoot);
+
+    remoteLogger.info('RemoteSession', `为会话实例化隔离 Config: ${this.sessionId}`, {
+      workspaceRoot,
+      geminiMdFileCount: sessionMemory.geminiMdFileCount,
+    });
+
+    const isolatedConfig = new Config({
+      sessionId: this.sessionId,
+      cwd: workspaceRoot,
+      debugMode: this.sharedConfig.getDebugMode?.() || false,
+      targetDir: workspaceRoot,
+      model: this.sharedConfig.getModel?.() || 'auto',
+      userMemory: sessionMemory.userMemory,
+      memoryTokenCount: sessionMemory.memoryTokenCount,
+      geminiMdFileCount: sessionMemory.geminiMdFileCount,
+      customModels: this.sharedConfig.getCustomModels?.() || [],
+      cloudModels: this.sharedConfig.getCloudModels?.() || [],
+      proxy: this.sharedConfig.getProxy?.(),
+      customProxyServerUrl: this.sharedConfig.getCustomProxyServerUrl?.(),
+      mcpServers: this.sharedConfig.getMcpServers?.(),
+    });
+
+    return isolatedConfig;
+  }
+
+  /**
+   * 加载隔离会话的项目级/全局指令记忆 (DEEPV.md / AGENTS.md 等)。
+   * 镜像 feishuCommand.ts 的 loadFeishuSessionMemory，确保隔离会话继承完整行为规范。
+   * 失败只警告、不中断主流程。
+   */
+  private async loadIsolatedSessionMemory(
+    workspaceRoot: string,
+  ): Promise<{ userMemory: string; memoryTokenCount: number; geminiMdFileCount: number }> {
+    try {
+      const fileService = new FileDiscoveryService(workspaceRoot);
+      const result = await loadServerHierarchicalMemory(
+        workspaceRoot,
+        false, // debugMode
+        fileService,
+        [], // extensionContextFilePaths
+        {
+          respectGitIgnore: true,
+          respectGeminiIgnore: true,
+        },
+      );
+
+      let memoryTokenCount = 0;
+      try {
+        const enc = getEncoding('cl100k_base');
+        memoryTokenCount = enc.encode(result.memoryContent).length;
+      } catch {
+        // 忽略 token 计数错误
+      }
+
+      return {
+        userMemory: result.memoryContent,
+        memoryTokenCount,
+        geminiMdFileCount: result.fileCount,
+      };
+    } catch (err) {
+      remoteLogger.warn(
+        'RemoteSession',
+        `加载隔离会话记忆失败 (${workspaceRoot}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { userMemory: '', memoryTokenCount: 0, geminiMdFileCount: 0 };
+    }
+  }
+
+  /**
+   * 注册仅在远程模式下存在的专属工具。
+   * 目前包含 create_remote_session（需要 remoteServer 引用才能反向创建新会话）。
+   */
+  private registerRemoteOnlyTools(): void {
+    if (!this.toolRegistry || !this.remoteServer) {
+      return;
+    }
+    const remoteServer = this.remoteServer;
+    this.toolRegistry.registerTool(
+      new CreateRemoteSessionTool({
+        createSessionForPath: (projectPath: string) =>
+          remoteServer.createNewSessionForPath(projectPath),
+        notifySwitch: (newSessionId: string, projectPath: string) => {
+          this.sendMessage(
+            MessageFactory.createSwitchToSessionNotification(
+              newSessionId,
+              projectPath,
+              'agent_requested',
+            ),
+          );
+        },
+      }),
+    );
+    remoteLogger.info('RemoteSession', `已注册远程专属工具 create_remote_session: ${this.sessionId}`);
   }
 
   /**

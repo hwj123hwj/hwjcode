@@ -431,10 +431,15 @@ export class RemoteServer {
 
   /**
    * 创建新session
+   *
+   * @param ws        绑定的（真实或虚拟）WebSocket
+   * @param workdir   可选：本会话绑定的物理工作目录。传入后 RemoteSession 会基于它
+   *                  实例化一个完全隔离的 Config / ToolRegistry / GeminiClient。
+   * @param sessionId 可选：指定 sessionId（默认自动生成）
    */
-  createSession(ws: WebSocket): string {
-    const sessionId = `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    remoteLogger.info('RemoteServer', `创建新session: ${sessionId}`);
+  createSession(ws: WebSocket, workdir?: string, sessionId?: string): string {
+    const finalSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    remoteLogger.info('RemoteServer', `创建新session: ${finalSessionId}`, { workdir: workdir || '(shared)' });
 
     // 先清理过期session
     if (this.sessions.size >= this.MAX_SESSIONS) {
@@ -448,22 +453,79 @@ export class RemoteServer {
       console.log(tp('session.cleaned.oldest', { sessionId: oldestSessionId }));
     }
 
-    const session = new RemoteSession(ws, this.config, sessionId);
+    // 透传 remoteServer 引用（供 create_remote_session 工具反向创建会话）与 workspaceRoot
+    const session = new RemoteSession(ws, this.config, finalSessionId, this, workdir);
 
     const sessionInfo: SessionInfo = {
-      id: sessionId,
+      id: finalSessionId,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
       session
     };
 
-    this.sessions.set(sessionId, sessionInfo);
+    this.sessions.set(finalSessionId, sessionInfo);
 
-    console.log(tp('session.created.new', { sessionId }));
-    remoteLogger.info('RemoteServer', `session创建完成: ${sessionId}`, {
+    console.log(tp('session.created.new', { sessionId: finalSessionId }));
+    remoteLogger.info('RemoteServer', `session创建完成: ${finalSessionId}`, {
       totalSessions: this.sessions.size
     });
 
+    return finalSessionId;
+  }
+
+  /**
+   * 构建云端模式下的虚拟 WebSocket。
+   *
+   * 它把 session 的所有回包注入路由信息后转发到云端。路由信息通过 routeRef 引用传入，
+   * 以便后续 COMMAND / REQUEST_UI_STATE 等消息能动态刷新路由（重连后 webId 会变化）。
+   */
+  private buildCloudVirtualWs(routeRef: { current: Record<string, any> }): WebSocket {
+    return {
+      readyState: 1, // WebSocket.OPEN
+      send: (data: string) => {
+        if (this.cloudClient) {
+          const parsed = JSON.parse(data);
+          if (!parsed._cloudRoute) {
+            parsed._cloudRoute = { ...routeRef.current };
+          }
+          this.cloudClient.sendToCloud(parsed);
+        }
+      },
+      close: () => {
+        console.log(`🌐 [VirtualWS] 关闭连接`);
+      }
+    } as WebSocket;
+  }
+
+  /**
+   * 🆕 供 Agent 工具（create_remote_session）反向调用：为指定物理路径创建并初始化一个
+   * 全新的隔离会话，返回新 sessionId。
+   *
+   * 仅在云端模式下可用。新会话使用一个独立的虚拟 WebSocket 路由；初始路由为空，
+   * 待前端收到 switch 通知切换后发来的 REQUEST_UI_STATE 会刷新其回包路由。
+   */
+  public async createNewSessionForPath(projectPath: string): Promise<string> {
+    if (!this.cloudMode || !this.cloudClient) {
+      throw new Error('createNewSessionForPath 仅在云端模式下可用');
+    }
+
+    remoteLogger.info('RemoteServer', `工具反向请求创建新会话: ${projectPath}`);
+
+    const routeRef = { current: {} as Record<string, any> };
+    const virtualWs = this.buildCloudVirtualWs(routeRef);
+
+    const sessionId = this.createSession(virtualWs, projectPath);
+
+    const sessionInfo = this.sessions.get(sessionId);
+    if (sessionInfo) {
+      sessionInfo.cloudRouteRef = routeRef;
+      await sessionInfo.session.initialize();
+    }
+
+    // 同步最新 session 列表到云端，让前端能感知到新会话
+    this.cloudClient.triggerSessionSync();
+
+    remoteLogger.info('RemoteServer', `工具创建新会话完成: ${sessionId}`, { projectPath });
     return sessionId;
   }
 
@@ -590,25 +652,16 @@ export class RemoteServer {
           // 使用对象引用，以便后续 COMMAND 消息可以更新路由
           const sessionRouteRef = { current: buildReplyRoute() };
 
-          const virtualWs = {
-            readyState: 1, // WebSocket.OPEN
-            send: (data: string) => {
-              if (this.cloudClient) {
-                const parsed = JSON.parse(data);
-                // 自动注入路由信息：让 session 的所有回包都能正确路由
-                if (!parsed._cloudRoute) {
-                  parsed._cloudRoute = { ...sessionRouteRef.current };
-                }
-                this.cloudClient.sendToCloud(parsed);
-              }
-            },
-            close: () => {
-              console.log(`🌐 [VirtualWS] 关闭连接`);
-            }
-          } as WebSocket;
+          const virtualWs = this.buildCloudVirtualWs(sessionRouteRef);
+
+          // 🆕 解析前端指定的工作目录（可选）：传入后该会话将拥有完全隔离的工作区
+          const requestedWorkdir =
+            typeof (message as any).payload?.workdir === 'string'
+              ? (message as any).payload.workdir
+              : undefined;
 
           // 使用现有的createSession方法
-          const sessionId = this.createSession(virtualWs);
+          const sessionId = this.createSession(virtualWs, requestedWorkdir);
           console.log(tp('cloud.mode.session.created', { sessionId }));
 
           // 将路由引用绑到 SessionInfo 上，以便后续 COMMAND 更新路由

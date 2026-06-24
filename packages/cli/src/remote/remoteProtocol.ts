@@ -41,6 +41,7 @@ export enum MessageType {
   SESSION_LIST = 'session_list',            // 可用session列表
   SELECT_SESSION = 'select_session',        // 选择session
   CREATE_SESSION = 'create_session',        // 创建新session
+  SWITCH_TO_SESSION_NOTIFICATION = 'switch_to_session_notification', // 服务端主动通知前端切换/跳转到新session
   CLEAR_SESSION = 'clear_session',          // 清理session数据
   FEISHU_IMAGE_MESSAGE = 'feishu_image_message', // 飞书图片消息
   GET_MODELS_REQUEST = 'get_models_request',   // 请求可用模型列表
@@ -254,10 +255,31 @@ export interface SelectSessionMessage extends RemoteMessage {
 
 /**
  * 创建session消息
+ *
+ * 在 --cloud-mode 下支持可选的 `workdir`：前端（Web/App）可以指定新会话绑定的
+ * 物理工作目录。CLI 收到后会为该会话实例化一个完全隔离的 Config / ToolRegistry /
+ * GeminiClient，做到多会话物理隔离、互不污染。省略时回退到全局共享 config 的工作目录。
  */
 export interface CreateSessionMessage extends RemoteMessage {
   type: MessageType.CREATE_SESSION;
-  payload: Record<string, never>; // 空载荷
+  payload: {
+    workdir?: string; // 可选：新会话绑定的物理工作目录（绝对路径）
+  };
+}
+
+/**
+ * 切换会话通知消息（服务端 → 前端控制端）
+ *
+ * 当 Agent 在某个会话中调用 `create_remote_session` 工具新建会话后，服务端主动向
+ * 控制端推送本消息，告知前端自动切换 / 跳转到新创建的会话窗口。
+ */
+export interface SwitchToSessionNotificationMessage extends RemoteMessage {
+  type: MessageType.SWITCH_TO_SESSION_NOTIFICATION;
+  payload: {
+    sessionId: string;   // 新创建会话的 id（前端据此切换窗口）
+    workdir: string;     // 新会话绑定的物理工作目录
+    reason?: string;     // 可选：触发切换的原因描述（用于前端提示）
+  };
 }
 
 /**
@@ -565,11 +587,24 @@ export class MessageFactory {
     };
   }
 
-  static createCreateSession(): CreateSessionMessage {
+  static createCreateSession(workdir?: string): CreateSessionMessage {
     return {
       id: this.generateId(),
       type: MessageType.CREATE_SESSION,
-      payload: {},
+      payload: workdir ? { workdir } : {},
+      timestamp: Date.now(),
+    };
+  }
+
+  static createSwitchToSessionNotification(
+    sessionId: string,
+    workdir: string,
+    reason?: string
+  ): SwitchToSessionNotificationMessage {
+    return {
+      id: this.generateId(),
+      type: MessageType.SWITCH_TO_SESSION_NOTIFICATION,
+      payload: { sessionId, workdir, reason },
       timestamp: Date.now(),
     };
   }
