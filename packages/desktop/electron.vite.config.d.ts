@@ -9,5 +9,5 @@
  * - renderer: a plain Vite + React SPA. No Node access; everything reaches the
  *             backend through the `window.easycode` bridge exposed by preload.
  */
-declare const _default: import("electron-vite").ElectronViteConfig;
+declare const _default: import("electron-vite").ElectronViteConfig & Promise<import("electron-vite").ElectronViteConfig> & (import("electron-vite").ElectronViteConfigFnObject & import("electron-vite").ElectronViteConfigExport);
 export default _default;

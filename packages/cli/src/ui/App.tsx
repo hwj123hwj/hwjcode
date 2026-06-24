@@ -155,7 +155,6 @@ import {
   isDeepXQuotaError,
   getDeepXQuotaErrorMessage,
   UserTierId,
-  isCustomModel,
   QuotaStatusService,
 } from 'deepv-code-core';
 import { checkForUpdates } from './utils/updateCheck.js';
