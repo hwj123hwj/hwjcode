@@ -120,6 +120,16 @@ jobs:
           echo "✅ Found artifact: $TGZ_FILE"
           ls -lh $TGZ_FILE
 
+      # 6.1 发布到 npm (跳过 prepare 因为构建产物已就绪)
+      - name: 📤 Publish to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          export SKIP_PREPARE=1
+          npm publish
+          rm -f .npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       # 7. 创建 GitHub Release (使用 tag message 作为 release notes)
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v1
