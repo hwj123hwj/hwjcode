@@ -38,7 +38,12 @@ import {
   searchFiles,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
-import { getUserSettings, updateUserSettings } from './userSettings.js';
+import {
+  getCustomInstructions,
+  getUserSettings,
+  saveCustomInstructions,
+  updateUserSettings,
+} from './userSettings.js';
 import { ComputerUseManager } from './computerUse/index.js';
 import { setOverlayVisible } from './computerUse/overlay.js';
 import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
@@ -192,6 +197,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.SettingsGet, () => getUserSettings());
   ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
     updateUserSettings(patch),
+  );
+  ipcMain.handle(IpcInvoke.InstructionsGet, () => getCustomInstructions());
+  ipcMain.handle(IpcInvoke.InstructionsSave, (_e, content: string) =>
+    saveCustomInstructions(content),
   );
 
   // ── color theme ───────────────────────────────────────────────────────────

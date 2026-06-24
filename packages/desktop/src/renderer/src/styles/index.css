@@ -2267,6 +2267,8 @@ select {
   align-items: center;
   gap: 7px;
   padding: 5px 8px;
+  background: none;
+  border: none;
   border-radius: var(--radius-sm);
   color: var(--text-dim);
   font-size: 13px;
@@ -2337,10 +2339,15 @@ select {
   gap: 10px;
   width: 100%;
   padding: 7px 9px;
+  /* No chrome by default — a bare <button> would otherwise show the browser's
+   * default light-gray fill + dark border, which looks like boxed-in items. */
+  background: none;
+  border: none;
   border-radius: var(--radius-sm);
   color: var(--text-dim);
   font-size: 13.5px;
   text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .settings-nav-item .ic {
   flex: 0 0 auto;
@@ -2403,6 +2410,31 @@ select {
   gap: 9px;
   justify-content: flex-end;
   margin-top: 20px;
+}
+/* Global custom-instructions editor (Settings → 个性化). A real bordered,
+ * resizable code-ish textarea, unlike the borderless inline `.prompt-input`. */
+.instructions-area {
+  display: block;
+  width: 100%;
+  min-height: 340px;
+  max-height: 60vh;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.instructions-area:focus {
+  border-color: var(--accent-border);
+  outline: none;
+}
+.instructions-area:disabled {
+  opacity: 0.6;
 }
 .settings-saved {
   position: fixed;

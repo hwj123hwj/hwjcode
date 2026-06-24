@@ -62,6 +62,9 @@ export const IpcInvoke = {
   // user settings (shared ~/.easycode-user/settings.json)
   SettingsGet: 'settings:get',
   SettingsUpdate: 'settings:update',
+  // global custom instructions (shared ~/.easycode-user/DEEPV.md)
+  InstructionsGet: 'instructions:get',
+  InstructionsSave: 'instructions:save',
   // computer use (let the agent control the real desktop)
   ComputerUseStatus: 'computer-use:status',
   ComputerUseSetEnabled: 'computer-use:set-enabled',
@@ -360,6 +363,13 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export interface DesktopUserSettings {
   /** Preferred response language, e.g. "English" / "中文". Empty = model default. */
   preferredLanguage?: string;
+  /**
+   * Global default model for newly created sessions, so the user doesn't have to
+   * pick one every time. A built-in `modelId` or a `custom:…` id. Undefined/empty
+   * = let the backend pick its own default. Desktop-only key; the CLI ignores it
+   * but preserves it.
+   */
+  defaultModel?: string;
   /** Healthy-use reminders. Undefined is treated as disabled (the default). */
   healthyUse?: boolean;
   /** How project memory (DEEPV.md / AGENTS.md) is loaded. Undefined = "all". */
@@ -903,6 +913,18 @@ export interface EasycodeBridge {
      * language back to the model default. Returns the new state.
      */
     update(patch: DesktopUserSettings): Promise<DesktopUserSettings>;
+    /**
+     * Read the global custom instructions (`~/.easycode-user/DEEPV.md`) — the
+     * home-level memory the agent loads for every task on this machine. Empty
+     * string when the file doesn't exist yet.
+     */
+    getInstructions(): Promise<string>;
+    /**
+     * Write the global custom instructions. An empty body removes the file.
+     * Takes effect on the next created session / app restart. Returns the saved
+     * content.
+     */
+    saveInstructions(content: string): Promise<string>;
   };
   theme: {
     /**

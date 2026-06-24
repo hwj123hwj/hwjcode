@@ -65,7 +65,7 @@ const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
  * `GROUPS`, and write its `*Section` component — the left-nav rail and the
  * content area are both generated from `GROUPS`, so nothing else needs to change.
  */
-export type SectionId = 'general' | 'appearance' | 'computerUse' | 'models';
+export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models';
 
 interface SectionDef {
   id: SectionId;
@@ -96,6 +96,12 @@ const GROUPS: GroupDef[] = [
     sections: [
       { id: 'general', icon: 'settings', labelKey: 'settings.tabGeneral', Component: GeneralSection },
       { id: 'appearance', icon: 'sparkle', labelKey: 'settings.navAppearance', Component: AppearanceSection },
+      {
+        id: 'personalization',
+        icon: 'comment',
+        labelKey: 'settings.navPersonalization',
+        Component: PersonalizationSection,
+      },
     ],
   },
   {
@@ -251,9 +257,36 @@ function GeneralSection() {
   const setLang = useStore((s) => s.setLang);
   const update = useStore((s) => s.update);
   const checkUpdate = useStore((s) => s.checkUpdate);
+  const order = useStore((s) => s.order);
+  const sessions = useStore((s) => s.sessions);
   const [checking, setChecking] = useState(false);
   const { settings, setSettings, patch, saved } = useUserSettings();
   const [replyLang, setReplyLang] = useState('');
+  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
+
+  // Build the default-model options the same way the new-session/empty-session
+  // pickers do: the built-in models cached on existing sessions' meta, merged
+  // with the user's custom models. No live session is needed here.
+  useEffect(() => {
+    let alive = true;
+    const builtins = new Map<string, string>();
+    for (const id of order) {
+      for (const m of sessions[id]?.meta.availableModels ?? []) {
+        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
+      }
+    }
+    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    void api.models
+      .listCustom()
+      .then((custom) => {
+        if (!alive) return;
+        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
+      })
+      .catch(() => alive && setModelOpts(fromBuiltins));
+    return () => {
+      alive = false;
+    };
+  }, [order, sessions]);
 
   // Sync the reply-language input whenever settings (re)load.
   useEffect(() => {
@@ -321,6 +354,17 @@ function GeneralSection() {
           }}
         />
         <div className="setting-desc">{t('settings.replyLanguageDesc')}</div>
+      </div>
+
+      <div className="setting-item">
+        <label className="field-label">{t('settings.defaultModel')}</label>
+        <ModelSelect
+          value={settings?.defaultModel ?? ''}
+          options={modelOpts}
+          autoLabel={t('settings.defaultModelAuto')}
+          onChange={(value) => void patch({ defaultModel: value })}
+        />
+        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
       </div>
 
       <div className="setting-item">
@@ -425,6 +469,75 @@ function AppearanceSection() {
   );
 }
 
+/* ── 个性化 ─────────────────────────────────────────────────────────────────
+ * Global custom instructions, stored as `~/.easycode-user/DEEPV.md` (the user's
+ * home-level memory the agent loads for every task on this machine — NOT a
+ * project's `.easycode/DEEPV.md`). The CLI/backend read the same file on session
+ * start, so a change here takes effect for newly created sessions / on restart.
+ */
+function PersonalizationSection() {
+  const t = useT();
+  const [content, setContent] = useState('');
+  /** The last-saved content, so we can tell when there are unsaved edits. */
+  const [saved, setSaved] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api.settings
+      .getInstructions()
+      .then((text) => {
+        if (!alive) return;
+        setContent(text);
+        setSaved(text);
+      })
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const dirty = content !== saved;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const persisted = await api.settings.saveInstructions(content);
+      setContent(persisted);
+      setSaved(persisted);
+      setFlash(true);
+      setTimeout(() => setFlash(false), 1200);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="setting-item">
+      <label className="field-label">{t('settings.customInstructions')}</label>
+      <div className="setting-desc">{t('settings.customInstructionsDesc')}</div>
+      <textarea
+        className="prompt-input instructions-area"
+        placeholder={t('settings.customInstructionsPlaceholder')}
+        value={content}
+        disabled={loading}
+        spellCheck={false}
+        onChange={(e) => setContent(e.target.value)}
+      />
+      <div className="setting-note">{t('settings.customInstructionsHint')}</div>
+      <div className="settings-pane-foot">
+        <button className="btn primary" disabled={busy || loading || !dirty} onClick={save}>
+          {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
+          {t('common.save')}
+        </button>
+      </div>
+      <SavedToast show={flash} />
+    </div>
+  );
+}
+
 /* ── 电脑控制 ──────────────────────────────────────────────────────────────
  * Runtime toggle for the desktop computer-use loop (not a settings.json field).
  */
@@ -522,6 +635,78 @@ function ShellSelect({
               <span className="grow">{t(SHELL_LABEL[o.id])}</span>
               {!o.available && <span className="shell-na">{t('settings.shellUnavailable')}</span>}
               <Icon name="check" className={value === o.id ? 'shell-check' : 'placeholder'} size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Dropdown for the global default model (Settings → 通用). Mirrors `ShellSelect`'s
+ * look (`.shell-select` + `.menu-pop`) so the settings UI stays consistent. The
+ * first entry is "Auto" (value ''); a saved-but-unlisted id still renders so the
+ * current selection is never silently lost.
+ */
+function ModelSelect({
+  value,
+  options,
+  autoLabel,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  autoLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Ensure a saved value that isn't in the (session-sourced) option list still
+  // appears, so switching it later doesn't blank the trigger.
+  const allOptions =
+    value && !options.some((o) => o.value === value)
+      ? [...options, { value, label: value }]
+      : options;
+  const currentLabel = value ? (allOptions.find((o) => o.value === value)?.label ?? value) : autoLabel;
+
+  const choose = (v: string) => {
+    onChange(v);
+    setOpen(false);
+  };
+
+  return (
+    <div className="shell-select" ref={ref}>
+      <button className="shell-select-trigger" onClick={() => setOpen((o) => !o)}>
+        <Icon name="cpu" size={14} />
+        <span className="grow">{currentLabel}</span>
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open && (
+        <div className="menu-pop" style={{ left: 0, top: '110%', minWidth: 260, maxHeight: 320, overflowY: 'auto' }}>
+          <button onClick={() => choose('')}>
+            <span className="grow">{autoLabel}</span>
+            <Icon name="check" className={!value ? 'shell-check' : 'placeholder'} size={14} />
+          </button>
+          {allOptions.map((o) => (
+            <button key={o.value} onClick={() => choose(o.value)}>
+              <span className="grow">{o.label}</span>
+              <Icon name="check" className={value === o.value ? 'shell-check' : 'placeholder'} size={14} />
             </button>
           ))}
         </div>

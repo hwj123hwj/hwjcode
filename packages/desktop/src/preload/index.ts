@@ -112,6 +112,9 @@ const bridge: EasycodeBridge = {
     get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,
     update: (patch: DesktopUserSettings) =>
       ipcRenderer.invoke(IpcInvoke.SettingsUpdate, patch) as Promise<DesktopUserSettings>,
+    getInstructions: () => ipcRenderer.invoke(IpcInvoke.InstructionsGet) as Promise<string>,
+    saveInstructions: (content: string) =>
+      ipcRenderer.invoke(IpcInvoke.InstructionsSave, content) as Promise<string>,
   },
   theme: {
     set: (mode: ThemeMode) => ipcRenderer.invoke(IpcInvoke.ThemeSet, mode) as Promise<void>,
