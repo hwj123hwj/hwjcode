@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { Icon } from './Icon';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Icon, type IconName } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
 import type { TranslationKey } from '../i18n/i18n';
 import { useStore } from '../store';
 import type {
+  ComputerUseStatus,
   CustomModelEntry,
   CustomModelInput,
   CustomModelProvider,
@@ -16,7 +17,7 @@ import type {
 
 const api = window.easycode;
 
-const PROVIDERS: { id: CustomModelProvider; label: string }[] = [
+const PROVIDERS: Array<{ id: CustomModelProvider; label: string }> = [
   { id: 'openai', label: 'OpenAI' },
   { id: 'openai-responses', label: 'OpenAI Responses' },
   { id: 'anthropic', label: 'Anthropic' },
@@ -40,7 +41,7 @@ const MEMORY_MODES: Array<{ id: ProjectMemoryMode; labelKey: TranslationKey; hin
   { id: 'none', labelKey: 'settings.memoryNone', hintKey: 'settings.memoryNoneHint' },
 ];
 
-/** GUI color-theme options shown as chips in the 通用 tab. */
+/** GUI color-theme options shown as chips in the 外观 section. */
 const THEME_MODES: Array<{ id: ThemeMode; labelKey: TranslationKey }> = [
   { id: 'system', labelKey: 'settings.themeSystem' },
   { id: 'light', labelKey: 'settings.themeLight' },
@@ -59,77 +60,238 @@ const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
   fish: 'settings.shellFish',
 };
 
-type Tab = 'general' | 'models';
+/**
+ * The id of every settings section. Add a new id here, give it an entry in
+ * `GROUPS`, and write its `*Section` component — the left-nav rail and the
+ * content area are both generated from `GROUPS`, so nothing else needs to change.
+ */
+export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models';
+
+interface SectionDef {
+  id: SectionId;
+  icon: IconName;
+  labelKey: TranslationKey;
+  Component: () => ReactElement;
+}
+
+interface GroupDef {
+  titleKey: TranslationKey;
+  sections: SectionDef[];
+}
 
 /**
- * Settings dialog. The two tabs both read/write the shared
- * `~/.easycode-user/…` stores the CLI uses, so anything changed here is honoured
- * by the CLI and by every newly created session's `easycode --acp` backend:
- *   - 通用       → `settings.json` (the file the CLI's `/config` edits)
- *   - 自定义模型 → `custom-models.json`
+ * Declarative section registry — the single source of truth for the settings UI.
+ * Each section reads/writes the shared `~/.easycode-user/…` stores the CLI uses,
+ * so anything changed here is honoured by the CLI and by every newly created
+ * session's `easycode --acp` backend:
+ *   - 通用 / 外观 / 电脑控制 → `settings.json` (+ runtime computer-use toggle)
+ *   - 自定义模型            → `custom-models.json`
+ *
+ * Grouped into categories (个人 / 集成 / …) so the rail scales as more settings
+ * land without restructuring the layout.
+ */
+const GROUPS: GroupDef[] = [
+  {
+    titleKey: 'settings.groupPersonal',
+    sections: [
+      { id: 'general', icon: 'settings', labelKey: 'settings.tabGeneral', Component: GeneralSection },
+      { id: 'appearance', icon: 'sparkle', labelKey: 'settings.navAppearance', Component: AppearanceSection },
+      {
+        id: 'personalization',
+        icon: 'comment',
+        labelKey: 'settings.navPersonalization',
+        Component: PersonalizationSection,
+      },
+    ],
+  },
+  {
+    titleKey: 'settings.groupIntegration',
+    sections: [
+      { id: 'computerUse', icon: 'laptop', labelKey: 'settings.navComputerUse', Component: ComputerUseSection },
+      { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
+    ],
+  },
+];
+
+const ALL_SECTIONS = GROUPS.flatMap((g) => g.sections);
+
+/**
+ * Full-window settings surface (not a modal): a left rail of grouped, searchable
+ * sections + a scrollable content pane on the right. The `initialTab` prop is the
+ * id of the section to open first (kept for call-site compatibility — Login opens
+ * straight on "models").
  */
 export function SettingsDialog({
   onClose,
   initialTab = 'general',
 }: {
   onClose: () => void;
-  initialTab?: Tab;
+  initialTab?: SectionId;
 }) {
-  const [tab, setTab] = useState<Tab>(initialTab);
   const t = useT();
+  const [active, setActive] = useState<SectionId>(initialTab);
+  const [query, setQuery] = useState('');
+
+  // Esc closes the surface, matching the back button.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const q = query.trim().toLowerCase();
+  const groups = useMemo(() => {
+    if (!q) return GROUPS;
+    return GROUPS.map((g) => ({
+      ...g,
+      sections: g.sections.filter((s) => t(s.labelKey).toLowerCase().includes(q)),
+    })).filter((g) => g.sections.length > 0);
+  }, [q, t]);
+
+  const section = ALL_SECTIONS.find((s) => s.id === active) ?? ALL_SECTIONS[0];
+  const Active = section.Component;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>
-            <Icon name="settings" size={17} />
-            {t('settings.title')}
-          </h3>
-          <div className="sub">
-            {t('settings.subtitlePre')}<code>~/.easycode-user/</code>{t('settings.subtitlePost')}
-          </div>
-          <div className="seg settings-tabs">
-            <button className={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}>
-              {t('settings.tabGeneral')}
-            </button>
-            <button className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}>
-              {t('settings.tabModels')}
-            </button>
-          </div>
+    <div className="settings-surface">
+      <nav className="settings-nav">
+        <button className="settings-back" onClick={onClose}>
+          <Icon name="arrow-left" size={15} />
+          {t('settings.backToApp')}
+        </button>
+
+        <div className="settings-search">
+          <Icon name="search" size={14} className="ic" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('settings.searchPlaceholder')}
+          />
         </div>
 
-        {tab === 'general' ? (
-          <GeneralTab onClose={onClose} />
-        ) : (
-          <ModelsTab onClose={onClose} />
-        )}
+        <div className="settings-nav-scroll">
+          {groups.length === 0 && <div className="settings-nav-empty">{t('settings.searchNoMatch')}</div>}
+          {groups.map((g) => (
+            <div className="settings-nav-group" key={g.titleKey}>
+              <div className="settings-nav-group-title">{t(g.titleKey)}</div>
+              {g.sections.map((s) => (
+                <button
+                  key={s.id}
+                  className={`settings-nav-item ${active === s.id ? 'active' : ''}`}
+                  onClick={() => setActive(s.id)}
+                >
+                  <Icon name={s.icon} size={16} />
+                  <span className="grow">{t(s.labelKey)}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="settings-nav-foot">
+          {t('settings.subtitlePre')}
+          <code>~/.easycode-user/</code>
+          {t('settings.subtitlePost')}
+        </div>
+      </nav>
+
+      <div className="settings-content" key={section.id}>
+        <div className="settings-content-inner">
+          <h2 className="settings-pane-title">{t(section.labelKey)}</h2>
+          <Active />
+        </div>
       </div>
     </div>
   );
 }
 
-/* ── 通用 ─────────────────────────────────────────────────────────────────
- * Shared user settings stored in `~/.easycode-user/settings.json`. Each control
- * persists immediately (the reply-language input on blur), so the only footer
- * action is "关闭". The display-language switch is a renderer-only preference
- * (the app's own i18n); reply-language / project-memory / healthy-use mirror the
- * CLI settings. Terminal-only CLI settings (theme/vim/editor) are not shown;
- * model and permission mode are configured per-session in the session view.
+/**
+ * Small toast badge that fades in after a setting auto-saves. Lives in the
+ * bottom-right of the content pane so it never shifts the layout.
  */
-function GeneralTab({ onClose }: { onClose: () => void }) {
+function SavedToast({ show }: { show: boolean }) {
+  const t = useT();
+  if (!show) return null;
+  return (
+    <div className="settings-saved">
+      <Icon name="check" size={13} />
+      {t('settings.saved')}
+    </div>
+  );
+}
+
+/**
+ * Shared loader/writer for `~/.easycode-user/settings.json`. Every section that
+ * mutates these settings goes through `patch`, which persists, refreshes local
+ * state, and flashes the saved toast.
+ */
+function useUserSettings() {
+  const [settings, setSettings] = useState<DesktopUserSettings | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    void api.settings.get().then(setSettings);
+  }, []);
+
+  const patch = async (p: DesktopUserSettings) => {
+    const next = await api.settings.update(p);
+    setSettings(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+    return next;
+  };
+
+  return { settings, setSettings, patch, saved };
+}
+
+/* ── 通用 ─────────────────────────────────────────────────────────────────
+ * Display/reply language, project memory, healthy-use reminder, software update.
+ */
+function GeneralSection() {
   const t = useT();
   const lang = useStore((s) => s.lang);
   const setLang = useStore((s) => s.setLang);
-  const theme = useStore((s) => s.theme);
-  const setTheme = useStore((s) => s.setTheme);
   const update = useStore((s) => s.update);
   const checkUpdate = useStore((s) => s.checkUpdate);
+  const order = useStore((s) => s.order);
+  const sessions = useStore((s) => s.sessions);
   const [checking, setChecking] = useState(false);
-  const [settings, setSettings] = useState<DesktopUserSettings | null>(null);
+  const { settings, setSettings, patch, saved } = useUserSettings();
   const [replyLang, setReplyLang] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [shells, setShells] = useState<ShellOption[]>([]);
+  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
+
+  // Build the default-model options the same way the new-session/empty-session
+  // pickers do: the built-in models cached on existing sessions' meta, merged
+  // with the user's custom models. No live session is needed here.
+  useEffect(() => {
+    let alive = true;
+    const builtins = new Map<string, string>();
+    for (const id of order) {
+      for (const m of sessions[id]?.meta.availableModels ?? []) {
+        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
+      }
+    }
+    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    void api.models
+      .listCustom()
+      .then((custom) => {
+        if (!alive) return;
+        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
+      })
+      .catch(() => alive && setModelOpts(fromBuiltins));
+    return () => {
+      alive = false;
+    };
+  }, [order, sessions]);
+
+  // Sync the reply-language input whenever settings (re)load.
+  useEffect(() => {
+    setReplyLang(settings?.preferredLanguage ?? '');
+  }, [settings?.preferredLanguage]);
 
   const runCheck = async () => {
     setChecking(true);
@@ -150,32 +312,10 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
         ? t('update.checkFailed')
         : t('update.upToDate', { version: curVersion });
 
-  const load = async () => {
-    const s = await api.settings.get();
-    setSettings(s);
-    setReplyLang(s.preferredLanguage ?? '');
-  };
-
-  useEffect(() => {
-    void load();
-    void api.terminal.listShells().then(setShells).catch(() => undefined);
-  }, []);
-
-  // Options for the shell picker: always offer "default" first, then the
-  // platform's shells (each flagged available/unavailable by the main process).
-  const shellOptions: ShellOption[] = [{ id: 'default', available: true }, ...shells];
-  const shellValue: TerminalShellKind = settings?.terminalShell ?? 'default';
-
-  const patch = async (p: DesktopUserSettings) => {
-    const next = await api.settings.update(p);
-    setSettings(next);
-    setReplyLang(next.preferredLanguage ?? '');
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1200);
-  };
-
   const commitLanguage = () => {
     if (replyLang.trim() === (settings?.preferredLanguage ?? '')) return;
+    // Optimistic so the input doesn't flicker back while the write round-trips.
+    setSettings((s) => (s ? { ...s, preferredLanguage: replyLang } : s));
     void patch({ preferredLanguage: replyLang });
   };
 
@@ -185,122 +325,258 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="modal-body">
-        <div className="setting-item">
-          <label className="field-label">{t('settings.language')}</label>
-          <div className="prompt-config">
-            {(['zh', 'en'] as const).map((l) => (
-              <span
-                key={l}
-                className={`chip interactive ${lang === l ? 'accent' : ''}`}
-                onClick={() => setLang(l)}
-              >
-                {lang === l && <Icon name="check" size={13} />}
-                {l === 'zh' ? t('settings.langZh') : t('settings.langEn')}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="setting-item">
-          <label className="field-label">{t('settings.theme')}</label>
-          <div className="prompt-config">
-            {THEME_MODES.map((m) => (
-              <span
-                key={m.id}
-                className={`chip interactive ${theme === m.id ? 'accent' : ''}`}
-                onClick={() => setTheme(m.id)}
-              >
-                {theme === m.id && <Icon name="check" size={13} />}
-                {t(m.labelKey)}
-              </span>
-            ))}
-          </div>
-          <div className="setting-desc">{t('settings.themeDesc')}</div>
-        </div>
-
-        <div className="setting-item">
-          <label className="field-label">{t('settings.terminalShell')}</label>
-          <ShellSelect
-            value={shellValue}
-            options={shellOptions}
-            onChange={(id) => void patch({ terminalShell: id })}
-            t={t}
-          />
-          <div className="setting-desc">{t('settings.terminalShellDesc')}</div>
-        </div>
-
-        <div className="setting-item">
-          <label className="field-label">{t('settings.replyLanguage')}</label>
-          <input
-            className="prompt-input cm-input"
-            placeholder={t('settings.replyLanguagePlaceholder')}
-            value={replyLang}
-            onChange={(e) => setReplyLang(e.target.value)}
-            onBlur={commitLanguage}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            }}
-          />
-          <div className="setting-desc">{t('settings.replyLanguageDesc')}</div>
-        </div>
-
-        <div className="setting-item">
-          <label className="field-label">{t('settings.projectMemory')}</label>
-          <div className="prompt-config">
-            {MEMORY_MODES.map((m) => (
-              <span
-                key={m.id}
-                className={`chip interactive ${memoryMode === m.id ? 'accent' : ''}`}
-                title={t(m.hintKey)}
-                onClick={() => void patch({ projectMemoryMode: m.id })}
-              >
-                {memoryMode === m.id && <Icon name="check" size={13} />}
-                {t(m.labelKey)}
-              </span>
-            ))}
-          </div>
-          <div className="setting-desc">
-            {t('settings.projectMemoryDesc', { hint: memoryHint ? t(memoryHint) : '' })}
-          </div>
-        </div>
-
-        <div className="setting-item">
-          <label className="setting-toggle">
-            <input
-              type="checkbox"
-              checked={healthyEnabled}
-              onChange={(e) => void patch({ healthyUse: e.target.checked })}
-            />
-            {t('settings.healthyUse')}
-          </label>
-          <div className="setting-desc">{t('settings.healthyUseDesc')}</div>
-        </div>
-
-        <div className="setting-item">
-          <label className="field-label">{t('update.section')}</label>
-          <div className="update-check-row">
-            <button className="btn" disabled={checking} onClick={() => void runCheck()}>
-              {checking ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
-              {t('update.checkNow')}
-            </button>
-            <span className="setting-desc">{updateStatus}</span>
-          </div>
+      <div className="setting-item">
+        <label className="field-label">{t('settings.language')}</label>
+        <div className="prompt-config">
+          {(['zh', 'en'] as const).map((l) => (
+            <span
+              key={l}
+              className={`chip interactive ${lang === l ? 'accent' : ''}`}
+              onClick={() => setLang(l)}
+            >
+              {lang === l && <Icon name="check" size={13} />}
+              {l === 'zh' ? t('settings.langZh') : t('settings.langEn')}
+            </span>
+          ))}
         </div>
       </div>
 
-      <div className="modal-foot">
-        {saved && (
-          <span className="saved-flag">
-            <Icon name="check" size={13} />
-            {t('settings.saved')}
-          </span>
-        )}
-        <button className="btn" onClick={onClose}>
-          {t('common.close')}
+      <div className="setting-item">
+        <label className="field-label">{t('settings.replyLanguage')}</label>
+        <input
+          className="prompt-input cm-input"
+          placeholder={t('settings.replyLanguagePlaceholder')}
+          value={replyLang}
+          onChange={(e) => setReplyLang(e.target.value)}
+          onBlur={commitLanguage}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+        />
+        <div className="setting-desc">{t('settings.replyLanguageDesc')}</div>
+      </div>
+
+      <div className="setting-item">
+        <label className="field-label">{t('settings.defaultModel')}</label>
+        <ModelSelect
+          value={settings?.defaultModel ?? ''}
+          options={modelOpts}
+          autoLabel={t('settings.defaultModelAuto')}
+          onChange={(value) => void patch({ defaultModel: value })}
+        />
+        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
+      </div>
+
+      <div className="setting-item">
+        <label className="field-label">{t('settings.projectMemory')}</label>
+        <div className="prompt-config">
+          {MEMORY_MODES.map((m) => (
+            <span
+              key={m.id}
+              className={`chip interactive ${memoryMode === m.id ? 'accent' : ''}`}
+              title={t(m.hintKey)}
+              onClick={() => void patch({ projectMemoryMode: m.id })}
+            >
+              {memoryMode === m.id && <Icon name="check" size={13} />}
+              {t(m.labelKey)}
+            </span>
+          ))}
+        </div>
+        <div className="setting-desc">
+          {t('settings.projectMemoryDesc', { hint: memoryHint ? t(memoryHint) : '' })}
+        </div>
+      </div>
+
+      <div className="setting-item">
+        <label className="setting-toggle">
+          <input
+            type="checkbox"
+            checked={healthyEnabled}
+            onChange={(e) => void patch({ healthyUse: e.target.checked })}
+          />
+          {t('settings.healthyUse')}
+        </label>
+        <div className="setting-desc">{t('settings.healthyUseDesc')}</div>
+      </div>
+
+      <div className="setting-item">
+        <label className="field-label">{t('update.section')}</label>
+        <div className="update-check-row">
+          <button className="btn" disabled={checking} onClick={() => void runCheck()}>
+            {checking ? <span className="spinner" /> : <Icon name="refresh" size={14} />}
+            {t('update.checkNow')}
+          </button>
+          <span className="setting-desc">{updateStatus}</span>
+        </div>
+      </div>
+
+      <SavedToast show={saved} />
+    </>
+  );
+}
+
+/* ── 外观 ─────────────────────────────────────────────────────────────────
+ * GUI color theme (renderer-only preference) + integrated-terminal shell.
+ */
+function AppearanceSection() {
+  const t = useT();
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
+  const { settings, patch, saved } = useUserSettings();
+  const [shells, setShells] = useState<ShellOption[]>([]);
+
+  useEffect(() => {
+    void api.terminal.listShells().then(setShells).catch(() => undefined);
+  }, []);
+
+  // Options for the shell picker: always offer "default" first, then the
+  // platform's shells (each flagged available/unavailable by the main process).
+  const shellOptions: ShellOption[] = [{ id: 'default', available: true }, ...shells];
+  const shellValue: TerminalShellKind = settings?.terminalShell ?? 'default';
+
+  return (
+    <>
+      <div className="setting-item">
+        <label className="field-label">{t('settings.theme')}</label>
+        <div className="prompt-config">
+          {THEME_MODES.map((m) => (
+            <span
+              key={m.id}
+              className={`chip interactive ${theme === m.id ? 'accent' : ''}`}
+              onClick={() => setTheme(m.id)}
+            >
+              {theme === m.id && <Icon name="check" size={13} />}
+              {t(m.labelKey)}
+            </span>
+          ))}
+        </div>
+        <div className="setting-desc">{t('settings.themeDesc')}</div>
+      </div>
+
+      <div className="setting-item">
+        <label className="field-label">{t('settings.terminalShell')}</label>
+        <ShellSelect
+          value={shellValue}
+          options={shellOptions}
+          onChange={(id) => void patch({ terminalShell: id })}
+          t={t}
+        />
+        <div className="setting-desc">{t('settings.terminalShellDesc')}</div>
+      </div>
+
+      <SavedToast show={saved} />
+    </>
+  );
+}
+
+/* ── 个性化 ─────────────────────────────────────────────────────────────────
+ * Global custom instructions, stored as `~/.easycode-user/DEEPV.md` (the user's
+ * home-level memory the agent loads for every task on this machine — NOT a
+ * project's `.easycode/DEEPV.md`). The CLI/backend read the same file on session
+ * start, so a change here takes effect for newly created sessions / on restart.
+ */
+function PersonalizationSection() {
+  const t = useT();
+  const [content, setContent] = useState('');
+  /** The last-saved content, so we can tell when there are unsaved edits. */
+  const [saved, setSaved] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api.settings
+      .getInstructions()
+      .then((text) => {
+        if (!alive) return;
+        setContent(text);
+        setSaved(text);
+      })
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const dirty = content !== saved;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const persisted = await api.settings.saveInstructions(content);
+      setContent(persisted);
+      setSaved(persisted);
+      setFlash(true);
+      setTimeout(() => setFlash(false), 1200);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="setting-item">
+      <label className="field-label">{t('settings.customInstructions')}</label>
+      <div className="setting-desc">{t('settings.customInstructionsDesc')}</div>
+      <textarea
+        className="prompt-input instructions-area"
+        placeholder={t('settings.customInstructionsPlaceholder')}
+        value={content}
+        disabled={loading}
+        spellCheck={false}
+        onChange={(e) => setContent(e.target.value)}
+      />
+      <div className="setting-note">{t('settings.customInstructionsHint')}</div>
+      <div className="settings-pane-foot">
+        <button className="btn primary" disabled={busy || loading || !dirty} onClick={save}>
+          {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
+          {t('common.save')}
         </button>
       </div>
-    </>
+      <SavedToast show={flash} />
+    </div>
+  );
+}
+
+/* ── 电脑控制 ──────────────────────────────────────────────────────────────
+ * Runtime toggle for the desktop computer-use loop (not a settings.json field).
+ */
+function ComputerUseSection() {
+  const t = useT();
+  const [computerUse, setComputerUse] = useState<ComputerUseStatus | null>(null);
+  // The preload tags <html> with the OS (see preload data-platform); used to show
+  // macOS-only permission guidance for computer use.
+  const isMac = document.documentElement.getAttribute('data-platform') === 'darwin';
+
+  useEffect(() => {
+    void api.computerUse.status().then(setComputerUse).catch(() => undefined);
+    // Keep the toggle in sync if control starts/stops while the section is open.
+    return api.computerUse.onStatus(setComputerUse);
+  }, []);
+
+  return (
+    <div className="setting-item">
+      <label className="setting-toggle">
+        <input
+          type="checkbox"
+          checked={computerUse?.enabled === true}
+          disabled={computerUse ? !computerUse.available : true}
+          onChange={(e) => void api.computerUse.setEnabled(e.target.checked).then(setComputerUse)}
+        />
+        {t('settings.computerUse')}
+      </label>
+      <div className="setting-desc">
+        {computerUse && !computerUse.available
+          ? t('settings.computerUseUnavailable')
+          : t('settings.computerUseDesc')}
+      </div>
+      {computerUse?.available && (
+        <>
+          <div className="setting-note setting-note-warn">{t('settings.computerUseExperimental')}</div>
+          {isMac && <div className="setting-note">{t('settings.computerUseMacPerms')}</div>}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -367,12 +643,84 @@ function ShellSelect({
   );
 }
 
+/**
+ * Dropdown for the global default model (Settings → 通用). Mirrors `ShellSelect`'s
+ * look (`.shell-select` + `.menu-pop`) so the settings UI stays consistent. The
+ * first entry is "Auto" (value ''); a saved-but-unlisted id still renders so the
+ * current selection is never silently lost.
+ */
+function ModelSelect({
+  value,
+  options,
+  autoLabel,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  autoLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Ensure a saved value that isn't in the (session-sourced) option list still
+  // appears, so switching it later doesn't blank the trigger.
+  const allOptions =
+    value && !options.some((o) => o.value === value)
+      ? [...options, { value, label: value }]
+      : options;
+  const currentLabel = value ? (allOptions.find((o) => o.value === value)?.label ?? value) : autoLabel;
+
+  const choose = (v: string) => {
+    onChange(v);
+    setOpen(false);
+  };
+
+  return (
+    <div className="shell-select" ref={ref}>
+      <button className="shell-select-trigger" onClick={() => setOpen((o) => !o)}>
+        <Icon name="cpu" size={14} />
+        <span className="grow">{currentLabel}</span>
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open && (
+        <div className="menu-pop" style={{ left: 0, top: '110%', minWidth: 260, maxHeight: 320, overflowY: 'auto' }}>
+          <button onClick={() => choose('')}>
+            <span className="grow">{autoLabel}</span>
+            <Icon name="check" className={!value ? 'shell-check' : 'placeholder'} size={14} />
+          </button>
+          {allOptions.map((o) => (
+            <button key={o.value} onClick={() => choose(o.value)}>
+              <span className="grow">{o.label}</span>
+              <Icon name="check" className={value === o.value ? 'shell-check' : 'placeholder'} size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── 自定义模型 ─────────────────────────────────────────────────────────────
  * Reads/writes the shared `~/.easycode-user/custom-models.json` (the same store
  * the CLI uses), so models added here are picked up by every newly created
  * session's ACP backend.
  */
-function ModelsTab({ onClose }: { onClose: () => void }) {
+function ModelsSection() {
   const t = useT();
   const [models, setModels] = useState<CustomModelEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -437,61 +785,58 @@ function ModelsTab({ onClose }: { onClose: () => void }) {
     await refresh();
   };
 
-  const patch = (p: Partial<CustomModelInput>) =>
-    setForm((f) => (f ? { ...f, ...p } : f));
+  const patch = (p: Partial<CustomModelInput>) => setForm((f) => (f ? { ...f, ...p } : f));
 
   return (
     <>
-      <div className="modal-body">
-        {error && (
-          <div className="login-err">
-            <Icon name="alert" size={15} />
-            {error}
+      {error && (
+        <div className="login-err">
+          <Icon name="alert" size={15} />
+          {error}
+        </div>
+      )}
+
+      {!form && (
+        <>
+          <div className="cm-list">
+            {loading && (
+              <div className="cm-empty">
+                <span className="spinner" /> {t('common.loading')}
+              </div>
+            )}
+            {!loading && models.length === 0 && <div className="cm-empty">{t('settings.noModels')}</div>}
+            {models.map((m) => (
+              <div className="cm-row" key={m.id}>
+                <div className="cm-row-main">
+                  <span className="cm-name">{m.displayName}</span>
+                  <span className="cm-badge">
+                    {PROVIDERS.find((p) => p.id === m.provider)?.label ?? m.provider}
+                  </span>
+                  {m.enabled === false && <span className="cm-badge muted">{t('settings.disabled')}</span>}
+                </div>
+                <div className="cm-row-sub">
+                  {m.modelId} · {m.baseUrl}
+                </div>
+                <div className="cm-actions">
+                  <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(m)}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button className="icon-btn" title={t('common.delete')} onClick={() => void remove(m)}>
+                    <Icon name="delete" size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        )}
+          <button className="btn" onClick={startAdd}>
+            <Icon name="plus" size={14} />
+            {t('settings.addModel')}
+          </button>
+        </>
+      )}
 
-        {!form && (
-          <>
-            <div className="cm-list">
-              {loading && (
-                <div className="cm-empty">
-                  <span className="spinner" /> {t('common.loading')}
-                </div>
-              )}
-              {!loading && models.length === 0 && (
-                <div className="cm-empty">{t('settings.noModels')}</div>
-              )}
-              {models.map((m) => (
-                <div className="cm-row" key={m.id}>
-                  <div className="cm-row-main">
-                    <span className="cm-name">{m.displayName}</span>
-                    <span className="cm-badge">
-                      {PROVIDERS.find((p) => p.id === m.provider)?.label ?? m.provider}
-                    </span>
-                    {m.enabled === false && <span className="cm-badge muted">{t('settings.disabled')}</span>}
-                  </div>
-                  <div className="cm-row-sub">
-                    {m.modelId} · {m.baseUrl}
-                  </div>
-                  <div className="cm-actions">
-                    <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(m)}>
-                      <Icon name="edit" size={14} />
-                    </button>
-                    <button className="icon-btn" title={t('common.delete')} onClick={() => void remove(m)}>
-                      <Icon name="delete" size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button className="btn" onClick={startAdd}>
-              <Icon name="plus" size={14} />
-              {t('settings.addModel')}
-            </button>
-          </>
-        )}
-
-        {form && (
+      {form && (
+        <>
           <div className="cm-form">
             <label className="field-label">{t('settings.name')}</label>
             <input
@@ -562,12 +907,8 @@ function ModelsTab({ onClose }: { onClose: () => void }) {
               {t('settings.enableModel')}
             </label>
           </div>
-        )}
-      </div>
 
-      <div className="modal-foot">
-        {form ? (
-          <>
+          <div className="settings-pane-foot">
             <button className="btn" onClick={() => setForm(null)}>
               {t('common.back')}
             </button>
@@ -575,13 +916,9 @@ function ModelsTab({ onClose }: { onClose: () => void }) {
               {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
               {t('common.save')}
             </button>
-          </>
-        ) : (
-          <button className="btn" onClick={onClose}>
-            {t('common.close')}
-          </button>
-        )}
-      </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

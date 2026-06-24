@@ -6,6 +6,7 @@ import { SessionView } from './components/SessionView';
 import { PermissionDialog } from './components/PermissionDialog';
 import { LinkContextMenu } from './components/LinkContextMenu';
 import { UpdateBanner } from './components/UpdateBanner';
+import { ComputerUseBanner } from './components/ComputerUseBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { RightSidebar } from './components/workspace/RightSidebar';
 import { BottomTerminal } from './components/workspace/BottomTerminal';
@@ -189,6 +190,7 @@ export function App() {
         <PermissionDialog />
         <LinkContextMenu />
         <UpdateBanner />
+        <ComputerUseBanner />
       </div>
     </ErrorBoundary>
   );

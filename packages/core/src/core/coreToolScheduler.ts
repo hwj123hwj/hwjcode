@@ -97,6 +97,53 @@ function createFunctionResponsePart(
   };
 }
 
+/**
+ * Promote MCP image/audio content blocks into genai `inlineData` parts.
+ *
+ * The genai SDK leaves an MCP `CallToolResult`'s `content` array raw, so an
+ * image block looks like `{ type: 'image', data: '<base64>', mimeType:
+ * 'image/png' }` (audio similarly). Those carry no `.text`, so the text-only
+ * extraction path drops them entirely. Re-emitting them as
+ * `{ inlineData: { data, mimeType } }` is exactly the shape the file-reading
+ * tools use to hand images to the model, so the vision model actually sees them.
+ */
+function extractMcpMediaParts(content: unknown): Part[] {
+  if (!Array.isArray(content)) return [];
+  const parts: Part[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as Record<string, unknown>;
+
+    // Already a genai-style inline part — pass through unchanged.
+    if (b.inlineData && typeof b.inlineData === 'object') {
+      parts.push({ inlineData: b.inlineData } as Part);
+      continue;
+    }
+
+    const type = b.type;
+    if (
+      (type === 'image' || type === 'audio') &&
+      typeof b.data === 'string' &&
+      b.data.length > 0
+    ) {
+      let data = b.data as string;
+      // Defensive: MCP base64 must be prefix-free, but tolerate a stray
+      // `data:<mime>;base64,` header from a non-compliant server.
+      const header = /^data:[^;,]+;base64,/.exec(data);
+      if (header) data = data.slice(header[0].length);
+
+      const mimeType =
+        typeof b.mimeType === 'string' && b.mimeType
+          ? b.mimeType
+          : type === 'image'
+            ? 'image/png'
+            : 'audio/wav';
+      parts.push({ inlineData: { data, mimeType } });
+    }
+  }
+  return parts;
+}
+
 export function convertToFunctionResponse(
   toolName: string,
   callId: string,
@@ -142,12 +189,29 @@ export function convertToFunctionResponse(
 
   // After this point, contentToProcess is a single Part object.
   if (contentToProcess.functionResponse) {
-    if (contentToProcess.functionResponse.response?.content) {
+    const responseContent = contentToProcess.functionResponse.response?.content;
+    if (responseContent) {
+      // MCP tool results land here: `response.content` is the raw MCP content
+      // block array (e.g. a status line PLUS a screenshot image). The genai SDK
+      // does NOT promote image/audio blocks into `inlineData` parts, and the
+      // previous code stringified only the text — silently discarding the image
+      // and leaving a vision model effectively blind ("operating without seeing
+      // the screen"). Hoist any media blocks out as real `inlineData` parts —
+      // the same shape the file-reading tools use to hand images to the model.
+      const mediaParts = extractMcpMediaParts(responseContent);
       const stringifiedOutput =
-        getResponseTextFromParts(
-          contentToProcess.functionResponse.response.content as Part[],
-        ) || '';
-      return createFunctionResponsePart(callId, toolName, stringifiedOutput);
+        getResponseTextFromParts(responseContent as Part[]) || '';
+      const functionResponse = createFunctionResponsePart(
+        callId,
+        toolName,
+        stringifiedOutput ||
+          (mediaParts.length
+            ? `Tool returned ${mediaParts.length} media item(s); see attached.`
+            : ''),
+      );
+      return mediaParts.length > 0
+        ? [functionResponse, ...mediaParts]
+        : functionResponse;
     }
     contentToProcess.functionResponse.id = callId;
     // It's a functionResponse that we should pass through as is.

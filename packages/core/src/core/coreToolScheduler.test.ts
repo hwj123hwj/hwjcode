@@ -420,6 +420,73 @@ describe('convertToFunctionResponse', () => {
       },
     });
   });
+
+  it('hoists an MCP image content block into a viewable inlineData part', () => {
+    // Shape produced by the genai SDK for an MCP CallToolResult: raw MCP content
+    // blocks left inside functionResponse.response.content. The image block must
+    // NOT be dropped — the model has to actually see the screenshot.
+    const llmContent: Part = {
+      functionResponse: {
+        name: toolName,
+        response: {
+          content: [
+            { type: 'text', text: 'Captured screenshot.' },
+            { type: 'image', data: 'c2NyZWVuc2hvdA==', mimeType: 'image/png' },
+          ],
+        },
+      },
+    };
+    const result = convertToFunctionResponse(toolName, callId, llmContent);
+    expect(result).toEqual([
+      {
+        functionResponse: {
+          name: toolName,
+          id: callId,
+          response: { output: 'Captured screenshot.' },
+        },
+      },
+      { inlineData: { data: 'c2NyZWVuc2hvdA==', mimeType: 'image/png' } },
+    ]);
+  });
+
+  it('strips a stray data: URI header and defaults a missing image mimeType', () => {
+    const llmContent: Part = {
+      functionResponse: {
+        name: toolName,
+        response: {
+          content: [{ type: 'image', data: 'data:image/jpeg;base64,Zm9v' }],
+        },
+      },
+    };
+    const result = convertToFunctionResponse(toolName, callId, llmContent);
+    expect(result).toEqual([
+      {
+        functionResponse: {
+          name: toolName,
+          id: callId,
+          response: { output: 'Tool returned 1 media item(s); see attached.' },
+        },
+      },
+      { inlineData: { data: 'Zm9v', mimeType: 'image/png' } },
+    ]);
+  });
+
+  it('passes through a text-only MCP content result unchanged (no media)', () => {
+    const llmContent: Part = {
+      functionResponse: {
+        name: toolName,
+        response: { content: [{ type: 'text', text: 'Done.' }] },
+      },
+    };
+    const result = convertToFunctionResponse(toolName, callId, llmContent);
+    expect(result).toEqual({
+      functionResponse: {
+        name: toolName,
+        id: callId,
+        response: { output: 'Done.' },
+      },
+    });
+  });
 });
 
 describe('CoreToolScheduler edit cancellation', () => {
