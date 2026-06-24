@@ -26,6 +26,7 @@ import * as http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { desktopCapturer, shell, systemPreferences } from 'electron';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
@@ -238,10 +239,68 @@ export class ComputerUseManager {
     this.enabled = enabled;
     this.opts.persistEnabled(enabled);
     this.writeSettingsFile();
-    if (!enabled) this.requestStop();
+    if (enabled) {
+      // Front-load the macOS TCC prompts the moment the user opts in. Without
+      // this, Accessibility is only touched on the first nut.js action and
+      // Screen Recording on the first screenshot — by which point the agent has
+      // already produced a blank capture / dead click, and the app never even
+      // appeared in System Settings for the user to grant it. Fire-and-forget;
+      // the toggle itself doesn't wait on the OS dialog.
+      void this.requestMacPermissions();
+    } else {
+      this.requestStop();
+    }
     this.opts.log(`computer-use ${enabled ? 'enabled' : 'disabled'}`);
     this.emitStatus();
     return this.getStatus();
+  }
+
+  /**
+   * macOS-only: proactively trigger the Accessibility + Screen-Recording TCC
+   * flows so the app registers in System Settings → Privacy & Security and the
+   * permission prompts appear at opt-in time. No-op on Windows/Linux.
+   *
+   *   - Accessibility (mouse/keyboard via nut.js): `isTrustedAccessibilityClient(true)`
+   *     is the ONLY call that both shows the system prompt and adds us to the
+   *     Accessibility list. It prompts once; afterwards it just reports status.
+   *   - Screen Recording (screenshots via desktopCapturer): there is no
+   *     `askForMediaAccess('screen')` — the prompt and the System-Settings entry
+   *     are created by actually attempting a screen capture, so a throwaway 1px
+   *     `getSources` probe is enough to register us and surface the dialog.
+   *
+   * If either permission isn't granted yet we also open the relevant Privacy
+   * pane, since the prompt only fires the very first time and a returning user
+   * who dismissed it needs a way back in.
+   */
+  private async requestMacPermissions(): Promise<void> {
+    if (process.platform !== 'darwin') return;
+    try {
+      // Prompts + registers under Privacy & Security → Accessibility.
+      const axTrusted = systemPreferences.isTrustedAccessibilityClient(true);
+
+      const screenStatus = systemPreferences.getMediaAccessStatus('screen');
+      if (screenStatus !== 'granted') {
+        // Triggers the Screen Recording prompt and the System-Settings entry.
+        await desktopCapturer
+          .getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
+          .catch(() => undefined);
+        // The prompt only appears once; deep-link the pane so a user who already
+        // dismissed it (or needs to re-toggle after restart) can still get there.
+        void shell.openExternal(
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+        );
+      }
+      if (!axTrusted) {
+        void shell.openExternal(
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+        );
+      }
+      this.opts.log(
+        `mac permissions requested (accessibility=${axTrusted ? 'granted' : 'pending'}, screen=${screenStatus})`,
+      );
+    } catch (err) {
+      this.opts.log(`mac permission request failed: ${String(err)}`);
+    }
   }
 
   /** Kill-switch: abort any in-flight action and arm a fresh controller. */
