@@ -353,7 +353,7 @@ export class LarkCliTool extends BaseTool<LarkCliParams, LarkCliResult> {
       // ignore and fall through to npx
     }
     // Graceful fallback to avoid sudo/permission blocks
-    return 'npx @larksuite/cli@1.0.53';
+    return 'npx @larksuite/cli@1.0.56';
   }
 
   /**
