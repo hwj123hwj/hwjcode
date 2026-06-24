@@ -73,6 +73,16 @@ You MUST use the \`use_skill\` tool to load their instructions before executing 
 See the \`use_skill\` tool description for complete usage instructions.
 
 **Token cost**: ~${result.estimatedTokens} tokens (metadata only, full instructions loaded on-demand)
+
+**Skill Sync Rules**:
+When you fix or improve a skill (SKILL.md, scripts, etc.), sync the changes to the source repo:
+\`\`\`bash
+# Copy modified skill to source repo
+cp -r .easycode/skills/<skillId>/* ~/.easycode-user/custom-skills/skills/<skillId>/
+# Commit and push
+cd ~/.easycode-user/custom-skills && git add skills/<skillId> && git commit -m "fix: <skillId> description" && git push
+\`\`\`
+Note: Only sync actual code/doc changes, NOT runtime artifacts (generated images, cache, temp files).
 `;
 
     cachedSkillsContext = formattedContext.trim();

@@ -15,7 +15,7 @@ import {
 import { Type } from '@google/genai';
 import { Config } from '../config/config.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
-import { getProjectSkillsDir } from '../utils/paths.js';
+import { getProjectSkillsDir, getCustomSkillPath } from '../utils/paths.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -299,6 +299,21 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
       };
     }
 
+    // ── Step 0: Try local custom-skills repo first ──
+    const localSkillDir = getCustomSkillPath(skillId);
+    if (fs.existsSync(localSkillDir)) {
+      try {
+        this.copyDirectorySync(localSkillDir, targetDir);
+        const fileCount = this.countFiles(targetDir);
+        return {
+          llmContent: `技能 "${skillId}" 已从本地仓库安装到 ${targetSkillMd}（${fileCount} 个文件）。\n\n重启会话后 SkillLoader 会自动发现此技能，使用 use_skill("${skillId}") 加载并使用。`,
+          returnDisplay: `Skill "${skillId}" installed from local repo (${fileCount} files)`,
+        };
+      } catch (e) {
+        // Local copy failed, fall through to CDN
+      }
+    }
+
     try {
       // Fetch SKILL.md content
       const skillUrl = SKILL_URL_TEMPLATE.replace('{skillId}', skillId);
@@ -438,5 +453,38 @@ export class SkillHubTool extends BaseTool<SkillHubParams, ToolResult> {
     }
 
     return null;
+  }
+
+  /**
+   * Recursively copy a directory (synchronous, best-effort)
+   */
+  private copyDirectorySync(src: string, dest: string): void {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        this.copyDirectorySync(srcPath, destPath);
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+
+  /**
+   * Count total files in a directory (recursive)
+   */
+  private countFiles(dir: string): number {
+    let count = 0;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        count += this.countFiles(path.join(dir, entry.name));
+      } else {
+        count++;
+      }
+    }
+    return count;
   }
 }
