@@ -147,6 +147,26 @@ function extractCuratedHistory(comprehensiveHistory: Content[]): Content[] {
 }
 
 /**
+ * How many of the most recent computer-use screenshots to keep inline in the
+ * request. Computer-use is a screenshot→action loop: every `computer` tool
+ * result carries an inline image, and without pruning the model re-reads ALL of
+ * them on every turn — image tokens (which scale with the number of images kept)
+ * grow ~quadratically with step count, so a long loop gets slower and slower
+ * (the same failure mode behind Codex's "long conversations make screenshots
+ * slow/stale"). We only ever need the last few screens to decide the next
+ * action, so older screenshots are dropped to a text placeholder before sending.
+ */
+const KEEP_RECENT_COMPUTER_SCREENSHOTS = 3;
+
+/** True if a functionResponse name is the desktop computer-use tool, whether
+ *  exposed bare (`computer`) or server-qualified (`…__computer`). */
+function isComputerToolResponseName(name: unknown): boolean {
+  return (
+    typeof name === 'string' && (name === 'computer' || name.endsWith('__computer'))
+  );
+}
+
+/**
  * Chat session that enables sending messages to the model with previous
  * conversation context.
  *
@@ -928,7 +948,57 @@ export class GeminiChat {
       }
     }
 
-    return mergedContents;
+    // 🖼️ 最后一步：裁剪陈旧的 computer-use 截图（见 KEEP_RECENT_COMPUTER_SCREENSHOTS）。
+    // 放在所有 fc/fr 配对与合并之后，保证只动 inlineData 图片、不碰任何配对结构。
+    return GeminiChat.pruneStaleComputerScreenshots(mergedContents);
+  }
+
+  /**
+   * Drop all but the most recent {@link KEEP_RECENT_COMPUTER_SCREENSHOTS}
+   * computer-use screenshots from the outgoing request, replacing each older
+   * image with a tiny text placeholder. This keeps the turn structure and
+   * functionResponse pairing perfectly intact (we only swap inline image parts),
+   * while stopping image tokens from piling up turn after turn in a long
+   * screenshot→action loop. The stored history is untouched — only the request
+   * we send this turn is slimmed.
+   */
+  static pruneStaleComputerScreenshots(contents: Content[]): Content[] {
+    // Locate every computer-tool screenshot image: an inline image part that
+    // rides in the same user message as a `computer` functionResponse.
+    const shots: Array<{ c: number; p: number }> = [];
+    for (let c = 0; c < contents.length; c++) {
+      const content = contents[c];
+      if (content.role !== MESSAGE_ROLES.USER || !content.parts) continue;
+      const isComputerTurn = content.parts.some((part) =>
+        isComputerToolResponseName((part as any)?.functionResponse?.name),
+      );
+      if (!isComputerTurn) continue;
+      for (let p = 0; p < content.parts.length; p++) {
+        const mime = (content.parts[p] as any)?.inlineData?.mimeType;
+        if (typeof mime === 'string' && mime.startsWith('image/')) {
+          shots.push({ c, p });
+        }
+      }
+    }
+    if (shots.length <= KEEP_RECENT_COMPUTER_SCREENSHOTS) return contents;
+
+    const drop = new Set(
+      shots
+        .slice(0, shots.length - KEEP_RECENT_COMPUTER_SCREENSHOTS)
+        .map((s) => `${s.c}:${s.p}`),
+    );
+    return contents.map((content, c) => {
+      if (content.role !== MESSAGE_ROLES.USER || !content.parts) return content;
+      let touched = false;
+      const parts = content.parts.map((part, p) => {
+        if (!drop.has(`${c}:${p}`)) return part;
+        touched = true;
+        return {
+          text: '[earlier screenshot omitted to save context — superseded by a newer capture]',
+        };
+      });
+      return touched ? { ...content, parts } : content;
+    });
   }
 
   /**

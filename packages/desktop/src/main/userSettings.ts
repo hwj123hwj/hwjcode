@@ -80,6 +80,9 @@ function project(raw: Record<string, unknown>): DesktopUserSettings {
   ) {
     out.terminalShell = raw.terminalShell as TerminalShellKind;
   }
+  if (typeof raw.computerUseEnabled === 'boolean') {
+    out.computerUseEnabled = raw.computerUseEnabled;
+  }
   return out;
 }
 
@@ -110,6 +113,9 @@ export function updateUserSettings(patch: DesktopUserSettings): DesktopUserSetti
   if ('terminalShell' in patch && patch.terminalShell) {
     if (patch.terminalShell === 'default') delete raw.terminalShell;
     else raw.terminalShell = patch.terminalShell;
+  }
+  if ('computerUseEnabled' in patch && typeof patch.computerUseEnabled === 'boolean') {
+    raw.computerUseEnabled = patch.computerUseEnabled;
   }
 
   writeRaw(raw);

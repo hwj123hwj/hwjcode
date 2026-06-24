@@ -206,6 +206,17 @@ export const en = {
   'settings.projectMemoryDesc': 'Which project memory files to load in new sessions ({hint}).',
   'settings.healthyUse': 'Healthy-use reminder',
   'settings.healthyUseDesc': 'Show a break reminder during long continuous use.',
+  'settings.computerUse': 'Computer use (control this computer)',
+  'settings.computerUseDesc':
+    'Let the agent see your screen and operate any app with the real mouse and keyboard. Off by default. Takes effect for newly created sessions. Use only with trusted tasks — keep watching and stop it if it acts on the wrong window.',
+  'settings.computerUseUnavailable': 'Not available on this platform.',
+  'settings.computerUseExperimental':
+    'Experimental. Each step sends a screenshot to the model, so a single task can burn through credits quickly — keep tasks short and watch your usage.',
+  'settings.computerUseMacPerms':
+    'On macOS, grant Easy Code two permissions in System Settings → Privacy & Security, then restart the app: turn on Screen Recording (so it can see the screen) and Accessibility (so it can move the mouse and type). Without them, screenshots come back blank and clicks do nothing.',
+  'computerUse.bannerActive': 'Easy Code is controlling your computer',
+  'computerUse.bannerHint': 'It is moving the mouse and typing on your screen.',
+  'computerUse.stop': 'Stop',
   'settings.saved': 'Saved',
   'settings.errName': 'Please enter a name',
   'settings.errBaseUrl': 'Please enter a Base URL',

@@ -13,10 +13,12 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { ensurePathFromLoginShell } from './shellPath.js';
 import { createTray, destroyTray } from './tray.js';
+import { destroyOverlay } from './computerUse/overlay.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
 import type { UpdateManager } from './updater.js';
 import type { TerminalManager } from './terminals.js';
+import type { ComputerUseManager } from './computerUse/index.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
 // taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
 // from the packaged .app bundle, so this is harmless there.
@@ -29,6 +31,7 @@ let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
 let updater: UpdateManager | null = null;
 let terminals: TerminalManager | null = null;
+let computerUse: ComputerUseManager | null = null;
 
 // Distinguishes "user clicked X / Cmd+W" (→ hide to tray) from "the app is
 // really quitting" (→ let the window close). Set true by the only paths that
@@ -191,7 +194,7 @@ function bootstrap(): void {
       // Drop the default application menu on Windows/Linux entirely.
       Menu.setApplicationMenu(null);
     }
-    ({ hub, feishu, updater, terminals } = registerIpc(() => mainWindow));
+    ({ hub, feishu, updater, terminals, computerUse } = registerIpc(() => mainWindow));
     createWindow();
     // System tray: closing the window hides it here, so the tray is the way
     // back to a visible window (and to an explicit Quit).
@@ -225,6 +228,10 @@ app.on('before-quit', () => {
   updater?.dispose();
   // Kill any integrated-terminal shells so we never orphan a child process.
   terminals?.disposeAll();
+  // Stop the computer-use MCP server + abort any in-flight on-screen action,
+  // and tear down the always-on-top control overlay.
+  computerUse?.dispose();
+  destroyOverlay();
   // Remove the tray icon so it doesn't linger after the windows are gone.
   destroyTray();
 });

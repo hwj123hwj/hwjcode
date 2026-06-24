@@ -62,6 +62,10 @@ export const IpcInvoke = {
   // user settings (shared ~/.easycode-user/settings.json)
   SettingsGet: 'settings:get',
   SettingsUpdate: 'settings:update',
+  // computer use (let the agent control the real desktop)
+  ComputerUseStatus: 'computer-use:status',
+  ComputerUseSetEnabled: 'computer-use:set-enabled',
+  ComputerUseStop: 'computer-use:stop',
   // color theme (renderer preference → native window chrome)
   ThemeSet: 'theme:set',
   // permission reply
@@ -116,6 +120,8 @@ export const IpcEvent = {
   TerminalData: 'terminal:data',
   /** An integrated-terminal shell process exited. */
   TerminalExit: 'terminal:exit',
+  /** Computer-use status changed (enabled toggled, or control started/stopped). */
+  ComputerUseStatus: 'computer-use:status',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -361,6 +367,28 @@ export interface DesktopUserSettings {
    * platform default). Desktop-only key; the CLI ignores it but preserves it.
    */
   terminalShell?: TerminalShellKind;
+  /**
+   * Whether the agent may control the real computer (screenshots + mouse +
+   * keyboard) via the computer-use tool. Undefined/false = disabled (the safe
+   * default). Toggled through the dedicated `computerUse.setEnabled` channel,
+   * not the generic settings update, so the main-process manager stays in sync.
+   * Desktop-only key; the CLI ignores it but preserves it.
+   */
+  computerUseEnabled?: boolean;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Computer use (agent controls the real desktop)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Snapshot of the computer-use subsystem, surfaced in Settings + the overlay. */
+export interface ComputerUseStatus {
+  /** True when the user has allowed the agent to control this computer. */
+  enabled: boolean;
+  /** True while the agent is actively touching the screen (drives the overlay). */
+  active: boolean;
+  /** False on platforms/builds where OS input injection is unavailable. */
+  available: boolean;
 }
 
 export interface CreateSessionOptions {
@@ -880,6 +908,16 @@ export interface EasycodeBridge {
      * setting `nativeTheme.themeSource`. 'system' restores OS-follow behaviour.
      */
     set(mode: ThemeMode): Promise<void>;
+  };
+  computerUse: {
+    /** Read the current computer-use status (enabled / active / available). */
+    status(): Promise<ComputerUseStatus>;
+    /** Enable or disable letting the agent control the computer. Returns new status. */
+    setEnabled(enabled: boolean): Promise<ComputerUseStatus>;
+    /** Emergency stop: abort any in-flight on-screen action immediately. */
+    stop(): Promise<void>;
+    /** Subscribe to status changes (toggle + control start/stop). */
+    onStatus(cb: (status: ComputerUseStatus) => void): () => void;
   };
   agents: {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */

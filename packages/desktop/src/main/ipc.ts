@@ -39,6 +39,8 @@ import {
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import { getUserSettings, updateUserSettings } from './userSettings.js';
+import { ComputerUseManager } from './computerUse/index.js';
+import { setOverlayVisible } from './computerUse/overlay.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
@@ -63,6 +65,7 @@ export interface IpcServices {
   feishu: FeishuManager;
   updater: UpdateManager;
   terminals: TerminalManager;
+  computerUse: ComputerUseManager;
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
@@ -78,8 +81,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
       notifier.handle(sessionId, event);
       send(IpcEvent.SessionEvent, { sessionId, event });
     },
-    sessionStatus: (sessionId, status, meta) =>
-      send(IpcEvent.SessionStatus, { sessionId, status, meta }),
+    sessionStatus: (sessionId, status, meta) => {
+      // When a turn finishes, let computer-use drop the "controlling" overlay
+      // instead of timing out between actions (which made it flicker).
+      if (status === 'idle') computerUse.noteTurnIdle();
+      send(IpcEvent.SessionStatus, { sessionId, status, meta });
+    },
     permissionRequest: (req) => send(IpcEvent.PermissionRequest, req),
     backendLog: (line) => send(IpcEvent.BackendLog, line),
   });
@@ -195,6 +202,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     nativeTheme.themeSource = mode;
   });
 
+  // ── computer use (agent controls the real desktop) ─────────────────────────
+  const computerUse = new ComputerUseManager({
+    initialEnabled: getUserSettings().computerUseEnabled === true,
+    persistEnabled: (enabled) => updateUserSettings({ computerUseEnabled: enabled }),
+    onStatus: (status) => {
+      // Reflect "currently controlling" in the always-on-top overlay, and push
+      // the full status to the renderer (Settings toggle + in-app banner).
+      setOverlayVisible(status.active);
+      send(IpcEvent.ComputerUseStatus, status);
+    },
+    log: (line) => send(IpcEvent.BackendLog, `[computer-use] ${line}`),
+  });
+  // Bring the localhost MCP server up before any backend spawns so the settings
+  // file carries a valid port. Non-fatal if it fails — the tool just won't load.
+  void computerUse.start().catch((err) =>
+    send(IpcEvent.BackendLog, `[computer-use] failed to start: ${String(err)}`),
+  );
+  ipcMain.handle(IpcInvoke.ComputerUseStatus, () => computerUse.getStatus());
+  ipcMain.handle(IpcInvoke.ComputerUseSetEnabled, (_e, enabled: boolean) =>
+    computerUse.setEnabled(enabled),
+  );
+  ipcMain.handle(IpcInvoke.ComputerUseStop, () => computerUse.requestStop());
+
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(
     IpcInvoke.PermissionRespond,
@@ -268,5 +298,5 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
   ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
 
-  return { hub, feishu, updater, terminals };
+  return { hub, feishu, updater, terminals, computerUse };
 }

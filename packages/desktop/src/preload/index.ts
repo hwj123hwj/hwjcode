@@ -13,6 +13,7 @@ import type {
   ApiKeyLoginResult,
   AuthStatus,
   BrowserLoginResult,
+  ComputerUseStatus,
   CreateSessionOptions,
   CustomModelEntry,
   CustomModelInput,
@@ -114,6 +115,14 @@ const bridge: EasycodeBridge = {
   },
   theme: {
     set: (mode: ThemeMode) => ipcRenderer.invoke(IpcInvoke.ThemeSet, mode) as Promise<void>,
+  },
+  computerUse: {
+    status: () =>
+      ipcRenderer.invoke(IpcInvoke.ComputerUseStatus) as Promise<ComputerUseStatus>,
+    setEnabled: (enabled) =>
+      ipcRenderer.invoke(IpcInvoke.ComputerUseSetEnabled, enabled) as Promise<ComputerUseStatus>,
+    stop: () => ipcRenderer.invoke(IpcInvoke.ComputerUseStop) as Promise<void>,
+    onStatus: (cb) => on<ComputerUseStatus>(IpcEvent.ComputerUseStatus, cb),
   },
   agents: {
     detect: () =>

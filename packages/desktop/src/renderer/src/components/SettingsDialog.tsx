@@ -4,6 +4,7 @@ import { useT, type TFunc } from '../i18n/useT';
 import type { TranslationKey } from '../i18n/i18n';
 import { useStore } from '../store';
 import type {
+  ComputerUseStatus,
   CustomModelEntry,
   CustomModelInput,
   CustomModelProvider,
@@ -130,6 +131,10 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
   const [replyLang, setReplyLang] = useState('');
   const [saved, setSaved] = useState(false);
   const [shells, setShells] = useState<ShellOption[]>([]);
+  const [computerUse, setComputerUse] = useState<ComputerUseStatus | null>(null);
+  // The preload tags <html> with the OS (see preload data-platform); used to show
+  // macOS-only permission guidance for computer use.
+  const isMac = document.documentElement.getAttribute('data-platform') === 'darwin';
 
   const runCheck = async () => {
     setChecking(true);
@@ -159,6 +164,9 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void load();
     void api.terminal.listShells().then(setShells).catch(() => undefined);
+    void api.computerUse.status().then(setComputerUse).catch(() => undefined);
+    // Keep the toggle in sync if control starts/stops while the dialog is open.
+    return api.computerUse.onStatus(setComputerUse);
   }, []);
 
   // Options for the shell picker: always offer "default" first, then the
@@ -275,6 +283,35 @@ function GeneralTab({ onClose }: { onClose: () => void }) {
             {t('settings.healthyUse')}
           </label>
           <div className="setting-desc">{t('settings.healthyUseDesc')}</div>
+        </div>
+
+        <div className="setting-item">
+          <label className="setting-toggle">
+            <input
+              type="checkbox"
+              checked={computerUse?.enabled === true}
+              disabled={computerUse ? !computerUse.available : true}
+              onChange={(e) =>
+                void api.computerUse.setEnabled(e.target.checked).then(setComputerUse)
+              }
+            />
+            {t('settings.computerUse')}
+          </label>
+          <div className="setting-desc">
+            {computerUse && !computerUse.available
+              ? t('settings.computerUseUnavailable')
+              : t('settings.computerUseDesc')}
+          </div>
+          {computerUse?.available && (
+            <>
+              <div className="setting-note setting-note-warn">
+                {t('settings.computerUseExperimental')}
+              </div>
+              {isMac && (
+                <div className="setting-note">{t('settings.computerUseMacPerms')}</div>
+              )}
+            </>
+          )}
         </div>
 
         <div className="setting-item">

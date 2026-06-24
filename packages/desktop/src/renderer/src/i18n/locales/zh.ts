@@ -204,6 +204,17 @@ export const zh = {
   'settings.projectMemoryDesc': '新建会话时加载哪些项目记忆文件（{hint}）。',
   'settings.healthyUse': '健康使用提醒',
   'settings.healthyUseDesc': '长时间连续使用时显示休息提醒。',
+  'settings.computerUse': '电脑控制（操作本机）',
+  'settings.computerUseDesc':
+    '允许智能体查看你的屏幕，并用真实的鼠标键盘操作任意应用。默认关闭，对新建会话生效。请仅在可信任务中使用——操作时请留意，若它点错窗口请及时停止。',
+  'settings.computerUseUnavailable': '当前平台不支持。',
+  'settings.computerUseExperimental':
+    '实验性功能。每一步都会把屏幕截图发送给模型，因此单个任务可能很快消耗较多积分——请尽量缩短任务并留意用量。',
+  'settings.computerUseMacPerms':
+    'macOS 上请在 系统设置 → 隐私与安全性 中授予 Easy Code 两项权限，并重启应用：开启「屏幕录制」（用于查看屏幕）和「辅助功能」（用于移动鼠标和输入）。未授权时截图会是空白、点击也不会生效。',
+  'computerUse.bannerActive': 'Easy Code 正在控制你的电脑',
+  'computerUse.bannerHint': '它正在你的屏幕上移动鼠标并输入。',
+  'computerUse.stop': '停止',
   'settings.saved': '已保存',
   'settings.errName': '请填写名称',
   'settings.errBaseUrl': '请填写 Base URL',

@@ -23,6 +23,11 @@ asarUnpack:
   - resources/**
   - '**/*.node'
   - '**/node_modules/@lydell/**'
+  # @nut-tree-fork/libnut (computer-use OS input injection) ships prebuilt N-API
+  # binaries via its platform packages (@nut-tree-fork/libnut-win32 etc.). Like
+  # @lydell above, the native .node can't be dlopen'd from inside the asar, so
+  # unpack the whole tree.
+  - '**/node_modules/@nut-tree-fork/**'
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
