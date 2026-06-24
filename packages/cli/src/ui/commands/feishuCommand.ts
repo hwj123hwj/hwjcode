@@ -45,7 +45,7 @@ import {
 } from '../../services/feishu/registration.js';
 import { FeishuGateway, FeishuMessage, FeishuFooterMetrics, buildCardKitFinalCard } from '../../services/feishu/gateway.js';
 import { SendFeishuFileTool } from '../../services/feishu/feishu-send-file-tool.js';
-import { NanobananaGenerateTool } from 'deepv-code-core';
+import { NanobananaGenerateTool, generateCustomModelId, isCustomModel } from 'deepv-code-core';
 import {
   type FeishuAgentTarget,
   resolveDelegation,
@@ -122,6 +122,7 @@ import { FileCommandLoader } from '../../services/FileCommandLoader.js';
 import { PluginCommandLoader } from '../../services/skill/loaders/plugin-command-loader.js';
 import { SettingScope } from '../../config/settings.js';
 import { loadCustomModels } from '../../config/customModelsStorage.js';
+import { formatCustomModelDisplayName } from '../../utils/modelUtils.js';
 import { getAvailableModels, refreshModelsInBackground, getModelDisplayName, getModelNameFromDisplayName } from './modelCommand.js';
 import { getCreditsService } from '../../services/creditsService.js';
 import { launchGoalMode } from '../hooks/launchGoalMode.js';
@@ -3484,11 +3485,34 @@ async function handleStart(context?: CommandContext): Promise<string> {
       const settings = globalCommandContext?.services?.settings;
       const favoriteModelIds: string[] = settings?.merged?.favoriteModels || [];
       const cloudModels = currentConfig?.getCloudModels?.() || [];
+      // 加载自定义模型（用于构建 displayName 映射）
+      let customModelsMap = new Map<string, string>();
+      try {
+        const fileCustomModels = loadCustomModels();
+        fileCustomModels.forEach(cm => {
+          if (cm.enabled !== false) {
+            customModelsMap.set(generateCustomModelId(cm), formatCustomModelDisplayName(cm));
+          }
+        });
+      } catch { /* ignore */ }
+
       const favorites = favoriteModelIds
         .map((id) => {
-          const model = cloudModels.find((m: any) => m.name === id);
-          // fallback: cloudModels 查不到时用 ID 本身，不丢弃
-          return { name: id, displayName: model?.displayName || id };
+          // 优先从 cloudModels 查找
+          const cloudModel = cloudModels.find((m: any) => m.name === id);
+          if (cloudModel) {
+            return { name: cloudModel.name, displayName: cloudModel.displayName, isCustom: false };
+          }
+          // 自定义模型 fallback
+          if (isCustomModel(id)) {
+            return {
+              name: id,
+              displayName: customModelsMap.get(id) || id,
+              isCustom: true,
+            };
+          }
+          // 未知模型 ID，仍保留（用 ID 本身作为 displayName）
+          return { name: id, displayName: id, isCustom: false };
         });
 
       const nlResult = await import('../hooks/useNLTriggerRegistry.js').then(m =>

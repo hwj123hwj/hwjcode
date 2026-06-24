@@ -135,6 +135,115 @@ describe('模型切换（type=modelSwitch）', () => {
 });
 
 // ============================================================
+// 自定义模型切换
+// ============================================================
+
+describe('自定义模型切换', () => {
+  // 包含自定义模型的收藏列表
+  const mixedFavorites: FavoriteModelEntry[] = [
+    { name: 'glm-5.2', displayName: 'GLM-5.2' },
+    { name: 'deepseek-v4-flash', displayName: 'DeepSeek-V4-Flash' },
+    { name: 'custom:openai:glm-5.2@abc123', displayName: '[OpenAI] GLM-5.2 自定义', isCustom: true },
+    { name: 'custom:openai:gpt-4o@def456', displayName: '[OpenAI] GPT-4o', isCustom: true },
+  ];
+
+  describe('"自定义"修饰词', () => {
+    it('"切换自定义智谱" → 匹配自定义 GLM 模型', () => {
+      const result = detectNLTrigger('切换自定义智谱', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:glm-5.2@abc123');
+      expect(result!.isCustom).toBe(true);
+    });
+
+    it('"用自定义智谱" → 匹配自定义 GLM 模型', () => {
+      const result = detectNLTrigger('用自定义智谱', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:glm-5.2@abc123');
+      expect(result!.isCustom).toBe(true);
+    });
+
+    it('"切换到自定义的GPT" → 匹配自定义 GPT-4o', () => {
+      const result = detectNLTrigger('切换到自定义的GPT', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:gpt-4o@def456');
+      expect(result!.isCustom).toBe(true);
+    });
+
+    it('"换自定义glm" → 匹配自定义 GLM', () => {
+      const result = detectNLTrigger('换自定义glm', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:glm-5.2@abc123');
+      expect(result!.isCustom).toBe(true);
+    });
+  });
+
+  describe('无"自定义"修饰词时优先匹配云端模型', () => {
+    it('"切换智谱" → 匹配云端 GLM（非自定义）', () => {
+      const result = detectNLTrigger('切换智谱', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('glm-5.2');
+      expect(result!.isCustom).toBe(false);
+    });
+
+    it('"用智谱" → 匹配云端 GLM（非自定义）', () => {
+      const result = detectNLTrigger('用智谱', { favorites: mixedFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('glm-5.2');
+      expect(result!.isCustom).toBe(false);
+    });
+  });
+
+  describe('仅自定义模型时的降级匹配', () => {
+    // 收藏中只有自定义 GLM，没有云端 GLM
+    const onlyCustomFavorites: FavoriteModelEntry[] = [
+      { name: 'custom:openai:glm-5.2@abc123', displayName: '[OpenAI] GLM-5.2 自定义', isCustom: true },
+    ];
+
+    it('"切换智谱" → 降级匹配自定义 GLM（无云端候选）', () => {
+      const result = detectNLTrigger('切换智谱', { favorites: onlyCustomFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:glm-5.2@abc123');
+      expect(result!.isCustom).toBe(true);
+    });
+
+    it('"用智谱" → 降级匹配自定义 GLM（无云端候选）', () => {
+      const result = detectNLTrigger('用智谱', { favorites: onlyCustomFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:glm-5.2@abc123');
+      expect(result!.isCustom).toBe(true);
+    });
+  });
+
+  describe('自定义模型 ID 提取匹配', () => {
+    const customOnlyFavorites: FavoriteModelEntry[] = [
+      { name: 'custom:openai:gpt-4o@def456', displayName: '[OpenAI] GPT-4o', isCustom: true },
+      { name: 'custom:anthropic:claude-sonnet-4@ghi789', displayName: '[Anthropic] Claude Sonnet 4', isCustom: true },
+    ];
+
+    it('"切换gpt-4o" → 通过提取的 modelId 匹配自定义模型', () => {
+      const result = detectNLTrigger('切换gpt-4o', { favorites: customOnlyFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:openai:gpt-4o@def456');
+      expect(result!.isCustom).toBe(true);
+    });
+
+    it('"用claude sonnet" → 通过拆词模糊匹配自定义模型', () => {
+      const result = detectNLTrigger('用claude sonnet', { favorites: customOnlyFavorites });
+      expect(result).not.toBeNull();
+      expect(result!.modelName).toBe('custom:anthropic:claude-sonnet-4@ghi789');
+      expect(result!.isCustom).toBe(true);
+    });
+  });
+
+  describe('"自定义"修饰词 + 不存在的模型', () => {
+    it('"切换自定义deepseek" → 无匹配时返回 null', () => {
+      const result = detectNLTrigger('切换自定义deepseek', { favorites: mixedFavorites });
+      expect(result).toBeNull();
+    });
+  });
+});
+
+// ============================================================
 // 命令调度
 // ============================================================
 
@@ -293,6 +402,6 @@ describe('辅助函数', () => {
     expect(words).toContain('模型');
     expect(words).toContain('请');
     expect(words).toContain('麻烦');
-    expect(words.length).toBe(12);
+    expect(words.length).toBe(17);
   });
 });

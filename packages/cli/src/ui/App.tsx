@@ -32,6 +32,9 @@ import { useThemeCommand } from './hooks/useThemeCommand.js';
 import { useModelCommand } from './hooks/useModelCommand.js';
 import { detectNLTrigger, buildSwitchMessage } from './hooks/useNLTriggerRegistry.js';
 import { useCustomModelWizard } from './hooks/useCustomModelWizard.js';
+import { loadCustomModels } from '../config/customModelsStorage.js';
+import { generateCustomModelId, isCustomModel } from 'deepv-code-core';
+import { formatCustomModelDisplayName } from '../utils/modelUtils.js';
 import { useDebateWizard } from './hooks/useDebateWizard.js';
 import { useGoalWizard } from './hooks/useGoalWizard.js';
 import { useAuthCommand } from './hooks/useAuthCommand.js';
@@ -2055,12 +2058,39 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
         // 匹配模型切换、命令调度、工具开关等 NL 触发规则
         const favoriteModelIds: string[] = settings.merged?.favoriteModels || [];
         const cloudModels = config.getCloudModels() || [];
+        // 加载自定义模型（用于构建 displayName 映射）
+        let customModelsList: Array<{ id: string; displayName: string }> = [];
+        try {
+          const fileCustomModels = loadCustomModels();
+          fileCustomModels.forEach(cm => {
+            if (cm.enabled !== false) {
+              customModelsList.push({
+                id: generateCustomModelId(cm),
+                displayName: formatCustomModelDisplayName(cm),
+              });
+            }
+          });
+        } catch { /* ignore */ }
+
         const favorites = favoriteModelIds
           .map((id) => {
-            const model = cloudModels.find(m => m.name === id);
-            return model ? { name: model.name, displayName: model.displayName } : null;
-          })
-          .filter((f): f is { name: string; displayName: string } => f !== null);
+            // 优先从 cloudModels 查找
+            const cloudModel = cloudModels.find(m => m.name === id);
+            if (cloudModel) {
+              return { name: cloudModel.name, displayName: cloudModel.displayName, isCustom: false };
+            }
+            // 自定义模型 fallback
+            if (isCustomModel(id)) {
+              const customEntry = customModelsList.find(cm => cm.id === id);
+              return {
+                name: id,
+                displayName: customEntry?.displayName || id,
+                isCustom: true,
+              };
+            }
+            // 未知模型 ID，仍保留（用 ID 本身作为 displayName）
+            return { name: id, displayName: id, isCustom: false };
+          });
 
         const nlResult = detectNLTrigger(trimmedValue, { favorites });
 
