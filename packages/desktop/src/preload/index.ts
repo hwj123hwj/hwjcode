@@ -123,6 +123,7 @@ const bridge: EasycodeBridge = {
       ipcRenderer.invoke(IpcInvoke.ComputerUseSetEnabled, enabled) as Promise<ComputerUseStatus>,
     stop: () => ipcRenderer.invoke(IpcInvoke.ComputerUseStop) as Promise<void>,
     onStatus: (cb) => on<ComputerUseStatus>(IpcEvent.ComputerUseStatus, cb),
+    onStopRequested: (cb) => on<void>(IpcEvent.ComputerUseStopRequested, cb),
   },
   agents: {
     detect: () =>

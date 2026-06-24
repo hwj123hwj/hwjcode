@@ -28,6 +28,7 @@
  */
 
 import { clipboard, desktopCapturer, screen as electronScreen } from 'electron';
+import { withEscPassthrough } from './escStop';
 
 /** The discrete actions the agent can emit, mirroring Claude's `computer_20251124`. */
 export type ComputerAction =
@@ -366,8 +367,18 @@ export class ComputerUseExecutor {
           .map((t) => mapKeyName(Key, t))
           .filter((k): k is number => k != null);
         if (!keys.length) throw new Error(`Unrecognized key combo: "${combo}".`);
-        for (const k of keys) await nut.keyboard.pressKey(k);
-        for (const k of [...keys].reverse()) await nut.keyboard.releaseKey(k);
+        const press = async () => {
+          for (const k of keys) await nut.keyboard.pressKey(k);
+          for (const k of [...keys].reverse()) await nut.keyboard.releaseKey(k);
+        };
+        // If the agent itself presses Escape, momentarily release our global
+        // Esc-to-stop hotkey so the keystroke reaches the target app rather than
+        // being captured as a user stop request.
+        if (/(?:^|\+)\s*(?:esc|escape)\s*(?:$|\+)/i.test(combo)) {
+          await withEscPassthrough(press);
+        } else {
+          await press();
+        }
         return shot(`Pressed ${combo}.`);
       }
 

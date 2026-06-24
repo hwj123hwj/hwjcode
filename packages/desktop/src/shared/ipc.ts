@@ -122,6 +122,8 @@ export const IpcEvent = {
   TerminalExit: 'terminal:exit',
   /** Computer-use status changed (enabled toggled, or control started/stopped). */
   ComputerUseStatus: 'computer-use:status',
+  /** User pressed the global Esc-to-stop hotkey; renderer should unwind the turn. */
+  ComputerUseStopRequested: 'computer-use:stop-requested',
 } as const;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -918,6 +920,8 @@ export interface EasycodeBridge {
     stop(): Promise<void>;
     /** Subscribe to status changes (toggle + control start/stop). */
     onStatus(cb: (status: ComputerUseStatus) => void): () => void;
+    /** Fires when the user hits the global Esc-to-stop hotkey. */
+    onStopRequested(cb: () => void): () => void;
   };
   agents: {
     /** Detect which external agents (Claude Code / Codex) are installed locally. */

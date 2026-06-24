@@ -41,6 +41,7 @@ import { deleteCustomModel, listCustomModels, saveCustomModel } from './customMo
 import { getUserSettings, updateUserSettings } from './userSettings.js';
 import { ComputerUseManager } from './computerUse/index.js';
 import { setOverlayVisible } from './computerUse/overlay.js';
+import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
@@ -210,6 +211,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
       // Reflect "currently controlling" in the always-on-top overlay, and push
       // the full status to the renderer (Settings toggle + in-app banner).
       setOverlayVisible(status.active);
+      // Arm the global Esc-to-stop hotkey only while actively in control. Esc
+      // aborts on-screen actions immediately and asks the renderer to unwind the
+      // session turn — mirroring the in-app Stop button.
+      if (status.active) {
+        armEscStop(() => {
+          computerUse.requestStop();
+          send(IpcEvent.ComputerUseStopRequested, undefined);
+        });
+      } else {
+        disarmEscStop();
+      }
       send(IpcEvent.ComputerUseStatus, status);
     },
     log: (line) => send(IpcEvent.BackendLog, `[computer-use] ${line}`),

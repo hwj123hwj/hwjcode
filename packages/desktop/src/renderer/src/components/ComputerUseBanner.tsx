@@ -23,17 +23,26 @@ export function ComputerUseBanner() {
   const activeSessionId = useStore((s) => s.activeSessionId);
   const cancel = useStore((s) => s.cancel);
 
-  useEffect(() => {
-    void api.computerUse.status().then(setStatus).catch(() => undefined);
-    return api.computerUse.onStatus(setStatus);
-  }, []);
-
-  if (!status?.active) return null;
-
   const stop = async () => {
     await api.computerUse.stop().catch(() => undefined);
     if (activeSessionId) await cancel(activeSessionId).catch(() => undefined);
   };
+
+  useEffect(() => {
+    void api.computerUse.status().then(setStatus).catch(() => undefined);
+    const offStatus = api.computerUse.onStatus(setStatus);
+    // The global Esc hotkey already aborted on-screen actions in main; unwind the
+    // session turn too, exactly like pressing Stop.
+    const offStop = api.computerUse.onStopRequested(() => {
+      if (activeSessionId) void cancel(activeSessionId).catch(() => undefined);
+    });
+    return () => {
+      offStatus();
+      offStop();
+    };
+  }, [activeSessionId, cancel]);
+
+  if (!status?.active) return null;
 
   return (
     <div className="cu-banner" role="alert">
