@@ -34,6 +34,8 @@ export interface NLTriggerResult {
   modelName?: string;
   /** 模型显示名（仅 type=modelSwitch） */
   modelDisplayName?: string;
+  /** 匹配到的模型是否为自定义模型（仅 type=modelSwitch） */
+  isCustom?: boolean;
 
   // --- command / toolToggle 专属字段 ---
   /** 对应的 slash 命令字符串（仅 type=command 或 toolToggle） */
@@ -54,6 +56,8 @@ export interface ModelSwitchContext {
 export interface FavoriteModelEntry {
   name: string;
   displayName: string;
+  /** 是否为自定义模型（通过本地网关等自定义接入的模型） */
+  isCustom?: boolean;
 }
 
 /**
@@ -118,6 +122,22 @@ const NOISE_WORDS = [
   '换', '切换', '切换至', '换为', '换到',
 ];
 
+/**
+ * 从自定义模型 ID 中提取实际的 modelId
+ * 格式: custom:{provider}:{modelId}@{hash}
+ * 例如: custom:openai:glm-5.2@abc123 → glm-5.2
+ */
+function extractCustomModelId(fullId: string): string {
+  const withoutPrefix = fullId.replace(/^custom:/, '');
+  // split on first ':' to get provider, then rest is modelId@hash
+  const colonIdx = withoutPrefix.indexOf(':');
+  if (colonIdx < 0) return fullId;
+  const modelPart = withoutPrefix.slice(colonIdx + 1);
+  // strip the @hash suffix
+  const atIdx = modelPart.lastIndexOf('@');
+  return atIdx > 0 ? modelPart.slice(0, atIdx) : modelPart;
+}
+
 function stripNoise(input: string): string {
   let clean = input;
   // 去除中英文标点符号（用户输入常带句号、感叹号等）
@@ -127,6 +147,20 @@ function stripNoise(input: string): string {
   }
   // 去标点后可能暴露的尾部空格再 trim 一次
   return clean.trim();
+}
+
+/**
+ * 检测并移除"自定义"修饰词
+ * @returns { customOnly: boolean, cleaned: string }
+ */
+function extractCustomModifier(input: string): { customOnly: boolean; cleaned: string } {
+  const CUSTOM_KEYWORDS = ['自定义的', '自定义'];
+  for (const kw of CUSTOM_KEYWORDS) {
+    if (input.includes(kw)) {
+      return { customOnly: true, cleaned: input.replace(kw, '').trim() };
+    }
+  }
+  return { customOnly: false, cleaned: input };
 }
 
 // ============================================================
@@ -242,37 +276,73 @@ function findKeywordMatch(text: string, keywords: string[]): string | null {
 }
 
 /**
- * 模型名匹配（4 层策略：精确名 → displayName → 拆词模糊 → 厂商别名）
+ * 模型名匹配（5 层策略 + 自定义模型支持）
+ *
+ * 匹配策略（按顺序）：
+ * 1. 精确匹配 model name（含自定义模型实际 modelId）
+ * 2. 精确匹配 displayName
+ * 3. 拆词模糊匹配
+ * 4. 厂商别名匹配
+ * 5. 前缀匹配
+ *
+ * 自定义模型支持：
+ * - 当 customOnly=true 时，仅匹配 isCustom 的收藏
+ * - 当 customOnly=false（默认）时，优先匹配非自定义模型；
+ *   若非自定义无匹配但自定义有匹配，则返回自定义模型
+ * - 自定义模型 ID 中的实际 modelId（从 custom:{provider}:{modelId}@{hash} 提取）也参与匹配
  */
 function matchModelName(
   query: string,
   favorites: FavoriteModelEntry[],
   vendorAliases?: Record<string, string>,
-): { modelName: string; modelDisplayName: string } | null {
+  customOnly?: boolean,
+): { modelName: string; modelDisplayName: string; isCustom?: boolean } | null {
   const q = query.toLowerCase();
 
+  // 按 customOnly 过滤候选列表
+  const candidates = customOnly
+    ? favorites.filter(f => f.isCustom)
+    : favorites;
+
+  // 辅助：构建结果
+  const toResult = (fav: FavoriteModelEntry) => ({
+    modelName: fav.name,
+    modelDisplayName: fav.displayName || fav.name,
+    isCustom: fav.isCustom || false,
+  });
+
   // 1. 精确匹配 model name
-  for (const fav of favorites) {
-    if (fav.name.toLowerCase() === q) {
-      return { modelName: fav.name, modelDisplayName: fav.displayName || fav.name };
+  for (const fav of candidates) {
+    if (fav.name.toLowerCase() === q) return toResult(fav);
+  }
+  // 自定义模型：也用提取出的实际 modelId 匹配
+  if (!customOnly) {
+    for (const fav of favorites.filter(f => f.isCustom)) {
+      const actualId = extractCustomModelId(fav.name);
+      if (actualId.toLowerCase() === q) return toResult(fav);
     }
   }
 
   // 2. 精确匹配 displayName
-  for (const fav of favorites) {
-    if (fav.displayName?.toLowerCase() === q) {
-      return { modelName: fav.name, modelDisplayName: fav.displayName || fav.name };
-    }
+  for (const fav of candidates) {
+    if (fav.displayName?.toLowerCase() === q) return toResult(fav);
   }
 
   // 3. 拆词模糊匹配：查询词拆成关键词，全部命中才匹配
   const queryKeywords = q.split(/\s+/).filter(k => k.length > 0);
-  for (const fav of favorites) {
+  for (const fav of candidates) {
     const name = fav.name.toLowerCase();
     const display = (fav.displayName || '').toLowerCase();
     const combined = `${name} ${display}`;
-    if (queryKeywords.every(kw => combined.includes(kw))) {
-      return { modelName: fav.name, modelDisplayName: fav.displayName || fav.name };
+    if (queryKeywords.every(kw => combined.includes(kw))) return toResult(fav);
+  }
+  // 自定义模型：也用提取出的实际 modelId 参与匹配
+  if (!customOnly) {
+    for (const fav of favorites.filter(f => f.isCustom)) {
+      const actualId = extractCustomModelId(fav.name).toLowerCase();
+      const display = (fav.displayName || '').toLowerCase();
+      const combined = `${actualId} ${display}`;
+      if (queryKeywords.every(kw => combined.includes(kw))) return toResult(fav);
     }
   }
 
@@ -280,11 +350,21 @@ function matchModelName(
   if (vendorAliases) {
     const vendorId = vendorAliases[q];
     if (vendorId) {
-      for (const fav of favorites) {
-        if (fav.name.toLowerCase().startsWith(vendorId)) {
-          return { modelName: fav.name, modelDisplayName: fav.displayName || fav.name };
+      for (const fav of candidates) {
+        const nameLower = fav.name.toLowerCase();
+        const actualId = fav.isCustom ? extractCustomModelId(fav.name).toLowerCase() : nameLower;
+        if (nameLower.startsWith(vendorId) || actualId.startsWith(vendorId)) {
+          return toResult(fav);
         }
       }
+    }
+  }
+
+  // 5. 前缀匹配（如用户说 "gemini" 可匹配 "gemini-2.5-flash"）
+  if (!customOnly) {
+    for (const fav of candidates) {
+      const nameLower = fav.name.toLowerCase();
+      if (nameLower.startsWith(q)) return toResult(fav);
     }
   }
 
@@ -347,18 +427,22 @@ export function detectNLTrigger(
 
         if (!matchedKw || !remaining) continue;
 
+        // 检测"自定义"修饰词（如"切换自定义智谱" → customOnly=true, cleaned="智谱"）
+        const { customOnly, cleaned: remainingAfterCustom } = extractCustomModifier(remaining);
+
         // 去噪
-        const cleanRemaining = stripNoise(remaining);
+        const cleanRemaining = stripNoise(remainingAfterCustom);
         if (!cleanRemaining) continue;
 
         // 模型名匹配
-        const modelMatch = matchModelName(cleanRemaining, context.favorites, rule.vendorAliases);
+        const modelMatch = matchModelName(cleanRemaining, context.favorites, rule.vendorAliases, customOnly);
         if (modelMatch) {
           return {
             type: 'modelSwitch',
             matchedKeyword: matchedKw,
             modelName: modelMatch.modelName,
             modelDisplayName: modelMatch.modelDisplayName,
+            isCustom: modelMatch.isCustom,
           };
         }
         // 模型切换关键词命中但模型名未匹配 → 不继续匹配其他规则
