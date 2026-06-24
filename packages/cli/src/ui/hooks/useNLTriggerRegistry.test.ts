@@ -16,6 +16,7 @@ const mockFavorites: FavoriteModelEntry[] = [
   { name: 'glm-5.2', displayName: 'GLM-5.2' },
   { name: 'deepseek-v4-flash', displayName: 'DeepSeek-V4-Flash' },
   { name: 'gemini-2.5-flash', displayName: 'Gemini-2.5-Flash' },
+  { name: 'mimo-opus', displayName: 'MiMo-Opus' },
 ];
 
 // ============================================================
@@ -95,6 +96,18 @@ describe('模型切换（type=modelSwitch）', () => {
     const result = detectNLTrigger('切双子星', { favorites: mockFavorites });
     expect(result).not.toBeNull();
     expect(result!.modelName).toBe('gemini-2.5-flash');
+  });
+
+  it('匹配 "用小米"（厂商别名 → mimo）', () => {
+    const result = detectNLTrigger('用小米', { favorites: mockFavorites });
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('mimo-opus');
+  });
+
+  it('匹配 "切xiaomi"（英文厂商别名 → mimo）', () => {
+    const result = detectNLTrigger('切xiaomi', { favorites: mockFavorites });
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('mimo-opus');
   });
 
   // 不匹配场景
