@@ -218,6 +218,24 @@ export function getProjectSkillsDir(projectRoot: string): string {
   return path.join(projectRoot, PROJECT_DIR_PREFIX, SKILLS_DIR_NAME);
 }
 
+const CUSTOM_SKILLS_REPO_NAME = 'custom-skills';
+
+/**
+ * Returns the absolute path to the custom-skills source repository.
+ * Stored under ~/.easycode-user/custom-skills/ for cross-environment consistency.
+ */
+export function getCustomSkillsRepo(): string {
+  return path.join(os.homedir(), GEMINI_DIR, CUSTOM_SKILLS_REPO_NAME);
+}
+
+/**
+ * Returns the absolute path to a specific skill in the custom-skills source repository.
+ * @param skillId - The skill identifier (e.g. "butler")
+ */
+export function getCustomSkillPath(skillId: string): string {
+  return path.join(getCustomSkillsRepo(), SKILLS_DIR_NAME, skillId);
+}
+
 /**
  * Recursively copies a directory to a new location.
  */
