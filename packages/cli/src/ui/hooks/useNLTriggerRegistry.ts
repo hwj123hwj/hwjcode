@@ -195,6 +195,8 @@ const NL_TRIGGER_RULES: NLTriggerRule[] = [
       '谷歌': 'gemini',
       '小米': 'mimo',
       'xiaomi': 'mimo',
+      '美团': 'longcat',
+      'meituan': 'longcat',
     },
   },
 

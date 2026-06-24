@@ -17,6 +17,7 @@ const mockFavorites: FavoriteModelEntry[] = [
   { name: 'deepseek-v4-flash', displayName: 'DeepSeek-V4-Flash' },
   { name: 'gemini-2.5-flash', displayName: 'Gemini-2.5-Flash' },
   { name: 'mimo-opus', displayName: 'MiMo-Opus' },
+  { name: 'longcat-opus', displayName: 'LongCat-Opus' },
 ];
 
 // ============================================================
@@ -108,6 +109,18 @@ describe('模型切换（type=modelSwitch）', () => {
     const result = detectNLTrigger('切xiaomi', { favorites: mockFavorites });
     expect(result).not.toBeNull();
     expect(result!.modelName).toBe('mimo-opus');
+  });
+
+  it('匹配 "用美团"（厂商别名 → longcat）', () => {
+    const result = detectNLTrigger('用美团', { favorites: mockFavorites });
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('longcat-opus');
+  });
+
+  it('匹配 "切meituan"（英文厂商别名 → longcat）', () => {
+    const result = detectNLTrigger('切meituan', { favorites: mockFavorites });
+    expect(result).not.toBeNull();
+    expect(result!.modelName).toBe('longcat-opus');
   });
 
   // 不匹配场景
