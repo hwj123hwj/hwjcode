@@ -193,6 +193,8 @@ const NL_TRIGGER_RULES: NLTriggerRule[] = [
       'ds': 'deepseek',
       '双子星': 'gemini',
       '谷歌': 'gemini',
+      '小米': 'mimo',
+      'xiaomi': 'mimo',
     },
   },
 
