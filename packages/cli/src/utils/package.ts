@@ -31,13 +31,14 @@ export async function getPackageJson(): Promise<PackageJson | undefined> {
 
   const result = await readPackageUp({ cwd: __dirname });
   if (!result) {
-    // TODO: Maybe bubble this up as an error.
+    // 打包后 readPackageUp 可能找不到 package.json，fallback 到构建时注入的环境变量
+    const injectedName = process.env.CLI_NAME;
+    const injectedVersion = process.env.CLI_VERSION;
+    if (injectedName && injectedVersion) {
+      packageJson = { name: injectedName, version: injectedVersion } as PackageJson;
+      return packageJson;
+    }
     return;
-  }
-
-  // 调试信息：显示实际读取的文件路径 (仅开发模式)
-  if (process.env.DEV === 'true' || process.env.NODE_ENV === 'development') {
-
   }
 
   packageJson = result.packageJson;
