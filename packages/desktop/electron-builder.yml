@@ -31,6 +31,12 @@ asarUnpack:
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # arm64-only 构建必须把最低系统设为 12.0+，否则 App Store Connect 校验失败：
+  #   "supports arm64 but not Intel ... deployment target must be 12.0 or higher"。
+  # 声明 12.0 等于告诉 Apple 我们是“有意只支持 Apple Silicon”，无需 x86_64。
+  # electron-builder 会写进 Info.plist 的 LSMinimumSystemVersion；放在 `mac` 根，
+  # dmg/zip 均生效。
+  minimumSystemVersion: '12.0'
   # Lives at the `mac` root: electron-builder 25.x rejects `artifactName`
   # inside a target array entry. Mirrors the Windows artifactName; productName
   # stays "Easy Code" so the app display name and DMG volume are unchanged.
