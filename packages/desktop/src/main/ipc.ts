@@ -38,7 +38,15 @@ import {
   searchFiles,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
-import { getUserSettings, updateUserSettings } from './userSettings.js';
+import {
+  getCustomInstructions,
+  getUserSettings,
+  saveCustomInstructions,
+  updateUserSettings,
+} from './userSettings.js';
+import { ComputerUseManager } from './computerUse/index.js';
+import { setOverlayVisible } from './computerUse/overlay.js';
+import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
@@ -63,6 +71,7 @@ export interface IpcServices {
   feishu: FeishuManager;
   updater: UpdateManager;
   terminals: TerminalManager;
+  computerUse: ComputerUseManager;
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices {
@@ -78,8 +87,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
       notifier.handle(sessionId, event);
       send(IpcEvent.SessionEvent, { sessionId, event });
     },
-    sessionStatus: (sessionId, status, meta) =>
-      send(IpcEvent.SessionStatus, { sessionId, status, meta }),
+    sessionStatus: (sessionId, status, meta) => {
+      // When a turn finishes, let computer-use drop the "controlling" overlay
+      // instead of timing out between actions (which made it flicker).
+      if (status === 'idle') computerUse.noteTurnIdle();
+      send(IpcEvent.SessionStatus, { sessionId, status, meta });
+    },
     permissionRequest: (req) => send(IpcEvent.PermissionRequest, req),
     backendLog: (line) => send(IpcEvent.BackendLog, line),
   });
@@ -185,6 +198,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.SettingsUpdate, (_e, patch: DesktopUserSettings) =>
     updateUserSettings(patch),
   );
+  ipcMain.handle(IpcInvoke.InstructionsGet, () => getCustomInstructions());
+  ipcMain.handle(IpcInvoke.InstructionsSave, (_e, content: string) =>
+    saveCustomInstructions(content),
+  );
 
   // ── color theme ───────────────────────────────────────────────────────────
   // Mirror the renderer's GUI theme onto the native window chrome (title bar,
@@ -194,6 +211,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.ThemeSet, (_e, mode: ThemeMode) => {
     nativeTheme.themeSource = mode;
   });
+
+  // ── computer use (agent controls the real desktop) ─────────────────────────
+  const computerUse = new ComputerUseManager({
+    initialEnabled: getUserSettings().computerUseEnabled === true,
+    persistEnabled: (enabled) => updateUserSettings({ computerUseEnabled: enabled }),
+    onStatus: (status) => {
+      // Reflect "currently controlling" in the always-on-top overlay, and push
+      // the full status to the renderer (Settings toggle + in-app banner).
+      setOverlayVisible(status.active);
+      // Arm the global Esc-to-stop hotkey only while actively in control. Esc
+      // aborts on-screen actions immediately and asks the renderer to unwind the
+      // session turn — mirroring the in-app Stop button.
+      if (status.active) {
+        armEscStop(() => {
+          computerUse.requestStop();
+          send(IpcEvent.ComputerUseStopRequested, undefined);
+        });
+      } else {
+        disarmEscStop();
+      }
+      send(IpcEvent.ComputerUseStatus, status);
+    },
+    log: (line) => send(IpcEvent.BackendLog, `[computer-use] ${line}`),
+  });
+  // Bring the localhost MCP server up before any backend spawns so the settings
+  // file carries a valid port. Non-fatal if it fails — the tool just won't load.
+  void computerUse.start().catch((err) =>
+    send(IpcEvent.BackendLog, `[computer-use] failed to start: ${String(err)}`),
+  );
+  ipcMain.handle(IpcInvoke.ComputerUseStatus, () => computerUse.getStatus());
+  ipcMain.handle(IpcInvoke.ComputerUseSetEnabled, (_e, enabled: boolean) =>
+    computerUse.setEnabled(enabled),
+  );
+  ipcMain.handle(IpcInvoke.ComputerUseStop, () => computerUse.requestStop());
 
   // ── permissions ─────────────────────────────────────────────────────────
   ipcMain.handle(
@@ -268,5 +319,5 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
   ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
 
-  return { hub, feishu, updater, terminals };
+  return { hub, feishu, updater, terminals, computerUse };
 }

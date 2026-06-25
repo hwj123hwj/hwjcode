@@ -1140,3 +1140,95 @@ describe('GeminiChat.sanitizeRequestContents > 带真实 id 的孤立 fr（Bedro
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// computer-use 截图裁剪：只保留最近 N 张，旧图换成文本占位符，配对结构不动
+// ─────────────────────────────────────────────────────────────────────
+describe('GeminiChat.sanitizeRequestContents > computer-use 截图裁剪', () => {
+  // 造一个「computer 工具 functionResponse + 截图 image」的 user 轮次。
+  function computerTurn(step: number, toolName = 'computer'): Content[] {
+    return [
+      {
+        role: MESSAGE_ROLES.MODEL,
+        parts: [
+          { functionCall: { name: toolName, id: `cu-${step}`, args: { action: 'screenshot' } } as any },
+        ],
+      },
+      {
+        role: MESSAGE_ROLES.USER,
+        parts: [
+          {
+            functionResponse: {
+              name: toolName,
+              id: `cu-${step}`,
+              response: { output: `Captured screenshot. (step ${step})` },
+            } as any,
+          },
+          { inlineData: { mimeType: 'image/jpeg', data: `base64-shot-${step}` } as any },
+        ],
+      },
+    ];
+  }
+
+  function countInlineImages(contents: Content[]): number {
+    return contents
+      .flatMap((c) => c.parts ?? [])
+      .filter((p: any) => typeof p?.inlineData?.mimeType === 'string' && p.inlineData.mimeType.startsWith('image/'))
+      .length;
+  }
+
+  it('超过保留上限时，只保留最近 3 张截图，其余替换为文本占位符', () => {
+    const input: Content[] = Array.from({ length: 6 }, (_, i) => computerTurn(i + 1)).flat();
+    expect(countInlineImages(input)).toBe(6);
+
+    const out = GeminiChat.sanitizeRequestContents(input);
+
+    // 只剩最近 3 张
+    expect(countInlineImages(out)).toBe(3);
+    // 保留的应是最后三步（4/5/6），最早三步（1/2/3）被换成占位符
+    const keptData = out
+      .flatMap((c) => c.parts ?? [])
+      .map((p: any) => p?.inlineData?.data)
+      .filter(Boolean);
+    expect(keptData).toEqual(['base64-shot-4', 'base64-shot-5', 'base64-shot-6']);
+    // 占位符文本出现 3 次
+    const placeholders = out
+      .flatMap((c) => c.parts ?? [])
+      .filter((p: any) => typeof p?.text === 'string' && p.text.includes('earlier screenshot omitted'));
+    expect(placeholders.length).toBe(3);
+  });
+
+  it('裁剪不破坏 functionResponse 配对：每个 fr 仍然在场', () => {
+    const input: Content[] = Array.from({ length: 5 }, (_, i) => computerTurn(i + 1)).flat();
+    const out = GeminiChat.sanitizeRequestContents(input);
+    const frCount = out
+      .flatMap((c) => c.parts ?? [])
+      .filter((p: any) => p?.functionResponse?.name && isCu(p.functionResponse.name)).length;
+    expect(frCount).toBe(5);
+  });
+
+  it('数量未超上限时不动任何截图', () => {
+    const input: Content[] = Array.from({ length: 2 }, (_, i) => computerTurn(i + 1)).flat();
+    const out = GeminiChat.sanitizeRequestContents(input);
+    expect(countInlineImages(out)).toBe(2);
+  });
+
+  it('server-qualified 名称（…__computer）同样被识别', () => {
+    const input: Content[] = Array.from({ length: 5 }, (_, i) =>
+      computerTurn(i + 1, 'easycode-computer-use__computer'),
+    ).flat();
+    const out = GeminiChat.sanitizeRequestContents(input);
+    expect(countInlineImages(out)).toBe(3);
+  });
+
+  it('非 computer 工具的图片不受影响（避免误伤 read_file 等）', () => {
+    const input: Content[] = Array.from({ length: 5 }, (_, i) => computerTurn(i + 1, 'read_file')).flat();
+    const out = GeminiChat.sanitizeRequestContents(input);
+    // read_file 不是 computer 工具，5 张图全部保留
+    expect(countInlineImages(out)).toBe(5);
+  });
+
+  function isCu(name: string): boolean {
+    return name === 'computer' || name.endsWith('__computer');
+  }
+});
+

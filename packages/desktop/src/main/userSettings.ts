@@ -35,9 +35,19 @@ const TERMINAL_SHELL_KINDS: TerminalShellKind[] = [
 
 const SETTINGS_DIRECTORY_NAME = '.easycode-user';
 const SETTINGS_FILE = 'settings.json';
+/**
+ * Global custom-instructions file: the user's home-level memory the agent loads
+ * for every task on this machine (NOT a project's `.easycode/DEEPV.md`). Shared
+ * with the CLI/backend, which read it from the same path on session start.
+ */
+const INSTRUCTIONS_FILE = 'DEEPV.md';
 
 function filePath(): string {
   return path.join(homedir(), SETTINGS_DIRECTORY_NAME, SETTINGS_FILE);
+}
+
+function instructionsPath(): string {
+  return path.join(homedir(), SETTINGS_DIRECTORY_NAME, INSTRUCTIONS_FILE);
 }
 
 /** Read the full settings object from disk; never throws (returns {} on failure). */
@@ -66,6 +76,7 @@ function writeRaw(data: Record<string, unknown>): void {
 function project(raw: Record<string, unknown>): DesktopUserSettings {
   const out: DesktopUserSettings = {};
   if (typeof raw.preferredLanguage === 'string') out.preferredLanguage = raw.preferredLanguage;
+  if (typeof raw.defaultModel === 'string') out.defaultModel = raw.defaultModel;
   if (typeof raw.healthyUse === 'boolean') out.healthyUse = raw.healthyUse;
   if (
     raw.projectMemoryMode === 'all' ||
@@ -79,6 +90,9 @@ function project(raw: Record<string, unknown>): DesktopUserSettings {
     TERMINAL_SHELL_KINDS.includes(raw.terminalShell as TerminalShellKind)
   ) {
     out.terminalShell = raw.terminalShell as TerminalShellKind;
+  }
+  if (typeof raw.computerUseEnabled === 'boolean') {
+    out.computerUseEnabled = raw.computerUseEnabled;
   }
   return out;
 }
@@ -101,6 +115,11 @@ export function updateUserSettings(patch: DesktopUserSettings): DesktopUserSetti
     if (v) raw.preferredLanguage = v;
     else delete raw.preferredLanguage;
   }
+  if ('defaultModel' in patch) {
+    const v = patch.defaultModel?.trim();
+    if (v) raw.defaultModel = v;
+    else delete raw.defaultModel; // empty = clear (back to backend default)
+  }
   if ('healthyUse' in patch && typeof patch.healthyUse === 'boolean') {
     raw.healthyUse = patch.healthyUse;
   }
@@ -111,7 +130,47 @@ export function updateUserSettings(patch: DesktopUserSettings): DesktopUserSetti
     if (patch.terminalShell === 'default') delete raw.terminalShell;
     else raw.terminalShell = patch.terminalShell;
   }
+  if ('computerUseEnabled' in patch && typeof patch.computerUseEnabled === 'boolean') {
+    raw.computerUseEnabled = patch.computerUseEnabled;
+  }
 
   writeRaw(raw);
   return project(raw);
+}
+
+/**
+ * Read the global custom-instructions (`~/.easycode-user/DEEPV.md`). Returns an
+ * empty string when the file doesn't exist yet; never throws.
+ */
+export function getCustomInstructions(): string {
+  try {
+    const fp = instructionsPath();
+    if (!fs.existsSync(fp)) return '';
+    return fs.readFileSync(fp, 'utf-8');
+  } catch (err) {
+    console.warn('[userSettings] Failed to read DEEPV.md:', err);
+    return '';
+  }
+}
+
+/**
+ * Write the global custom-instructions (`~/.easycode-user/DEEPV.md`) atomically.
+ * An empty/whitespace-only body removes the file so the agent loads no global
+ * instructions. Returns the persisted content.
+ */
+export function saveCustomInstructions(content: string): string {
+  const fp = instructionsPath();
+  fs.mkdirSync(path.dirname(fp), { recursive: true });
+  if (!content.trim()) {
+    try {
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch (err) {
+      console.warn('[userSettings] Failed to remove DEEPV.md:', err);
+    }
+    return '';
+  }
+  const tmp = fp + '.tmp';
+  fs.writeFileSync(tmp, content, 'utf-8');
+  fs.renameSync(tmp, fp);
+  return content;
 }

@@ -541,7 +541,7 @@ export const useStore = create<StoreState>((set, get) => ({
       cwd,
       permissionMode: mode,
       agentType,
-      model: model ?? defaultModelFor(get()),
+      model: await resolveDefaultModel(get(), model),
     });
     liveSessions.add(meta.id);
     set((s) => ({
@@ -555,7 +555,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const meta = await api.sessions.createChat({
       permissionMode: mode ?? 'default',
       agentType,
-      model: model ?? defaultModelFor(get()),
+      model: await resolveDefaultModel(get(), model),
     });
     liveSessions.add(meta.id);
     set((s) => ({
@@ -896,13 +896,29 @@ async function firstEnabledCustomModelId(): Promise<string | undefined> {
 }
 
 /**
- * The model a freshly created session should default to. In custom-model-only
- * mode that's the captured custom model (otherwise the backend would fall back
- * to the cloud model, which 401s when not signed in). Signed-in users get the
- * backend default (undefined).
+ * The model a freshly created session should default to. Priority:
+ *   1. an explicit `model` passed by the caller (a picker selection),
+ *   2. the user's global default-model setting (`~/.easycode-user/settings.json`),
+ *      so they don't have to choose a model on every new session,
+ *   3. in custom-model-only mode, the captured custom model — otherwise the
+ *      backend falls back to the cloud model, which 401s when not signed in.
+ * Resolving to `undefined` lets the backend pick its own default.
+ *
+ * When not signed in (custom-model-only mode) the cloud models are unusable, so
+ * a global default is only honoured there if it's itself a custom model.
  */
-function defaultModelFor(s: StoreState): string | undefined {
-  return s.customModelOnly ? s.defaultCustomModelId : undefined;
+async function resolveDefaultModel(s: StoreState, explicit?: string): Promise<string | undefined> {
+  if (explicit !== undefined) return explicit;
+  let globalDefault: string | undefined;
+  try {
+    globalDefault = (await api.settings.get()).defaultModel?.trim() || undefined;
+  } catch {
+    /* settings unreadable — fall back below */
+  }
+  if (s.customModelOnly) {
+    return globalDefault?.startsWith('custom:') ? globalDefault : s.defaultCustomModelId;
+  }
+  return globalDefault;
 }
 
 type SetFn = (

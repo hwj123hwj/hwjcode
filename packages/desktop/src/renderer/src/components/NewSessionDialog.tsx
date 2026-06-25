@@ -30,6 +30,9 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const createSession = useStore((s) => s.createSession);
   const createChatSession = useStore((s) => s.createChatSession);
   const t = useT();
+  // 'project' binds a working directory; 'chat' is a directory-less "just chat"
+  // session (the Chats section) — no folder to pick.
+  const [sessionType, setSessionType] = useState<'project' | 'chat'>('project');
   const [cwd, setCwd] = useState('');
   const [agent, setAgent] = useState<AgentKind>('easy-code');
   const [available, setAvailable] = useState<ExternalAgentAvailability>({
@@ -65,15 +68,18 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   };
 
   const start = async () => {
+    // A 闲聊 session is directory-less; a 项目 session needs a working directory.
+    if (sessionType === 'project' && !cwd.trim()) {
+      setError(t('newSession.pickDirError'));
+      return;
+    }
     setBusy(true);
     setError('');
     try {
-      // No directory → a directory-less "just chat" session (Chats section).
-      // With a directory → a project-bound session.
-      if (cwd.trim()) {
-        await createSession(cwd, mode, agent);
-      } else {
+      if (sessionType === 'chat') {
         await createChatSession(mode, agent);
+      } else {
+        await createSession(cwd, mode, agent);
       }
       onClose();
     } catch (e) {
@@ -107,6 +113,28 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
             </span>
           </div>
 
+          <label className="field-label">{t('newSession.type')}</label>
+          <div className="prompt-config">
+            <span
+              className={`chip interactive ${sessionType === 'project' ? 'accent' : ''}`}
+              title={t('newSession.typeProjectHint')}
+              onClick={() => setSessionType('project')}
+            >
+              {sessionType === 'project' && <Icon name="check" size={13} />}
+              <Icon name="folder-open" size={14} />
+              {t('newSession.typeProject')}
+            </span>
+            <span
+              className={`chip interactive ${sessionType === 'chat' ? 'accent' : ''}`}
+              title={t('newSession.typeChatHint')}
+              onClick={() => setSessionType('chat')}
+            >
+              {sessionType === 'chat' && <Icon name="check" size={13} />}
+              <Icon name="sparkle" size={14} />
+              {t('newSession.typeChat')}
+            </span>
+          </div>
+
           <label className="field-label">Agent</label>
           <div className="prompt-config">
             {agentOptions.map((a) => (
@@ -123,20 +151,24 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
             ))}
           </div>
 
-          <label className="field-label">{t('newSession.projectDirOptional')}</label>
-          <div className="prompt-input-wrap">
-            <input
-              className="prompt-input"
-              style={{ height: 22 }}
-              placeholder={t('newSession.pickFolderOptionalPlaceholder')}
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-            />
-            <button className="btn" onClick={pick}>
-              <Icon name="folder-open" size={14} />
-              {t('newSession.browse')}
-            </button>
-          </div>
+          {sessionType === 'project' && (
+            <>
+              <label className="field-label">{t('newSession.projectDir')}</label>
+              <div className="prompt-input-wrap">
+                <input
+                  className="prompt-input"
+                  style={{ height: 22 }}
+                  placeholder={t('newSession.pickFolderPlaceholder')}
+                  value={cwd}
+                  onChange={(e) => setCwd(e.target.value)}
+                />
+                <button className="btn" onClick={pick}>
+                  <Icon name="folder-open" size={14} />
+                  {t('newSession.browse')}
+                </button>
+              </div>
+            </>
+          )}
 
           {agent === 'easy-code' ? (
             <>

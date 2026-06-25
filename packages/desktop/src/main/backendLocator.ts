@@ -18,6 +18,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import { desktopSystemSettingsPath } from './computerUse/paths.js';
 
 export interface BackendSpec {
   /** Executable to spawn (the Electron binary, run as Node). */
@@ -91,6 +92,13 @@ export function buildBackendSpec(): BackendSpec {
       //   desktop system-prompt environment context (mirrors VSCODE_PLUGIN=1).
       CLI_VERSION: `Desktop-${app.getVersion()}`,
       EASYCODE_DESKTOP: '1',
+      // Inject the computer-use MCP server into THIS backend (and only desktop
+      // backends) by overriding core's system-settings path. The file is owned
+      // by ComputerUseManager and carries the MCP entry only while the user has
+      // enabled computer use, so a disabled toggle means the tool isn't even
+      // advertised. The CLI never sets this env, so standalone runs are
+      // unaffected. See main/computerUse/paths.ts.
+      GEMINI_CLI_SYSTEM_SETTINGS_PATH: desktopSystemSettingsPath(),
       // Carry the same proxy/web endpoints the CLI uses. Production has these
       // baked in; we only forward overrides when present so dev (api-code/dvcode)
       // and prod both work without special-casing here.

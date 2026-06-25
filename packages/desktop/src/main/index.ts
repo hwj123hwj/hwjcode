@@ -7,19 +7,22 @@
  * IPC bridge and ACP session hub wired in.
  */
 
-import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, Menu, shell, nativeTheme, nativeImage } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { ensurePathFromLoginShell } from './shellPath.js';
 import { createTray, destroyTray } from './tray.js';
+import { destroyOverlay } from './computerUse/overlay.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
 import type { UpdateManager } from './updater.js';
 import type { TerminalManager } from './terminals.js';
+import type { ComputerUseManager } from './computerUse/index.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
-// taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
-// from the packaged .app bundle, so this is harmless there.
+// taskbar icon at runtime (dev + Linux/Windows), and — via app.dock.setIcon in
+// bootstrap() — as the macOS dock icon for unpackaged/dev runs (a packaged .app
+// gets its dock icon from the bundle's icns; setting it again is harmless).
 import appIcon from '../../build/icon.png?asset';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +32,7 @@ let hub: SessionHub | null = null;
 let feishu: FeishuManager | null = null;
 let updater: UpdateManager | null = null;
 let terminals: TerminalManager | null = null;
+let computerUse: ComputerUseManager | null = null;
 
 // Distinguishes "user clicked X / Cmd+W" (→ hide to tray) from "the app is
 // really quitting" (→ let the window close). Set true by the only paths that
@@ -187,11 +191,17 @@ function bootstrap(): void {
       // default macOS menu shows "Electron" in dev/unpackaged runs regardless
       // of app.setName. Keep the standard edit/window shortcuts working.
       setMacAppMenu();
+      // Show the Easy Code logo in the dock. A packaged .app already gets its
+      // dock icon from the bundle's icns, but dev/unpackaged runs (electron-vite
+      // serve, `electron .`) otherwise show the generic Electron icon — so set
+      // it explicitly. `app.dock` exists only on macOS; guarded above.
+      const dockIcon = nativeImage.createFromPath(appIcon);
+      if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
     } else {
       // Drop the default application menu on Windows/Linux entirely.
       Menu.setApplicationMenu(null);
     }
-    ({ hub, feishu, updater, terminals } = registerIpc(() => mainWindow));
+    ({ hub, feishu, updater, terminals, computerUse } = registerIpc(() => mainWindow));
     createWindow();
     // System tray: closing the window hides it here, so the tray is the way
     // back to a visible window (and to an explicit Quit).
@@ -225,6 +235,10 @@ app.on('before-quit', () => {
   updater?.dispose();
   // Kill any integrated-terminal shells so we never orphan a child process.
   terminals?.disposeAll();
+  // Stop the computer-use MCP server + abort any in-flight on-screen action,
+  // and tear down the always-on-top control overlay.
+  computerUse?.dispose();
+  destroyOverlay();
   // Remove the tray icon so it doesn't linger after the windows are gone.
   destroyTray();
 });
