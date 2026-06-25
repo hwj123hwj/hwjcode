@@ -38,7 +38,6 @@
     "diff": "^8.0.3",
     "dotenv": "^17.1.0",
     "express": "^5.1.0",
-    "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "iconv-lite": "^0.7.0",
     "ink": "npm:@jrichman/ink@6.6.9",
