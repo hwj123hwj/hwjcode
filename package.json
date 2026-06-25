@@ -164,6 +164,7 @@
     "ajv": "^8.17.1",
     "ink": "npm:@jrichman/ink@6.6.9",
     "wrap-ansi": "^7.0.0",
-    "axios": "^1.16.0"
+    "axios": "^1.16.0",
+    "js-yaml": "^4.1.0"
   }
 }

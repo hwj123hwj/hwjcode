@@ -35,7 +35,7 @@
     "@types/qrcode-terminal": "^0.12.2",
     "command-exists": "^1.2.9",
     "deepv-code-core": "file:../core",
-    "diff": "^7.0.0",
+    "diff": "^8.0.3",
     "dotenv": "^17.1.0",
     "express": "^5.1.0",
     "gray-matter": "^4.0.3",
