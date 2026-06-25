@@ -16,7 +16,6 @@
     "pack:dir": "electron-vite build && node scripts/pack-installer.cjs --dir",
     "pack:win": "electron-vite build && node scripts/pack-installer.cjs --win",
     "pack:mac": "electron-vite build && node scripts/pack-installer.cjs --mac",
-    "pack:mac:pkg": "electron-vite build && node scripts/pack-installer.cjs --mac mas --arm64",
     "pack:linux": "electron-vite build && node scripts/pack-installer.cjs --linux",
     "pack:all": "electron-vite build && node scripts/pack-installer.cjs --win --mac --linux",
     "lint": "eslint . --ext .ts,.tsx"
