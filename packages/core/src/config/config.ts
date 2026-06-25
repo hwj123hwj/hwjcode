@@ -52,6 +52,7 @@ import { BatchTool } from '../tools/batch.js';
 import { AskUserQuestionTool } from '../tools/ask-user-question.js';
 import { LocalTimeTool } from '../tools/local-time.js';
 import { LarkCliTool } from '../tools/lark-cli.js';
+import { OpenCliTool } from '../tools/opencli.js';
 import { DelegateToAgentTool } from '../tools/delegate-agent.js';
 import { CheckDelegateStatusTool } from '../tools/delegate-status.js';
 import { hasAnyLocalAgent } from '../acp-client/localAgentDetection.js';
@@ -1156,6 +1157,7 @@ export class Config {
 
     registerCoreTool(LocalTimeTool, this);
     registerCoreTool(LarkCliTool, this);
+    registerCoreTool(OpenCliTool, this);
 
     // Delegate-to-external-agent (ACP client). Only register when at least
     // one external agent (Claude Code or Codex) is detected on the user's
