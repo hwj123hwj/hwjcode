@@ -26,7 +26,7 @@ import * as http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { desktopCapturer, shell, systemPreferences } from 'electron';
+import { shell, systemPreferences } from 'electron';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
@@ -260,47 +260,62 @@ export class ComputerUseManager {
    * flows so the app registers in System Settings → Privacy & Security and the
    * permission prompts appear at opt-in time. No-op on Windows/Linux.
    *
-   *   - Accessibility (mouse/keyboard via nut.js): `isTrustedAccessibilityClient(true)`
-   *     is the ONLY call that both shows the system prompt and adds us to the
-   *     Accessibility list. It prompts once; afterwards it just reports status.
-   *   - Screen Recording (screenshots via desktopCapturer): there is no
-   *     `askForMediaAccess('screen')` — the prompt and the System-Settings entry
-   *     are created by actually attempting a screen capture, so a throwaway 1px
-   *     `getSources` probe is enough to register us and surface the dialog.
+   * Why the earlier 1px-probe / status-gated version didn't surface anything:
+   *   - Screen Recording: `getMediaAccessStatus('screen')` is best-effort and
+   *     often reports 'granted' BEFORE any capture has ever happened, so gating
+   *     the probe on it skipped the trigger entirely. And a 1×1 `getSources`
+   *     thumbnail is degenerate enough that recent macOS serves it without
+   *     reading the framebuffer, so TCC is never evaluated. The fix is to run a
+   *     REAL full-resolution capture — byte-for-byte the same operation a live
+   *     screenshot action performs (which the user confirms DOES prompt) — and
+   *     to never gate it on the unreliable status.
+   *   - Accessibility: `isTrustedAccessibilityClient(true)`
+   *     (`AXIsProcessTrustedWithOptions(prompt:true)`) is the ONLY sanctioned
+   *     call that both shows the prompt and registers us in the Accessibility
+   *     list. macOS shows that prompt at most ONCE per app identity, ever — and
+   *     in an unsigned/dev build TCC tracks the wrong binary, so the dialog is
+   *     flaky there and only reliably appears in the signed, notarized .app.
+   *     There is no stronger proactive API; injecting a real nut.js event at
+   *     opt-in time would risk typing/clicking into the user's focused window.
    *
    * If either permission isn't granted yet we also open the relevant Privacy
    * pane, since the prompt only fires the very first time and a returning user
-   * who dismissed it needs a way back in.
+   * who dismissed it (or toggled the feature back on) needs a way back in.
    */
   private async requestMacPermissions(): Promise<void> {
     if (process.platform !== 'darwin') return;
-    try {
-      // Prompts + registers under Privacy & Security → Accessibility.
-      const axTrusted = systemPreferences.isTrustedAccessibilityClient(true);
 
-      const screenStatus = systemPreferences.getMediaAccessStatus('screen');
-      if (screenStatus !== 'granted') {
-        // Triggers the Screen Recording prompt and the System-Settings entry.
-        await desktopCapturer
-          .getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
-          .catch(() => undefined);
-        // The prompt only appears once; deep-link the pane so a user who already
-        // dismissed it (or needs to re-toggle after restart) can still get there.
-        void shell.openExternal(
-          'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
-        );
-      }
-      if (!axTrusted) {
-        void shell.openExternal(
-          'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
-        );
-      }
-      this.opts.log(
-        `mac permissions requested (accessibility=${axTrusted ? 'granted' : 'pending'}, screen=${screenStatus})`,
-      );
+    // ── Accessibility (mouse/keyboard via nut.js) ──
+    let axTrusted = false;
+    try {
+      axTrusted = systemPreferences.isTrustedAccessibilityClient(true);
     } catch (err) {
-      this.opts.log(`mac permission request failed: ${String(err)}`);
+      this.opts.log(`accessibility prompt failed: ${String(err)}`);
     }
+    if (!axTrusted) {
+      void shell.openExternal(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+      );
+    }
+
+    // ── Screen Recording (screenshots via desktopCapturer) ──
+    // Run the same real capture the executor uses; this is what trips the TCC
+    // screen-recording evaluation. Never gate it on getMediaAccessStatus.
+    try {
+      await this.executor.capture();
+    } catch (err) {
+      this.opts.log(`screen capture probe failed: ${String(err)}`);
+    }
+    const screenStatus = systemPreferences.getMediaAccessStatus('screen');
+    if (screenStatus !== 'granted') {
+      void shell.openExternal(
+        'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      );
+    }
+
+    this.opts.log(
+      `mac permissions requested (accessibility=${axTrusted ? 'granted' : 'pending'}, screen=${screenStatus})`,
+    );
   }
 
   /** Kill-switch: abort any in-flight action and arm a fresh controller. */
