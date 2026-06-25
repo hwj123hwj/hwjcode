@@ -40,11 +40,11 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "42.5.0",
     "electron-builder": "^26.15.3",
-    "electron-vite": "^2.3.0",
+    "electron-vite": "^4.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typescript": "5.9.3",
-    "vite": "^5.4.11",
+    "vite": "^6.4.3",
     "zustand": "^5.0.2"
   },
   "engines": {
