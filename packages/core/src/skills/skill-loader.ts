@@ -11,7 +11,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import matter from 'gray-matter';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 import {
   Skill,
   SkillMetadata,
@@ -437,7 +437,7 @@ export class SkillLoader {
       const fileContent = await fs.readFile(skillFilePath, 'utf-8');
 
       // 解析 YAML frontmatter
-      const { data, content } = matter(fileContent);
+      const { data, content } = parseFrontmatter(fileContent);
 
       // 验证元数据（传递文件路径以便从文件名生成 name）
       this.validateMetadata(data, skillFilePath);
