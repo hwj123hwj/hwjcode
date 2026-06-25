@@ -31,6 +31,12 @@ asarUnpack:
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
+  # arm64-only 构建必须把最低系统设为 12.0+，否则 App Store Connect 校验失败：
+  #   "supports arm64 but not Intel ... deployment target must be 12.0 or higher"。
+  # 声明 12.0 等于告诉 Apple 我们是“有意只支持 Apple Silicon”，无需 x86_64。
+  # electron-builder 会写进 Info.plist 的 LSMinimumSystemVersion；放在 `mac` 根，
+  # dmg/zip 与下面继承本块的 `mas` 都生效。
+  minimumSystemVersion: '12.0'
   # Lives at the `mac` root: electron-builder 25.x rejects `artifactName`
   # inside a target array entry. Mirrors the Windows artifactName; productName
   # stays "Easy Code" so the app display name and DMG volume are unchanged.
@@ -55,6 +61,22 @@ mac:
   #   APPLE_TEAM_ID                —— 团队 ID
   # 当未提供这些环境变量时，公证步骤会自动跳过，保证未配置公证的普通本地构建也能完成。
   notarize: true
+# Mac App Store (MAS) 专用目标，与上面的 `mac`（dmg/zip，外部分发）并存、互不干扰：
+#   - `mac.target` 仍只产出 dmg/zip，普通 `pack:mac` / `pack:desktop:mac` 不会生成
+#     MAS 包；
+#   - MAS 的 .pkg 仅通过 `pack:mac:pkg`（electron-builder --mac mas --arm64）单独
+#     触发，产物可上传 App Store Connect。
+# electron-builder 会把上面的 `mac` 配置合并进 `mas`（继承 category / icon /
+# hardenedRuntime 等），此处仅声明 MAS 特有 / 需覆盖的项。未启用 App Sandbox：
+# 直接复用上面 `mac` 的 entitlements（其 com.apple.security.app-sandbox = false），
+# 以标准 hardened runtime 签名后即可打包 .pkg 上传 App Store Connect。
+mas:
+  # distribution：用于提交 App Store Connect。
+  type: distribution
+  # 区别于 dmg 的 artifactName，避免两套产物混淆。
+  artifactName: EasyCode-MAS-v${version}-${env.BUILD_TIME}.${ext}
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
 win:
   # A hand-authored multi-size .ico (16/24/32/48/64/72/96/128/256) — sharper
   # than letting electron-builder downscale a single PNG. Used for the .exe and,
