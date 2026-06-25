@@ -33,7 +33,7 @@
     "chardet": "^2.1.0",
     "diff": "^7.0.0",
     "dotenv": "^17.1.0",
-    "google-auth-library": "^9.11.0",
+    "google-auth-library": "^10.9.0",
     "gray-matter": "^4.0.3",
     "html-to-text": "^9.0.5",
     "https-proxy-agent": "^7.0.6",
