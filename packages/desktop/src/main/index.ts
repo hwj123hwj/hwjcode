@@ -7,7 +7,7 @@
  * IPC bridge and ACP session hub wired in.
  */
 
-import { app, BrowserWindow, Menu, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, Menu, shell, nativeTheme, nativeImage } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
@@ -20,8 +20,9 @@ import type { UpdateManager } from './updater.js';
 import type { TerminalManager } from './terminals.js';
 import type { ComputerUseManager } from './computerUse/index.js';
 // Bundled by electron-vite (`?asset`) and copied into out/. Used as the window /
-// taskbar icon at runtime (dev + Linux/Windows). On macOS the dock icon comes
-// from the packaged .app bundle, so this is harmless there.
+// taskbar icon at runtime (dev + Linux/Windows), and — via app.dock.setIcon in
+// bootstrap() — as the macOS dock icon for unpackaged/dev runs (a packaged .app
+// gets its dock icon from the bundle's icns; setting it again is harmless).
 import appIcon from '../../build/icon.png?asset';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -190,6 +191,12 @@ function bootstrap(): void {
       // default macOS menu shows "Electron" in dev/unpackaged runs regardless
       // of app.setName. Keep the standard edit/window shortcuts working.
       setMacAppMenu();
+      // Show the Easy Code logo in the dock. A packaged .app already gets its
+      // dock icon from the bundle's icns, but dev/unpackaged runs (electron-vite
+      // serve, `electron .`) otherwise show the generic Electron icon — so set
+      // it explicitly. `app.dock` exists only on macOS; guarded above.
+      const dockIcon = nativeImage.createFromPath(appIcon);
+      if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
     } else {
       // Drop the default application menu on Windows/Linux entirely.
       Menu.setApplicationMenu(null);
