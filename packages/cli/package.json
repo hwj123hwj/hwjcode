@@ -87,7 +87,7 @@
     "pretty-format": "^30.0.2",
     "react-dom": "^19.2.0",
     "typescript": "5.9.3",
-    "vitest": "3.2.4"
+    "vitest": "3.2.6"
   },
   "engines": {
     "node": ">=20"
