@@ -8,11 +8,16 @@ files:
   - package.json
 # Ship the agent backend the desktop spawns (`easycode --acp`). Built at the
 # repo root with `npm run bundle`; copied into the app under resources/backend.
+# Note: electron-builder v26+ hard-codes node_modules exclusion in filter.js
+# (relative === "node_modules" → return false) and cannot be overridden via
+# filter patterns. The backend's node_modules (@vscode/ripgrep etc.) is
+# injected by the afterPack hook (scripts/afterPack.cjs) instead.
 extraResources:
   - from: ../../bundle
     to: backend
     filter:
       - '**/*'
+afterPack: scripts/afterPack.cjs
 # `@lydell/node-pty` ships N-API prebuilt binaries (the .node addon plus, on
 # Windows, conpty.dll + OpenConsole.exe). N-API is ABI-stable, so they load in
 # Electron with no rebuild — keep npmRebuild off so packaging needs no native
