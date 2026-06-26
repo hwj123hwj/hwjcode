@@ -517,22 +517,22 @@ export class FeishuManager {
     return { ok: true, status: await this.getStatus() };
   }
 
-  async qrBegin(_domain: FeishuDomain): Promise<FeishuQrBeginResult> {
+  async qrBegin(domain: FeishuDomain): Promise<FeishuQrBeginResult> {
     try {
       this.pollCancelled = false;
-      // The device-code app-registration flow is a single *unified* entry hosted
-      // on accounts.feishu.cn for BOTH Feishu (国内) and Lark (国际) tenants. The
-      // real platform is auto-detected from the scanner's `tenant_brand` during
-      // polling (see pollRegistration's lark switch), not chosen up front.
+      // Honor the platform the user picked in the UI: Feishu (国内) begins on
+      // accounts.feishu.cn, Lark (国际) on accounts.larksuite.com. Both are
+      // valid device-code registration endpoints — verified against the
+      // official @larksuiteoapi/node-sdk, whose DEFAULT_LARK_DOMAIN is exactly
+      // accounts.larksuite.com. Seeding from the chosen domain makes the QR,
+      // the open-platform it points at, and the saved credential all consistent
+      // (picking Lark now yields an open.larksuite.com QR, not open.feishu.cn).
       //
-      // We deliberately ignore the user-selected domain here: beginning on
-      // accounts.larksuite.com yields a QR that the registration backend can't
-      // complete — which is exactly why picking "Lark" showed a QR but scanning
-      // did nothing. This mirrors the CLI's handleQrSetup, which always begins on
-      // 'feishu' and lets the poll resolve the brand. (Manual credential entry
-      // still honors the selected domain — there the user knows their platform.)
-      await initRegistration('feishu');
-      const begin = await beginRegistration('feishu');
+      // pollRegistration still auto-switches to lark if the scanner's
+      // tenant_brand says so, so a feishu-seeded scan by a Lark user is also
+      // resolved correctly — but we no longer force everyone through feishu.
+      await initRegistration(domain);
+      const begin = await beginRegistration(domain);
       return { ok: true, begin };
     } catch (e) {
       return { ok: false, error: errMsg(e) };

@@ -1462,6 +1462,7 @@ export const translations = {
 
     // Feishu Bot Integration
     'feishu.command.description': 'Integrate Feishu Bot, let easycode answer code questions in Feishu',
+    'lark.command.description': 'Integrate Lark Bot (larksuite.com), let easycode answer code questions in Lark',
     'feishu.subcmd.setup.description': 'Configure Feishu app credentials (QR scan or manual)',
     'feishu.subcmd.start.description': 'Start the Feishu Bot (WebSocket long connection)',
     'feishu.subcmd.stop.description': 'Stop the Feishu Bot',
@@ -3145,6 +3146,7 @@ export const translations = {
 
     // Feishu Bot Integration
     'feishu.command.description': '接入飞书 Bot，让 easycode 在飞书里回答代码问题',
+    'lark.command.description': '接入 Lark Bot（larksuite.com 国际版），让 easycode 在 Lark 里回答代码问题',
     'feishu.subcmd.setup.description': '配置飞书应用凭证（扫码或手动输入）',
     'feishu.subcmd.start.description': '启动飞书 Bot（WS 长连接）',
     'feishu.subcmd.stop.description': '停止飞书 Bot',
