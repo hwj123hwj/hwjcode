@@ -517,11 +517,22 @@ export class FeishuManager {
     return { ok: true, status: await this.getStatus() };
   }
 
-  async qrBegin(domain: FeishuDomain): Promise<FeishuQrBeginResult> {
+  async qrBegin(_domain: FeishuDomain): Promise<FeishuQrBeginResult> {
     try {
       this.pollCancelled = false;
-      await initRegistration(domain);
-      const begin = await beginRegistration(domain);
+      // The device-code app-registration flow is a single *unified* entry hosted
+      // on accounts.feishu.cn for BOTH Feishu (国内) and Lark (国际) tenants. The
+      // real platform is auto-detected from the scanner's `tenant_brand` during
+      // polling (see pollRegistration's lark switch), not chosen up front.
+      //
+      // We deliberately ignore the user-selected domain here: beginning on
+      // accounts.larksuite.com yields a QR that the registration backend can't
+      // complete — which is exactly why picking "Lark" showed a QR but scanning
+      // did nothing. This mirrors the CLI's handleQrSetup, which always begins on
+      // 'feishu' and lets the poll resolve the brand. (Manual credential entry
+      // still honors the selected domain — there the user knows their platform.)
+      await initRegistration('feishu');
+      const begin = await beginRegistration('feishu');
       return { ok: true, begin };
     } catch (e) {
       return { ok: false, error: errMsg(e) };

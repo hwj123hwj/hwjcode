@@ -25,7 +25,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import matter from 'gray-matter';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 import { getProjectSkillsDir } from '../utils/paths.js';
 import { isDirectoryFollowingSymlinksSync } from './utils/fs-helpers.js';
 import type {
@@ -514,7 +514,7 @@ export class SkillsContextBuilder {
         let description = `Skill from ${source}`;
         try {
           const content = fs.readFileSync(skillMdPath, 'utf-8');
-          const parsed = matter(content);
+          const parsed = parseFrontmatter(content);
 
           // 使用 frontmatter 中的 description
           if (parsed.data.description && typeof parsed.data.description === 'string') {

@@ -6,7 +6,7 @@
  */
 import fs from 'fs-extra';
 import path from 'path';
-import matter from 'gray-matter';
+import { parseFrontmatter } from '../../utils/frontmatter.js';
 import { UnifiedComponent, ComponentType, ComponentSource, ComponentLoadLevel } from '../models/unified.js';
 
 /**
@@ -29,7 +29,7 @@ export class MarkdownParser {
     let body = content;
 
     try {
-      const result = matter(content);
+      const result = parseFrontmatter(content);
       data = result.data;
       body = result.content;
     } catch (error) {
