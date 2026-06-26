@@ -1091,6 +1091,7 @@ export class Config {
       'WorkflowTool',
       'DelegateToAgentTool',
       'CheckDelegateStatusTool',
+      'OpenCliTool',
     ];
 
     // helper to create & register core tools that are enabled
@@ -1186,6 +1187,7 @@ export class Config {
     registerCoreTool(LocalTimeTool, this);
     // Opt-in: disabled by default, add to coreTools config to enable
     registerCoreTool(LarkCliTool, this);
+    // Opt-in: disabled by default, add to coreTools config to enable
     registerCoreTool(OpenCliTool, this);
 
     // Delegate-to-external-agent (ACP client). Only register when at least
