@@ -67,6 +67,7 @@ esbuild
     },
     define: {
       'process.env.CLI_VERSION': JSON.stringify(pkg.version),
+      'process.env.CLI_NAME': JSON.stringify(require(path.resolve(__dirname, 'packages/cli/package.json')).name),
       'process.env.DEEPX_SERVER_URL': JSON.stringify(process.env.DEEPX_SERVER_URL || 'https://api-code.deepvlab.ai'),
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
       'process.env.DEV': JSON.stringify(process.env.DEV || 'false'),

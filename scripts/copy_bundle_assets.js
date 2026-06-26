@@ -411,9 +411,29 @@ if (existsSync(fixPermissionsScript)) {
 // spawn. Ship a self-describing package.json so the bundle is ESM everywhere.
 // Written via JSON.stringify + writeFileSync (no BOM) — the CLI parses this
 // file at startup and a BOM would make its JSON parser throw.
+//
+// CRITICAL: this package.json MUST carry the real `name` and `version`. The CLI
+// reads its own identity via `readPackageUp()` walking up from the bundle dir;
+// this file is the first package.json it hits once installed globally. If it
+// lacks name/version, the update-check user-agent degrades to "/" and
+// `checkForUpdates` bails out silently (regression introduced in 1.1.26 when
+// this file shipped only `{ "type": "module" }`).
+const cliPkg = JSON.parse(
+  readFileSync(join(root, 'packages', 'cli', 'package.json'), 'utf8'),
+);
 const bundlePkgJson = join(bundleDir, 'package.json');
-writeFileSync(bundlePkgJson, JSON.stringify({ type: 'module' }, null, 2) + '\n', 'utf8');
-console.log('✅ Wrote bundle/package.json ({ "type": "module" })');
+writeFileSync(
+  bundlePkgJson,
+  JSON.stringify(
+    { name: cliPkg.name, version: cliPkg.version, type: 'module' },
+    null,
+    2,
+  ) + '\n',
+  'utf8',
+);
+console.log(
+  `✅ Wrote bundle/package.json ({ name: "${cliPkg.name}", version: "${cliPkg.version}", type: "module" })`,
+);
 
 // Copy authentication templates from packages/core to bundle
 const templatesSourceDir = join(root, 'packages', 'core', 'src', 'auth', 'login', 'templates');

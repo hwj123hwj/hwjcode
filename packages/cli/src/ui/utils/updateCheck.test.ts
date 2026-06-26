@@ -66,7 +66,7 @@ describe('checkForUpdates', () => {
   it('should return null if there is no update', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({
+      text: async () => JSON.stringify({
         success: true,
         hasUpdate: false,
       }),
@@ -79,7 +79,7 @@ describe('checkForUpdates', () => {
   it('should return a message if a newer version is available and showProgress is true', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({
+      text: async () => JSON.stringify({
         success: true,
         hasUpdate: true,
         latestVersion: '1.1.0',
@@ -97,7 +97,7 @@ describe('checkForUpdates', () => {
   it('should return null if newer version available but showProgress is false and not forced update', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({
+      text: async () => JSON.stringify({
         success: true,
         hasUpdate: true,
         latestVersion: '1.1.0',
@@ -112,7 +112,7 @@ describe('checkForUpdates', () => {
   it('should return a FORCE_UPDATE message if forceUpdate is true', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({
+      text: async () => JSON.stringify({
         success: true,
         hasUpdate: true,
         forceUpdate: true,
@@ -139,5 +139,27 @@ describe('checkForUpdates', () => {
     });
     const result = await checkForUpdates(false, true);
     expect(result).toBeNull();
+  });
+
+  it('should return null gracefully when the server returns non-JSON (e.g. HTML error page)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => '<!DOCTYPE html><html><body>502 Bad Gateway</body></html>',
+    });
+    const result = await checkForUpdates(true, true);
+    expect(result).toBeNull();
+  });
+
+  it('should send a user-agent derived from the package name and version', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ success: true, hasUpdate: false }),
+    });
+
+    await checkForUpdates(false, true);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers['User-Agent']).toBe('deepv-code-cli/1.0.0');
   });
 });

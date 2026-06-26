@@ -147,23 +147,29 @@ export async function checkForUpdates(
 
     if (!response.ok) {
       const message = tp('update.check.failed.http', { status: response.status });
+      console.warn(message);
       if (showProgress) {
-        console.warn(message);
-      } else {
-        console.warn(message);
+        console.warn(`[update-check] url: ${updateApiUrl} -> ${response.status} ${response.statusText}`);
       }
       return null;
     }
 
-    const data: UpdateCheckResponse = await response.json();
+    const rawText = await response.text();
+
+    let data: UpdateCheckResponse;
+    try {
+      data = JSON.parse(rawText);
+    } catch (parseErr) {
+      console.warn(tp('update.check.failed.generic', { error: String(parseErr) }));
+      if (showProgress) {
+        console.warn(`[update-check] non-JSON response from ${updateApiUrl}: ${rawText}`);
+      }
+      return null;
+    }
 
     if (!data.success) {
       const message = tp('update.check.failed.message', { message: String(data.message || '') });
-      if (showProgress) {
-        console.warn(message);
-      } else {
-        console.warn(message);
-      }
+      console.warn(message);
       return null;
     }
 
