@@ -1,6 +1,6 @@
 {
-  "name": "easycode-desktop",
-  "version": "1.1.33",
+  "name": "hwjcode-desktop",
+  "version": "1.1.56",
   "description": "Easy Code Desktop - AI-powered coding assistant with multi-model chat, code generation, tool integration, and Feishu collaboration",
   "type": "module",
   "main": "out/main/index.js",
