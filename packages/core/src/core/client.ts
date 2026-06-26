@@ -672,7 +672,9 @@ export class GeminiClient {
     const currentModel = this.config.getModel();
     const customModelInfo = this.getCustomModelInfo(currentModel);
     const userRules = this.config.getUserRules();
-    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode());
+    const toolRegistry = await this.config.getToolRegistry();
+    const enabledToolNames = new Set(toolRegistry.getAllTools().map(t => t.name));
+    const updatedSystemPrompt = getCoreSystemPrompt(userMemory, isVSCode, userRules || promptRegistry, agentStyle, currentModel, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode(), enabledToolNames);
 
     if (this.chat) {
       this.chat.setSystemInstruction(updatedSystemPrompt);
@@ -855,6 +857,7 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       const userRules = this.config.getUserRules();
 
       // 如果有用户规则，优先使用；否则使用 promptRegistry
+      const enabledToolNames = new Set(toolRegistry.getAllTools().map(t => t.name));
       const systemInstruction = getCoreSystemPrompt(
         userMemory,
         isVSCode,
@@ -864,7 +867,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
         this.config.getPreferredLanguage(),
         customModelInfo,
         this.config.getFeishuMode(),
-        this.config.getDesktopMode()
+        this.config.getDesktopMode(),
+        enabledToolNames
       );
 
       // 🐛 FIX: 同上，不再在这里写死 includeThoughts:false 覆盖下游。

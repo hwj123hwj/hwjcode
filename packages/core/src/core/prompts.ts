@@ -1166,6 +1166,7 @@ export function getCoreSystemPrompt(
   customModelInfo?: CustomModelInfo,
   isFeishu?: boolean,
   isDesktop?: boolean,
+  enabledToolNames?: Set<string>,
 ): string {
   // Handle backward compatibility: promptRegistryOrUserRules can be PromptRegistry or userRules string
   let promptRegistry: PromptRegistry | undefined;
@@ -1227,6 +1228,23 @@ export function getCoreSystemPrompt(
   if (isClaudeModel(effectiveModelId) && !systemMdEnabled) {
     basePrompt = basePrompt.replace(
       /\n\n# Tool Calling Format \(CRITICAL\)[\s\S]*?(?=\n\n# )/,
+      '',
+    );
+  }
+
+  // Remove opt-in tool references from system prompt when those tools are disabled.
+  // This prevents the LLM from seeing instructions for tools it cannot use.
+  // NOTE: Template literals like ${WorkflowTool.Name} are already resolved at runtime,
+  // so we match against the actual resolved value (e.g. 'workflow').
+  if (!enabledToolNames?.has('workflow')) {
+    // Codex-style: - **Workflow:** 'workflow' — ...
+    basePrompt = basePrompt.replace(
+      /\n- \*\*Workflow:[^\n]*'workflow'[^\n]*\n(?:- \*\*MANDATORY:[^\n]*'workflow'[^\n]*\n)?/g,
+      '',
+    );
+    // Other styles: - Only use 'workflow' when ...
+    basePrompt = basePrompt.replace(
+      /\n- Only use 'workflow'[^\n]*\n(?:- \*\*MANDATORY:[^\n]*'workflow'[^\n]*\n)?/g,
       '',
     );
   }

@@ -1083,6 +1083,17 @@ export class Config {
   async createToolRegistry(): Promise<ToolRegistry> {
     const registry = new ToolRegistry(this);
 
+    // Tools that are disabled by default — users must explicitly enable them
+    // via the `coreTools` config to include these in the tool list.
+    const OPT_IN_TOOLS: string[] = [
+      'WebSearchTool',
+      'LarkCliTool',
+      'WorkflowTool',
+      'DelegateToAgentTool',
+      'CheckDelegateStatusTool',
+      'OpenCliTool',
+    ];
+
     // helper to create & register core tools that are enabled
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registerCoreTool = (ToolClass: any, ...args: unknown[]) => {
@@ -1102,6 +1113,25 @@ export class Config {
             tool.startsWith(`${className}(`) ||
             tool.startsWith(`${toolName}(`),
         );
+      }
+
+      // Opt-in tools are disabled by default unless explicitly listed in coreTools
+      if (
+        OPT_IN_TOOLS.includes(className) ||
+        OPT_IN_TOOLS.includes(toolName)
+      ) {
+        if (
+          coreTools === undefined ||
+          !coreTools.some(
+            (tool) =>
+              tool === className ||
+              tool === toolName ||
+              tool.startsWith(`${className}(`) ||
+              tool.startsWith(`${toolName}(`),
+          )
+        ) {
+          isEnabled = false;
+        }
       }
 
       if (
@@ -1127,6 +1157,7 @@ export class Config {
     registerCoreTool(ReadManyFilesTool, this);
     registerCoreTool(ShellTool, this);
     registerCoreTool(MemoryTool, this);
+    // Opt-in: disabled by default, add to coreTools config to enable
     registerCoreTool(WebSearchTool, this);
     registerCoreTool(ImageReaderTool, this);
     registerCoreTool(TodoWriteTool, this);
@@ -1154,13 +1185,16 @@ export class Config {
     }
 
     registerCoreTool(LocalTimeTool, this);
+    // Opt-in: disabled by default, add to coreTools config to enable
     registerCoreTool(LarkCliTool, this);
+    // Opt-in: disabled by default, add to coreTools config to enable
     registerCoreTool(OpenCliTool, this);
 
     // Delegate-to-external-agent (ACP client). Only register when at least
     // one external agent (Claude Code or Codex) is detected on the user's
     // machine — otherwise the AI would blindly call the tool and pretend the
     // task was dispatched when in fact nothing happened.
+    // Opt-in: disabled by default, add to coreTools config to enable
     const hasAgent = await hasAnyLocalAgent();
     if (hasAgent) {
       registerCoreTool(DelegateToAgentTool, this);
@@ -1170,8 +1204,8 @@ export class Config {
     // TaskTool (SubAgent) is available in both CLI and VSCode environments
     registerCoreTool(TaskTool, this, registry);
 
-    // WorkflowTool is disabled in VSCode plugin mode (not yet adapted)
-    // but remains available in CLI mode
+    // Opt-in: disabled by default, add to coreTools config to enable.
+    // WorkflowTool is also disabled in VSCode plugin mode (not yet adapted).
     if (!this.getVsCodePluginMode()) {
       registerCoreTool(WorkflowTool, this, registry);
     }
