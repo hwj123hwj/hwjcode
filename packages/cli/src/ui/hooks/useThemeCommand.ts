@@ -21,6 +21,20 @@ interface UseThemeCommandReturn {
   handleThemeHighlight: (themeName: string | undefined) => void;
 }
 
+/**
+ * True when the process is an unattended Feishu gateway (`easycode --feishu`),
+ * including the background process the desktop app spawns. Such a process has
+ * no human at a TTY to pick a theme, so the first-run theme dialog must be
+ * suppressed — otherwise it blocks the `/feishu start` auto-start effect
+ * (gated on `!isThemeDialogOpen`) and the Bot never comes online.
+ *
+ * Matches `--feishu` as a standalone argv token (never a substring like
+ * `--feishu-notes`).
+ */
+export function isFeishuUnattendedMode(argv: string[] = process.argv): boolean {
+  return argv.includes('--feishu');
+}
+
 export const useThemeCommand = (
   loadedSettings: LoadedSettings,
   setThemeError: (error: string | null) => void,
@@ -31,6 +45,18 @@ export const useThemeCommand = (
   // Check for theme configuration on startup
   // Use empty dependency array to prevent re-triggering when loadedSettings.merged.theme changes
   useEffect(() => {
+    // 🤖 飞书网关无人值守模式（`easycode --feishu`，含 desktop 内嵌 spawn 的后台进程）：
+    // 这种进程没有人能在 TTY 里交互式地选择主题。若此时弹出主题选择对话框，
+    // 它会阻塞 `/feishu start` 自启 useEffect（其触发条件含 !isThemeDialogOpen），
+    // 导致网关永远不启动、Bot 收不到消息（典型表现：desktop 全新扫码配置后 Bot 不回复，
+    // 而用户手动跑一次 CLI 选好主题写入 settings 后就“神奇修复”）。
+    // 因此无人值守模式下绝不弹窗：themeManager 已默认 DEFAULT_THEME 且 getActiveTheme()
+    // 有兜底，渲染始终安全。
+    if (isFeishuUnattendedMode()) {
+      setThemeError(null);
+      return;
+    }
+
     // 只要用户级别没有设置过主题，就视为“初次启动”，需要提示设置
     const userTheme = loadedSettings.user.settings.theme;
     const effectiveTheme = loadedSettings.merged.theme;
