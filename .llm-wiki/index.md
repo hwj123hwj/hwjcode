@@ -62,6 +62,8 @@
 | [SkillLoader](wiki/SkillLoader.md) | entity | Plugin | `core/src/skills/skill-loader.ts` |
 | [MarketplaceManager](wiki/MarketplaceManager.md) | entity | Plugin | `core/src/skills/marketplace-manager.ts` |
 | [lark-cli-tool](wiki/lark-cli-tool.md) | entity | Tool | `core/src/tools/lark-cli.ts` |
+| [OpenCliTool](wiki/OpenCliTool.md) | entity | Tool | `core/src/tools/opencli.ts` |
+| [opt-in-tools](wiki/opt-in-tools.md) | concept | 工具按需启用机制，6 工具默认禁用，需 coreTools 配置 |
 | [audio-reader](packages/core/src/tools/audio-reader.ts) | entity | Tool | `core/src/tools/audio-reader.ts` |
 | [self-update](wiki/self-update.md) | entity | Tool | `core/src/tools/self-update.ts` |
 

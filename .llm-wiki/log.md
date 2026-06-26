@@ -2,6 +2,12 @@
 
 > Chronological record of wiki operations.
 
+## [2026-06-26] update | 上游同步 + PR #4 opt-in tools + bug 修复
+- Updated [[tools-system]]: 移除 PPT 工具引用，新增 OpenCliTool 和 opt-in 机制说明
+- Created [[OpenCliTool]]: 浏览器自动化工具页面，含依赖、设计要点、适配器说明
+- Created [[opt-in-tools]]: 按需启用机制页面，6 工具默认禁用，需 coreTools 配置
+- Commit: `de8cacc4` (merge PR #4), `50fd5aaf` (fix opt-in prompt cleanup bugs)
+
 ## [2026-06-21] ingest | CLI 版本锁死 & 自定义模型压缩 token=0 & 自更新缓存问题
 
 从对话中提取三个互相关联的 Bug：esbuild define 将根 package.json 版本烙入 bundle 导致版本号锁死、DeepVServerAdapter.countTokens 对自定义模型返回 0 导致压缩失效、self-update 外挂脚本未清除 npm cache。

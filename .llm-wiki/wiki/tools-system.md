@@ -30,7 +30,10 @@ AI FunctionCall → ToolExecutionEngine → ToolRegistry.getTool()
 | [[BaseTool]] | Abstract base class for all tools |
 | [[DiscoveredMCPTool]] | Wrapper for [[mcp-system]] tools |
 
-## 32 Built-in Tools
+## 28 Built-in Tools
+
+> ⚠️ **Opt-in Tools（默认禁用）**: 6 tools are disabled by default. Users must explicitly add them to `coreTools` config to enable:
+> `WebSearchTool`, `LarkCliTool`, `WorkflowTool`, `DelegateToAgentTool`, `CheckDelegateStatusTool`, `OpenCliTool`
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -38,11 +41,12 @@ AI FunctionCall → ToolExecutionEngine → ToolRegistry.getTool()
 | Advanced Edit | 3 | multiedit, patch, batch |
 | Execution & Sub-agent | 2 | run_shell_command, task ([[SubAgent]]) |
 | Web | 2 | web_fetch, google_web_search |
+| Browser Automation | 1 | opencli ([[OpenCliTool]]) — 通过 @jackwener/opencli 驱动用户 Chrome |
 | Memory/Todo | 2 | save_memory, todo_write |
 | Code Intelligence | 4 | lsp, read_lints, lint_fix, codesearch |
-| Skills | 3 | list_available_skills, get_skill_details, use_skill |
-| PPT | 2 | ppt_outline, ppt_generate |
-| Workspace & Utilities | 6 | ask_user_question, [[lark-cli-tool]] (`lark_cli`), local_time, goal_achieved, image_reader, audio_reader |
+| Skills | 4 | list_available_skills, get_skill_details, use_skill, skill_hub |
+| Workspace & Utilities | 7 | ask_user_question, [[lark-cli-tool]] (`lark_cli`), local_time, goal_achieved, image_reader, audio_reader, nanobanana_generate |
+| Agent Delegation | 4 | delegate_to_agent, check_delegate_status, task ([[SubAgent]]), workflow |
 
 ## Confirmation Types
 
