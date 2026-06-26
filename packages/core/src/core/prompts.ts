@@ -1236,7 +1236,7 @@ export function getCoreSystemPrompt(
   // This prevents the LLM from seeing instructions for tools it cannot use.
   // NOTE: Template literals like ${WorkflowTool.Name} are already resolved at runtime,
   // so we match against the actual resolved value (e.g. 'workflow').
-  if (!enabledToolNames?.has('workflow')) {
+  if (enabledToolNames && !enabledToolNames.has('workflow')) {
     // Codex-style: - **Workflow:** 'workflow' — ...
     basePrompt = basePrompt.replace(
       /\n- \*\*Workflow:[^\n]*'workflow'[^\n]*\n(?:- \*\*MANDATORY:[^\n]*'workflow'[^\n]*\n)?/g,

@@ -477,7 +477,9 @@ export class GeminiClient {
     } else {
       const customModelInfo = this.getCustomModelInfo(modelToUse);
       const userRules = this.config.getUserRules();
-      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode());
+      const toolRegistry = await this.config.getToolRegistry();
+      const enabledToolNames = new Set(toolRegistry.getAllTools().map(t => t.name));
+      systemInstruction = getCoreSystemPrompt(userMemory, false, userRules || promptRegistry, agentStyle, modelToUse, this.config.getPreferredLanguage(), customModelInfo, this.config.getFeishuMode(), this.config.getDesktopMode(), enabledToolNames);
     }
 
     const isThinking = isThinkingSupported(modelToUse);
