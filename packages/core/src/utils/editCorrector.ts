@@ -265,25 +265,227 @@ export async function ensureCorrectEdit(
   client: GeminiClient,
   abortSignal: AbortSignal,
 ): Promise<CorrectedEditResult> {
-  // 🔧 全局禁用修正逻辑：直接使用模型传入的原始参数
-  // 不做任何反转义或 LLM 修正，执行不了就让 edit.ts 返回具体错误给模型
-  console.log(`[Edit Correction] Correction disabled globally - using original params as-is`);
+  // Constants for quote normalization matching CC 1:1
+  const LEFT_SINGLE_CURLY_QUOTE = '‘';
+  const RIGHT_SINGLE_CURLY_QUOTE = '’';
+  const LEFT_DOUBLE_CURLY_QUOTE = '“';
+  const RIGHT_DOUBLE_CURLY_QUOTE = '”';
 
-  const occurrences = countOccurrences(currentContent, originalParams.old_string);
+  const normalizeQuotes = (str: string): string => {
+    return str
+      .replaceAll(LEFT_SINGLE_CURLY_QUOTE, "'")
+      .replaceAll(RIGHT_SINGLE_CURLY_QUOTE, "'")
+      .replaceAll(LEFT_DOUBLE_CURLY_QUOTE, '"')
+      .replaceAll(RIGHT_DOUBLE_CURLY_QUOTE, '"');
+  };
+
+  const stripTrailingWhitespace = (str: string): string => {
+    const lines = str.split(/(\r\n|\n|\r)/);
+    let result = '';
+    for (let i = 0; i < lines.length; i++) {
+      const part = lines[i];
+      if (part !== undefined) {
+        if (i % 2 === 0) {
+          result += part.replace(/\s+$/, '');
+        } else {
+          result += part;
+        }
+      }
+    }
+    return result;
+  };
+
+  const findActualString = (fileContent: string, searchString: string): string | null => {
+    if (fileContent.includes(searchString)) {
+      return searchString;
+    }
+    const normalizedSearch = normalizeQuotes(searchString);
+    const normalizedFile = normalizeQuotes(fileContent);
+    const searchIndex = normalizedFile.indexOf(normalizedSearch);
+    if (searchIndex !== -1) {
+      return fileContent.substring(searchIndex, searchIndex + searchString.length);
+    }
+    return null;
+  };
+
+  const isOpeningContext = (chars: string[], index: number): boolean => {
+    if (index === 0) {
+      return true;
+    }
+    const prev = chars[index - 1];
+    return (
+      prev === ' ' ||
+      prev === '\t' ||
+      prev === '\n' ||
+      prev === '\r' ||
+      prev === '(' ||
+      prev === '[' ||
+      prev === '{' ||
+      prev === '\u2014' ||
+      prev === '\u2013'
+    );
+  };
+
+  const applyCurlyDoubleQuotes = (str: string): string => {
+    const chars = [...str];
+    const result: string[] = [];
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i] === '"') {
+        result.push(
+          isOpeningContext(chars, i)
+            ? LEFT_DOUBLE_CURLY_QUOTE
+            : RIGHT_DOUBLE_CURLY_QUOTE,
+        );
+      } else {
+        result.push(chars[i]!);
+      }
+    }
+    return result.join('');
+  };
+
+  const applyCurlySingleQuotes = (str: string): string => {
+    const chars = [...str];
+    const result: string[] = [];
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i] === "'") {
+        const prev = i > 0 ? chars[i - 1] : undefined;
+        const next = i < chars.length - 1 ? chars[i + 1] : undefined;
+        const prevIsLetter = prev !== undefined && /\p{L}/u.test(prev);
+        const nextIsLetter = next !== undefined && /\p{L}/u.test(next);
+        if (prevIsLetter && nextIsLetter) {
+          result.push(RIGHT_SINGLE_CURLY_QUOTE);
+        } else {
+          result.push(
+            isOpeningContext(chars, i)
+              ? LEFT_SINGLE_CURLY_QUOTE
+              : RIGHT_SINGLE_CURLY_QUOTE,
+          );
+        }
+      } else {
+        result.push(chars[i]!);
+      }
+    }
+    return result.join('');
+  };
+
+  const preserveQuoteStyle = (
+    oldString: string,
+    actualOldString: string,
+    newString: string,
+  ): string => {
+    if (oldString === actualOldString) {
+      return newString;
+    }
+    const hasDoubleQuotes =
+      actualOldString.includes(LEFT_DOUBLE_CURLY_QUOTE) ||
+      actualOldString.includes(RIGHT_DOUBLE_CURLY_QUOTE);
+    const hasSingleQuotes =
+      actualOldString.includes(LEFT_SINGLE_CURLY_QUOTE) ||
+      actualOldString.includes(RIGHT_SINGLE_CURLY_QUOTE);
+
+    if (!hasDoubleQuotes && !hasSingleQuotes) {
+      return newString;
+    }
+    let result = newString;
+    if (hasDoubleQuotes) {
+      result = applyCurlyDoubleQuotes(result);
+    }
+    if (hasSingleQuotes) {
+      result = applyCurlySingleQuotes(result);
+    }
+    return result;
+  };
+
+  const DESANITIZATIONS: Record<string, string> = {
+    '<fnr>': '<function_results>',
+    '</fnr>': '</function_results>',
+    '<n>': '<name>',
+    '</n>': '</name>',
+    '<o>': '<output>',
+    '</o>': '</output>',
+    '<e>': '<error>',
+    '</e>': '</error>',
+    '<s>': '<system>',
+    '</s>': '</system>',
+    '<r>': '<result>',
+    '</r>': '</result>',
+    '< META_START >': '<META_START>',
+    '< META_END >': '<META_END>',
+    '< EOT >': '<EOT>',
+    '< META >': '<META>',
+    '< SOS >': '<SOS>',
+    '\n\nH:': '\n\nHuman:',
+    '\n\nA:': '\n\nAssistant:',
+  };
+
+  const desanitizeMatchString = (matchString: string): {
+    result: string;
+    appliedReplacements: Array<{ from: string; to: string }>;
+  } => {
+    let result = matchString;
+    const appliedReplacements: Array<{ from: string; to: string }> = [];
+    for (const [from, to] of Object.entries(DESANITIZATIONS)) {
+      const beforeReplace = result;
+      result = result.replaceAll(from, to);
+      if (beforeReplace !== result) {
+        appliedReplacements.push({ from, to });
+      }
+    }
+    return { result, appliedReplacements };
+  };
+
+  console.log(`[Edit Correction] Applying physical deterministic self-healing for ${filePath}`);
+
+  let finalOldString = originalParams.old_string;
+  let finalNewString = originalParams.new_string;
+
+  // Exact match works directly, return as-is (fast path)
+  let occurrences = countOccurrences(currentContent, finalOldString);
+  if (occurrences > 0) {
+    return {
+      params: {
+        file_path: originalParams.file_path,
+        old_string: finalOldString,
+        new_string: finalNewString,
+      },
+      occurrences,
+    };
+  }
+
+  const isMarkdown = /\.(md|mdx)$/i.test(filePath);
+
+  // 1. Desanitize and normalize trailing whitespace (matching CC 1:1)
+  const desanitizedResult = desanitizeMatchString(finalOldString);
+  let resolvedOldString = desanitizedResult.result;
+  let resolvedNewString = isMarkdown ? finalNewString : stripTrailingWhitespace(finalNewString);
+
+  if (desanitizedResult.appliedReplacements.length > 0) {
+    for (const { from, to } of desanitizedResult.appliedReplacements) {
+      resolvedNewString = resolvedNewString.replaceAll(from, to);
+    }
+  }
+
+  // 2. Find actual string using quote normalization (matching CC 1:1)
+  const actualOldString = findActualString(currentContent, resolvedOldString);
+  if (actualOldString) {
+    finalOldString = actualOldString;
+    finalNewString = preserveQuoteStyle(resolvedOldString, actualOldString, resolvedNewString);
+  } else {
+    finalOldString = resolvedOldString;
+    finalNewString = resolvedNewString;
+  }
+
+  occurrences = countOccurrences(currentContent, finalOldString);
 
   const result: CorrectedEditResult = {
     params: {
       file_path: originalParams.file_path,
-      old_string: originalParams.old_string,
-      new_string: originalParams.new_string,
+      old_string: finalOldString,
+      new_string: finalNewString,
     },
     occurrences,
   };
   return result;
-
-  // ========== 以下是原有的修正逻辑，已禁用 ==========
-  // 保留代码以备将来需要时可以快速恢复
-
 }
 
 /**

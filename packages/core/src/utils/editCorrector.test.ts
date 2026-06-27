@@ -174,12 +174,14 @@ describe('editCorrector', () => {
   });
 
   /**
-   * 🔧 2026-01: 修正逻辑已全局禁用
+   * 🔧 2026-06: 强化自愈对齐 (deterministic self-healing)
    *
-   * ensureCorrectEdit 和 ensureCorrectFileContent 现在直接返回原始参数/内容，
-   * 不做任何反转义或 LLM 修正。以下测试验证这一新行为。
+   * ensureCorrectEdit 现在集成了物理确定性自愈算法：
+   * - 引号自动标准化、样式保留
+   * - 转义反消杀
+   * - 行尾修剪
    */
-  describe('ensureCorrectEdit (correction disabled)', () => {
+  describe('ensureCorrectEdit (deterministic self-healing)', () => {
     let mockGeminiClientInstance: Mocked<GeminiClient>;
     let mockToolRegistry: Mocked<ToolRegistry>;
     let mockConfigInstance: Config;
@@ -362,6 +364,121 @@ describe('editCorrector', () => {
       );
       expect(result.params.old_string).toBe('');
       expect(result.occurrences).toBe(0);
+    });
+
+    // ─────────── 2026-06 新增：自愈纠错与引号标准化单元测试 ───────────
+    it('should auto-heal quotes by mapping straight quotes to curly double quotes', async () => {
+      const currentContent = 'This is a “curly-quoted” text in file.';
+      const originalParams = {
+        file_path: '/test/file.txt',
+        old_string: 'a "curly-quoted" text',
+        new_string: 'a "perfectly normalized" text',
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.txt',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.occurrences).toBe(1);
+      // 应该映射到实际弯引号
+      expect(result.params.old_string).toBe('a “curly-quoted” text');
+      // 新替换串应该保留弯引号样式
+      expect(result.params.new_string).toBe('a “perfectly normalized” text');
+    });
+
+    it('should auto-heal quotes by mapping straight quotes to curly single quotes', async () => {
+      const currentContent = 'This is a ‘curly-quoted’ text in file.';
+      const originalParams = {
+        file_path: '/test/file.txt',
+        old_string: "a 'curly-quoted' text",
+        new_string: "a 'perfectly normalized' text",
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.txt',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.occurrences).toBe(1);
+      expect(result.params.old_string).toBe('a ‘curly-quoted’ text');
+      expect(result.params.new_string).toBe('a ‘perfectly normalized’ text');
+    });
+
+    it('should preserve single curly quotes for contractions like we’ll or don’t', async () => {
+      const currentContent = 'We don’t like bugs in code.';
+      const originalParams = {
+        file_path: '/test/file.txt',
+        old_string: "We don't like bugs",
+        new_string: "We don't hate bugs",
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.txt',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.occurrences).toBe(1);
+      expect(result.params.old_string).toBe('We don’t like bugs');
+      expect(result.params.new_string).toBe('We don’t hate bugs');
+    });
+
+    it('should desanitize API wrappers like <fnr> and <n> to their full tags', async () => {
+      const currentContent = 'Output was: <function_results><name>test_run</name>Success</function_results>';
+      const originalParams = {
+        file_path: '/test/file.txt',
+        old_string: 'Output was: <fnr><n>test_run</n>Success</fnr>',
+        new_string: 'Output was: <fnr><n>test_run</n>Failure</fnr>',
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.txt',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.occurrences).toBe(1);
+      expect(result.params.old_string).toBe('Output was: <function_results><name>test_run</name>Success</function_results>');
+      expect(result.params.new_string).toBe('Output was: <function_results><name>test_run</name>Failure</function_results>');
+    });
+
+    it('should strip trailing whitespace for non-markdown files', async () => {
+      const currentContent = 'const a = “one”;'; // curly double quotes
+      const originalParams = {
+        file_path: '/test/file.ts',
+        old_string: 'const a = "one";', // straight double quotes to force slow path
+        new_string: 'const a = "one";   \n', // 带有多余行尾空格
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.ts',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.occurrences).toBe(1);
+      expect(result.params.old_string).toBe('const a = “one”;');
+      expect(result.params.new_string).toBe('const a = “one”;\n'); // 行尾空格被修剪，并保持原弯引号风格
+    });
+
+    it('should NOT strip trailing whitespace for markdown files', async () => {
+      const currentContent = '# Heading';
+      const originalParams = {
+        file_path: '/test/file.md',
+        old_string: '# Heading',
+        new_string: '# Heading   \n', // md 文件换行通常需要双空格或更多空格，不应修剪
+      };
+      const result = await ensureCorrectEdit(
+        '/test/file.md',
+        currentContent,
+        originalParams,
+        mockGeminiClientInstance,
+        abortSignal,
+      );
+      expect(result.params.new_string).toBe('# Heading   \n'); // markdown 文件保持原样
     });
   });
 

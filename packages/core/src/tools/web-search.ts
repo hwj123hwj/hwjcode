@@ -279,7 +279,7 @@ export class WebSearchTool extends BaseTool<
       }
 
       const truncationNotice = isTruncated
-        ? `\n\n[Note: Content truncated from ${modifiedResponseText.length} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow]`
+        ? `\n\n<system-reminder>\nNote: Content truncated from ${modifiedResponseText.length} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow.\n</system-reminder>`
         : '';
 
       return {

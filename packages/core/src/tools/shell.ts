@@ -479,6 +479,11 @@ Reserve this tool for system commands and terminal operations that have no dedic
   }
 
   validateToolParams(params: ShellToolParams): string | null {
+    // 🔧 Self-heal parameter hallucination matching CC's context safety
+    if (params.directory === '(root)' || params.directory === '.' || params.directory === '') {
+      params.directory = undefined;
+    }
+
     const action = params.action || 'execute';
 
     if (action === 'list_background_tasks') {
@@ -1121,9 +1126,11 @@ Reserve this tool for system commands and terminal operations that have no dedic
       finalLlmContent = [
         headPart,
         '',
-        `[NOTICE: Output truncated due to length (${llmContent.length} chars total).`,
+        '<system-reminder>',
+        `NOTICE: Output truncated due to length (${llmContent.length} chars total).`,
         `Omitted ${omittedLength} chars from middle.`,
-        `Showing first ${halfLength} chars above and last ${halfLength} chars below.]`,
+        `Showing first ${halfLength} chars above and last ${halfLength} chars below.`,
+        '</system-reminder>',
         '',
         tailPart
       ].join('\n');

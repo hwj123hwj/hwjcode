@@ -476,7 +476,7 @@ export class CompressionService {
       return keptHistory;
     }
 
-    const toolSummaryText = `[Recent tool activity summary — prior tool calls compressed, verify file state with read_file before editing]\n${toolSummaryParts.join('\n')}`;
+    const toolSummaryText = `<system-reminder>\nRecent tool activity summary — prior tool calls compressed. Always verify the file state with read_file before editing to ensure your unescaped context is fresh.\n${toolSummaryParts.join('\n')}\n</system-reminder>`;
 
     // 根据 keptHistory 末尾的角色决定如何追加摘要消息
     const lastKept = keptHistory[keptHistory.length - 1];
