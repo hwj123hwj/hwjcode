@@ -11,6 +11,7 @@ import * as summarizer from '../utils/summarizer.js';
 import { GeminiClient } from '../core/client.js';
 import { ToolExecuteConfirmationDetails } from './tools.js';
 import os from 'os';
+import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 
 describe('ShellTool Bug Reproduction', () => {
   let shellTool: ShellTool;
@@ -226,5 +227,18 @@ describe('ShellTool - Background Task Actions', () => {
 
     const confirmStop = await shellTool.shouldConfirmExecute({ command: '', action: 'stop_background_task', backgroundTaskId: 'abc' }, signal);
     expect(confirmStop).toBe(false);
+  });
+
+  it('handles run_in_background parameter correctly by executing in background', async () => {
+    const signal = new AbortController().signal;
+    const result = await shellTool.execute({ command: 'echo hello', run_in_background: true }, signal);
+    expect(result.backgroundTaskId).toBeDefined();
+    expect(typeof result.backgroundTaskId).toBe('string');
+    expect(result.returnDisplay).toContain('Running in background');
+    expect(result.llmContent).toContain('Background task started');
+
+    // Clean up the spawned background task to prevent leaks
+    const taskManager = getBackgroundTaskManager();
+    taskManager.killTask(result.backgroundTaskId!);
   });
 });

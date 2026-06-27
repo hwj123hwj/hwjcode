@@ -110,6 +110,7 @@ export interface ShellToolParams {
   directory?: string;
   action?: 'execute' | 'stop_background_task' | 'list_background_tasks';
   backgroundTaskId?: string;
+  run_in_background?: boolean;
 }
 
 import { spawn } from 'child_process';
@@ -454,6 +455,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
             type: Type.STRING,
             description: 'The ID of the background task to terminate. Required when action is "stop_background_task".',
           },
+          run_in_background: {
+            type: Type.BOOLEAN,
+            description: 'Set to true to run this command in the background. Highly recommended for long-running scripts (such as compilations, migrations, or large test suites) to prevent timing out after 5 minutes.',
+          },
         },
         required: [],
       },
@@ -655,6 +660,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
         llmContent: msg,
         returnDisplay: msg,
       };
+    }
+
+    if (params.run_in_background === true) {
+      return this.executeBackground(params, signal);
     }
 
     const strippedCommand = stripShellWrapper(params.command || '');
