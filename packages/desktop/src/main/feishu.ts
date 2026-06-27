@@ -520,6 +520,17 @@ export class FeishuManager {
   async qrBegin(domain: FeishuDomain): Promise<FeishuQrBeginResult> {
     try {
       this.pollCancelled = false;
+      // Honor the platform the user picked in the UI: Feishu (国内) begins on
+      // accounts.feishu.cn, Lark (国际) on accounts.larksuite.com. Both are
+      // valid device-code registration endpoints — verified against the
+      // official @larksuiteoapi/node-sdk, whose DEFAULT_LARK_DOMAIN is exactly
+      // accounts.larksuite.com. Seeding from the chosen domain makes the QR,
+      // the open-platform it points at, and the saved credential all consistent
+      // (picking Lark now yields an open.larksuite.com QR, not open.feishu.cn).
+      //
+      // pollRegistration still auto-switches to lark if the scanner's
+      // tenant_brand says so, so a feishu-seeded scan by a Lark user is also
+      // resolved correctly — but we no longer force everyone through feishu.
       await initRegistration(domain);
       const begin = await beginRegistration(domain);
       return { ok: true, begin };

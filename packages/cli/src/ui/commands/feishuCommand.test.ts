@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   feishuCommand,
+  larkCommand,
   buildBoundProjectsLines,
   shortenProjectPath,
   safeTruncateForLog,
@@ -16,6 +17,7 @@ import {
 } from './feishuCommand.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import * as credentials from '../../services/feishu/credentials.js';
+import * as registration from '../../services/feishu/registration.js';
 
 vi.mock('../../services/feishu/credentials.js', () => {
   return {
@@ -247,6 +249,86 @@ describe('feishuCommand', () => {
 
     const stopCmd = feishuCommand.subCommands?.find(c => c.name === 'stop');
     await stopCmd?.action!(context, '');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// larkCommand — 与 /feishu 同构，唯一区别是 domain 走 'lark'（larksuite.com）。
+//   验证：命令元数据、子命令齐备，以及 setup 链路把 'lark' 贯穿到注册/凭证。
+//   这是「feishu 就是 feishu、lark 就是 lark」需求的回归保护。
+// ---------------------------------------------------------------------------
+describe('larkCommand', () => {
+  let context: any;
+
+  beforeEach(() => {
+    context = createMockCommandContext();
+    vi.clearAllMocks();
+    // QR 流：begin 返回可渲染的二维码，poll 返回 null（超时分支），
+    // 避免触碰 finalizeQrSetup → handleStart 的真实网络/网关逻辑。
+    vi.mocked(registration.beginRegistration).mockResolvedValue({
+      deviceCode: 'dev_code',
+      qrUrl: 'https://open.larksuite.com/page/launcher?user_code=ABCD',
+      userCode: 'ABCD',
+      interval: 1,
+      expireIn: 1,
+    } as any);
+    vi.mocked(registration.pollRegistration).mockResolvedValue(null);
+    vi.mocked(registration.probeCredentials).mockResolvedValue(null);
+  });
+
+  it('exposes lark metadata with the same subcommands as feishu', () => {
+    expect(larkCommand.name).toBe('lark');
+    expect(larkCommand.altNames).toContain('Lark');
+    const larkSubs = (larkCommand.subCommands ?? []).map((c) => c.name).sort();
+    const feishuSubs = (feishuCommand.subCommands ?? []).map((c) => c.name).sort();
+    expect(larkSubs).toEqual(feishuSubs);
+  });
+
+  it('/lark setup (QR) drives registration on the lark domain', async () => {
+    const setupCmd = larkCommand.subCommands?.find((c) => c.name === 'setup');
+    expect(setupCmd).toBeDefined();
+
+    // 非交互式（不传 ctx 的第二参为空字符串即可），同步走完 init/begin
+    await setupCmd?.action!(context, '');
+
+    expect(registration.initRegistration).toHaveBeenCalledWith('lark');
+    expect(registration.beginRegistration).toHaveBeenCalledWith('lark');
+  });
+
+  it('/lark setup --manual saves credentials tagged with the lark domain', async () => {
+    const setupCmd = larkCommand.subCommands?.find((c) => c.name === 'setup');
+    await setupCmd?.action!(context, '--manual cli_lark sec_lark');
+
+    expect(registration.probeCredentials).toHaveBeenCalledWith(
+      'cli_lark',
+      'sec_lark',
+      'lark',
+    );
+    expect(credentials.saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ domain: 'lark' }),
+    );
+  });
+
+  it('/feishu setup --manual still saves the feishu domain (regression guard)', async () => {
+    const setupCmd = feishuCommand.subCommands?.find((c) => c.name === 'setup');
+    await setupCmd?.action!(context, '--manual cli_fs sec_fs');
+
+    expect(registration.probeCredentials).toHaveBeenCalledWith(
+      'cli_fs',
+      'sec_fs',
+      'feishu',
+    );
+    expect(credentials.saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ domain: 'feishu' }),
+    );
+  });
+
+  it('/feishu setup (QR) still drives registration on the feishu domain', async () => {
+    const setupCmd = feishuCommand.subCommands?.find((c) => c.name === 'setup');
+    await setupCmd?.action!(context, '');
+
+    expect(registration.initRegistration).toHaveBeenCalledWith('feishu');
+    expect(registration.beginRegistration).toHaveBeenCalledWith('feishu');
   });
 });
 

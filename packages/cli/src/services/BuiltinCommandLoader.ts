@@ -52,7 +52,7 @@ import { wikiCommand } from '../ui/commands/wikiCommand.js';
 import { debateCommand } from '../ui/commands/debateCommand.js';
 import { goalCommand } from '../ui/commands/goalCommand.js';
 import { loopCommand } from '../ui/commands/loopCommand.js';
-import { feishuCommand } from '../ui/commands/feishuCommand.js';
+import { feishuCommand, larkCommand } from '../ui/commands/feishuCommand.js';
 import { todoCommand } from '../ui/commands/todoCommand.js';
 import { workflowCommand } from '../ui/commands/workflowCommand.js';
 
@@ -124,6 +124,7 @@ export class BuiltinCommandLoader implements ICommandLoader {
       goalCommand,
       loopCommand,
       feishuCommand,
+      larkCommand,
       todoCommand,
       workflowCommand,
     ];

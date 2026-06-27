@@ -1402,7 +1402,11 @@ function helpText(): string {
   return t('feishu.help.text');
 }
 
-async function handleSetup(args: string, ctx?: CommandContext): Promise<string> {
+async function handleSetup(
+  args: string,
+  ctx?: CommandContext,
+  domain: 'feishu' | 'lark' = 'feishu',
+): Promise<string> {
   const trimmed = args.trim();
   // 手动检测 --manual 模式，不走 parseArgs（避免 flag 值吃掉后续参数）
   const manualMatch = trimmed.match(/^--manual\s+(.+)$/s);
@@ -1412,11 +1416,11 @@ async function handleSetup(args: string, ctx?: CommandContext): Promise<string> 
     const parts = rest.split(/\s+/).filter(Boolean);
     const appId = parts[0];
     const appSecret = parts[1];
-    return appendCheetahHint(await handleManualSetup(appId, appSecret, ctx));
+    return appendCheetahHint(await handleManualSetup(appId, appSecret, ctx, domain));
   }
 
   // 没有 --manual 则走 QR
-  return appendCheetahHint(await handleQrSetup(ctx));
+  return appendCheetahHint(await handleQrSetup(ctx, domain));
 }
 
 /**
@@ -1507,13 +1511,16 @@ function renderQrCode(text: string): string | null {
  *
  * 没有 ctx（被非交互式 CLI 调用，如 `dvcode -p`）时退化回单次同步返回。
  */
-async function handleQrSetup(ctx?: CommandContext): Promise<string> {
+async function handleQrSetup(
+  ctx?: CommandContext,
+  domain: 'feishu' | 'lark' = 'feishu',
+): Promise<string> {
   const lines: string[] = [t('feishu.setup.qr.title')];
   lines.push(t('feishu.setup.qr.connecting'));
 
   try {
-    await initRegistration('feishu');
-    const begin = await beginRegistration('feishu');
+    await initRegistration(domain);
+    const begin = await beginRegistration(domain);
     const qrUrl = begin.qrUrl;
 
     // ============= 阶段 1：立刻拼好「二维码 + 链接 + 扫码提示」一并返回 =============
@@ -1541,7 +1548,7 @@ async function handleQrSetup(ctx?: CommandContext): Promise<string> {
         begin.deviceCode,
         begin.interval,
         begin.expireIn,
-        'feishu',
+        domain,
       );
       if (!pollResult) {
         lines.push('');
@@ -1562,7 +1569,7 @@ async function handleQrSetup(ctx?: CommandContext): Promise<string> {
           begin.deviceCode,
           begin.interval,
           begin.expireIn,
-          'feishu',
+          domain,
         );
         if (!pollResult) {
           ctx.ui.addItem(
@@ -1751,6 +1758,7 @@ async function handleManualSetup(
   appId?: string,
   appSecret?: string,
   ctx?: CommandContext,
+  domain: 'feishu' | 'lark' = 'feishu',
 ): Promise<string> {
   if (!appId || !appSecret) {
     return [
@@ -1768,12 +1776,12 @@ async function handleManualSetup(
 
   // 校验凭证
   const lines: string[] = [t('feishu.setup.manual.validating')];
-  const botInfo = await probeCredentials(appId, appSecret, 'feishu');
+  const botInfo = await probeCredentials(appId, appSecret, domain);
 
   const creds: FeishuCredentials = {
     appId,
     appSecret,
-    domain: 'feishu',
+    domain,
     botName: botInfo?.botName,
     botOpenId: botInfo?.botOpenId,
   };
@@ -5855,71 +5863,91 @@ function msg(content: string): SlashCommandActionReturn {
   return { type: 'message', messageType: 'info', content };
 }
 
-export const feishuCommand: SlashCommand = {
-  name: 'feishu',
-  altNames: ['飞书'],
-  description: t('feishu.command.description'),
-  kind: CommandKind.BUILT_IN,
+/**
+ * 构建 /feishu 或 /lark 命令。两者结构完全一致，唯一区别是 setup 链路使用的
+ * domain（'feishu' → accounts.feishu.cn / open.feishu.cn；'lark' →
+ * accounts.larksuite.com / open.larksuite.com）。
+ *
+ * 其余子命令（start/stop/status/logout/allow/deny/allowlist）不接 domain：
+ * 它们一律从已保存凭证的 `creds.domain` 读取平台，单槽位凭证存储下天然正确。
+ * setup 阶段把正确的 domain 写进凭证，是整条链路区分 feishu/lark 的唯一源头。
+ */
+function makeFeishuLikeCommand(domain: 'feishu' | 'lark'): SlashCommand {
+  const isLark = domain === 'lark';
+  return {
+    name: isLark ? 'lark' : 'feishu',
+    altNames: isLark ? ['Lark'] : ['飞书'],
+    description: t(isLark ? 'lark.command.description' : 'feishu.command.description'),
+    kind: CommandKind.BUILT_IN,
 
-  // /feishu（无子命令）→ 显示帮助
-  action: async () => msg(await handleInteractive()),
+    // /feishu | /lark（无子命令）→ 显示帮助
+    action: async () => msg(await handleInteractive()),
 
-  subCommands: [
-    {
-      name: 'start',
-      description: t('feishu.subcmd.start.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (ctx) => msg(await handleStart(ctx)),
-    },
-    {
-      name: 'setup',
-      description: t('feishu.subcmd.setup.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (ctx, args) => msg(await handleSetup(args, ctx)),
-    },
-    {
-      name: 'stop',
-      description: t('feishu.subcmd.stop.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (ctx) => {
-        return msg(await handleStop(ctx));
+    subCommands: [
+      {
+        name: 'start',
+        description: t('feishu.subcmd.start.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (ctx) => msg(await handleStart(ctx)),
       },
-    },
-    {
-      name: 'status',
-      description: t('feishu.subcmd.status.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async () => msg(await handleStatus()),
-    },
-    {
-      name: 'logout',
-      description: t('feishu.subcmd.logout.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (ctx) => msg(await handleLogout(ctx)),
-    },
-    {
-      name: 'allow',
-      description: t('feishu.subcmd.allow.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (_ctx, args) => msg(await handleAllow(args)),
-    },
-    {
-      name: 'deny',
-      description: t('feishu.subcmd.deny.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async (_ctx, args) => msg(await handleDeny(args)),
-    },
-    {
-      name: 'allowlist',
-      description: t('feishu.subcmd.allowlist.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async () => msg(await handleAllowlist()),
-    },
-    {
-      name: 'help',
-      description: t('feishu.subcmd.help.description'),
-      kind: CommandKind.BUILT_IN,
-      action: async () => msg(helpText()),
-    },
-  ],
-};
+      {
+        name: 'setup',
+        description: t('feishu.subcmd.setup.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (ctx, args) => msg(await handleSetup(args, ctx, domain)),
+      },
+      {
+        name: 'stop',
+        description: t('feishu.subcmd.stop.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (ctx) => {
+          return msg(await handleStop(ctx));
+        },
+      },
+      {
+        name: 'status',
+        description: t('feishu.subcmd.status.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async () => msg(await handleStatus()),
+      },
+      {
+        name: 'logout',
+        description: t('feishu.subcmd.logout.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (ctx) => msg(await handleLogout(ctx)),
+      },
+      {
+        name: 'allow',
+        description: t('feishu.subcmd.allow.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (_ctx, args) => msg(await handleAllow(args)),
+      },
+      {
+        name: 'deny',
+        description: t('feishu.subcmd.deny.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (_ctx, args) => msg(await handleDeny(args)),
+      },
+      {
+        name: 'allowlist',
+        description: t('feishu.subcmd.allowlist.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async () => msg(await handleAllowlist()),
+      },
+      {
+        name: 'help',
+        description: t('feishu.subcmd.help.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async () => msg(helpText()),
+      },
+    ],
+  };
+}
+
+export const feishuCommand: SlashCommand = makeFeishuLikeCommand('feishu');
+
+/**
+ * /lark — 与 /feishu 同构的国际版入口，domain 固定走 larksuite.com。
+ * 「feishu 就是 feishu、lark 就是 lark」：扫码 / 手动配置都会落到正确的开放平台。
+ */
+export const larkCommand: SlashCommand = makeFeishuLikeCommand('lark');

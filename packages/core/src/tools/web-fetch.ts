@@ -170,7 +170,7 @@ ${textContent}
       if (resultText.length > MAX_CONTENT_LENGTH) {
         const originalLength = resultText.length;
         resultText = resultText.substring(0, MAX_CONTENT_LENGTH);
-        resultText += `\n\n[Note: Content truncated from ${originalLength} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow]`;
+        resultText += `\n\n<system-reminder>\nNote: Content truncated from ${originalLength} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow.\n</system-reminder>`;
         isTruncated = true;
       }
 
@@ -414,7 +414,7 @@ ${sourceListFormatted.join('\n')}`;
       let isTruncated = false;
       if (responseText.length > MAX_CONTENT_LENGTH) {
         finalContent = responseText.substring(0, MAX_CONTENT_LENGTH);
-        finalContent += `\n\n[Note: Content truncated from ${responseText.length} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow]`;
+        finalContent += `\n\n<system-reminder>\nNote: Content truncated from ${responseText.length} to ${MAX_CONTENT_LENGTH} characters to prevent context overflow.\n</system-reminder>`;
         isTruncated = true;
       }
 

@@ -202,7 +202,20 @@ Each todo object must have:
         completed: todoItems.filter(t => t.status === 'completed').length,
       };
 
+      const allDone = todoItems.length > 0 && stats.completed === stats.total;
+      let verificationNudgeNeeded = false;
+      if (
+        allDone &&
+        todoItems.length >= 3 &&
+        !todoItems.some(t => /verif/i.test(t.content))
+      ) {
+        verificationNudgeNeeded = true;
+      }
+
       let output = `Todo List Updated Successfully\n\n`;
+      if (verificationNudgeNeeded) {
+        output += `\n\nNOTE: You just closed out 3+ tasks and none of them was a verification step. Before writing your final summary, spawn the verification agent (subagent_type="verification"). You cannot self-assign PARTIAL by listing caveats in your summary — only the verifier issues a verdict.`;
+      }
 
       // UI友好排序：已完成 > 进行中 > 待办
       const sortedTodos = [...todoItems].sort((a, b) => {
