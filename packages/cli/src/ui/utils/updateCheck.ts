@@ -5,7 +5,9 @@
  */
 
 import { getPackageJson } from '../../utils/package.js';
+import { getCliVersion } from '../../utils/version.js';
 import { t, tp, isChineseLocale } from './i18n.js';
+import semver from 'semver';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -95,6 +97,30 @@ function formatNextCheckTime(timestamp: number): string {
   });
 }
 
+/**
+ * 判断 latestVersion 是否比 currentVersion 更新。
+ * 使用 semver 进行语义化版本比较；当任一版本号无法被 semver 解析时，
+ * 回退为信任服务器（返回 true），以兼容非标准版本号场景。
+ */
+function isNewerVersion(
+  currentVersion: string,
+  latestVersion: string | undefined,
+): boolean {
+  if (!latestVersion) {
+    return false;
+  }
+
+  const current = semver.coerce(currentVersion);
+  const latest = semver.coerce(latestVersion);
+
+  // 无法解析为标准 semver 时，回退信任服务器的 hasUpdate 判断
+  if (!current || !latest) {
+    return true;
+  }
+
+  return semver.gt(latest, current);
+}
+
 export async function checkForUpdates(
   showProgress: boolean = false,
   forceCheck: boolean = false
@@ -112,6 +138,12 @@ export async function checkForUpdates(
       return null;
     }
 
+    // 统一版本来源：优先使用 CI 构建期注入的 CLI_VERSION（发版流程会用 git tag
+    // 覆写为真实版本号），而非 package.json 里可能滞后的占位版本号。
+    // 这与 footer / --version 的取值口径（getCliVersion）保持一致，避免出现
+    // “footer 显示 1.1.36 但更新检查仍按 1.1.14 上报”导致的误报升级。
+    const currentVersion = await getCliVersion();
+
     const now = Date.now();
     const oneDayMs = 24 * 60 * 60 * 1000; // 24小时
 
@@ -119,7 +151,7 @@ export async function checkForUpdates(
     if (!forceCheck) {
       const cache = await readUpdateCheckCache();
 
-      if (cache && cache.version === packageJson.version) {
+      if (cache && cache.version === currentVersion) {
         const timeSinceLastCheck = now - cache.lastCheckTime;
 
         if (timeSinceLastCheck < oneDayMs) {
@@ -130,7 +162,7 @@ export async function checkForUpdates(
     }
 
     const serverUrl = getServerUrl();
-    const updateApiUrl = `${serverUrl}/api/update-check?version=${encodeURIComponent(packageJson.version)}`;
+    const updateApiUrl = `${serverUrl}/api/update-check?version=${encodeURIComponent(currentVersion)}`;
 
     // 调用自己服务器的更新检测API
     const response = await fetch(
@@ -138,7 +170,7 @@ export async function checkForUpdates(
       {
         method: 'GET',
         headers: {
-          'User-Agent': `${packageJson.name}/${packageJson.version}`,
+          'User-Agent': `${packageJson.name}/${currentVersion}`,
         },
         // 设置超时
         signal: AbortSignal.timeout(10000), // 10秒超时
@@ -178,17 +210,24 @@ export async function checkForUpdates(
     let result: string | null = null;
     const MESSAGE_SEPARATOR = '::MSG::';
 
-    if (data.hasUpdate && data.forceUpdate && data.latestVersion && data.updateCommand) {
+    // 客户端二次校验版本号：仅当服务器返回的 latestVersion 严格大于当前版本时，
+    // 才认为存在可用更新。避免服务器误报（如缓存了旧的 latestVersion）导致
+    // 已是最新版本却仍提示升级。当版本号非标准 semver 时，回退为信任服务器结果。
+    const hasRealUpdate =
+      data.hasUpdate &&
+      isNewerVersion(currentVersion, data.latestVersion);
+
+    if (hasRealUpdate && data.forceUpdate && data.latestVersion && data.updateCommand) {
       // 返回特殊标记，表示需要强制更新
       result = `FORCE_UPDATE:${data.latestVersion}:${data.updateCommand}${MESSAGE_SEPARATOR}${t('update.force.message.header')}
-${tp('update.version.line', { current: packageJson.version, latest: String(data.latestVersion) })}
+${tp('update.version.line', { current: currentVersion, latest: String(data.latestVersion) })}
 ${tp('update.command.line', { command: String(data.updateCommand) })}
 
 ${t('update.after.success.exit')}`;
-    } else if (data.hasUpdate && showProgress && data.latestVersion && data.updateCommand) {
+    } else if (hasRealUpdate && showProgress && data.latestVersion && data.updateCommand) {
       // 非强制更新时的提示
       result = `UPDATE_AVAILABLE:${data.latestVersion}:${data.updateCommand}${MESSAGE_SEPARATOR}${t('update.available.message.header')}
-${tp('update.version.line', { current: packageJson.version, latest: String(data.latestVersion) })}
+${tp('update.version.line', { current: currentVersion, latest: String(data.latestVersion) })}
 ${tp('update.command.line', { command: String(data.updateCommand) })}`;
     }
 
@@ -197,7 +236,7 @@ ${tp('update.command.line', { command: String(data.updateCommand) })}`;
       const cache: UpdateCheckCache = {
         lastCheckTime: now,
         lastResult: result,
-        version: packageJson.version
+        version: currentVersion
       };
       await writeUpdateCheckCache(cache);
     }
