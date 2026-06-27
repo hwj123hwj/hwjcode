@@ -382,7 +382,7 @@ export class ImageReaderTool extends BaseTool<ImageReaderToolParams, ToolResult>
       if (description.length > MAX_DESCRIPTION_LENGTH) {
         const originalLength = description.length;
         description = description.substring(0, MAX_DESCRIPTION_LENGTH);
-        description += `\n\n[Note: Description truncated from ${originalLength} to ${MAX_DESCRIPTION_LENGTH} characters to prevent context overflow]`;
+        description += `\n\n<system-reminder>\nNote: Description truncated from ${originalLength} to ${MAX_DESCRIPTION_LENGTH} characters to prevent context overflow.\n</system-reminder>`;
         truncated = true;
       }
 

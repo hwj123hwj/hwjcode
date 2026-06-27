@@ -104,8 +104,8 @@ export class MicroCompactService {
   private lastAssistantMessageTime: number = Date.now();
 
   constructor(config: MicroCompactConfig = {}) {
-    this.idleThresholdMinutes = config.idleThresholdMinutes ?? 60;
-    this.keepRecentToolResults = config.keepRecentToolResults ?? 5;
+    this.idleThresholdMinutes = config.idleThresholdMinutes ?? 6;
+    this.keepRecentToolResults = config.keepRecentToolResults ?? 2;
     this.tokenUsageThreshold = config.tokenUsageThreshold ?? 0.7;
     this.enabled = config.enabled ?? true;
   }

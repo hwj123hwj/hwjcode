@@ -203,5 +203,13 @@ describe('MicroCompactService', () => {
       expect(config.keepRecentToolResults).toBe(2);
       expect(config.enabled).toBe(true);
     });
+
+    it('should use correct default parameters when constructed without configuration', () => {
+      const defaultService = new MicroCompactService();
+      const config = defaultService.getConfig();
+      expect(config.idleThresholdMinutes).toBe(6);
+      expect(config.keepRecentToolResults).toBe(2);
+      expect(config.enabled).toBe(true);
+    });
   });
 });

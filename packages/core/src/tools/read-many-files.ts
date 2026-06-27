@@ -538,11 +538,11 @@ This tool automatically enables external file access when absolute paths are det
           // 单个文件大小检查和截断
           if (contentToUse.length > MAX_SINGLE_FILE_SIZE) {
             contentToUse = contentToUse.substring(0, MAX_SINGLE_FILE_SIZE);
-            contentToUse += '\n\n[TRUNCATED: File content exceeds size limit. Use read_file for complete content.]';
+            contentToUse += '\n\n<system-reminder>\nTRUNCATED: File content exceeds size limit. Use read_file for complete content.\n</system-reminder>';
             isTruncated = true;
           }
 
-          const textContentWithSeparator = `${separator}\n\n${isTruncated ? '[TRUNCATED FILE - Use read_file for complete content]\n\n' : ''}${contentToUse}\n\n`;
+          const textContentWithSeparator = `${separator}\n\n${isTruncated ? '<system-reminder>\nTRUNCATED FILE - Use read_file for complete content.\n</system-reminder>\n\n' : ''}${contentToUse}\n\n`;
           fileContentSize = textContentWithSeparator.length;
 
           // 总内容大小检查 - 文本文件
@@ -620,7 +620,7 @@ This tool automatically enables external file access when absolute paths are det
             processedFilesCount++;
           } else {
             // 其他类型的非字符串内容 - 作为错误处理
-            const errorContent = `${separator}\n\n[ERROR: Unhandled content type for ${fileType.toUpperCase()} file: ${relativePathForDisplay}]\n\n`;
+            const errorContent = `${separator}\n\n<system-reminder>\nERROR: Unhandled content type for ${fileType.toUpperCase()} file: ${relativePathForDisplay}\n</system-reminder>\n\n`;
             const errorContentSize = errorContent.length;
 
             if (totalContentSize + errorContentSize <= MAX_TOTAL_CONTENT_SIZE) {

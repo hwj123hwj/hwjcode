@@ -259,13 +259,60 @@ Expectation for required parameters:
           .replace(/\\r/g, '\r')
           .replace(/\\t/g, '\t');
 
+        const normalizeQuotes = (str: string): string => {
+          return str
+            .replaceAll('‘', "'")
+            .replaceAll('’', "'")
+            .replaceAll('“', '"')
+            .replaceAll('”', '"');
+        };
+
+        const desanitize = (str: string): string => {
+          let res = str;
+          const DESANITIZATIONS: Record<string, string> = {
+            '<fnr>': '<function_results>',
+            '</fnr>': '</function_results>',
+            '<n>': '<name>',
+            '</n>': '</name>',
+            '<o>': '<output>',
+            '</o>': '</output>',
+            '<e>': '<error>',
+            '</e>': '</error>',
+            '<s>': '<system>',
+            '</s>': '</system>',
+            '<r>': '<result>',
+            '</r>': '</result>',
+            '< META_START >': '<META_START>',
+            '< META_END >': '<META_END>',
+            '< EOT >': '<EOT>',
+            '< META >': '<META>',
+            '< SOS >': '<SOS>',
+            '\n\nH:': '\n\nHuman:',
+            '\n\nA:': '\n\nAssistant:',
+          };
+          for (const [from, to] of Object.entries(DESANITIZATIONS)) {
+            res = res.replaceAll(from, to);
+          }
+          return res;
+        };
+
         const foundInContent = currentContent.includes(params.old_string);
         const foundInUnescaped = currentContent.includes(unescapedOldString);
 
+        let foundInNormalized = false;
         if (!foundInContent && !foundInUnescaped) {
+          const normalizedContent = normalizeQuotes(currentContent);
+          const normalizedOld = normalizeQuotes(desanitize(params.old_string));
+          const normalizedUnescaped = normalizeQuotes(desanitize(unescapedOldString));
+          foundInNormalized =
+            normalizedContent.includes(normalizedOld) ||
+            normalizedContent.includes(normalizedUnescaped);
+        }
+
+        if (!foundInContent && !foundInUnescaped && !foundInNormalized) {
           console.log(`[EditTool] Quick check: old_string not found in file, skipping API call`);
           error = {
-            display: `[HINT: Read File First] Failed to edit, could not find the string to replace.`,
+            display: `<system-reminder>\nFailed to edit: could not find the string to replace. Always read the file with read_file before editing to ensure you have the exact unescaped content.\n</system-reminder>`,
             raw: `Failed to edit, 0 occurrences found for old_string in ${params.file_path}. No edits made. The exact text in old_string was not found. Ensure you're not escaping content incorrectly and check whitespace, indentation, and context. Use ${ReadFileTool.Name} tool to verify.`,
           };
           occurrences = 0;
@@ -298,7 +345,7 @@ Expectation for required parameters:
         } else if (occurrences === 0) {
           // 未找到匹配的字符串
           error = {
-            display: `[HINT: Read File First] Failed to edit, could not find the string to replace.`,
+            display: `<system-reminder>\nFailed to edit: could not find the string to replace. Always read the file with read_file before editing to ensure you have the exact unescaped content.\n</system-reminder>`,
             raw: `Failed to edit, 0 occurrences found for old_string in ${params.file_path}. No edits made. The exact text in old_string was not found. Ensure you're not escaping content incorrectly and check whitespace, indentation, and context. Use ${ReadFileTool.Name} tool to verify.`,
           };
         } else if (occurrences !== expectedReplacements) {

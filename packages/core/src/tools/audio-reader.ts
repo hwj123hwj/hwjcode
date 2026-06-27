@@ -264,7 +264,7 @@ export class AudioReaderTool extends BaseTool<AudioReaderToolParams, ToolResult>
       if (transcript.length > MAX_TRANSCRIPT_LENGTH) {
         const originalLength = transcript.length;
         transcript = transcript.substring(0, MAX_TRANSCRIPT_LENGTH);
-        transcript += `\n\n[Note: Transcript truncated from ${originalLength} to ${MAX_TRANSCRIPT_LENGTH} characters to prevent context overflow]`;
+        transcript += `\n\n<system-reminder>\nNote: Transcript truncated from ${originalLength} to ${MAX_TRANSCRIPT_LENGTH} characters to prevent context overflow.\n</system-reminder>`;
         truncated = true;
       }
 
