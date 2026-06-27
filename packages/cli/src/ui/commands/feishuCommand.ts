@@ -115,11 +115,94 @@ import {
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
 
+import {
+  isAcpDelegateTask,
+  formatClaudeCodeTaskResult,
+} from 'deepv-code-core';
+import { formatBackgroundTaskResult } from '../hooks/useBackgroundTaskNotifications.js';
+
 // 🎯 跟踪飞书会话拉起的后台任务，以便在其完成时主动向飞书群/私聊发送卡片通知
-const feishuBackgroundTaskMap = new Map<string, { chatId: string; messageId?: string; gateway: FeishuGateway }>();
+const feishuBackgroundTaskMap = new Map<
+  string,
+  {
+    chatId: string;
+    messageId?: string;
+    gateway: FeishuGateway;
+    sessionId?: string;
+    projectRoot?: string;
+  }
+>();
+
+export function isFeishuBackgroundTask(taskId: string): boolean {
+  return feishuBackgroundTaskMap.has(taskId);
+}
+
+// 🎯 全局存储 nested processMessageQueueForChat 引用
+let triggerQueueProcessingRef: ((gateway: FeishuGateway, chatId: string, creds: FeishuCredentials) => Promise<void>) | null = null;
 
 // 全局注册后台任务监听器，保证飞书网关模式下后台长任务也有完成通知推送！
 const feishuTaskManager = getBackgroundTaskManager();
+
+/**
+ * 🎯 将后台任务的执行结果注入到 AI 的对话历史中，并自动触发新一轮的思考继续处理
+ */
+async function injectTaskResultToAiAndTrigger(task: any, ctx: any, isSuccess: boolean) {
+  const creds = await loadCredentials().catch(() => null);
+  if (!creds) {
+    console.warn('[Feishu Continuation] Failed to load credentials for background task continuation.');
+    return;
+  }
+
+  const session = isolatedSessions.get(ctx.chatId);
+  if (!session) {
+    console.warn(`[Feishu Continuation] No active isolated session found for chatId '${ctx.chatId}'.`);
+    return;
+  }
+
+  const isAcpDelegate = isAcpDelegateTask(task);
+  const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
+  const resultText = isAcpDelegate
+    ? formatClaudeCodeTaskResult(task)
+    : formatBackgroundTaskResult(task);
+
+  const notificationText = isSuccess
+    ? (isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task completed (Task ID: ${task.id}).\n\n${resultText}`
+        : `[Easy Code - SYSTEM NOTIFICATION] Background task completed (Task ID: ${task.id}). Exit code: ${task.exitCode ?? 'unknown'}.\n\n${resultText}`)
+    : (isAcpDelegate
+        ? `[Easy Code - SYSTEM NOTIFICATION] ${agentLabel} task failed (Task ID: ${task.id}).\n\n${resultText}`
+        : `[Easy Code - SYSTEM NOTIFICATION] Background task failed (Task ID: ${task.id}). Error: ${task.error || 'unknown'}.\n\n${resultText}`);
+
+  const fakeMsg: FeishuMessage = {
+    chatId: ctx.chatId,
+    messageId: ctx.messageId || `bg-notify-${task.id}`,
+    senderOpenId: creds.ownerOpenId || '',
+    text: notificationText,
+    chatType: 'group',
+    messageType: 'text',
+    mentions: [],
+  };
+
+  let queue = messageQueues.get(ctx.chatId);
+  if (!queue) {
+    queue = [];
+    messageQueues.set(ctx.chatId, queue);
+  }
+
+  queue.push({
+    msg: fakeMsg,
+    resolve: () => {},
+    reject: () => {},
+  });
+
+  console.log(`[Feishu Continuation] Enqueued system notification for task ${task.id} (success=${isSuccess}), triggering processMessageQueueForChat...`);
+
+  if (triggerQueueProcessingRef) {
+    await triggerQueueProcessingRef(ctx.gateway, ctx.chatId, creds);
+  } else {
+    console.warn('[Feishu Continuation] triggerQueueProcessingRef is not initialized.');
+  }
+}
 
 feishuTaskManager.on('task-completed', async (event: { type: string; task: any }) => {
   const task = event.task;
@@ -146,6 +229,13 @@ feishuTaskManager.on('task-completed', async (event: { type: string; task: any }
     } catch (e) {
       console.error('[Feishu Background Listener] Failed to send completion notification:', e);
     }
+
+    // 🎯 追加把结果投给 AI 的逻辑，并自动触发 processMessageQueueForChat
+    try {
+      await injectTaskResultToAiAndTrigger(task, ctx, true);
+    } catch (e) {
+      console.error('[Feishu Background Listener] Failed to trigger AI continuation:', e);
+    }
   }
 });
 
@@ -171,6 +261,13 @@ feishuTaskManager.on('task-failed', async (event: { type: string; task: any }) =
       await ctx.gateway.sendMarkdown(ctx.chatId, md, ctx.messageId);
     } catch (e) {
       console.error('[Feishu Background Listener] Failed to send failure notification:', e);
+    }
+
+    // 🎯 追加把结果投给 AI 的逻辑，并自动触发 processMessageQueueForChat
+    try {
+      await injectTaskResultToAiAndTrigger(task, ctx, false);
+    } catch (e) {
+      console.error('[Feishu Background Listener] Failed to trigger AI continuation on failure:', e);
     }
   }
 });
@@ -4060,6 +4157,8 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     chatId: msg.chatId,
                     messageId: msg.messageId,
                     gateway,
+                    sessionId: config?.getSessionId?.() || '',
+                    projectRoot: config?.getProjectRoot?.() || process.cwd(),
                   });
                 }
 
@@ -4792,6 +4891,13 @@ async function handleStart(context?: CommandContext): Promise<string> {
 
     return `${headLine}${branchLine}${contentBox}`;
   }
+
+  // 🎯 将 nested processMessageQueueForChat 暴露给全局后台任务监听器
+  triggerQueueProcessingRef = async (gateway, chatId, creds) => {
+    const session = isolatedSessions.get(chatId);
+    if (!session) return;
+    await processMessageQueueForChat(gateway, session.config, session.geminiClient, creds, chatId);
+  };
 
   async function processMessageQueueForChat(
     gateway: FeishuGateway,
