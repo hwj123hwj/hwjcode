@@ -111,8 +111,69 @@ import {
   type RelaunchInstallMode,
   runSideQuestion,
   QuotaStatusService,
+  getBackgroundTaskManager,
 } from 'deepv-code-core';
 import { CommandService } from '../../services/CommandService.js';
+
+// 🎯 跟踪飞书会话拉起的后台任务，以便在其完成时主动向飞书群/私聊发送卡片通知
+const feishuBackgroundTaskMap = new Map<string, { chatId: string; messageId?: string; gateway: FeishuGateway }>();
+
+// 全局注册后台任务监听器，保证飞书网关模式下后台长任务也有完成通知推送！
+const feishuTaskManager = getBackgroundTaskManager();
+
+feishuTaskManager.on('task-completed', async (event: { type: string; task: any }) => {
+  const task = event.task;
+  const ctx = feishuBackgroundTaskMap.get(task.id);
+  if (ctx) {
+    feishuBackgroundTaskMap.delete(task.id);
+    const duration = task.endTime ? Math.round((task.endTime - task.startTime) / 1000) : 0;
+
+    let md = `🟢 **Easy Code 后台任务执行完毕**\n\n`;
+    md += `*   **任务 ID：** \`${task.id}\`\n`;
+    md += `*   **命令：** \`${task.command}\`\n`;
+    md += `*   **状态：** 🟢 \`completed\` (Exit Code: ${task.exitCode ?? 0})\n`;
+    md += `*   **耗时：** ${duration} 秒\n\n`;
+
+    if (task.output && task.output.trim()) {
+      const displayOutput = task.output.length > 2000
+        ? task.output.slice(-2000) + '\n\n*(内容过长已截断，仅显示尾部)*'
+        : task.output;
+      md += `**📋 控制台输出：**\n\`\`\`\n${displayOutput}\n\`\`\`\n`;
+    }
+
+    try {
+      await ctx.gateway.sendMarkdown(ctx.chatId, md, ctx.messageId);
+    } catch (e) {
+      console.error('[Feishu Background Listener] Failed to send completion notification:', e);
+    }
+  }
+});
+
+feishuTaskManager.on('task-failed', async (event: { type: string; task: any }) => {
+  const task = event.task;
+  const ctx = feishuBackgroundTaskMap.get(task.id);
+  if (ctx) {
+    feishuBackgroundTaskMap.delete(task.id);
+    const duration = task.endTime ? Math.round((task.endTime - task.startTime) / 1000) : 0;
+
+    let md = `🔴 **Easy Code 后台任务执行失败**\n\n`;
+    md += `*   **任务 ID：** \`${task.id}\`\n`;
+    md += `*   **命令：** \`${task.command}\`\n`;
+    md += `*   **状态：** 🔴 \`failed\`\n`;
+    md += `*   **错误信息：** ${task.error || '未知错误'}\n`;
+    md += `*   **耗时：** ${duration} 秒\n\n`;
+
+    if (task.output && task.output.trim()) {
+      md += `**📋 部分输出：**\n\`\`\`\n${task.output.slice(-1000)}\n\`\`\`\n`;
+    }
+
+    try {
+      await ctx.gateway.sendMarkdown(ctx.chatId, md, ctx.messageId);
+    } catch (e) {
+      console.error('[Feishu Background Listener] Failed to send failure notification:', e);
+    }
+  }
+});
 import { McpPromptLoader } from '../../services/McpPromptLoader.js';
 import { BuiltinCommandLoader } from '../../services/BuiltinCommandLoader.js';
 import { InlineCommandLoader } from '../../services/InlineCommandLoader.js';
@@ -3992,6 +4053,15 @@ async function handleStart(context?: CommandContext): Promise<string> {
                     response: { output: toolResult.llmContent },
                   }
                 };
+
+                // 🎯 如果启动了后台任务，在飞书路由映射中注册它，以便完成时推送通知卡片给用户
+                if (toolResult.backgroundTaskId) {
+                  feishuBackgroundTaskMap.set(toolResult.backgroundTaskId, {
+                    chatId: msg.chatId,
+                    messageId: msg.messageId,
+                    gateway,
+                  });
+                }
 
                 toolResponse = {
                   callId: req.callId,
