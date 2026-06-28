@@ -422,6 +422,8 @@ Reserve this tool for system commands and terminal operations that have no dedic
 - Do not sleep between commands that can run immediately.
 - Do not retry failing commands in a sleep loop — diagnose the root cause instead.
 - If you must poll, keep sleep duration short (1-5 seconds).
+- If your command is long-running and you would like to be notified when it finishes, use the \`run_in_background\` parameter (set to \`true\`). There is no need to sleep, poll, or use \`&\` at the end of the command.
+- If waiting for a background task started with \`run_in_background: true\`, you will be automatically notified when it completes — do not sleep or poll proactively.
 
 # Git safety
 

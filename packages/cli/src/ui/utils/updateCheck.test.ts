@@ -41,8 +41,9 @@ global.fetch = mockFetch;
 describe('checkForUpdates', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Clear DEV environment variable before each test
+    // Clear environment variables that affect version resolution before each test
     delete process.env.DEV;
+    delete process.env.CLI_VERSION;
     // Mock successful package.json
     getPackageJson.mockResolvedValue({
       name: 'deepv-code-cli',
@@ -109,6 +110,71 @@ describe('checkForUpdates', () => {
     expect(result).toBeNull();
   });
 
+  it('should return null when server reports hasUpdate but latestVersion equals current version', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        latestVersion: '1.0.0',
+        updateCommand: 'npm install -g deepv-code-cli',
+      }),
+    });
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toBeNull();
+  });
+
+  it('should return null when server reports hasUpdate but latestVersion is older than current version', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        latestVersion: '0.9.9',
+        updateCommand: 'npm install -g deepv-code-cli',
+      }),
+    });
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toBeNull();
+  });
+
+  it('should not force update when latestVersion is not newer than current version', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        forceUpdate: true,
+        latestVersion: '1.0.0',
+        updateCommand: 'npm install -g deepv-code-cli',
+      }),
+    });
+
+    const result = await checkForUpdates(false, true);
+    expect(result).toBeNull();
+  });
+
+  it('should still notify update when version strings are non-semver (trust server)', async () => {
+    getPackageJson.mockResolvedValue({
+      name: 'deepv-code-cli',
+      version: 'not-a-semver',
+    });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        latestVersion: 'also-not-semver',
+        updateCommand: 'npm install -g deepv-code-cli',
+      }),
+    });
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toContain('UPDATE_AVAILABLE:');
+  });
+
   it('should return a FORCE_UPDATE message if forceUpdate is true', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -161,5 +227,62 @@ describe('checkForUpdates', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [, init] = mockFetch.mock.calls[0];
     expect(init.headers['User-Agent']).toBe('deepv-code-cli/1.0.0');
+  });
+
+  it('should use the CI-injected CLI_VERSION instead of the stale package.json version', async () => {
+    // Reproduces the real bug: package.json carries a stale placeholder version
+    // (e.g. 1.1.14) while the CI build injects the real version via CLI_VERSION
+    // (e.g. 1.1.36). The update check must report the injected version, not the
+    // stale one, otherwise the server is queried with a wrong version and keeps
+    // offering an "update" to a version the user already runs.
+    getPackageJson.mockResolvedValue({
+      name: 'easycode',
+      version: '1.1.14',
+    });
+    process.env.CLI_VERSION = '1.1.36';
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        latestVersion: '1.1.36',
+        updateCommand: 'npm install -g easycode-ai',
+      }),
+    });
+
+    const result = await checkForUpdates(true, true);
+
+    // Server query and user-agent must carry the real injected version.
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toContain('version=1.1.36');
+    expect(init.headers['User-Agent']).toBe('easycode/1.1.36');
+
+    // 1.1.36 server-latest is not newer than the real 1.1.36 install → no prompt.
+    expect(result).toBeNull();
+  });
+
+  it('should still detect a genuine update relative to the injected CLI_VERSION', async () => {
+    getPackageJson.mockResolvedValue({
+      name: 'easycode',
+      version: '1.1.14',
+    });
+    process.env.CLI_VERSION = '1.1.36';
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        success: true,
+        hasUpdate: true,
+        latestVersion: '1.1.40',
+        updateCommand: 'npm install -g easycode-ai',
+      }),
+    });
+
+    const result = await checkForUpdates(true, true);
+
+    expect(result).toContain('UPDATE_AVAILABLE:1.1.40');
+    expect(result).toContain('1.1.36');
+    expect(result).not.toContain('1.1.14');
   });
 });

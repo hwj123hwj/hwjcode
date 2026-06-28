@@ -63,6 +63,7 @@ import { HelpModeIndicator } from './components/HelpModeIndicator.js';
 import { PlanModeIndicator } from './components/PlanModeIndicator.js';
 import { InputPrompt } from './components/InputPrompt.js';
 import { Footer } from './components/Footer.js';
+import { isFeishuBackgroundTask } from './commands/feishuCommand.js';
 import { truncateText, getDefaultMaxRows } from './utils/textTruncator.js';
 import { ThemeDialog } from './components/ThemeDialog.js';
 import { ModelDialog } from './components/ModelDialog.js';
@@ -1532,6 +1533,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
   // 🎯 监听后台任务完成事件
   useBackgroundTaskNotifications({
     onTaskCompleted: useCallback((task: BackgroundTask) => {
+      if (isFeishuBackgroundTask(task.id)) {
+        console.log('[App] Skipping Feishu background task completed in TUI:', task.id);
+        return;
+      }
       console.log('[App] Background task completed, adding to history:', task.id);
 
       const isAcpDelegate = isAcpDelegateTask(task);
@@ -1574,6 +1579,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       }
     }, [addItem, streamingState, submitQuery]),
     onTaskFailed: useCallback((task: BackgroundTask) => {
+      if (isFeishuBackgroundTask(task.id)) {
+        console.log('[App] Skipping Feishu background task failed in TUI:', task.id);
+        return;
+      }
       console.log('[App] Background task failed:', task.id);
       const isAcpDelegate = isAcpDelegateTask(task);
       const agentLabel = task.kind === 'codex' ? 'Codex' : 'Claude Code';
@@ -1610,6 +1619,10 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
       }
     }, [addItem, streamingState, submitQuery]),
     onTaskKilled: useCallback((task: BackgroundTask) => {
+      if (isFeishuBackgroundTask(task.id)) {
+        console.log('[App] Skipping Feishu background task killed in TUI:', task.id);
+        return;
+      }
       console.log('[App] Background task killed by user:', task.id);
       // 🎯 使用 tool_group 格式显示任务被终止
       // 🔧 截断大型输出，防止 CLI 界面压力过大
