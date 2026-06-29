@@ -154,6 +154,111 @@ describe('feishuCommand', () => {
     }));
   });
 
+  it('exposes the owner subcommand in metadata', () => {
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    expect(ownerCmd).toBeDefined();
+    expect(ownerCmd?.description).toBeTruthy();
+  });
+
+  it('owner: sets owner and marks verified when none is bound', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      domain: 'feishu',
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, 'ou_new_owner');
+
+    expect(result?.type).toBe('message');
+    expect(result?.content).toMatch(/Set .*as Bot Owner|设为 Bot Owner/i);
+    expect(credentials.saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerOpenId: 'ou_new_owner', ownerVerified: true }),
+    );
+  });
+
+  it('owner: overwrites an existing owner and marks verified', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      domain: 'feishu',
+      ownerOpenId: 'ou_old_owner',
+      ownerVerified: true,
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, 'ou_replacement');
+
+    expect(result?.type).toBe('message');
+    expect(result?.content).toMatch(/Changed|更换|Set|设为/i);
+    expect(credentials.saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerOpenId: 'ou_replacement', ownerVerified: true }),
+    );
+  });
+
+  it('owner: confirms a TOFU-pending owner (verified false → true) without changing the id', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      domain: 'feishu',
+      ownerOpenId: 'ou_pending',
+      ownerVerified: false,
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, 'ou_pending');
+
+    expect(result?.type).toBe('message');
+    expect(credentials.saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerOpenId: 'ou_pending', ownerVerified: true }),
+    );
+  });
+
+  it('owner: no-op when the same id is already the verified owner', async () => {
+    const mockCreds: any = {
+      appId: 'cli_123',
+      appSecret: 'sec_123',
+      domain: 'feishu',
+      ownerOpenId: 'ou_same',
+      ownerVerified: true,
+      allowlist: [],
+    };
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(mockCreds);
+
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, 'ou_same');
+
+    expect(result?.type).toBe('message');
+    expect(result?.content).toMatch(/already|已是/i);
+    expect(credentials.saveCredentials).not.toHaveBeenCalled();
+  });
+
+  it('owner: shows usage when no open_id is provided', async () => {
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, '');
+
+    expect(result?.type).toBe('message');
+    expect(result?.content).toMatch(/Usage: \/feishu owner|用法: \/feishu owner/i);
+    expect(credentials.saveCredentials).not.toHaveBeenCalled();
+  });
+
+  it('owner: reports missing credentials', async () => {
+    vi.mocked(credentials.loadCredentials).mockResolvedValue(null);
+
+    const ownerCmd = feishuCommand.subCommands?.find((c) => c.name === 'owner');
+    const result = await ownerCmd?.action!(context, 'ou_whatever');
+
+    expect(result?.type).toBe('message');
+    expect(result?.content).toMatch(/credentials not found|未找到飞书凭证/i);
+    expect(credentials.saveCredentials).not.toHaveBeenCalled();
+  });
+
   it('should handle stop correctly and reset state', async () => {
     const mockCreds: any = {
       appId: 'cli_123',

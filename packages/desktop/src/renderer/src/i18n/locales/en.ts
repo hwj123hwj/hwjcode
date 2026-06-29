@@ -83,8 +83,10 @@ export const en = {
   'feishu.stopGateway': 'Stop gateway',
   'feishu.startGateway': 'Start gateway',
   'feishu.reconfigure': 'Reconfigure',
-  'feishu.qrLogin': 'QR login (auto-create app)',
-  'feishu.manualEntry': 'Enter credentials manually',
+  'feishu.qrLogin': 'QR Login',
+  'feishu.qrLoginDesc': 'Recommended · Scan with Feishu / Lark app to auto-create and authorize — no developer setup needed.',
+  'feishu.manualEntry': 'Enter credentials',
+  'feishu.manualEntryDesc': 'Already have a Feishu app? Paste your App ID and App Secret to connect directly.',
   'feishu.qrHint': 'Scan the QR code with {platform} and authorize app creation.',
   'feishu.verifyCode': 'Code',
   'feishu.openInBrowser': 'Open in browser',
@@ -96,6 +98,27 @@ export const en = {
   'feishu.detailsLogSize': '{n} chars',
   'feishu.detailsLogEmpty':
     'No output yet. Once the gateway starts, its live log (WebSocket connect, scope audit, errors) appears here.',
+
+  // ── feishu authorization management (graphical owner / allowlist config) ─────
+  'feishu.auth.title': 'Authorization',
+  'feishu.auth.ownerLabel': 'Owner',
+  'feishu.auth.ownerNone': 'Not set',
+  'feishu.auth.verified': 'Verified',
+  'feishu.auth.unverified': 'Pending first-DM confirmation',
+  'feishu.auth.edit': 'Edit',
+  'feishu.auth.save': 'Save',
+  'feishu.auth.ownerPlaceholder': 'Bot-app open_id (ou_…)',
+  'feishu.auth.ownerHint':
+    "The owner is the open_id authorized to drive the Bot. Use the open_id from the Bot app's own space (the sender open_id in DMs with the Bot). Setting it here marks it verified, so first-use auto-binding (TOFU) no longer applies.",
+  'feishu.auth.allowlistLabel': 'Authorized users',
+  'feishu.auth.allowlistEmpty': 'No additional authorized users.',
+  'feishu.auth.allowPlaceholder': 'open_id to authorize (ou_…)',
+  'feishu.auth.add': 'Add',
+  'feishu.auth.remove': 'Remove',
+  'feishu.auth.restartHint':
+    'Gateway is running — changes only take effect for live sessions after a restart.',
+  'feishu.auth.cmdFailed': 'Command failed',
+  'feishu.auth.working': 'Working…',
 
   // ── login ────────────────────────────────────────────────────────────────────
   'login.failed': 'Login failed',
