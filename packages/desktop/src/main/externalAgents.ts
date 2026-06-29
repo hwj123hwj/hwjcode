@@ -47,11 +47,11 @@ const OVERRIDE_ENV: Record<'claude-code' | 'codex', string> = {
 const DEFAULT_BRIDGE: Record<'claude-code' | 'codex', { label: string; args: string[] }> = {
   'claude-code': {
     label: 'Claude Code',
-    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.44.0'],
+    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.52.0'],
   },
   codex: {
     label: 'Codex',
-    args: ['-y', '@zed-industries/codex-acp@0.16.0'],
+    args: ['-y', '@agentclientprotocol/codex-acp@1.0.2'],
   },
 };
 
