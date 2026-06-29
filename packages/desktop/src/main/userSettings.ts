@@ -20,7 +20,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
-import type { DesktopUserSettings, TerminalShellKind } from '../shared/ipc.js';
+import type { DesktopUserSettings, ModelOverrides, TerminalShellKind } from '../shared/ipc.js';
 
 const TERMINAL_SHELL_KINDS: TerminalShellKind[] = [
   'default',
@@ -72,6 +72,22 @@ function writeRaw(data: Record<string, unknown>): void {
   fs.renameSync(tmp, fp);
 }
 
+/**
+ * Sanitize a raw `modelOverrides` value to the known string fields, dropping any
+ * empty/invalid entries. Returns `undefined` when nothing valid remains so the key
+ * can be omitted entirely (mirrors the "unset = default" semantics).
+ */
+function sanitizeModelOverrides(value: unknown): ModelOverrides | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const src = value as Record<string, unknown>;
+  const out: ModelOverrides = {};
+  for (const key of ['compression', 'codeExpert', 'verification'] as const) {
+    const v = src[key];
+    if (typeof v === 'string' && v.trim()) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** Project the full settings file down to the subset the desktop exposes. */
 function project(raw: Record<string, unknown>): DesktopUserSettings {
   const out: DesktopUserSettings = {};
@@ -94,6 +110,8 @@ function project(raw: Record<string, unknown>): DesktopUserSettings {
   if (typeof raw.computerUseEnabled === 'boolean') {
     out.computerUseEnabled = raw.computerUseEnabled;
   }
+  const overrides = sanitizeModelOverrides(raw.modelOverrides);
+  if (overrides) out.modelOverrides = overrides;
   return out;
 }
 
@@ -132,6 +150,13 @@ export function updateUserSettings(patch: DesktopUserSettings): DesktopUserSetti
   }
   if ('computerUseEnabled' in patch && typeof patch.computerUseEnabled === 'boolean') {
     raw.computerUseEnabled = patch.computerUseEnabled;
+  }
+  if ('modelOverrides' in patch) {
+    // Sanitize, then write the cleaned object or drop the key entirely when empty
+    // (empty = clear all overrides, back to the built-in defaults).
+    const overrides = sanitizeModelOverrides(patch.modelOverrides);
+    if (overrides) raw.modelOverrides = overrides;
+    else delete raw.modelOverrides;
   }
 
   writeRaw(raw);

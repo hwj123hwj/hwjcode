@@ -20,6 +20,7 @@ import {
   HookDefinition,
   CustomModelConfig,
   ThinkingConfig,
+  ModelOverrides,
 } from 'deepv-code-core';
 import stripJsonComments from 'strip-json-comments';
 import { DefaultLight } from '../ui/themes/default-light.js';
@@ -137,6 +138,12 @@ export interface Settings {
 
   // Custom model settings
   customModels?: CustomModelConfig[];
+
+  // 内部场景/子代理模型覆盖：
+  // - compression: 上下文压缩模型，未设置则走硬编码默认
+  // - codeExpert: Code Expert 子代理模型，未设置则继承当前会话模型
+  // - verification: Verification 子代理模型，未设置则继承当前会话模型
+  modelOverrides?: ModelOverrides;
 
   // 标准的思考配置
   thinking?: ThinkingConfig;

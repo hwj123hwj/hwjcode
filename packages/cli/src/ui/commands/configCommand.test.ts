@@ -25,11 +25,13 @@ describe('configCommand', () => {
       getVsCodePluginMode: vi.fn().mockReturnValue(false),
       getUserMemory: vi.fn().mockReturnValue(null),
       getGeminiClient: vi.fn(),
+      setModelOverrides: vi.fn(),
     };
 
     mockSettings = {
       merged: {
         vimMode: false,
+        modelOverrides: {},
       },
       setValue: vi.fn(),
     };
@@ -62,8 +64,8 @@ describe('configCommand', () => {
     expect(configCommand.kind).toBe(CommandKind.BUILT_IN);
   });
 
-  it('should have 9 subcommands', () => {
-    expect(configCommand.subCommands).toHaveLength(9);
+  it('should have 12 subcommands', () => {
+    expect(configCommand.subCommands).toHaveLength(12);
     const names = configCommand.subCommands!.map(cmd => cmd.name);
     expect(names).toContain('theme');
     expect(names).toContain('editor');
@@ -74,6 +76,9 @@ describe('configCommand', () => {
     expect(names).toContain('healthy-use');
     expect(names).toContain('language');
     expect(names).toContain('memory-mode');
+    expect(names).toContain('compression-model');
+    expect(names).toContain('code-expert-model');
+    expect(names).toContain('verification-model');
   });
 
   it('should open settings menu dialog when no args provided', async () => {
@@ -171,5 +176,31 @@ describe('configCommand', () => {
     expect(result).toBeDefined();
     expect(result.type).toBe('message');
     expect(mockConfig.setAgentStyle).toHaveBeenCalledWith('cursor');
+  });
+
+  it('should open settings menu for compression-model without args', async () => {
+    const result = await configCommand.action!(mockContext as CommandContext, 'compression-model');
+    expect(result).toBeDefined();
+    expect(result.type).toBe('dialog');
+    expect((result as any).dialog).toBe('settings-menu');
+  });
+
+  it('should clear compression override when set to default', async () => {
+    mockSettings.merged.modelOverrides = { compression: 'gemini-2.5-pro', codeExpert: 'auto' };
+    const result = await configCommand.action!(mockContext as CommandContext, 'compression-model default');
+    expect(result).toBeDefined();
+    expect(result.type).toBe('message');
+    // 应写回去除 compression 后的覆盖对象，并同步到运行中的 Config
+    expect(mockSettings.setValue).toHaveBeenCalledWith('User', 'modelOverrides', { codeExpert: 'auto' });
+    expect(mockConfig.setModelOverrides).toHaveBeenCalledWith({ codeExpert: 'auto' });
+  });
+
+  it('should clear verification override with inherit keyword', async () => {
+    mockSettings.merged.modelOverrides = { verification: 'gemini-2.5-flash' };
+    const result = await configCommand.action!(mockContext as CommandContext, 'verification-model inherit');
+    expect(result).toBeDefined();
+    expect(result.type).toBe('message');
+    expect(mockSettings.setValue).toHaveBeenCalledWith('User', 'modelOverrides', {});
+    expect(mockConfig.setModelOverrides).toHaveBeenCalledWith({});
   });
 });

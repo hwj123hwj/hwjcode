@@ -1212,7 +1212,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       }
 
       const curatedHistory = this.getChat().getHistory(true);
-      let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 用户可在 /config 中自定义压缩模型；未设置时回退到硬编码场景默认值。
+      let compressionModel = this.config.getCompressionModel();
 
       // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
       // upgrade the compression model so a 1M+ history can still fit.
@@ -1389,7 +1390,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     try {
       const curatedHistory = this.getChat().getHistory(true);
-      let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 用户可在 /config 中自定义压缩模型；未设置时回退到硬编码场景默认值。
+      let compressionModel = this.config.getCompressionModel();
 
       // 🚀 Dynamic Model Upgrade: 与 tryCompressChat 路径保持一致 —— 自定义
       //   模型用户不能被强行改写为云端 'x-ai/grok-4.1-fast'，否则 DeepVServer

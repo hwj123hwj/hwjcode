@@ -31,6 +31,10 @@ interface ExecutionSettingsPanelProps {
   onHealthyUseChange: (value: boolean) => void;
   /** 可用模型列表 */
   availableModels: any[];
+  /** 内部场景/子代理模型覆盖 */
+  modelOverrides: { compression?: string; codeExpert?: string; verification?: string };
+  /** 模型覆盖更新回调 */
+  onModelOverridesChange: (overrides: { compression?: string; codeExpert?: string; verification?: string }) => void;
 }
 
 export const ExecutionSettingsPanel: React.FC<ExecutionSettingsPanelProps> = ({
@@ -40,7 +44,9 @@ export const ExecutionSettingsPanel: React.FC<ExecutionSettingsPanelProps> = ({
   onPreferredModelChange,
   healthyUse,
   onHealthyUseChange,
-  availableModels
+  availableModels,
+  modelOverrides,
+  onModelOverridesChange
 }) => {
   const { t } = useTranslation();
 
@@ -56,6 +62,50 @@ export const ExecutionSettingsPanel: React.FC<ExecutionSettingsPanelProps> = ({
       value: model.name,
       description: model.description
     }))
+  ];
+
+  // 模型覆盖选择项：第一项为空值=恢复默认（压缩→内置默认，子代理→继承会话模型）。
+  const overrideOptions = (defaultLabel: string) => [
+    { label: defaultLabel, value: '', description: '' },
+    ...otherModels.map(model => ({
+      label: model.displayName || model.name,
+      value: model.name,
+      description: model.description
+    }))
+  ];
+
+  // 单个覆盖字段更新：合并进现有覆盖对象。
+  const setOverride = (
+    key: 'compression' | 'codeExpert' | 'verification',
+    value: string
+  ) => {
+    onModelOverridesChange({ ...modelOverrides, [key]: value });
+  };
+
+  const overrideFields: Array<{
+    key: 'compression' | 'codeExpert' | 'verification';
+    label: string;
+    description: string;
+    defaultLabel: string;
+  }> = [
+    {
+      key: 'compression',
+      label: t('settings.general.overrideCompressionLabel'),
+      description: t('settings.general.overrideCompressionDesc'),
+      defaultLabel: t('settings.general.overrideAutoDefault'),
+    },
+    {
+      key: 'codeExpert',
+      label: t('settings.general.overrideCodeExpertLabel'),
+      description: t('settings.general.overrideCodeExpertDesc'),
+      defaultLabel: t('settings.general.overrideInherit'),
+    },
+    {
+      key: 'verification',
+      label: t('settings.general.overrideVerificationLabel'),
+      description: t('settings.general.overrideVerificationDesc'),
+      defaultLabel: t('settings.general.overrideInherit'),
+    },
   ];
 
   return (
@@ -98,6 +148,24 @@ export const ExecutionSettingsPanel: React.FC<ExecutionSettingsPanelProps> = ({
           options={modelOptions}
         />
       </div>
+
+      {/* 高级模型覆盖：压缩 / Code Expert / Verification 子代理 */}
+      {overrideFields.map((f) => (
+        <div
+          key={f.key}
+          className="execution-settings-panel__model-section"
+          style={{ marginTop: '20px' }}
+        >
+          <SelectSettingItem
+            id={`model-override-${f.key}`}
+            label={f.label}
+            description={f.description}
+            value={modelOverrides[f.key] ?? ''}
+            onChange={(value) => setOverride(f.key, value)}
+            options={overrideOptions(f.defaultLabel)}
+          />
+        </div>
+      ))}
     </div>
   );
 };

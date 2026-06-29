@@ -573,6 +573,14 @@ export interface Translations {
       autoModelDesc: string;
       healthyUseLabel: string;
       healthyUseDesc: string;
+      overrideAutoDefault: string;
+      overrideInherit: string;
+      overrideCompressionLabel: string;
+      overrideCompressionDesc: string;
+      overrideCodeExpertLabel: string;
+      overrideCodeExpertDesc: string;
+      overrideVerificationLabel: string;
+      overrideVerificationDesc: string;
     };
     memory: {
       title: string;

@@ -394,7 +394,7 @@ export class DelegateToAgentTool extends BaseTool<
   /**
    * Default timeout for delegated tasks. Claude Code coding tasks can
    * legitimately run for many minutes (large refactors, running test suites,
-   * etc.), so we default to 60 minutes. Override with the environment
+   * etc.), so we default to 5 hours (300 minutes). Override with the environment
    * variable EASYCODE_CC_TIMEOUT_MINUTES.
    */
   static readonly DEFAULT_TIMEOUT_MS = (() => {
@@ -403,7 +403,7 @@ export class DelegateToAgentTool extends BaseTool<
       const mins = parseInt(env, 10);
       if (mins > 0) return mins * 60 * 1000;
     }
-    return 60 * 60 * 1000; // 60 minutes
+    return 5 * 60 * 60 * 1000; // 5 hours (300 minutes)
   })();
 
   /**

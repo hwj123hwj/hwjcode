@@ -92,9 +92,11 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
     yoloMode: originalYoloMode,
     preferredModel: originalPreferredModel,
     healthyUse: originalHealthyUse,
+    modelOverrides: originalModelOverrides,
     updateYoloMode,
     updatePreferredModel,
     updateHealthyUse,
+    updateModelOverrides,
     loadYoloMode,
     isLoading,
     error
@@ -255,6 +257,19 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
       await updateHealthyUse(enabled);
     } catch (error) {
       console.error('[HEALTH] Failed to update healthy use reminder:', error);
+    }
+  };
+
+  /**
+   * 处理模型覆盖改变 - 直接生效
+   */
+  const handleModelOverridesChange = async (
+    overrides: { compression?: string; codeExpert?: string; verification?: string }
+  ) => {
+    try {
+      await updateModelOverrides(overrides);
+    } catch (error) {
+      console.error('[ModelOverrides] Failed to update model overrides:', error);
     }
   };
 
@@ -424,6 +439,8 @@ export const YoloModeSettingsDialog: React.FC<YoloModeSettingsDialogProps> = ({
                 healthyUse={originalHealthyUse}
                 onHealthyUseChange={handleHealthyUseChange}
                 availableModels={availableModels}
+                modelOverrides={originalModelOverrides}
+                onModelOverridesChange={handleModelOverridesChange}
               />
             )}
             {activeTab === 'mcp' && (

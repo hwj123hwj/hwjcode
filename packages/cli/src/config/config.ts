@@ -666,6 +666,7 @@ export async function loadCliConfig(
     hooks: settings.hooks,
     healthyUse: settings.healthyUse ?? false,
     preferredLanguage: settings.preferredLanguage,
+    modelOverrides: settings.modelOverrides,
   });
 
   // Set memory file paths for display in UI

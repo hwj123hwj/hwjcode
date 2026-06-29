@@ -101,6 +101,18 @@ export const configCommand: SlashCommand = {
       case 'memory':
         return handleProjectMemoryModeConfig(context, subArgs);
 
+      case 'compression-model':
+      case 'compression':
+        return handleModelOverrideConfig(context, 'compression', subArgs);
+
+      case 'code-expert-model':
+      case 'code-expert':
+        return handleModelOverrideConfig(context, 'codeExpert', subArgs);
+
+      case 'verification-model':
+      case 'verification':
+        return handleModelOverrideConfig(context, 'verification', subArgs);
+
       case 'help':
         return displayConfigMenu(context);
 
@@ -191,12 +203,37 @@ export const configCommand: SlashCommand = {
       action: (context: CommandContext, args: string) =>
         handleProjectMemoryModeConfig(context, args),
     },
+    {
+      name: 'compression-model',
+      altNames: ['compression'],
+      description: t('config.option.modelOverrides.compression'),
+      kind: CommandKind.BUILT_IN,
+      action: (context: CommandContext, args: string) =>
+        handleModelOverrideConfig(context, 'compression', args),
+    },
+    {
+      name: 'code-expert-model',
+      altNames: ['code-expert'],
+      description: t('config.option.modelOverrides.codeExpert'),
+      kind: CommandKind.BUILT_IN,
+      action: (context: CommandContext, args: string) =>
+        handleModelOverrideConfig(context, 'codeExpert', args),
+    },
+    {
+      name: 'verification-model',
+      altNames: ['verification'],
+      description: t('config.option.modelOverrides.verification'),
+      kind: CommandKind.BUILT_IN,
+      action: (context: CommandContext, args: string) =>
+        handleModelOverrideConfig(context, 'verification', args),
+    },
   ],
 
   completion: async (_context, partialArg) => {
     const subCommands = [
       'theme', 'editor', 'model', 'vim', 'agent-style',
-      'yolo', 'healthy-use', 'language', 'memory-mode', 'help',
+      'yolo', 'healthy-use', 'language', 'memory-mode',
+      'compression-model', 'code-expert-model', 'verification-model', 'help',
       't', 'e', 'm', 'v', 'a', 'y', 'h', 'l'
     ];
     return subCommands.filter(cmd =>
@@ -809,6 +846,105 @@ Usage:
 }
 
 /**
+ * 处理模型覆盖配置（压缩 / Code Expert / Verification 子代理）
+ * - 无参数：打开交互式设置面板
+ * - default / none / inherit：清除覆盖，恢复默认
+ * - <模型名>：解析并设置覆盖
+ */
+function handleModelOverrideConfig(
+  context: CommandContext,
+  key: 'compression' | 'codeExpert' | 'verification',
+  args: string
+): SlashCommandActionReturn {
+  const { settings, config } = context.services;
+  const trimmedArgs = args.trim();
+
+  if (!settings) {
+    return {
+      type: 'message',
+      messageType: 'error',
+      content: t('error.config.not.loaded'),
+    };
+  }
+
+  const targetLabel = t(`config.option.modelOverrides.${key}` as any);
+
+  // 无参数：打开交互式设置面板（在「高级模型」子菜单中选择）
+  if (!trimmedArgs) {
+    return {
+      type: 'dialog',
+      dialog: 'settings-menu',
+    };
+  }
+
+  const lowered = trimmedArgs.toLowerCase();
+  const isClear = lowered === 'default' || lowered === 'none' || lowered === 'inherit';
+
+  // 恢复默认：直接清除该项覆盖
+  if (isClear) {
+    const next = { ...(settings.merged.modelOverrides ?? {}) };
+    delete next[key];
+    settings.setValue(SettingScope.User, 'modelOverrides', next);
+    config?.setModelOverrides(next);
+
+    return {
+      type: 'message',
+      messageType: 'info',
+      content: tp('config.status.modelOverrides.cleared', { target: targetLabel }),
+    };
+  }
+
+  // 解析模型名并设置覆盖（复用 modelCommand 的解析逻辑）
+  (async () => {
+    try {
+      const { getAvailableModels, getModelNameFromDisplayName, getModelDisplayName } =
+        await import('./modelCommand.js');
+
+      const { modelInfos } = await getAvailableModels(settings, config || undefined);
+      const actualModelName = getModelNameFromDisplayName(trimmedArgs, modelInfos);
+      const availableModelNames = ['auto', ...modelInfos.map((m: any) => m.name)];
+
+      if (!availableModelNames.includes(actualModelName)) {
+        const errorMsg: HistoryItemWithoutId = {
+          type: 'error',
+          text: `Invalid model: ${trimmedArgs}\n\nAvailable models:\n${availableModelNames
+            .map((m: string) => `  - ${getModelDisplayName(m, config)}`)
+            .join('\n')}`,
+        };
+        context.ui?.addItem?.(errorMsg, Date.now());
+        return;
+      }
+
+      const next = { ...(settings.merged.modelOverrides ?? {}) };
+      next[key] = actualModelName;
+      settings.setValue(SettingScope.User, 'modelOverrides', next);
+      config?.setModelOverrides(next);
+
+      const successMsg: HistoryItemWithoutId = {
+        type: 'info',
+        text: tp('config.status.modelOverrides.updated', {
+          target: targetLabel,
+          model: getModelDisplayName(actualModelName, config),
+        }),
+      };
+      context.ui?.addItem?.(successMsg, Date.now());
+    } catch (error) {
+      const errorMsg: HistoryItemWithoutId = {
+        type: 'error',
+        text: `Failed to set ${targetLabel} model: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+      context.ui?.addItem?.(errorMsg, Date.now());
+    }
+  })().catch(error => {
+    console.error('[ConfigCommand] Model override config failed:', error);
+  });
+
+  return undefined as any;
+}
+
+/**
  * 处理项目级记忆加载模式配置
  */
 function handleProjectMemoryModeConfig(context: CommandContext, args: string): SlashCommandActionReturn {
@@ -897,5 +1033,8 @@ function getConfigHelp(): string {
   /config yolo [on|off]      - Toggle YOLO mode
   /config healthy-use [on|off] - Toggle healthy use mode
   /config language [name]    - Set preferred response language
-  /config memory-mode [mode] - Set project memory mode (all|deepv-only|none)`;
+  /config memory-mode [mode] - Set project memory mode (all|deepv-only|none)
+  /config compression-model [name|default]   - Set context compression model
+  /config code-expert-model [name|default]   - Set Code Expert sub-agent model
+  /config verification-model [name|default]  - Set Verification sub-agent model`;
 }
