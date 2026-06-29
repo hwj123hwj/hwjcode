@@ -91,6 +91,9 @@ export const zh = {
   'feishu.appSecretPlaceholder': '应用密钥',
   'feishu.verifyAndSave': '验证并保存',
   'feishu.lastError': '最近错误：{msg}',
+  'feishu.detailsLog': '详情输出',
+  'feishu.detailsLogSize': '{n} 字符',
+  'feishu.detailsLogEmpty': '暂无输出。网关启动后，这里会实时显示其日志（WebSocket 连接、权限校验、错误等）。',
 
   // ── login ────────────────────────────────────────────────────────────────────
   'login.failed': '登录失败',
