@@ -133,6 +133,57 @@ async function copyRipgrepModule() {
 // Call the async function
 await copyRipgrepModule();
 
+// Copy the `yoga-layout` module into the bundle's node_modules.
+//
+// `yoga-layout` is marked `external` in esbuild.config.js (NOT bundled). Its
+// `dist/src/index.js` does a genuine top-level `await` (WASM init); when esbuild
+// bundles it, every Ink module that transitively imports it is emitted as an
+// `__esm(async …)` initializer and the entry top-level-awaits the whole densely
+// circular Ink graph — an init order that only settles for one fragile module
+// layout, so any new module reachable from the ACP path reorders it into an
+// unsettled top-level await and the `--acp` backend exits with code 13 before
+// it starts (see acpCommandBridge.ts). Keeping yoga external makes Ink's modules
+// synchronous and removes that deadlock class — but then Node must resolve
+// `yoga-layout` at runtime next to `easycode.js`, so it has to live here.
+//
+// yoga-layout has zero dependencies; copying its `package.json` + `dist/`
+// (the only paths its `exports` map points at) is sufficient. The afterPack
+// hook (packages/desktop/scripts/afterPack.cjs) copies all of
+// `bundle/node_modules` into the packaged desktop app, so this also ships there.
+function copyYogaLayoutModule() {
+  try {
+    const require = createRequire(import.meta.url);
+    // yoga-layout's `exports` map does not expose `./package.json`, so resolve
+    // the package entry (`dist/src/index.js`) and walk up to the package root.
+    const yogaModulePath = dirname(
+      dirname(dirname(require.resolve('yoga-layout'))),
+    );
+    const yogaBundleDir = join(bundleDir, 'node_modules', 'yoga-layout');
+
+    if (existsSync(yogaBundleDir)) {
+      rmSync(yogaBundleDir, { recursive: true, force: true });
+    }
+    mkdirSync(yogaBundleDir, { recursive: true });
+
+    copyFileSync(
+      join(yogaModulePath, 'package.json'),
+      join(yogaBundleDir, 'package.json'),
+    );
+    copyDirectoryRecursive(
+      join(yogaModulePath, 'dist'),
+      join(yogaBundleDir, 'dist'),
+    );
+    console.log('✅ Copied yoga-layout module (external) into bundle');
+  } catch (error) {
+    // A missing yoga-layout means the bundled Ink/TUI cannot load at runtime;
+    // fail loudly rather than ship a backend that crashes on spawn.
+    console.error('❌ Failed to copy yoga-layout module:', error.message);
+    process.exit(1);
+  }
+}
+
+copyYogaLayoutModule();
+
 // Note: Jimp (pure JavaScript) doesn't need cross-platform binary copying
 console.log('✅ Using Jimp (pure JavaScript) - no native binaries needed');
 
