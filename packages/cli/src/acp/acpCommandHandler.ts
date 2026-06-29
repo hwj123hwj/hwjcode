@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { Config } from 'deepv-code-core';
 import type {
   Command,
   CommandContext,
@@ -15,6 +16,13 @@ import { InitCommand } from './commands/init.js';
 import { AboutCommand } from './commands/about.js';
 import { HelpCommand } from './commands/help.js';
 import { ExtensionsCommand } from './commands/extensions.js';
+import {
+  buildAdvertisedCommands,
+  loadRealCommands,
+  runRealCommand,
+  type AcpCommandMeta,
+  type DispatchResult,
+} from './acpCommandBridge.js';
 
 /**
  * Handles slash-command interception and dispatch for ACP prompts.
@@ -47,24 +55,60 @@ export class CommandHandler {
     return registry;
   }
 
-  getAvailableCommands(): Array<{ name: string; description: string }> {
-    return this.registry
+  /**
+   * The full slash-command set advertised to ACP clients. Unions the
+   * purpose-built headless commands (which produce nicer output, e.g. multi-word
+   * `memory show`) with the real CLI command set sourced from
+   * {@link loadRealCommands}, so the desktop `/` popup matches the CLI.
+   *
+   * Falls back to just the headless set if the real loader is unavailable.
+   */
+  async getAvailableCommands(
+    config: Config | null = null,
+  ): Promise<AcpCommandMeta[]> {
+    const dedicated: AcpCommandMeta[] = this.registry
       .getAllCommands()
       .map((c) => ({ name: c.name, description: c.description }));
+
+    let real: AcpCommandMeta[] = [];
+    try {
+      real = buildAdvertisedCommands(await loadRealCommands(config));
+    } catch {
+      // The CLI command tree may be unavailable in stripped builds; the
+      // headless set alone keeps the popup non-empty.
+    }
+
+    // Merge by name. The headless set wins on conflicts (its descriptions are
+    // tuned for the ACP surface) and contributes its multi-word subcommands.
+    const byName = new Map<string, AcpCommandMeta>();
+    for (const c of real) byName.set(c.name, c);
+    for (const c of dedicated) byName.set(c.name, c);
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
-   * Parse and execute a slash-command. Returns `true` if a command was
-   * handled (so the caller can skip the LLM round trip), `false` otherwise.
+   * Parse and execute a slash-command. The headless registry is tried first
+   * (its commands are tuned for ACP); anything it doesn't own falls through to
+   * the real CLI command set via {@link runRealCommand}.
+   *
+   * Returns `{ handled }` so the caller can skip the LLM round trip, plus an
+   * optional `submitPrompt` when a command expanded into a prompt to run.
    */
   async handleCommand(
     commandText: string,
     context: CommandContext,
-  ): Promise<boolean> {
+  ): Promise<DispatchResult> {
+    const trimmed = commandText.trim();
+    if (!trimmed.startsWith('/') && !trimmed.startsWith('$')) {
+      return { handled: false };
+    }
     const parsed = this.parseSlashCommand(commandText);
-    if (!parsed.commandToExecute) return false;
-    await this.runCommand(parsed.commandToExecute, parsed.args, context);
-    return true;
+    if (parsed.commandToExecute) {
+      await this.runCommand(parsed.commandToExecute, parsed.args, context);
+      return { handled: true };
+    }
+    // Not one of the headless built-ins — try the real CLI command set.
+    return runRealCommand(commandText, context);
   }
 
   private async runCommand(

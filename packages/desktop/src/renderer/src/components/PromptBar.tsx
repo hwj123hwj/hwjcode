@@ -8,6 +8,7 @@ import {
   type AgentKind,
   type DirEntry,
   type PermissionMode,
+  type SlashCommand,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -115,6 +116,10 @@ export function PromptBar({ view }: { view: SessionView }) {
   const [mention, setMention] = useState<{ token: string; entries: DirEntry[]; active: number } | null>(
     null,
   );
+  // Slash-command autocomplete. Populated from `view.commands`, which the ACP
+  // agent advertises via `available_commands_update` — the same set the CLI
+  // exposes. Only shown while the whole input is a bare `/token` (no args yet).
+  const [cmd, setCmd] = useState<{ matches: SlashCommand[]; active: number } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   // True while an IME (e.g. Chinese pinyin) is composing. Using a ref — not
   // state — so onKeyDown reads the latest value synchronously without a
@@ -224,9 +229,42 @@ export function PromptBar({ view }: { view: SessionView }) {
     setMention({ token, entries: filtered, active: 0 });
   };
 
+  /**
+   * Show the slash-command popup while the input is a single `/token` with no
+   * arguments yet. Matching is a case-insensitive substring on the command
+   * name, so `/mem` surfaces `memory`, `memory show`, etc.
+   */
+  const updateCommand = (value: string) => {
+    const m = value.match(/^\/([\w:-]*)$/);
+    if (!m) {
+      setCmd(null);
+      return;
+    }
+    const token = m[1].toLowerCase();
+    const matches = (view.commands ?? [])
+      .filter((c) => c.name.toLowerCase().includes(token))
+      .slice(0, 12);
+    // If the token is the one and only command it matches, the user has typed a
+    // complete command — hide the popup so Enter sends it instead of re-picking.
+    if (matches.length === 1 && matches[0].name.toLowerCase() === token) {
+      setCmd(null);
+      return;
+    }
+    setCmd(matches.length > 0 ? { matches, active: 0 } : null);
+  };
+
   const onChange = (value: string) => {
     setText(value);
     void updateMention(value);
+    updateCommand(value);
+  };
+
+  const pickCommand = (c: SlashCommand) => {
+    // Insert `/name ` (trailing space closes the popup); the user adds any args
+    // and presses Enter, mirroring the CLI's insert-then-run behaviour.
+    setText(`/${c.name} `);
+    setCmd(null);
+    taRef.current?.focus();
   };
 
   const pickMention = (entry: DirEntry) => {
@@ -254,6 +292,7 @@ export function PromptBar({ view }: { view: SessionView }) {
     setText('');
     setAtPaths({});
     setMention(null);
+    setCmd(null);
     setAttachments([]);
 
     // Inline the (compressed) bytes for multimodal models …
@@ -288,6 +327,32 @@ export function PromptBar({ view }: { view: SessionView }) {
     e.nativeEvent.isComposing || e.keyCode === 229 || isComposingRef.current;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (cmd && cmd.matches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCmd({ ...cmd, active: (cmd.active + 1) % cmd.matches.length });
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCmd({
+          ...cmd,
+          active: (cmd.active - 1 + cmd.matches.length) % cmd.matches.length,
+        });
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        // While composing, Enter commits the IME candidate — don't hijack it.
+        if (e.key === 'Enter' && isImeCommit(e)) return;
+        e.preventDefault();
+        pickCommand(cmd.matches[cmd.active]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setCmd(null);
+        return;
+      }
+    }
     if (mention && mention.entries.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -428,6 +493,23 @@ export function PromptBar({ view }: { view: SessionView }) {
         )}
 
         <div className="prompt-input-wrap" style={{ position: 'relative' }}>
+          {cmd && cmd.matches.length > 0 && (
+            <div className="command-pop">
+              {cmd.matches.map((c, i) => (
+                <div
+                  key={c.name}
+                  className={`command-item ${i === cmd.active ? 'active' : ''}`}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    pickCommand(c);
+                  }}
+                >
+                  <span className="command-name">/{c.name}</span>
+                  {c.description && <span className="command-desc">{c.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
           {mention && mention.entries.length > 0 && (
             <div className="mention-pop">
               {mention.entries.map((e, i) => (

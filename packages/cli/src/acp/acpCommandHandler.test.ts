@@ -29,9 +29,9 @@ function makeContext(): {
 }
 
 describe('CommandHandler', () => {
-  it('lists the default built-in commands', () => {
+  it('lists the default built-in commands', async () => {
     const handler = new CommandHandler();
-    const names = handler.getAvailableCommands().map((c) => c.name);
+    const names = (await handler.getAvailableCommands()).map((c) => c.name);
     expect(names).toEqual(
       expect.arrayContaining([
         'help',
@@ -52,16 +52,16 @@ describe('CommandHandler', () => {
   it('returns false for non-slash text', async () => {
     const handler = new CommandHandler();
     const ctx = makeContext();
-    const handled = await handler.handleCommand('just a question', ctx);
-    expect(handled).toBe(false);
+    const result = await handler.handleCommand('just a question', ctx);
+    expect(result.handled).toBe(false);
     expect(ctx.sendMessage).not.toHaveBeenCalled();
   });
 
   it('executes /help and emits a help banner', async () => {
     const handler = new CommandHandler();
     const ctx = makeContext();
-    const handled = await handler.handleCommand('/help', ctx);
-    expect(handled).toBe(true);
+    const result = await handler.handleCommand('/help', ctx);
+    expect(result.handled).toBe(true);
     expect(ctx.sendMessage).toHaveBeenCalledTimes(1);
     const msg = ctx.sendMessage.mock.calls[0][0] as string;
     expect(msg).toMatch(/Easy Code Help/);
@@ -71,8 +71,8 @@ describe('CommandHandler', () => {
   it('resolves multi-word commands (memory show)', async () => {
     const handler = new CommandHandler();
     const ctx = makeContext();
-    const handled = await handler.handleCommand('/memory show', ctx);
-    expect(handled).toBe(true);
+    const result = await handler.handleCommand('/memory show', ctx);
+    expect(result.handled).toBe(true);
     expect(ctx.sendMessage).toHaveBeenCalled();
     const msg = ctx.sendMessage.mock.calls[0][0] as string;
     expect(msg).toMatch(/Memory is currently empty\.|Current memory content/);
@@ -81,10 +81,10 @@ describe('CommandHandler', () => {
   it('emits an error message for unknown subcommands (falls back to parent)', async () => {
     const handler = new CommandHandler();
     const ctx = makeContext();
-    const handled = await handler.handleCommand('/memory bogus', ctx);
+    const result = await handler.handleCommand('/memory bogus', ctx);
     // "memory" parent matches, but there's no "memory bogus" subcommand so the
     // parent executor runs with args = ["bogus"].
-    expect(handled).toBe(true);
+    expect(result.handled).toBe(true);
     expect(ctx.sendMessage).toHaveBeenCalled();
   });
 });

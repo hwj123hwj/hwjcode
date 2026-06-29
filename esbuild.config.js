@@ -58,7 +58,7 @@ esbuild
     minify: buildEnv === 'production', // 生产环境启用混淆
     keepNames: false, // 生产环境不保留函数名
     target: 'esnext',
-    external: ['@vscode/ripgrep', 'sharp'],
+    external: ['@vscode/ripgrep', 'sharp', 'yoga-layout'],
     alias: {
       'is-in-ci': path.resolve(
         __dirname,
