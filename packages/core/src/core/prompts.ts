@@ -402,6 +402,35 @@ export function isClaudeModel(modelId: string | undefined): boolean {
 }
 
 /**
+ * 检测是否是 Gemini Flash 系列模型（如 gemini-2.5-flash、gemini-flash 等）。
+ *
+ * Gemini flash 系列能力较弱，容易把用户输入当成待续写的文本去“补全”，
+ * 而不是作为 agent 去理解并响应指令。识别后会在系统提示词末尾追加一段
+ * 行为矫正提示（见 GEMINI_FLASH_AGENT_REMINDER）。
+ *
+ * 判断逻辑：模型名同时包含 "gemini" 和 "flash"（大小写不敏感），
+ * 以避免误伤其它模型。
+ * @param modelId - 模型 ID
+ * @returns 是否是 Gemini Flash 系列模型
+ */
+export function isGeminiFlashModel(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  const normalizedId = modelId.toLowerCase();
+  return normalizedId.includes('gemini') && normalizedId.includes('flash');
+}
+
+/**
+ * Gemini Flash 系列模型专用的行为矫正提示片段。
+ *
+ * 这是一段面向模型的静态英文指令（非面向终端用户的 UI 文案），因此始终以
+ * 英文注入、不走 i18n。核心意图：明确告诉模型它是一个 agent，应当响应并执行
+ * 用户的 prompt 指令，而不是把它当成待续写的文本去补全。
+ */
+const GEMINI_FLASH_AGENT_REMINDER = `<System reminder>
+You are not a text-completion chat model. You are an agent. Treat the user's prompt as instructions to understand and respond to — fulfill and act on them. Do NOT continue, autocomplete, or echo back the user's text as if it were unfinished writing.
+</System reminder>`;
+
+/**
  * Gemini 3 系列模型专用系统提示词
  *
  * 基于 Google 官方 Gemini 3 Prompting Guide 优化：
@@ -1104,6 +1133,12 @@ export function getCoreSystemPrompt(
 
   if (isDesktop) {
     finalPrompt += `\n\n---\n\n## Environment Awareness: Easy Code Desktop Context\n- **Current Client**: You are running inside the **Easy Code Desktop** application (a native Electron GUI), driven through the same agent core as the CLI via ACP.\n- **User Environment**: The user interacts through a graphical desktop window — a chat transcript with side panels for diffs, plan, tasks, terminal output, and file viewing — not a raw terminal/TTY.\n- **Guidance**:\n  - When referring to UI actions, prefer the app's graphical affordances (the prompt bar, the diff/plan/tasks panels, the permission dialog) over instructing the user to run raw shell commands in a separate terminal.\n  - File edits and command approvals surface as in-app permission prompts; describe outcomes accordingly.\n  - Output renders as Markdown in a desktop-width window, so normal tables and code blocks are fine (no need for the mobile-narrow constraints of a chat gateway).`;
+  }
+
+  // Gemini Flash 系列模型容易把用户输入当成待补全文本，在系统提示词末尾追加
+  // 一段静态英文提示，矫正这种 completion 行为，明确其 agent 身份。
+  if (isGeminiFlashModel(effectiveModelId)) {
+    finalPrompt += `\n\n${GEMINI_FLASH_AGENT_REMINDER}`;
   }
 
   return finalPrompt.trim();

@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
-import { getCoreSystemPrompt, isGemini3Model, formatCompactSummary } from './prompts.js';
+import { getCoreSystemPrompt, isGemini3Model, isGeminiFlashModel, formatCompactSummary } from './prompts.js';
 
 describe('prompts', () => {
   describe('isGemini3Model', () => {
@@ -15,6 +15,59 @@ describe('prompts', () => {
       expect(isGemini3Model('gemini3-pro')).toBe(true);
       expect(isGemini3Model('gemini-2.0-flash')).toBe(false);
       expect(isGemini3Model(undefined)).toBe(false);
+    });
+  });
+
+  describe('isGeminiFlashModel', () => {
+    it('should identify gemini flash models (case-insensitive)', () => {
+      expect(isGeminiFlashModel('gemini-2.5-flash')).toBe(true);
+      expect(isGeminiFlashModel('gemini-flash')).toBe(true);
+      expect(isGeminiFlashModel('gemini-2.0-flash-lite')).toBe(true);
+      expect(isGeminiFlashModel('Gemini-2.5-Flash')).toBe(true);
+    });
+
+    it('should not match non-flash gemini models', () => {
+      expect(isGeminiFlashModel('gemini-2.5-pro')).toBe(false);
+      expect(isGeminiFlashModel('gemini-1.5-pro')).toBe(false);
+    });
+
+    it('should not match flash models from other families', () => {
+      // "flash" 但非 gemini，不应误伤
+      expect(isGeminiFlashModel('some-flash-model')).toBe(false);
+      expect(isGeminiFlashModel('claude-opus-4')).toBe(false);
+      expect(isGeminiFlashModel('gpt-4o')).toBe(false);
+    });
+
+    it('should return false for undefined', () => {
+      expect(isGeminiFlashModel(undefined)).toBe(false);
+    });
+  });
+
+  describe('getCoreSystemPrompt - Gemini Flash Completion Correction', () => {
+    it('should append the agent reminder for gemini flash models', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', 'gemini-2.5-flash');
+      expect(prompt).toContain('<System reminder>');
+      expect(prompt).toContain('You are not a text-completion chat model. You are an agent.');
+    });
+
+    it('should detect gemini flash via custom model info', () => {
+      const customModel = {
+        provider: 'openai',
+        modelId: 'gemini-2.0-flash',
+        baseUrl: 'https://example.com/v1',
+      };
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, undefined, customModel);
+      expect(prompt).toContain('You are not a text-completion chat model. You are an agent.');
+    });
+
+    it('should NOT append the reminder for non-flash gemini models', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', 'gemini-2.5-pro');
+      expect(prompt).not.toContain('You are not a text-completion chat model');
+    });
+
+    it('should NOT append the reminder for non-gemini models', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', 'claude-opus-4');
+      expect(prompt).not.toContain('You are not a text-completion chat model');
     });
   });
 
