@@ -43,6 +43,18 @@ export interface FeishuCredentials {
    */
   ownerOpenId?: string;
   /**
+   * 标记 {@link ownerOpenId} 是否已在 **Bot 应用自身的 open_id 空间** 完成确认。
+   *
+   * 飞书 open_id 按应用隔离：同一个人在不同应用下 open_id 不同。扫码 setup 时
+   * 拿到的 open_id 来自 dvcode 注册流（另一个应用的 id 空间），无法与 Bot 应用
+   * `im.message.receive_v1` 事件里的 sender open_id 匹配，因此 setup 时置为
+   * `false`，表示"owner open_id 只是注册态猜测，待首次私聊确认"。收到 owner 的
+   * 首条私聊后，把 ownerOpenId 绑定为真实的 Bot 应用 open_id 并置 `true`。
+   *
+   * 旧凭证缺省此字段（undefined）按"已确认"处理，避免升级后被重新绑定（防劫持）。
+   */
+  ownerVerified?: boolean;
+  /**
    * 额外的授权 open_id 白名单（除 ownerOpenId 外）。
    * 通过 `/feishu allow <openId>` 添加；`/feishu deny <openId>` 移除。
    */
@@ -222,4 +234,32 @@ export function isSenderAuthorized(
   if (creds.ownerOpenId && creds.ownerOpenId === senderOpenId) return true;
   if (creds.allowlist?.includes(senderOpenId)) return true;
   return false;
+}
+
+/**
+ * 是否应把这条消息的发送者「首次使用即绑定」（Trust-On-First-Use）为已验证的
+ * Bot 拥有者。
+ *
+ * 为什么需要它 —— 飞书 open_id **按应用隔离**：同一个人在每个应用下的 open_id
+ * 都不同。setup 时记录的 owner open_id 来自 device-code *注册流*（dvcode 平台
+ * 应用的 id 空间），而非 Bot 应用本身，因此永远无法与 Bot 应用在
+ * `im.message.receive_v1` 里看到的 `sender_id.open_id` 匹配——真正的群主会被
+ * 误判为"非授权用户"。owner 的 **Bot 应用 open_id 只能从 Bot 应用自身的事件里
+ * 拿到**，故在首次使用时绑定。
+ *
+ * 安全约束：
+ *   - 仅 p2p（私聊）可声明所有权：刚建好的 PersonalAgent 只有创建者知道，首条
+ *     私聊几乎必定来自 owner；若允许群消息声明所有权，任何群成员都能劫持 Bot。
+ *   - 仅当 `ownerVerified === false` 时——该标记只由 setup 路径写入，含义是
+ *     "owner open_id 是注册态猜测，待首次确认"。旧凭证（字段缺省）按"已确认"
+ *     处理，确保升级不会把一个已正常工作的 Bot 静默重新绑定给先发消息的人。
+ */
+export function shouldAutoBindOwner(
+  creds: FeishuCredentials,
+  senderOpenId: string,
+  chatType: 'p2p' | 'group' | 'topic',
+): boolean {
+  if (!senderOpenId) return false;
+  if (chatType !== 'p2p') return false;
+  return creds.ownerVerified === false;
 }

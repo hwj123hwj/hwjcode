@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect } from 'vitest';
-import { Kind, ApprovalMode } from 'deepv-code-core';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Kind, ApprovalMode, proxyAuthManager } from 'deepv-code-core';
 import type { Config } from 'deepv-code-core';
 import type { GenerateContentResponseUsageMetadata } from '@google/genai';
+import { SettingScope } from '../config/settings.js';
 import {
   buildAvailableModes,
   buildUsageUpdate,
   hasMeta,
+  refreshCloudModelsForAcp,
   toAcpToolKind,
 } from './acpUtils.js';
 
@@ -108,5 +110,101 @@ describe('buildUsageUpdate', () => {
       sessionUpdate: 'usage_update',
       used: 1000,
     });
+  });
+});
+
+describe('refreshCloudModelsForAcp', () => {
+  const realFetch = global.fetch;
+  let fetchMock: ReturnType<typeof vi.fn>;
+  // Minimal Config stub exposing only the cloud-model accessors the function
+  // touches. `setCloudModels` doubles as the in-memory store for getCloudModels.
+  let config: {
+    _cloud: unknown[];
+    getCloudModels: () => unknown[];
+    setCloudModels: ReturnType<typeof vi.fn>;
+  };
+  let settings: { setValue: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    vi.spyOn(proxyAuthManager, 'getUserHeaders').mockResolvedValue({
+      Authorization: 'Bearer tok',
+    });
+    vi.spyOn(proxyAuthManager, 'getProxyServerUrl').mockReturnValue(
+      'https://proxy.test',
+    );
+    const store: { _cloud: unknown[] } = { _cloud: [] };
+    config = {
+      _cloud: store._cloud,
+      getCloudModels: () => store._cloud,
+      setCloudModels: vi.fn((m: unknown[]) => {
+        store._cloud = m;
+      }),
+    };
+    settings = { setValue: vi.fn() };
+  });
+
+  afterEach(() => {
+    global.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('fetches, seeds Config, and persists the list to user settings', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: [{ name: 'claude-sonnet-4-6', displayName: 'Sonnet 4.6' }],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await refreshCloudModelsForAcp(
+      config as unknown as Config,
+      settings as never,
+    );
+
+    expect(config.setCloudModels).toHaveBeenCalledTimes(1);
+    const seeded = config.setCloudModels.mock.calls[0][0] as unknown[];
+    expect(seeded).toEqual([
+      expect.objectContaining({
+        name: 'claude-sonnet-4-6',
+        displayName: 'Sonnet 4.6',
+        available: true,
+      }),
+    ]);
+    // Same normalized list is written through to the user settings.json cache,
+    // so the next cold start (desktop-only user) is warm.
+    expect(settings.setValue).toHaveBeenCalledWith(
+      SettingScope.User,
+      'cloudModels',
+      seeded,
+    );
+  });
+
+  it('is best-effort: never throws and skips seeding when the fetch fails', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('boom', { status: 500 }));
+
+    await expect(
+      refreshCloudModelsForAcp(config as unknown as Config, settings as never),
+    ).resolves.toBeUndefined();
+
+    expect(config.setCloudModels).not.toHaveBeenCalled();
+    expect(settings.setValue).not.toHaveBeenCalled();
+  });
+
+  it('still seeds Config when no settings are provided', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ success: true, data: [{ name: 'm', displayName: 'M' }] }),
+        { status: 200 },
+      ),
+    );
+
+    await refreshCloudModelsForAcp(config as unknown as Config);
+
+    expect(config.setCloudModels).toHaveBeenCalledTimes(1);
   });
 });
