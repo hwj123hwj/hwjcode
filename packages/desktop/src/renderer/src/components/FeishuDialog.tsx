@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Icon } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
@@ -76,6 +76,11 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  // Live gateway output. "running=true" only means the child process is alive —
+  // it does NOT prove the WebSocket connected to Feishu. The real state (connect
+  // handshake, scope audit, crashes) lives in the child's output, exposed here.
+  const [showLog, setShowLog] = useState(false);
+  const logRef = useRef<HTMLPreElement | null>(null);
 
   // Manual form.
   const [appId, setAppId] = useState('');
@@ -111,6 +116,14 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
   const running = !!status?.running;
   const configured = !!status?.credsConfigured;
+  const logText = status?.logTail?.trim() ?? '';
+
+  // Keep the live log scrolled to the newest output while the panel is open.
+  useEffect(() => {
+    if (showLog && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logText, showLog]);
 
   const submitManual = async () => {
     if (!appId.trim() || !appSecret.trim()) {
@@ -171,6 +184,9 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError('');
     setInfo('');
+    // Reveal the live output immediately so the user can watch the gateway
+    // actually connect (or fail) instead of trusting a static "running" badge.
+    setShowLog(true);
     const res = await api.feishu.start();
     setBusy(false);
     if (res.status) setStatus(res.status);
@@ -467,6 +483,33 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
           {status?.lastError && (
             <div className="feishu-logtail" title={status.lastError}>
               {t('feishu.lastError', { msg: status.lastError })}
+            </div>
+          )}
+
+          {/* Live gateway output — the real diagnostic surface. A "running"
+              badge only means the child process is alive; whether it actually
+              connected to Feishu is only visible in this output. */}
+          {configured && (logText || running) && (
+            <div className="feishu-logpanel">
+              <button
+                type="button"
+                className="feishu-logpanel-head"
+                onClick={() => setShowLog((v) => !v)}
+              >
+                <Icon name={showLog ? 'chevron-down' : 'chevron-right'} size={13} />
+                <span>{t('feishu.detailsLog')}</span>
+                {running && <span className="status-dot idle" />}
+                {logText && (
+                  <span className="feishu-logpanel-size">
+                    {t('feishu.detailsLogSize', { n: logText.length })}
+                  </span>
+                )}
+              </button>
+              {showLog && (
+                <pre className="feishu-logpanel-body" ref={logRef}>
+                  {logText || t('feishu.detailsLogEmpty')}
+                </pre>
+              )}
             </div>
           )}
         </div>

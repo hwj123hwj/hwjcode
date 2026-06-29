@@ -449,6 +449,16 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 const FEISHU_RESTART_EXIT_CODE = 97;
 
+/** How much of the gateway child's combined stdout/stderr we keep and surface
+ * to the UI's "details" panel. Big enough for the full WebSocket connect
+ * handshake + a stack trace, bounded so a chatty gateway can't grow unbounded. */
+const LOG_TAIL_MAX = 16_000;
+
+/** Min gap between log-driven status pushes, so a noisy child doesn't flood the
+ * IPC channel / React re-renders. The tail is always complete on the next tick;
+ * this only rate-limits how often we notify. */
+const LOG_EMIT_THROTTLE_MS = 250;
+
 // ── the manager ──────────────────────────────────────────────────────────────
 
 export class FeishuManager {
@@ -458,6 +468,8 @@ export class FeishuManager {
   private logTail = '';
   private pollCancelled = false;
   private stopping = false;
+  private logEmitTimer?: NodeJS.Timeout;
+  private logEmitPending = false;
 
   constructor(
     private readonly onChange: (status: FeishuStatus) => void,
@@ -471,7 +483,28 @@ export class FeishuManager {
   private appendLog(chunk: Buffer): void {
     const text = stripAnsi(chunk.toString('utf8'));
     if (!text.trim()) return;
-    this.logTail = (this.logTail + text).slice(-2000);
+    this.logTail = (this.logTail + text).slice(-LOG_TAIL_MAX);
+    // Stream live output to the UI so the user can watch the gateway actually
+    // boot (WebSocket connect, scope audit, crashes) instead of only seeing a
+    // static "running" badge. Throttled to avoid flooding IPC on a chatty child.
+    this.scheduleLogEmit();
+  }
+
+  /** Push the latest status (carrying logTail) to the UI, at most once per
+   * LOG_EMIT_THROTTLE_MS while output keeps arriving. */
+  private scheduleLogEmit(): void {
+    if (this.logEmitTimer) {
+      this.logEmitPending = true;
+      return;
+    }
+    this.emitChange();
+    this.logEmitTimer = setTimeout(() => {
+      this.logEmitTimer = undefined;
+      if (this.logEmitPending) {
+        this.logEmitPending = false;
+        this.scheduleLogEmit();
+      }
+    }, LOG_EMIT_THROTTLE_MS);
   }
 
   async getStatus(): Promise<FeishuStatus> {
@@ -486,7 +519,7 @@ export class FeishuManager {
       pid: this.running ? this.child?.pid : undefined,
       startedAt: this.running ? this.startedAt : undefined,
       lastError: this.lastError,
-      logTail: this.logTail.slice(-1500),
+      logTail: this.logTail,
     };
   }
 

@@ -92,6 +92,10 @@ export const en = {
   'feishu.appSecretPlaceholder': 'App secret',
   'feishu.verifyAndSave': 'Verify & save',
   'feishu.lastError': 'Last error: {msg}',
+  'feishu.detailsLog': 'Details output',
+  'feishu.detailsLogSize': '{n} chars',
+  'feishu.detailsLogEmpty':
+    'No output yet. Once the gateway starts, its live log (WebSocket connect, scope audit, errors) appears here.',
 
   // ── login ────────────────────────────────────────────────────────────────────
   'login.failed': 'Login failed',
