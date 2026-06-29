@@ -13,6 +13,7 @@ import type {
   ShellOption,
   TerminalShellKind,
   ThemeMode,
+  VersionInfo,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -65,7 +66,7 @@ const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
  * `GROUPS`, and write its `*Section` component — the left-nav rail and the
  * content area are both generated from `GROUPS`, so nothing else needs to change.
  */
-export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models';
+export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models' | 'about';
 
 interface SectionDef {
   id: SectionId;
@@ -109,6 +110,12 @@ const GROUPS: GroupDef[] = [
     sections: [
       { id: 'computerUse', icon: 'laptop', labelKey: 'settings.navComputerUse', Component: ComputerUseSection },
       { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
+    ],
+  },
+  {
+    titleKey: 'settings.groupAbout',
+    sections: [
+      { id: 'about', icon: 'info', labelKey: 'settings.navAbout', Component: AboutSection },
     ],
   },
 ];
@@ -574,6 +581,68 @@ function ComputerUseSection() {
         <>
           <div className="setting-note setting-note-warn">{t('settings.computerUseExperimental')}</div>
           {isMac && <div className="setting-note">{t('settings.computerUseMacPerms')}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── 关于 ─────────────────────────────────────────────────────────────────
+ * VSCode-style version/environment readout: the desktop version, the bundled
+ * backend version (easycode-cli-core), the Electron/Chromium/Node/V8 runtime,
+ * and the OS. All values come from the main process via `app.getVersionInfo()`
+ * (see main/appInfo.ts); the runtime names are proper nouns and not translated.
+ */
+function AboutSection() {
+  const t = useT();
+  const [info, setInfo] = useState<VersionInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    void api.app.getVersionInfo().then(setInfo).catch(() => undefined);
+  }, []);
+
+  const rows: Array<{ label: string; value: string }> = info
+    ? [
+        { label: t('settings.aboutDesktop'), value: info.desktop },
+        { label: t('settings.aboutCliCore'), value: info.cliCore },
+        { label: 'Electron', value: info.electron },
+        { label: 'Chromium', value: info.chrome },
+        { label: 'Node.js', value: info.node },
+        { label: 'V8', value: info.v8 },
+        { label: t('settings.aboutOs'), value: info.os },
+      ]
+    : [];
+
+  const copy = async () => {
+    if (!info) return;
+    await api.clipboard.writeText(rows.map((r) => `${r.label}: ${r.value}`).join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <div className="setting-item">
+      {!info ? (
+        <div className="cm-empty">
+          <span className="spinner" /> {t('common.loading')}
+        </div>
+      ) : (
+        <>
+          <div className="about-rows">
+            {rows.map((r) => (
+              <div className="about-row" key={r.label}>
+                <span className="about-label">{r.label}</span>
+                <span className="about-value">{r.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="settings-pane-foot">
+            <button className="btn" onClick={() => void copy()}>
+              <Icon name="copy" size={14} />
+              {copied ? t('settings.aboutCopied') : t('settings.aboutCopy')}
+            </button>
+          </div>
         </>
       )}
     </div>

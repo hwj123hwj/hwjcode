@@ -103,6 +103,8 @@ export const IpcInvoke = {
   UpdateInstall: 'update:install',
   UpdateSkip: 'update:skip',
   UpdateSnooze: 'update:snooze',
+  // app meta (version / environment info for the About panel)
+  AppGetVersionInfo: 'app:get-version-info',
 } as const;
 
 /** Main -> renderer, push events (webContents.send / ipcRenderer.on). */
@@ -841,6 +843,33 @@ export interface UpdateCheckResult {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// App meta (About panel)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Version + environment snapshot shown in Settings → 关于 (VSCode-style). All
+ * values are read in the main process: `desktop` from `app.getVersion()`, the
+ * runtime fields from `process.versions`, `os` from `node:os`, and `cliCore`
+ * (the bundled `easycode --acp` backend's version) from the package.json shipped
+ * beside its entry. See main/appInfo.ts.
+ */
+export interface VersionInfo {
+  /** Easy Code Desktop's own version (packages/desktop/package.json). */
+  desktop: string;
+  /**
+   * The bundled backend (`easycode.js`) version — i.e. the packages/cli version
+   * shipped inside the app. `'unknown'` when the backend can't be located.
+   */
+  cliCore: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  v8: string;
+  /** `${os.type()} ${os.arch()} ${os.release()}`, e.g. "Windows_NT x64 10.0.26220". */
+  os: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // The bridge surface exposed on window.easycode (preload).
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1071,6 +1100,10 @@ export interface EasycodeBridge {
     snooze(): Promise<void>;
     onStatus(cb: (state: UpdateState) => void): () => void;
     onProgress(cb: (p: UpdateDownloadProgress) => void): () => void;
+  };
+  app: {
+    /** Version + environment snapshot for the Settings → 关于 panel. */
+    getVersionInfo(): Promise<VersionInfo>;
   };
 }
 

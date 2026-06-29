@@ -47,6 +47,7 @@ export type IconName =
   | 'circle'
   | 'circle-check'
   | 'circle-dot'
+  | 'info'
   | 'clock'
   | 'alert'
   | 'loader'
@@ -134,6 +135,7 @@ const PATHS: Record<IconName, string> = {
   circle: '<circle cx="12" cy="12" r="9"/>',
   'circle-check': '<circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/>',
   'circle-dot': '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   alert:
     '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',

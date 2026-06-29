@@ -14,14 +14,14 @@ import {
   Icon,
   ApprovalMode,
   ToolConfirmationOutcome,
-  proxyAuthManager,
+  fetchCloudModels,
   tokenLimit,
   generateCustomModelId,
 } from 'deepv-code-core';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { GenerateContentResponseUsageMetadata } from '@google/genai';
 import { z } from 'zod';
-import type { LoadedSettings } from '../config/settings.js';
+import { SettingScope, type LoadedSettings } from '../config/settings.js';
 import { loadCustomModels } from '../config/customModelsStorage.js';
 import { formatCustomModelDisplayName } from '../utils/modelUtils.js';
 
@@ -642,75 +642,52 @@ export function buildConfigOptionsSnapshot(
   return [modelOption];
 }
 
-interface WebApiModelInfo {
-  name: string;
-  displayName: string;
-  creditsPerRequest?: number;
-  available?: boolean;
-  maxToken?: number;
-  highVolumeThreshold?: number;
-  highVolumeCredits?: number;
-}
-
 /**
  * Fetch the authoritative list of models the proxy will accept and seed
- * `Config.setCloudModels` with it.
+ * `Config.setCloudModels` with it, then persist it to the user settings cache.
  *
- * The interactive CLI does this lazily, on the first `/model` invocation.
- * ACP clients never fire `/model` (they call `session/set_config_option`
- * with whatever id the IDE's picker selected), so without this preload the
- * ACP agent would advertise an empty/fallback model list and accept any
- * string — then the server would reject it with a 500 "不支持的模型".
+ * The interactive CLI does this lazily, on the first `/model` invocation, and
+ * persists to `settings.json` via `saveCloudModelsToSettings`. ACP clients (the
+ * desktop app, IDEs) never fire `/model` — they read the model list straight
+ * out of the `session/new` / `session/load` response, exactly once. So without
+ * this preload the ACP agent advertises an empty/fallback list and a
+ * desktop-only user (who never ran the interactive CLI, hence has no cached
+ * `cloudModels`) sees no models at all.
  *
- * Best-effort: network/auth failures here are logged but never fatal.
- * Without the cache, the snapshot falls back to `auto` + the current model.
+ * The actual network fetch/parse is shared with the CLI via core's
+ * {@link fetchCloudModels} — same `/web-api/models` endpoint, same auth headers.
+ * Passing `settings` writes the result through to `settings.json` so the NEXT
+ * cold start is warm (the CLI behaves identically).
+ *
+ * Best-effort: network/auth failures here are logged but never fatal. Without
+ * the cache, the snapshot falls back to `auto` + the current model.
  */
-export async function refreshCloudModelsForAcp(config: Config): Promise<void> {
+export async function refreshCloudModelsForAcp(
+  config: Config,
+  settings?: LoadedSettings,
+): Promise<void> {
   if (!config.setCloudModels) return;
   try {
-    const headers = await proxyAuthManager.getUserHeaders();
-    const baseUrl = proxyAuthManager.getProxyServerUrl();
-    if (!baseUrl) return;
-
-    const url = `${baseUrl.replace(/\/+$/, '')}/web-api/models`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'DeepCode ACP',
-        ...headers,
-      },
-    });
-    if (!res.ok) {
-      process.stderr.write(
-        `[acp] /web-api/models HTTP ${res.status}, skipping model-list preload\n`,
-      );
-      return;
-    }
-    const body = (await res.json()) as {
-      success?: boolean;
-      data?: WebApiModelInfo[];
-    };
-    if (!body?.success || !Array.isArray(body.data)) {
-      process.stderr.write(
-        '[acp] /web-api/models returned no data, skipping model-list preload\n',
-      );
-      return;
-    }
-    const models = body.data
-      .filter((m): m is WebApiModelInfo => !!m && typeof m.name === 'string')
-      .map((m) => ({
-        name: m.name,
-        displayName: m.displayName || m.name,
-        creditsPerRequest: m.creditsPerRequest ?? 0,
-        available: m.available !== false,
-        maxToken: m.maxToken ?? 0,
-        highVolumeThreshold: m.highVolumeThreshold ?? 0,
-        highVolumeCredits: m.highVolumeCredits ?? 0,
-      }));
+    const models = await fetchCloudModels({ userAgent: 'DeepCode ACP' });
     config.setCloudModels(models);
+
+    // Mirror the interactive CLI's saveCloudModelsToSettings: persist to the
+    // user settings.json so the next desktop/ACP launch starts warm and
+    // `buildAvailableModels` can advertise the full list synchronously.
+    if (settings) {
+      try {
+        settings.setValue(SettingScope.User, 'cloudModels', models);
+      } catch (e) {
+        process.stderr.write(
+          `[acp] failed to persist cloud models to settings: ${
+            e instanceof Error ? e.message : String(e)
+          }\n`,
+        );
+      }
+    }
+
     process.stderr.write(
-      `[acp] loaded ${models.length} models from ${url}\n`,
+      `[acp] loaded ${models.length} models from /web-api/models\n`,
     );
   } catch (err) {
     process.stderr.write(

@@ -34,6 +34,7 @@ import {
   saveCredentials,
   clearCredentials,
   isSenderAuthorized,
+  shouldAutoBindOwner,
   CredentialsLoadError,
   FeishuCredentials,
 } from '../../services/feishu/credentials.js';
@@ -1667,7 +1668,14 @@ async function finalizeQrSetup(
     botOpenId: botInfo?.botOpenId,
     // The user who scanned the QR code becomes the Bot owner — only they
     // (and entries in `allowlist`) may invoke the agent. See B1 in MR review.
+    //
+    // ⚠️ `pollResult.openId` comes from the dvcode *registration* flow, which
+    // is a DIFFERENT Feishu app than the Bot we just created — and open_id is
+    // per-app scoped, so this id will never match the Bot-app events. Mark the
+    // owner as unverified so the first p2p message rebinds it to the real
+    // Bot-app open_id (see `shouldAutoBindOwner`).
     ownerOpenId: pollResult.openId,
+    ownerVerified: false,
   };
 
   await saveCredentials(creds);
@@ -1813,6 +1821,10 @@ async function handleManualSetup(
     domain,
     botName: botInfo?.botName,
     botOpenId: botInfo?.botOpenId,
+    // Manual setup has no scanning user, so no owner is known yet. Mark as
+    // awaiting first-use so the first p2p message binds the owner in the
+    // Bot-app open_id space (see `shouldAutoBindOwner`).
+    ownerVerified: false,
   };
 
   await saveCredentials(creds);
@@ -2912,20 +2924,46 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // 触发 LLM/工具调用。任何其他人发送的消息直接拒绝，绝不会进入 agent 循环
     // 或访问本地文件系统，避免 Bot 成为远程 RCE 入口。
     if (!isSenderAuthorized(creds, msg.senderOpenId)) {
-      const reply = creds.ownerOpenId
-        ? `🛡️ 此 Bot 仅响应授权用户。如需使用，请联系 Bot 拥有者用 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
-        : `🛡️ 此 Bot 尚未配置授权用户。请 Bot 拥有者在 dvcode 中执行 \`/feishu allow ${msg.senderOpenId}\` 后再试。`;
-      tuiContext?.addItem(
-        {
-          type: 'info',
-          text: tp('feishu.tui.unauthorized_log', {
-            openId: msg.senderOpenId,
-            text: messageText.slice(0, 60),
-          }),
-        },
-        Date.now(),
-      );
-      return reply;
+      // 首次使用即绑定 owner（Trust-On-First-Use）。setup 记录的 owner open_id
+      // 来自 dvcode 注册流（另一个应用的 id 空间），与 Bot 应用事件里的 open_id
+      // 不在同一空间，真正的群主因此被误判为未授权。owner 的 Bot 应用 open_id
+      // 只能从 Bot 应用自身的私聊事件里拿到——故首条私聊在此绑定并持久化。
+      // 仅 p2p 且 ownerVerified===false 时触发（详见 shouldAutoBindOwner 的安全说明）。
+      if (shouldAutoBindOwner(creds, msg.senderOpenId, msg.chatType)) {
+        creds.ownerOpenId = msg.senderOpenId;
+        creds.ownerVerified = true;
+        try {
+          await saveCredentials(creds);
+        } catch (e) {
+          derror('feishu owner auto-bind: failed to persist credentials:', (e as Error)?.message);
+        }
+        tuiContext?.addItem(
+          {
+            type: 'info',
+            text: `🔗 已将首位私聊用户绑定为 Bot 拥有者：${msg.senderOpenId}`,
+          },
+          Date.now(),
+        );
+        // 绑定后视为已授权，继续走正常处理流程（不 return）
+      } else {
+        const reply =
+          creds.ownerVerified === false
+            ? `🛡️ 此 Bot 仅响应授权用户。\n如果你是 Bot 拥有者：请先**私聊 Bot**（单独发起会话）发送任意一条消息完成绑定，之后即可在群里使用。\n否则请联系 Bot 拥有者执行 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
+            : creds.ownerOpenId
+              ? `🛡️ 此 Bot 仅响应授权用户。如需使用，请联系 Bot 拥有者用 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
+              : `🛡️ 此 Bot 尚未配置授权用户。请 Bot 拥有者在 dvcode 中执行 \`/feishu allow ${msg.senderOpenId}\` 后再试。`;
+        tuiContext?.addItem(
+          {
+            type: 'info',
+            text: tp('feishu.tui.unauthorized_log', {
+              openId: msg.senderOpenId,
+              text: messageText.slice(0, 60),
+            }),
+          },
+          Date.now(),
+        );
+        return reply;
+      }
     }
 
     // 🚫 拦截飞书侧的 /feishu start | /feishu stop 生命周期命令：

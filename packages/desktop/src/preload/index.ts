@@ -50,6 +50,7 @@ import type {
   UpdateCheckResult,
   UpdateDownloadProgress,
   UpdateState,
+  VersionInfo,
 } from '../shared/ipc.js';
 
 /** Subscribe to a push channel; returns an unsubscribe fn. */
@@ -213,6 +214,10 @@ const bridge: EasycodeBridge = {
     snooze: () => ipcRenderer.invoke(IpcInvoke.UpdateSnooze) as Promise<void>,
     onStatus: (cb) => on<UpdateState>(IpcEvent.UpdateStatus, cb),
     onProgress: (cb) => on<UpdateDownloadProgress>(IpcEvent.UpdateProgress, cb),
+  },
+  app: {
+    getVersionInfo: () =>
+      ipcRenderer.invoke(IpcInvoke.AppGetVersionInfo) as Promise<VersionInfo>,
   },
 };
 
