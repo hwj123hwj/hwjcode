@@ -12,6 +12,7 @@ import {
   createContentGeneratorConfig,
 } from '../core/contentGenerator.js';
 import { PromptRegistry } from '../prompts/prompt-registry.js';
+import { SceneManager, SceneType } from '../core/sceneManager.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import type { HookDefinition, HookEventName } from '../hooks/types.js';
 import { isMCPDiscoveryTriggered, markMCPDiscoveryTriggered, unloadMcpServer } from '../tools/mcp-client.js';
@@ -186,6 +187,21 @@ export type FlashFallbackHandler = (
   error?: unknown,
 ) => Promise<boolean | string | null>;
 
+/**
+ * 用户可自定义的内部场景/子代理模型覆盖。
+ * 所有字段均为可选 —— 未设置时回退到内置默认：
+ * - compression: 未设置 → 走硬编码的 SceneType.COMPRESSION 默认模型
+ * - codeExpert / verification: 未设置 → 继承当前会话模型
+ */
+export interface ModelOverrides {
+  /** 上下文压缩使用的模型。未设置 → 硬编码场景默认（gemini-2.5-flash）。 */
+  compression?: string;
+  /** Code Analysis Expert 子代理（agentType 'code-analysis'）使用的模型。未设置 → 继承会话模型。 */
+  codeExpert?: string;
+  /** Verification 子代理（agentType 'verification'）使用的模型。未设置 → 继承会话模型。 */
+  verification?: string;
+}
+
 export interface ConfigParameters {
   sessionId: string;
   embeddingModel?: string;
@@ -244,6 +260,7 @@ export interface ConfigParameters {
   hooks?: { [K in HookEventName]?: HookDefinition[] };
   healthyUse?: boolean;
   preferredLanguage?: string;
+  modelOverrides?: ModelOverrides;
 }
 
 export class Config {
@@ -325,6 +342,7 @@ export class Config {
   private readonly hooks: { [K in HookEventName]?: HookDefinition[] };
   private readonly healthyUse: boolean;
   private readonly preferredLanguage: string | undefined;
+  private modelOverrides: ModelOverrides;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -406,6 +424,7 @@ export class Config {
     this.hooks = params.hooks ?? {};
     this.healthyUse = params.healthyUse ?? false;
     this.preferredLanguage = params.preferredLanguage;
+    this.modelOverrides = params.modelOverrides ?? {};
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -593,6 +612,45 @@ export class Config {
 
   getModel(): string {
     return this.model || 'auto';
+  }
+
+  /** 返回用户自定义的内部场景/子代理模型覆盖（未设置时为空对象）。 */
+  getModelOverrides(): ModelOverrides {
+    return this.modelOverrides;
+  }
+
+  /** 运行时更新模型覆盖（用于 /config 修改后立即生效）。 */
+  setModelOverrides(overrides: ModelOverrides): void {
+    this.modelOverrides = overrides ?? {};
+  }
+
+  /**
+   * 返回上下文压缩应使用的模型。
+   * 用户设置了 compression 覆盖则使用之，否则回退到硬编码的场景默认模型。
+   */
+  getCompressionModel(): string {
+    return (
+      this.modelOverrides.compression ||
+      SceneManager.getModelForScene(SceneType.COMPRESSION)!
+    );
+  }
+
+  /**
+   * 返回某个子代理类型应使用的模型覆盖。
+   * - 'code-analysis'（默认子代理 / Code Analysis Expert）→ codeExpert 覆盖
+   * - 'verification'（Verification 子代理）→ verification 覆盖
+   * - 其它类型或未设置 → undefined（由 SubAgent 继承当前会话模型）
+   */
+  getSubAgentModelOverride(agentType?: string): string | undefined {
+    // 'code-analysis' 是默认子代理类型（见 agents/agentDefinition.ts）。
+    const resolved = agentType ?? 'code-analysis';
+    if (resolved === 'code-analysis') {
+      return this.modelOverrides.codeExpert;
+    }
+    if (resolved === 'verification') {
+      return this.modelOverrides.verification;
+    }
+    return undefined;
   }
 
   getCloudModels(): CloudModelInfo[] | undefined {

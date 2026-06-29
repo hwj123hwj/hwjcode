@@ -21,9 +21,10 @@ import { SubAgentAdapter } from './subAgentAdapter.js';
 import { TaskPrompts } from './taskPrompts.js';
 import { SessionManager } from '../services/sessionManager.js';
 import { CompressionService } from '../services/compressionService.js';
-import { SceneManager, SceneType } from './sceneManager.js';
+import { SceneType } from './sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
 import { AgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
+import { isCustomModel } from '../types/customModel.js';
 
 // ─── SubAgent 超时与内存保护常量 ───
 
@@ -323,12 +324,42 @@ export class SubAgent {
    * 构建子agent固定系统提示（不包含任务描述）
    */
   private buildSystemPrompt(): string {
+    let systemPrompt: string;
     if (this.agentDefinition) {
-      return this.agentDefinition.systemPrompt;
+      systemPrompt = this.agentDefinition.systemPrompt;
+    } else {
+      const availableTools = this.getAvailableToolNames();
+      systemPrompt = TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
     }
 
-    const availableTools = this.getAvailableToolNames();
-    return TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
+    return systemPrompt + this.buildModelIdContext();
+  }
+
+  /**
+   * 构建模型覆盖说明，追加到子 Agent 系统提示末尾。
+   *
+   * 仅当用户为该子代理显式配置了模型 override（modelOverrides.codeExpert /
+   * .verification）时才注入：明确告诉子 Agent 它当前运行在哪个模型上，使其被问到
+   * "你是什么模型"时能如实回答，也便于真机验证 override 是否真正生效。
+   *
+   * 未设置 override 时（子 Agent 继承当前会话模型）不注入任何内容，保持现状。
+   */
+  private buildModelIdContext(): string {
+    // 没有 per-agent 模型覆盖 → 继承会话模型，不注入说明。
+    if (!this.modelOverride) {
+      return '';
+    }
+
+    // 解析展示用的模型名：自定义模型用其真实 modelId，内置模型直接用 id。
+    let modelName = this.modelOverride;
+    if (isCustomModel(this.modelOverride)) {
+      const customConfig = this.config.getCustomModelConfig(this.modelOverride);
+      if (customConfig?.modelId) {
+        modelName = customConfig.modelId;
+      }
+    }
+
+    return `\n\n---\n\n${t('subagent.model.override.notice', { model: modelName })}`;
   }
 
   /**
@@ -940,7 +971,8 @@ export class SubAgent {
 
     try {
       const currentHistory = this.subAgentChat.getHistory(true); // 使用精选历史进行压缩
-      const compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 尊重用户在 /config 中自定义的压缩模型；未设置时回退到场景默认值。
+      const compressionModel = this.config.getCompressionModel();
       const historyModel = this.config.getModel(); // subAgent历史使用的模型，用于测算长度
 
       // 使用压缩服务检查并执行压缩

@@ -364,6 +364,21 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * omitted; the model and permission mode are handled per-session elsewhere in
  * the desktop UI.
  */
+/**
+ * Model overrides for internal scenes / sub-agents. Mirrors core's `ModelOverrides`
+ * (see `packages/core/src/config/config.ts`). Kept as a local copy so this shared
+ * type stays dependency-free and renderer-safe. Persisted to the same shared
+ * `~/.easycode-user/settings.json` under the `modelOverrides` key the CLI reads.
+ */
+export interface ModelOverrides {
+  /** Context-compression model. Unset = hardcoded scene default. */
+  compression?: string;
+  /** Code Expert sub-agent model. Unset = inherit the session model. */
+  codeExpert?: string;
+  /** Verification sub-agent model. Unset = inherit the session model. */
+  verification?: string;
+}
+
 export interface DesktopUserSettings {
   /** Preferred response language, e.g. "English" / "中文". Empty = model default. */
   preferredLanguage?: string;
@@ -391,6 +406,12 @@ export interface DesktopUserSettings {
    * Desktop-only key; the CLI ignores it but preserves it.
    */
   computerUseEnabled?: boolean;
+  /**
+   * Per-scene / per-sub-agent model overrides shared with the CLI's `/config`.
+   * Each field is optional; unset means "fall back to the built-in default"
+   * (compression → hardcoded scene model, sub-agents → inherit the session model).
+   */
+  modelOverrides?: ModelOverrides;
 }
 
 // ──────────────────────────────────────────────────────────────────────────

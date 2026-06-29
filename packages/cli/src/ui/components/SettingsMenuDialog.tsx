@@ -8,10 +8,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { RadioButtonSelect, type RadioSelectItem } from './shared/RadioButtonSelect.js';
 import { SettingScope, type LoadedSettings } from '../../config/settings.js';
-import { Config, ApprovalMode, getCoreSystemPrompt, AgentStyle } from 'deepv-code-core';
+import { Config, ApprovalMode, getCoreSystemPrompt, AgentStyle, ModelOverrides } from 'deepv-code-core';
 import { Colors } from '../colors.js';
 import { t, tp } from '../utils/i18n.js';
 import { getModelDisplayName } from '../../utils/modelUtils.js';
+import { getAvailableModels } from '../commands/modelCommand.js';
+
+type ModelOverrideKey = keyof ModelOverrides;
 
 interface SettingsMenuDialogProps {
   onClose: () => void;
@@ -59,6 +62,25 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     }
   })();
 
+  // 当前模型覆盖（压缩 & 子代理），本地状态以便修改后立即刷新展示
+  const [overrides, setOverrides] = useState<ModelOverrides>(
+    settings.merged.modelOverrides ?? {}
+  );
+
+  // 计算某个覆盖项的展示值：已设置 → 模型显示名；未设置 → 默认/继承
+  const overrideDisplayValue = useCallback(
+    (key: ModelOverrideKey): string => {
+      const value = overrides[key];
+      if (value) {
+        return getModelDisplayName(value, config);
+      }
+      return key === 'compression'
+        ? t('config.value.modelOverrides.default')
+        : t('config.value.modelOverrides.inherit');
+    },
+    [overrides, config]
+  );
+
   // 主菜单选项 - 按使用频率排序
   const menuItems: RadioSelectItem<string>[] = [
     { label: t('config.menu.model'), value: 'model', rightText: `(${modelValue})` },
@@ -81,6 +103,7 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     { label: t('config.menu.theme'), value: 'theme', rightText: `(${themeValue})` },
     { label: t('config.menu.language'), value: 'language', rightText: settings.merged.preferredLanguage ? `(${settings.merged.preferredLanguage})` : `(${t('config.value.default')})` },
     { label: t('config.menu.editor'), value: 'editor', rightText: `(${editorValue})` },
+    { label: t('config.menu.modelOverrides'), value: 'model-overrides' },
     { label: t('config.menu.project.memory'), value: 'project-memory', rightText: `(${projectMemoryDisplayValue})` },
     { label: `${settings.merged.vimMode ? '✅' : '❌'} ${t('config.menu.vim')}`, value: 'vim', rightText: settings.merged.vimMode ? `(${t('config.value.on')})` : `(${t('config.value.off')})` },
     { label: `${config.getHealthyUseEnabled() ? '✅' : '❌'} ${t('config.menu.healthy.use')}`, value: 'healthy-use', rightText: config.getHealthyUseEnabled() ? `(${t('config.value.on')})` : `(${t('config.value.off')})` },
@@ -116,10 +139,22 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     { label: t('config.option.project.memory.none'), value: 'none' },
   ];
 
+  // 模型覆盖目标列表（压缩 / Code Expert / Verification）
+  const overrideTargetItems: RadioSelectItem<string>[] = [
+    { label: t('config.option.modelOverrides.compression'), value: 'compression', rightText: `(${overrideDisplayValue('compression')})` },
+    { label: t('config.option.modelOverrides.codeExpert'), value: 'codeExpert', rightText: `(${overrideDisplayValue('codeExpert')})` },
+    { label: t('config.option.modelOverrides.verification'), value: 'verification', rightText: `(${overrideDisplayValue('verification')})` },
+  ];
+
   // 菜单状态
-  type MenuView = 'main' | 'yolo' | 'agent-style' | 'healthy-use' | 'language' | 'project-memory';
+  type MenuView = 'main' | 'yolo' | 'agent-style' | 'healthy-use' | 'language' | 'project-memory' | 'model-overrides' | 'model-override-picker';
   const [currentView, setCurrentView] = useState<MenuView>('main');
   const [selectedMain, setSelectedMain] = useState<string>('model');
+
+  // 模型覆盖：当前正在编辑的目标项 & 可选模型列表（异步加载）
+  const [selectedOverrideTarget, setSelectedOverrideTarget] = useState<ModelOverrideKey>('compression');
+  const [overrideModelItems, setOverrideModelItems] = useState<RadioSelectItem<string>[]>([]);
+  const [overrideModelsLoading, setOverrideModelsLoading] = useState(false);
 
   const [languageInput, setLanguageInput] = useState(settings.merged.preferredLanguage || '');
 
@@ -171,6 +206,8 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
         handleEnterSubMenu('healthy-use', value);
       } else if (value === 'project-memory') {
         handleEnterSubMenu('project-memory', value);
+      } else if (value === 'model-overrides') {
+        handleEnterSubMenu('model-overrides', value);
       } else if (value === 'language') {
         setLanguageInput(settings.merged.preferredLanguage || '');
         handleEnterSubMenu('language', value);
@@ -290,6 +327,86 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     [settings, onReloadMemory]
   );
 
+  // 进入某个模型覆盖目标的选择器：异步加载可选模型列表
+  const handleSelectOverrideTarget = useCallback(
+    async (value: string) => {
+      const targetKey = value as ModelOverrideKey;
+      setSelectedOverrideTarget(targetKey);
+      setCurrentView('model-override-picker');
+      setOverrideModelsLoading(true);
+      setOverrideModelItems([]);
+
+      try {
+        const { modelNames } = await getAvailableModels(settings, config);
+
+        // 首项：恢复默认（压缩 → 自动管理，子代理 → 继承会话模型）
+        const defaultItem: RadioSelectItem<string> = {
+          label:
+            targetKey === 'compression'
+              ? t('config.option.modelOverrides.useDefault')
+              : t('config.option.modelOverrides.inherit'),
+          value: '__default__',
+        };
+
+        const modelItems: RadioSelectItem<string>[] = modelNames.map((name) => ({
+          label: getModelDisplayName(name, config),
+          value: name,
+        }));
+
+        setOverrideModelItems([defaultItem, ...modelItems]);
+      } catch (_error) {
+        // 加载失败：仅保留"恢复默认"选项
+        setOverrideModelItems([
+          {
+            label:
+              targetKey === 'compression'
+                ? t('config.option.modelOverrides.useDefault')
+                : t('config.option.modelOverrides.inherit'),
+            value: '__default__',
+          },
+        ]);
+      } finally {
+        setOverrideModelsLoading(false);
+      }
+    },
+    [settings, config]
+  );
+
+  // 处理模型覆盖选择（含恢复默认）
+  const handleOverrideModelSelect = useCallback(
+    async (value: string) => {
+      const targetKey = selectedOverrideTarget;
+      const next: ModelOverrides = { ...overrides };
+
+      if (value === '__default__') {
+        delete next[targetKey];
+      } else {
+        next[targetKey] = value;
+      }
+
+      setOverrides(next);
+      // 持久化到用户级 settings.json，并同步到运行中的 Config 立即生效
+      settings.setValue(SettingScope.User, 'modelOverrides', next);
+      config.setModelOverrides(next);
+
+      const targetLabel = t(`config.option.modelOverrides.${targetKey}` as any);
+      setStatusMessage(
+        value === '__default__'
+          ? tp('config.status.modelOverrides.cleared', { target: targetLabel })
+          : tp('config.status.modelOverrides.updated', {
+              target: targetLabel,
+              model: getModelDisplayName(value, config),
+            })
+      );
+
+      setTimeout(() => {
+        setCurrentView('model-overrides');
+        setStatusMessage('');
+      }, 1000);
+    },
+    [selectedOverrideTarget, overrides, settings, config]
+  );
+
   // 处理语言提交
   const handleLanguageSubmit = useCallback(
     async (value: string) => {
@@ -351,6 +468,9 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
     if (key.escape) {
       if (currentView === 'main') {
         onClose();
+      } else if (currentView === 'model-override-picker') {
+        // 从模型选择器返回到覆盖项列表
+        setCurrentView('model-overrides');
       } else {
         // Return to main menu and restore selection
         setSelectedMain(lastSelectedBeforeSubMenu);
@@ -462,6 +582,61 @@ export const SettingsMenuDialog = React.memo(function SettingsMenuDialog({
             isFocused
             initialIndex={projectMemoryItems.findIndex(item => item.value === selectedProjectMemory)}
           />
+          <Box marginTop={1}>
+            <Text color={Colors.Foreground}>
+              {t('config.hint.press.esc')}
+            </Text>
+          </Box>
+        </Box>
+      )}
+
+      {/* Model Overrides - target list */}
+      {currentView === 'model-overrides' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Box marginBottom={1}>
+            <Text color={Colors.AccentCyan}>
+              {t('config.submenu.modelOverrides.title')}
+            </Text>
+          </Box>
+          <RadioButtonSelect<string>
+            items={overrideTargetItems}
+            onSelect={handleSelectOverrideTarget}
+            isFocused
+            initialIndex={overrideTargetItems.findIndex(item => item.value === selectedOverrideTarget)}
+          />
+          <Box marginTop={1}>
+            <Text color={Colors.Foreground}>
+              {t('config.hint.press.esc')}
+            </Text>
+          </Box>
+        </Box>
+      )}
+
+      {/* Model Overrides - model picker */}
+      {currentView === 'model-override-picker' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Box marginBottom={1}>
+            <Text color={Colors.AccentCyan}>
+              {t(`config.submenu.modelOverrides.pick.${selectedOverrideTarget}` as any)}
+            </Text>
+          </Box>
+          {overrideModelsLoading ? (
+            <Text color={Colors.Gray}>{t('config.hint.modelOverrides.loading')}</Text>
+          ) : overrideModelItems.length === 0 ? (
+            <Text color={Colors.Gray}>{t('config.hint.modelOverrides.empty')}</Text>
+          ) : (
+            <RadioButtonSelect<string>
+              items={overrideModelItems}
+              onSelect={handleOverrideModelSelect}
+              isFocused
+              initialIndex={Math.max(
+                0,
+                overrideModelItems.findIndex(
+                  item => item.value === (overrides[selectedOverrideTarget] ?? '__default__')
+                )
+              )}
+            />
+          )}
           <Box marginTop={1}>
             <Text color={Colors.Foreground}>
               {t('config.hint.press.esc')}

@@ -211,6 +211,75 @@ describe('Server Config (config.ts)', () => {
     }
   });
 
+  describe('model overrides', () => {
+    it('defaults to an empty override map when not provided', () => {
+      const config = new Config({ ...baseParams });
+      expect(config.getModelOverrides()).toEqual({});
+    });
+
+    it('stores model overrides provided in params', () => {
+      const config = new Config({
+        ...baseParams,
+        modelOverrides: {
+          compression: 'gemini-2.5-pro',
+          codeExpert: 'claude-sonnet-4',
+          verification: 'gemini-2.5-flash',
+        },
+      });
+      expect(config.getModelOverrides()).toEqual({
+        compression: 'gemini-2.5-pro',
+        codeExpert: 'claude-sonnet-4',
+        verification: 'gemini-2.5-flash',
+      });
+    });
+
+    it('getCompressionModel falls back to the hardcoded scene default when unset', () => {
+      const config = new Config({ ...baseParams });
+      // SceneType.COMPRESSION default — see SCENE_MODEL_MAPPING.
+      expect(config.getCompressionModel()).toBe('gemini-2.5-flash');
+    });
+
+    it('getCompressionModel returns the override when set', () => {
+      const config = new Config({
+        ...baseParams,
+        modelOverrides: { compression: 'gemini-2.5-pro' },
+      });
+      expect(config.getCompressionModel()).toBe('gemini-2.5-pro');
+    });
+
+    it('getSubAgentModelOverride maps the code-analysis agent to codeExpert', () => {
+      const config = new Config({
+        ...baseParams,
+        modelOverrides: { codeExpert: 'claude-sonnet-4' },
+      });
+      expect(config.getSubAgentModelOverride('code-analysis')).toBe('claude-sonnet-4');
+      // The default agent type (undefined) is the code-analysis expert.
+      expect(config.getSubAgentModelOverride(undefined)).toBe('claude-sonnet-4');
+    });
+
+    it('getSubAgentModelOverride maps the verification agent to verification', () => {
+      const config = new Config({
+        ...baseParams,
+        modelOverrides: { verification: 'gemini-2.5-flash' },
+      });
+      expect(config.getSubAgentModelOverride('verification')).toBe('gemini-2.5-flash');
+    });
+
+    it('getSubAgentModelOverride returns undefined for unset or other agent types (inherit session model)', () => {
+      const config = new Config({ ...baseParams });
+      expect(config.getSubAgentModelOverride('code-analysis')).toBeUndefined();
+      expect(config.getSubAgentModelOverride('verification')).toBeUndefined();
+      expect(config.getSubAgentModelOverride('code-explorer')).toBeUndefined();
+    });
+
+    it('setModelOverrides updates the stored overrides at runtime', () => {
+      const config = new Config({ ...baseParams });
+      config.setModelOverrides({ compression: 'gemini-2.5-pro', verification: 'auto' });
+      expect(config.getCompressionModel()).toBe('gemini-2.5-pro');
+      expect(config.getSubAgentModelOverride('verification')).toBe('auto');
+    });
+  });
+
   it('Config constructor should default userMemory to empty string if not provided', () => {
     const paramsWithoutMemory: ConfigParameters = { ...baseParams };
     delete paramsWithoutMemory.userMemory;

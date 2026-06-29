@@ -9,6 +9,7 @@ import type {
   CustomModelInput,
   CustomModelProvider,
   DesktopUserSettings,
+  ModelOverrides,
   ProjectMemoryMode,
   ShellOption,
   TerminalShellKind,
@@ -40,6 +41,22 @@ const MEMORY_MODES: Array<{ id: ProjectMemoryMode; labelKey: TranslationKey; hin
   { id: 'all', labelKey: 'settings.memoryAll', hintKey: 'settings.memoryAllHint' },
   { id: 'deepv-only', labelKey: 'settings.memoryDeepvOnly', hintKey: 'settings.memoryDeepvOnlyHint' },
   { id: 'none', labelKey: 'settings.memoryNone', hintKey: 'settings.memoryNoneHint' },
+];
+
+/**
+ * Per-scene / per-sub-agent model overrides — mirrors the CLI `/config` "高级模型"
+ * submenu. `autoKey` labels the cleared (empty) state: compression falls back to
+ * the built-in default, sub-agents inherit the session model.
+ */
+const MODEL_OVERRIDE_FIELDS: Array<{
+  key: keyof ModelOverrides;
+  labelKey: TranslationKey;
+  descKey: TranslationKey;
+  autoKey: TranslationKey;
+}> = [
+  { key: 'compression', labelKey: 'settings.overrideCompression', descKey: 'settings.overrideCompressionDesc', autoKey: 'settings.overrideAutoDefault' },
+  { key: 'codeExpert', labelKey: 'settings.overrideCodeExpert', descKey: 'settings.overrideCodeExpertDesc', autoKey: 'settings.overrideInherit' },
+  { key: 'verification', labelKey: 'settings.overrideVerification', descKey: 'settings.overrideVerificationDesc', autoKey: 'settings.overrideInherit' },
 ];
 
 /** GUI color-theme options shown as chips in the 外观 section. */
@@ -373,6 +390,24 @@ function GeneralSection() {
         />
         <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
       </div>
+
+      {/* 高级模型覆盖：压缩 / Code Expert / Verification 子代理。空值=恢复默认。 */}
+      {MODEL_OVERRIDE_FIELDS.map((f) => (
+        <div className="setting-item" key={f.key}>
+          <label className="field-label">{t(f.labelKey)}</label>
+          <ModelSelect
+            value={settings?.modelOverrides?.[f.key] ?? ''}
+            options={modelOpts}
+            autoLabel={t(f.autoKey)}
+            onChange={(value) =>
+              void patch({
+                modelOverrides: { ...(settings?.modelOverrides ?? {}), [f.key]: value },
+              })
+            }
+          />
+          <div className="setting-desc">{t(f.descKey)}</div>
+        </div>
+      ))}
 
       <div className="setting-item">
         <label className="field-label">{t('settings.projectMemory')}</label>

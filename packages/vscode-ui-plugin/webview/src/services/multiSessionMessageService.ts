@@ -627,7 +627,7 @@ export class MultiSessionMessageService {
   /**
    * 🎯 发送项目设置更新
    */
-  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any }) {
+  sendProjectSettingsUpdate(settings: { yoloMode: boolean; preferredModel?: string; thinkingConfig?: any; healthyUse?: boolean; modelOverrides?: { compression?: string; codeExpert?: string; verification?: string } }) {
     this.sendMessage({
       type: 'project_settings_update',
       payload: settings

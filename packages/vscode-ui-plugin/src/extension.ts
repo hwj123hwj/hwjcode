@@ -32,6 +32,7 @@ import { TerminalOutputService } from './services/terminalOutputService';
 import { McpEnabledStateService } from './services/mcpEnabledStateService';
 import { AIService } from './services/aiService';
 import { CustomModelsStorageService } from './services/customModelsStorageService';
+import { UserSettingsService } from './services/userSettingsService';
 import {
   getAllMCPServerToolCounts,
   getAllMCPServerToolNames,
@@ -1119,6 +1120,12 @@ function setupBasicMessageHandlers() {
         logger.info(`[HEALTH] ✅ Healthy use updated to: ${data.healthyUse}`);
       }
 
+      // 🎯 更新内部场景/子代理模型覆盖（写入共享的 ~/.easycode-user/settings.json）
+      if (data.modelOverrides !== undefined) {
+        UserSettingsService.getInstance(logger).setModelOverrides(data.modelOverrides);
+        logger.info(`[ModelOverrides] ✅ Updated: ${JSON.stringify(data.modelOverrides)}`);
+      }
+
       logger.info(`[YOLO] ✅ Project settings synchronized`);
     } catch (error) {
       logger.error('[YOLO] Failed to update project settings', error instanceof Error ? error : undefined);
@@ -1174,7 +1181,10 @@ function setupBasicMessageHandlers() {
       const preferredModel = config.get<string>('preferredModel', 'auto');
       const healthyUse = config.get<boolean>('healthyUse', true);
 
-      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse, thinkingConfig });
+      // 🎯 读取内部场景/子代理模型覆盖（来自共享的 ~/.easycode-user/settings.json）
+      const modelOverrides = UserSettingsService.getInstance(logger).getModelOverrides();
+
+      await communicationService.sendProjectSettingsResponse({ yoloMode, preferredModel, healthyUse, thinkingConfig, modelOverrides });
       logger.info(`[YOLO] ✅ Response sent: YOLO=${yoloMode}, Model=${preferredModel}, HealthyUse=${healthyUse}`);
     } catch (error) {
       logger.error('[YOLO] Failed to get project settings', error instanceof Error ? error : undefined);

@@ -9,6 +9,16 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getGlobalMessageService } from '../services/globalMessageService';
 
+/**
+ * 内部场景/子代理模型覆盖（镜像 core 的 ModelOverrides）。各字段可选，未设置=回退默认：
+ * compression → 内置默认；codeExpert / verification → 继承会话模型。
+ */
+export interface ModelOverrides {
+  compression?: string;
+  codeExpert?: string;
+  verification?: string;
+}
+
 // =============================================================================
 // Context 类型定义
 // =============================================================================
@@ -26,6 +36,9 @@ interface YoloModeContextType {
   /** 思考配置 */
   thinkingConfig: any;
 
+  /** 内部场景/子代理模型覆盖 */
+  modelOverrides: ModelOverrides;
+
   /** 更新YOLO模式 */
   updateYoloMode: (enabled: boolean) => Promise<void>;
 
@@ -37,6 +50,9 @@ interface YoloModeContextType {
 
   /** 更新思考配置 */
   updateThinkingConfig: (config: any) => Promise<void>;
+
+  /** 更新内部场景/子代理模型覆盖 */
+  updateModelOverrides: (overrides: ModelOverrides) => Promise<void>;
 
   /** 加载YOLO模式设置 */
   loadYoloMode: () => Promise<void>;
@@ -67,6 +83,7 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
   const [preferredModel, setPreferredModel] = useState<string>('auto');
   const [healthyUse, setHealthyUse] = useState<boolean>(true);
   const [thinkingConfig, setThinkingConfig] = useState<any>({ mode: 'auto', effort: 'auto' });
+  const [modelOverrides, setModelOverrides] = useState<ModelOverrides>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,6 +117,9 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
         if (data.thinkingConfig !== undefined && data.thinkingConfig !== null) {
           setThinkingConfig(data.thinkingConfig);
         }
+        if (data.modelOverrides !== undefined && data.modelOverrides !== null) {
+          setModelOverrides(data.modelOverrides);
+        }
       });
 
       // 请求当前设置
@@ -118,7 +138,7 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
   /**
    * 向VSCode发送设置更新
    */
-  const sendToVSCode = useCallback(async (updates: { yoloMode?: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any }) => {
+  const sendToVSCode = useCallback(async (updates: { yoloMode?: boolean; preferredModel?: string; healthyUse?: boolean; thinkingConfig?: any; modelOverrides?: ModelOverrides }) => {
     try {
       const messageService = getGlobalMessageService();
       if (messageService) {
@@ -127,7 +147,8 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
           yoloMode: updates.yoloMode !== undefined ? updates.yoloMode : yoloMode,
           preferredModel: updates.preferredModel !== undefined ? updates.preferredModel : preferredModel,
           healthyUse: updates.healthyUse !== undefined ? updates.healthyUse : healthyUse,
-          thinkingConfig: updates.thinkingConfig !== undefined ? updates.thinkingConfig : thinkingConfig
+          thinkingConfig: updates.thinkingConfig !== undefined ? updates.thinkingConfig : thinkingConfig,
+          modelOverrides: updates.modelOverrides !== undefined ? updates.modelOverrides : modelOverrides
         };
 
         messageService.sendProjectSettingsUpdate(payload);
@@ -137,7 +158,7 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
       console.error('Failed to send settings to VSCode:', error);
       throw new Error('同步设置到VSCode失败');
     }
-  }, [yoloMode, preferredModel, healthyUse, thinkingConfig]);
+  }, [yoloMode, preferredModel, healthyUse, thinkingConfig, modelOverrides]);
 
   /**
    * 加载设置
@@ -221,6 +242,23 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     }
   }, [sendToVSCode, thinkingConfig]);
 
+  /**
+   * 更新内部场景/子代理模型覆盖
+   */
+  const updateModelOverrides = useCallback(async (overrides: ModelOverrides) => {
+    setError(null);
+    const oldOverrides = modelOverrides;
+
+    try {
+      setModelOverrides(overrides);
+      await sendToVSCode({ modelOverrides: overrides });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新模型覆盖失败');
+      // 如果发送失败，恢复原状态
+      setModelOverrides(oldOverrides);
+    }
+  }, [sendToVSCode, modelOverrides]);
+
   // =============================================================================
   // 初始化加载
   // =============================================================================
@@ -241,10 +279,12 @@ export const YoloModeProvider: React.FC<YoloModeProviderProps> = ({ children }) 
     preferredModel,
     healthyUse,
     thinkingConfig,
+    modelOverrides,
     updateYoloMode,
     updatePreferredModel,
     updateHealthyUse,
     updateThinkingConfig,
+    updateModelOverrides,
     loadYoloMode,
     isLoading,
     error

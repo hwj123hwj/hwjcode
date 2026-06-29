@@ -290,6 +290,9 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
 
       // 创建子agent实例 - 使用AgentDefinition过滤后的工具
       const agentDefinition = this.createAgentDefinition(params);
+      // 用户可在 /config 中为 Code Expert / Verification 子代理指定模型；
+      // 未设置时返回 undefined，SubAgent 将继承当前会话模型。
+      const modelOverride = this.config.getSubAgentModelOverride(params.agent_type);
       const subAgent = new SubAgent(
         this.config,
         this.createFilteredToolRegistry(agentDefinition),
@@ -298,6 +301,7 @@ export class TaskTool extends BaseTool<TaskToolParams, ToolResult> {
         signal,
         services?.onPreToolExecution, // 🎯 传入外部预执行回调（用于git快照等）
         agentDefinition,
+        modelOverride,
       );
 
       // 🎯 直接使用services中的statusUpdateCallback
