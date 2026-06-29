@@ -104,8 +104,7 @@ export class CommandHandler {
     }
     const parsed = this.parseSlashCommand(commandText);
     if (parsed.commandToExecute) {
-      await this.runCommand(parsed.commandToExecute, parsed.args, context);
-      return { handled: true };
+      return this.runCommand(parsed.commandToExecute, parsed.args, context);
     }
     // Not one of the headless built-ins — try the real CLI command set.
     return runRealCommand(commandText, context);
@@ -115,12 +114,19 @@ export class CommandHandler {
     command: Command,
     args: string,
     context: CommandContext,
-  ): Promise<void> {
+  ): Promise<DispatchResult> {
     try {
       const result: CommandExecutionResponse = await command.execute(
         context,
         args ? args.split(/\s+/) : [],
       );
+
+      // A `submit_prompt` command (e.g. `/init`) expanded into a prompt to run
+      // through the model. Hand it up instead of echoing it as text, so the ACP
+      // session submits it as the next user turn — matching the CLI behavior.
+      if (typeof result.submitPrompt === 'string' && result.submitPrompt) {
+        return { handled: true, submitPrompt: result.submitPrompt };
+      }
 
       let message = '';
       if (typeof result.data === 'string') {
@@ -137,9 +143,11 @@ export class CommandHandler {
         message = JSON.stringify(result.data, null, 2);
       }
       await context.sendMessage(message);
+      return { handled: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await context.sendMessage(`Error: ${msg}`);
+      return { handled: true };
     }
   }
 
