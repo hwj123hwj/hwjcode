@@ -191,6 +191,13 @@ export const en = {
   'settings.navAppearance': 'Appearance',
   'settings.navPersonalization': 'Personalization',
   'settings.navComputerUse': 'Computer use',
+  'settings.groupAbout': 'About',
+  'settings.navAbout': 'About',
+  'settings.aboutDesktop': 'Easy Code Desktop',
+  'settings.aboutCliCore': 'Bundled backend (easycode-cli-core)',
+  'settings.aboutOs': 'OS',
+  'settings.aboutCopy': 'Copy info',
+  'settings.aboutCopied': 'Copied',
   'settings.customInstructions': 'Custom instructions',
   'settings.customInstructionsDesc': 'Give extra guidance and context for every task on this machine.',
   'settings.customInstructionsPlaceholder':

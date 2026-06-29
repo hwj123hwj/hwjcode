@@ -49,6 +49,7 @@ import { setOverlayVisible } from './computerUse/overlay.js';
 import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
+import { getVersionInfo } from './appInfo.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
   ApiKeyLoginResult,
@@ -318,6 +319,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.UpdateInstall, () => updater.install());
   ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
   ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
+
+  // ── app meta (About panel: version + environment info) ──────────────────────
+  ipcMain.handle(IpcInvoke.AppGetVersionInfo, () => getVersionInfo());
 
   return { hub, feishu, updater, terminals, computerUse };
 }

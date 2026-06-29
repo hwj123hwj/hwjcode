@@ -188,6 +188,13 @@ export const zh = {
   'settings.navAppearance': '外观',
   'settings.navPersonalization': '个性化',
   'settings.navComputerUse': '电脑控制',
+  'settings.groupAbout': '关于',
+  'settings.navAbout': '关于',
+  'settings.aboutDesktop': 'Easy Code 桌面版',
+  'settings.aboutCliCore': '内置后端 (easycode-cli-core)',
+  'settings.aboutOs': '操作系统',
+  'settings.aboutCopy': '复制信息',
+  'settings.aboutCopied': '已复制',
   'settings.customInstructions': '自定义指令',
   'settings.customInstructionsDesc': '为此主机上的所有任务提供额外说明和上下文。',
   'settings.customInstructionsPlaceholder':

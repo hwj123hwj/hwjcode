@@ -317,6 +317,17 @@ select {
   color: var(--text-dim);
   letter-spacing: 0.02em;
   -webkit-app-region: no-drag;
+  /* Rendered as a <button> so it opens Settings → 关于; strip the native button
+     chrome so it still looks like the plain version label it replaced. */
+  display: block;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.brand-version:hover {
+  color: var(--text);
 }
 .btn-new {
   -webkit-app-region: no-drag;
@@ -2225,6 +2236,36 @@ select {
   border-left-color: var(--amber);
   background: var(--amber-weak);
   color: var(--amber);
+}
+/* 关于面板：VSCode 风格的版本/环境信息表 */
+.about-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.about-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.about-row + .about-row {
+  border-top: 1px solid var(--border);
+}
+.about-label {
+  flex: 0 0 auto;
+  min-width: 200px;
+  color: var(--text-dim);
+}
+.about-value {
+  flex: 1 1 auto;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-all;
+  user-select: text;
 }
 .saved-flag {
   display: inline-flex;
