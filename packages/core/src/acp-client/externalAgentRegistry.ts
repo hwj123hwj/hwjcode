@@ -64,7 +64,7 @@ const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
     type: 'claude-code',
     label: 'Claude Code',
     command: 'npx',
-    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.44.0'],
+    args: ['-y', '@agentclientprotocol/claude-agent-acp@0.52.0'],
   },
   'codex': {
     // Codex CLI does not speak ACP natively. We drive it through Zed
@@ -75,7 +75,7 @@ const DEFAULT_SPECS: Record<ExternalAgentType, ExternalAgentSpec> = {
     type: 'codex',
     label: 'Codex',
     command: 'npx',
-    args: ['-y', '@zed-industries/codex-acp@0.16.0'],
+    args: ['-y', '@agentclientprotocol/codex-acp@1.0.2'],
   },
 };
 
