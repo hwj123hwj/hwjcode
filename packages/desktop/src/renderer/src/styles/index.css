@@ -603,9 +603,19 @@ select {
   top: 7px;
   display: none;
   gap: 2px;
+  /* Semi-opaque background so action buttons don't visually merge with the
+     time text underneath when they overlap on narrow chat cards. */
+  background: var(--bg-elev);
+  border-radius: var(--radius-xs);
+  padding: 1px;
 }
 .session-item:hover .session-actions {
   display: flex;
+}
+/* On chat cards (single-line, compact padding) the hover actions overlap the
+   right-aligned time. Hide the time while hovering so icons have clear space. */
+.session-item.chat-item:hover .session-time {
+  visibility: hidden;
 }
 .icon-btn {
   border: none;
