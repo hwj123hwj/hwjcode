@@ -83,7 +83,14 @@ const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
  * `GROUPS`, and write its `*Section` component — the left-nav rail and the
  * content area are both generated from `GROUPS`, so nothing else needs to change.
  */
-export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models' | 'about';
+export type SectionId =
+  | 'general'
+  | 'appearance'
+  | 'personalization'
+  | 'computerUse'
+  | 'generalModel'
+  | 'models'
+  | 'about';
 
 interface SectionDef {
   id: SectionId;
@@ -126,6 +133,7 @@ const GROUPS: GroupDef[] = [
     titleKey: 'settings.groupIntegration',
     sections: [
       { id: 'computerUse', icon: 'laptop', labelKey: 'settings.navComputerUse', Component: ComputerUseSection },
+      { id: 'generalModel', icon: 'switch', labelKey: 'settings.navGeneralModel', Component: GeneralModelSection },
       { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
     ],
   },
@@ -274,6 +282,7 @@ function useUserSettings() {
 
 /* ── 通用 ─────────────────────────────────────────────────────────────────
  * Display/reply language, project memory, healthy-use reminder, software update.
+ * Model selection lives in its own 通用模型设置 section (GeneralModelSection).
  */
 function GeneralSection() {
   const t = useT();
@@ -281,36 +290,9 @@ function GeneralSection() {
   const setLang = useStore((s) => s.setLang);
   const update = useStore((s) => s.update);
   const checkUpdate = useStore((s) => s.checkUpdate);
-  const order = useStore((s) => s.order);
-  const sessions = useStore((s) => s.sessions);
   const [checking, setChecking] = useState(false);
   const { settings, setSettings, patch, saved } = useUserSettings();
   const [replyLang, setReplyLang] = useState('');
-  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
-
-  // Build the default-model options the same way the new-session/empty-session
-  // pickers do: the built-in models cached on existing sessions' meta, merged
-  // with the user's custom models. No live session is needed here.
-  useEffect(() => {
-    let alive = true;
-    const builtins = new Map<string, string>();
-    for (const id of order) {
-      for (const m of sessions[id]?.meta.availableModels ?? []) {
-        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
-      }
-    }
-    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
-    void api.models
-      .listCustom()
-      .then((custom) => {
-        if (!alive) return;
-        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
-      })
-      .catch(() => alive && setModelOpts(fromBuiltins));
-    return () => {
-      alive = false;
-    };
-  }, [order, sessions]);
 
   // Sync the reply-language input whenever settings (re)load.
   useEffect(() => {
@@ -381,35 +363,6 @@ function GeneralSection() {
       </div>
 
       <div className="setting-item">
-        <label className="field-label">{t('settings.defaultModel')}</label>
-        <ModelSelect
-          value={settings?.defaultModel ?? ''}
-          options={modelOpts}
-          autoLabel={t('settings.defaultModelAuto')}
-          onChange={(value) => void patch({ defaultModel: value })}
-        />
-        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
-      </div>
-
-      {/* 高级模型覆盖：压缩 / Code Expert / Verification 子代理。空值=恢复默认。 */}
-      {MODEL_OVERRIDE_FIELDS.map((f) => (
-        <div className="setting-item" key={f.key}>
-          <label className="field-label">{t(f.labelKey)}</label>
-          <ModelSelect
-            value={settings?.modelOverrides?.[f.key] ?? ''}
-            options={modelOpts}
-            autoLabel={t(f.autoKey)}
-            onChange={(value) =>
-              void patch({
-                modelOverrides: { ...(settings?.modelOverrides ?? {}), [f.key]: value },
-              })
-            }
-          />
-          <div className="setting-desc">{t(f.descKey)}</div>
-        </div>
-      ))}
-
-      <div className="setting-item">
         <label className="field-label">{t('settings.projectMemory')}</label>
         <div className="prompt-config">
           {MEMORY_MODES.map((m) => (
@@ -451,6 +404,79 @@ function GeneralSection() {
           <span className="setting-desc">{updateStatus}</span>
         </div>
       </div>
+
+      <SavedToast show={saved} />
+    </>
+  );
+}
+
+/* ── 通用模型设置 ───────────────────────────────────────────────────────────
+ * Global default model + per-scene / per-sub-agent overrides (compression /
+ * Code Expert / Verification). Carved out of 通用 into its own nav item; still
+ * reads/writes the same `settings.json` keys (defaultModel / modelOverrides),
+ * so the data binding is unchanged.
+ */
+function GeneralModelSection() {
+  const t = useT();
+  const order = useStore((s) => s.order);
+  const sessions = useStore((s) => s.sessions);
+  const { settings, patch, saved } = useUserSettings();
+  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
+
+  // Build the default-model options the same way the new-session/empty-session
+  // pickers do: the built-in models cached on existing sessions' meta, merged
+  // with the user's custom models. No live session is needed here.
+  useEffect(() => {
+    let alive = true;
+    const builtins = new Map<string, string>();
+    for (const id of order) {
+      for (const m of sessions[id]?.meta.availableModels ?? []) {
+        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
+      }
+    }
+    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    void api.models
+      .listCustom()
+      .then((custom) => {
+        if (!alive) return;
+        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
+      })
+      .catch(() => alive && setModelOpts(fromBuiltins));
+    return () => {
+      alive = false;
+    };
+  }, [order, sessions]);
+
+  return (
+    <>
+      <div className="setting-item">
+        <label className="field-label">{t('settings.defaultModel')}</label>
+        <ModelSelect
+          value={settings?.defaultModel ?? ''}
+          options={modelOpts}
+          autoLabel={t('settings.defaultModelAuto')}
+          onChange={(value) => void patch({ defaultModel: value })}
+        />
+        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
+      </div>
+
+      {/* 高级模型覆盖：压缩 / Code Expert / Verification 子代理。空值=恢复默认。 */}
+      {MODEL_OVERRIDE_FIELDS.map((f) => (
+        <div className="setting-item" key={f.key}>
+          <label className="field-label">{t(f.labelKey)}</label>
+          <ModelSelect
+            value={settings?.modelOverrides?.[f.key] ?? ''}
+            options={modelOpts}
+            autoLabel={t(f.autoKey)}
+            onChange={(value) =>
+              void patch({
+                modelOverrides: { ...(settings?.modelOverrides ?? {}), [f.key]: value },
+              })
+            }
+          />
+          <div className="setting-desc">{t(f.descKey)}</div>
+        </div>
+      ))}
 
       <SavedToast show={saved} />
     </>

@@ -1122,8 +1122,21 @@ function setupBasicMessageHandlers() {
 
       // 🎯 更新内部场景/子代理模型覆盖（写入共享的 ~/.easycode-user/settings.json）
       if (data.modelOverrides !== undefined) {
-        UserSettingsService.getInstance(logger).setModelOverrides(data.modelOverrides);
+        const persisted = UserSettingsService.getInstance(logger).setModelOverrides(data.modelOverrides);
         logger.info(`[ModelOverrides] ✅ Updated: ${JSON.stringify(data.modelOverrides)}`);
+        // 🎯 热重载到所有 active session 的 Config（等价 CLI /config 的即时生效）。
+        // 不重载的话，已打开的会话里子 agent 仍读到旧的 modelOverrides。
+        for (const sess of sessionManager.getAllSessionsInfo()) {
+          try {
+            const cfg = sessionManager.getAIService(sess.id)?.getConfig?.();
+            if (cfg && typeof (cfg as any).setModelOverrides === 'function') {
+              (cfg as any).setModelOverrides(persisted);
+              logger.debug(`[ModelOverrides] hot-reloaded into session ${sess.id}`);
+            }
+          } catch (sessErr) {
+            logger.warn(`[ModelOverrides] hot-reload skipped for session ${sess.id}`, sessErr instanceof Error ? sessErr : undefined);
+          }
+        }
       }
 
       logger.info(`[YOLO] ✅ Project settings synchronized`);

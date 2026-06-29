@@ -214,6 +214,7 @@ export const en = {
   'settings.navAppearance': 'Appearance',
   'settings.navPersonalization': 'Personalization',
   'settings.navComputerUse': 'Computer use',
+  'settings.navGeneralModel': 'Model settings',
   'settings.groupAbout': 'About',
   'settings.navAbout': 'About',
   'settings.aboutDesktop': 'Easy Code Desktop',

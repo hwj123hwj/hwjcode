@@ -3245,6 +3245,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
         proxy: activeConfig?.getProxy(),
         customProxyServerUrl: activeConfig?.getCustomProxyServerUrl(),
         mcpServers: activeConfig?.getMcpServers(),
+        // 🎯 继承子代理模型覆盖（Code Expert / Verification 等），否则飞书网关模式下
+        // 隔离 Config 的 modelOverrides 为空，getSubAgentModelOverride 永远返回 undefined，
+        // 子 agent 会错误地继承父会话模型而非 /config 中配置的专属模型。
+        modelOverrides: activeConfig?.getModelOverrides(),
       });
 
       try {

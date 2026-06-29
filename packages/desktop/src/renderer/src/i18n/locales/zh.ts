@@ -210,6 +210,7 @@ export const zh = {
   'settings.navAppearance': '外观',
   'settings.navPersonalization': '个性化',
   'settings.navComputerUse': '电脑控制',
+  'settings.navGeneralModel': '通用模型设置',
   'settings.groupAbout': '关于',
   'settings.navAbout': '关于',
   'settings.aboutDesktop': 'Easy Code 桌面版',
