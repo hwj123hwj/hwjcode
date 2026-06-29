@@ -26,7 +26,7 @@ export function Markdown({ text }: { text: string }) {
 
 function renderBlocks(src: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const lines = src.split('\n');
+  const lines = src.split(/\r?\n/);
   let i = 0;
   let key = 0;
 
@@ -159,6 +159,11 @@ function renderBlocks(src: string): ReactNode[] {
     ) {
       para.push(lines[i]);
       i++;
+    }
+    if (para.length === 0) {
+      // Safety guard: if we didn't advance, skip this line to avoid infinite loop
+      i++;
+      continue;
     }
     out.push(<p key={key++}>{renderInline(para.join('\n'))}</p>);
   }
