@@ -171,6 +171,18 @@ describe('parseArguments', () => {
     const argv = await parseArguments();
     expect(argv.continue).toBe(false);
   });
+
+  it('should allow --new flag to set new to true', async () => {
+    process.argv = ['node', 'script.js', '--new'];
+    const argv = await parseArguments();
+    expect(argv.new).toBe(true);
+  });
+
+  it('should allow -n shorthand for --new', async () => {
+    process.argv = ['node', 'script.js', '-n'];
+    const argv = await parseArguments();
+    expect(argv.new).toBe(true);
+  });
 });
 
 describe('loadCliConfig', () => {

@@ -182,6 +182,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.FeishuDetectExternal, () => feishu.detectExternal());
   ipcMain.handle(IpcInvoke.FeishuKillExternal, () => feishu.killExternal());
   ipcMain.handle(IpcInvoke.FeishuLobby, () => feishu.getLobby());
+  ipcMain.handle(IpcInvoke.FeishuRunCommand, (_e, args: string) =>
+    feishu.runFeishuCommand(args),
+  );
 
   // ── custom models ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());

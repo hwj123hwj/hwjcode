@@ -82,8 +82,10 @@ export const zh = {
   'feishu.stopGateway': '停止网关',
   'feishu.startGateway': '启动网关',
   'feishu.reconfigure': '重新配置',
-  'feishu.qrLogin': '扫码登录（自动建应用）',
+  'feishu.qrLogin': '扫码登录',
+  'feishu.qrLoginDesc': '推荐 · 使用飞书 App 扫码，自动完成应用创建与授权，无需任何开发者配置。',
   'feishu.manualEntry': '手动输入凭据',
+  'feishu.manualEntryDesc': '已有飞书应用？填入 App ID 与 App Secret 直接接入。',
   'feishu.qrHint': '使用 {platform} 扫描二维码并授权创建应用。',
   'feishu.verifyCode': '验证码',
   'feishu.openInBrowser': '在浏览器打开',
@@ -94,6 +96,26 @@ export const zh = {
   'feishu.detailsLog': '详情输出',
   'feishu.detailsLogSize': '{n} 字符',
   'feishu.detailsLogEmpty': '暂无输出。网关启动后，这里会实时显示其日志（WebSocket 连接、权限校验、错误等）。',
+
+  // ── feishu authorization management（owner / 白名单图形化配置） ───────────────
+  'feishu.auth.title': '授权管理',
+  'feishu.auth.ownerLabel': 'Owner（拥有者）',
+  'feishu.auth.ownerNone': '未设置',
+  'feishu.auth.verified': '已确认',
+  'feishu.auth.unverified': '待首次私聊确认',
+  'feishu.auth.edit': '编辑',
+  'feishu.auth.save': '保存',
+  'feishu.auth.ownerPlaceholder': 'Bot 应用 open_id（ou_…）',
+  'feishu.auth.ownerHint':
+    'Owner 是被授权驱动 Bot 的 open_id。应填 Bot 应用自身空间的 open_id（与 Bot 私聊时事件里的 sender open_id）；手动设置会标记为已确认，自动绑定（TOFU）将不再生效。',
+  'feishu.auth.allowlistLabel': '授权用户白名单',
+  'feishu.auth.allowlistEmpty': '暂无额外授权用户。',
+  'feishu.auth.allowPlaceholder': '要授权的 open_id（ou_…）',
+  'feishu.auth.add': '添加',
+  'feishu.auth.remove': '移除',
+  'feishu.auth.restartHint': '网关运行中——改动需重启网关后才对运行中的会话生效。',
+  'feishu.auth.cmdFailed': '命令执行失败',
+  'feishu.auth.working': '处理中…',
 
   // ── login ────────────────────────────────────────────────────────────────────
   'login.failed': '登录失败',

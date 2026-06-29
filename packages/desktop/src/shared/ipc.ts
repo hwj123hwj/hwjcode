@@ -55,6 +55,8 @@ export const IpcInvoke = {
   FeishuDetectExternal: 'feishu:detect-external',
   FeishuKillExternal: 'feishu:kill-external',
   FeishuLobby: 'feishu:lobby',
+  /** Run a `/feishu` authorization subcommand (allow/deny/owner/allowlist) via pass-through. */
+  FeishuRunCommand: 'feishu:run-command',
   // custom models
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
@@ -611,7 +613,15 @@ export interface FeishuStatus {
   platform?: FeishuDomain;
   /** Bot owner's open_id (the user authorized to drive the bot). */
   ownerOpenId?: string;
+  /**
+   * Whether {@link ownerOpenId} has been confirmed in the Bot app's own open_id
+   * space (TOFU first-DM binding). `undefined` on legacy creds is treated as
+   * confirmed. `false` means it's a registration-time guess awaiting first DM.
+   */
+  ownerVerified?: boolean;
   allowlistCount?: number;
+  /** The full authorization allowlist (open_ids), for graphical management. */
+  allowlist?: string[];
   /** Whether the desktop-managed gateway child is alive. */
   running: boolean;
   pid?: number;
@@ -651,6 +661,19 @@ export interface FeishuQrBeginResult {
   ok: boolean;
   error?: string;
   begin?: FeishuQrBegin;
+}
+
+/**
+ * Result of a `/feishu` authorization pass-through command. On success
+ * `message` carries the CLI command's human-readable reply (e.g. "Added … to
+ * the authorization allowlist"); `status` is the refreshed gateway snapshot so
+ * the dialog re-renders owner/allowlist without a separate round-trip.
+ */
+export interface FeishuRunResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
+  status?: FeishuStatus;
 }
 
 /** A detected `--feishu` gateway process not managed by this desktop app. */
@@ -1006,6 +1029,12 @@ export interface EasycodeBridge {
     killExternal(): Promise<number>;
     /** Read the project↔chat bindings (+ resolved chat names) for the lobby panel. */
     lobby(): Promise<FeishuLobby>;
+    /**
+     * Run a `/feishu` authorization subcommand (`allow <id>` / `deny <id>` /
+     * `owner <id>` / `allowlist`) by passing it through to the bundled backend.
+     * Reuses the CLI command logic verbatim — no reimplementation in the desktop.
+     */
+    runCommand(args: string): Promise<FeishuRunResult>;
     onChanged(cb: (status: FeishuStatus) => void): () => void;
   };
   permissions: {

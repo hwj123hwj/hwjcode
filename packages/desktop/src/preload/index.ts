@@ -29,6 +29,7 @@ import type {
   FeishuQrBegin,
   FeishuQrBeginResult,
   FeishuResult,
+  FeishuRunResult,
   FeishuStatus,
   FileBase64,
   GitFileDiff,
@@ -154,6 +155,8 @@ const bridge: EasycodeBridge = {
       ipcRenderer.invoke(IpcInvoke.FeishuDetectExternal) as Promise<FeishuExternalProcess[]>,
     killExternal: () => ipcRenderer.invoke(IpcInvoke.FeishuKillExternal) as Promise<number>,
     lobby: () => ipcRenderer.invoke(IpcInvoke.FeishuLobby) as Promise<FeishuLobby>,
+    runCommand: (args: string) =>
+      ipcRenderer.invoke(IpcInvoke.FeishuRunCommand, args) as Promise<FeishuRunResult>,
     onChanged: (cb) => on<FeishuStatus>(IpcEvent.FeishuChanged, cb),
   },
   permissions: {

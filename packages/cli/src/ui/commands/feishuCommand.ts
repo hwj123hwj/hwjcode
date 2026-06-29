@@ -5513,6 +5513,47 @@ async function handleAllow(args: string): Promise<string> {
 }
 
 /**
+ * 设置（或覆盖式更换）Bot Owner，并标记为已确认（ownerVerified=true）。
+ *
+ * 用法：/feishu owner <openId>
+ *
+ * 与 `/feishu allow` 的区别：allow 仅在「owner 未绑定」时把 openId 设为 owner，
+ * 无法更换已有 owner；owner 命令则总是覆盖式设置，用于图形化「配置 / 修改 owner」。
+ * 标记 verified=true 是显式断言：之后 TOFU 自动绑定（仅在 ownerVerified===false 时
+ * 触发）不会再把 owner 改绑给下一个私聊的人。
+ */
+async function handleSetOwner(args: string): Promise<string> {
+  const openId = args.trim();
+  if (!openId) {
+    return [
+      t('feishu.owner.usage_title'),
+      '',
+      t('feishu.owner.usage_body'),
+    ].join('\n');
+  }
+  let creds: FeishuCredentials | null;
+  try {
+    creds = await loadCredentials();
+  } catch (e) {
+    return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
+  }
+  if (!creds) {
+    return t('feishu.allow.creds_missing');
+  }
+  // 已是该 owner 且已确认（含旧凭证 ownerVerified 缺省按已确认处理）→ 无需改动。
+  if (creds.ownerOpenId === openId && creds.ownerVerified !== false) {
+    return tp('feishu.owner.already', { openId });
+  }
+  const previous = creds.ownerOpenId;
+  creds.ownerOpenId = openId;
+  creds.ownerVerified = true;
+  await saveCredentials(creds);
+  return previous && previous !== openId
+    ? tp('feishu.owner.changed', { openId, previous })
+    : tp('feishu.owner.set', { openId });
+}
+
+/**
  * 从授权白名单移除 open_id（B1 — 授权管理）
  *
  * 用法：/feishu deny <openId>
@@ -5705,6 +5746,12 @@ function makeFeishuLikeCommand(domain: 'feishu' | 'lark'): SlashCommand {
         description: t('feishu.subcmd.allow.description'),
         kind: CommandKind.BUILT_IN,
         action: async (_ctx, args) => msg(await handleAllow(args)),
+      },
+      {
+        name: 'owner',
+        description: t('feishu.subcmd.owner.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (_ctx, args) => msg(await handleSetOwner(args)),
       },
       {
         name: 'deny',

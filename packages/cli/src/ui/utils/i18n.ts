@@ -1469,6 +1469,7 @@ export const translations = {
     'feishu.subcmd.status.description': 'Show the Feishu Bot connection status',
     'feishu.subcmd.logout.description': 'Clear Feishu credentials and disconnect',
     'feishu.subcmd.allow.description': 'Add a Feishu open_id to the authorization allowlist',
+    'feishu.subcmd.owner.description': 'Set or replace the Bot Owner open_id (marks it verified)',
     'feishu.subcmd.deny.description': 'Remove an open_id from the authorization allowlist',
     'feishu.subcmd.allowlist.description': 'List the current Bot Owner and authorization allowlist',
     'feishu.subcmd.help.description': 'Show Feishu help',
@@ -1593,6 +1594,13 @@ export const translations = {
     'feishu.allow.set_as_owner': '✅ Set {openId} as Bot Owner.',
     'feishu.allow.already_in_list': 'ℹ️ {openId} is already in the authorization allowlist.',
     'feishu.allow.added': '✅ Added {openId} to the authorization allowlist (total {count}).',
+
+    // Owner handler
+    'feishu.owner.usage_title': 'Usage: /feishu owner <openId>',
+    'feishu.owner.usage_body': 'Set (or replace) the Bot Owner — the open_id authorized to drive the Bot — and mark it verified.',
+    'feishu.owner.already': 'ℹ️ {openId} is already the verified Bot Owner.',
+    'feishu.owner.set': '✅ Set {openId} as Bot Owner (marked verified).',
+    'feishu.owner.changed': '✅ Changed Bot Owner from {previous} to {openId} (marked verified).',
 
     // Deny handler
     'feishu.deny.usage': 'Usage: /feishu deny <openId>',
@@ -3153,6 +3161,7 @@ export const translations = {
     'feishu.subcmd.status.description': '查看飞书 Bot 连接状态',
     'feishu.subcmd.logout.description': '清除飞书凭证并断开连接',
     'feishu.subcmd.allow.description': '将飞书 open_id 加入授权白名单',
+    'feishu.subcmd.owner.description': '设置或更换 Bot Owner 的 open_id（并标记为已确认）',
     'feishu.subcmd.deny.description': '从授权白名单中移除指定 open_id',
     'feishu.subcmd.allowlist.description': '列出当前 Bot 的 Owner 与授权白名单',
     'feishu.subcmd.help.description': '显示飞书帮助',
@@ -3273,6 +3282,13 @@ export const translations = {
     'feishu.allow.set_as_owner': '✅ 已将 {openId} 设为 Bot Owner。',
     'feishu.allow.already_in_list': 'ℹ️ {openId} 已在授权白名单中。',
     'feishu.allow.added': '✅ 已将 {openId} 加入授权白名单 (共 {count} 人)。',
+
+    // Owner handler
+    'feishu.owner.usage_title': '用法: /feishu owner <openId>',
+    'feishu.owner.usage_body': '设置（或更换）Bot Owner —— 即被授权驱动 Bot 的 open_id，并标记为已确认。',
+    'feishu.owner.already': 'ℹ️ {openId} 已是已确认的 Bot Owner。',
+    'feishu.owner.set': '✅ 已将 {openId} 设为 Bot Owner（已标记为已确认）。',
+    'feishu.owner.changed': '✅ 已将 Bot Owner 从 {previous} 更换为 {openId}（已标记为已确认）。',
 
     // Deny handler
     'feishu.deny.usage': '用法: /feishu deny <openId>',

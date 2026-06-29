@@ -13,6 +13,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest run",
     "pack:dir": "electron-vite build && node scripts/pack-installer.cjs --dir",
     "pack:win": "electron-vite build && node scripts/pack-installer.cjs --win",
     "pack:mac": "electron-vite build && node scripts/pack-installer.cjs --mac",
