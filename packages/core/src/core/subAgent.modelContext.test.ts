@@ -11,8 +11,12 @@
  * using the override's real model name. This lets the sub-agent answer "which
  * model are you" truthfully and makes the override verifiable on a real machine.
  *
- * When NO override is set the sub-agent simply inherits the session model — and
- * nothing is injected (we don't add a model block in that case).
+ * When NO override is set the sub-agent inherits the session model. As long as
+ * that model is concretely named (not the server-decided `auto`), we still inject
+ * an "inherited from session" notice so the sub-agent ALWAYS knows its own model —
+ * matching the main session, which always carries a `Current Model:` line. Only
+ * when the resolved model is `auto`/empty (server picks at request time, so we
+ * cannot truthfully name it) do we inject nothing.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -83,13 +87,28 @@ describe('SubAgent current-model context injection', () => {
     expect(prompt).not.toContain('gemini-2.5-pro');
   });
 
-  it('injects NOTHING when no override is set (silently inherits session model)', () => {
+  it('injects the inherited-session notice with the session model when no override is set', () => {
     const subAgent = makeSubAgent('gemini-2.5-pro');
     const prompt = (subAgent as any).buildSystemPrompt() as string;
 
-    // No override → no appended block at all, just the base system prompt.
+    expect(prompt).toContain(BASE_PROMPT);
+    // No override, but the session model is concretely named → inherited notice.
+    expect(prompt).toContain(
+      t('subagent.model.inherited.notice', { model: 'gemini-2.5-pro' }),
+    );
+    expect(prompt).toContain('gemini-2.5-pro');
+    // It must be the inherited wording, NOT the explicit-override wording.
+    expect(prompt).not.toContain(
+      t('subagent.model.override.notice', { model: 'gemini-2.5-pro' }),
+    );
+  });
+
+  it('injects NOTHING when no override is set and the session model is `auto` (server-decided, cannot name truthfully)', () => {
+    const subAgent = makeSubAgent('auto');
+    const prompt = (subAgent as any).buildSystemPrompt() as string;
+
     expect(prompt).toBe(BASE_PROMPT);
-    expect(prompt).not.toContain('gemini-2.5-pro');
+    expect(prompt).not.toContain('auto');
   });
 
   it('uses the real modelId for a custom-model override', () => {

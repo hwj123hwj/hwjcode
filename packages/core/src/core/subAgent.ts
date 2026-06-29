@@ -336,30 +336,41 @@ export class SubAgent {
   }
 
   /**
-   * 构建模型覆盖说明，追加到子 Agent 系统提示末尾。
+   * 构建模型身份说明，追加到子 Agent 系统提示末尾。
    *
-   * 仅当用户为该子代理显式配置了模型 override（modelOverrides.codeExpert /
-   * .verification）时才注入：明确告诉子 Agent 它当前运行在哪个模型上，使其被问到
-   * "你是什么模型"时能如实回答，也便于真机验证 override 是否真正生效。
+   * 让子 Agent 永远知道自己实际运行在哪个模型上，使其被问到"你是什么模型"时能如实
+   * 回答（与主会话始终带 `Current Model:` 行的行为对齐），也便于真机验证模型解析是否
+   * 正确。实际模型 = per-agent override（modelOverrides.codeExpert / .verification）
+   * 优先，否则继承当前会话模型 config.getModel()。
    *
-   * 未设置 override 时（子 Agent 继承当前会话模型）不注入任何内容，保持现状。
+   * - 有显式 override → 注入 override 文案（强调"用户为该子代理显式配置"）。
+   * - 无 override 但会话模型可具名 → 注入"继承会话"文案。
+   * - 模型为 'auto' 或空（由服务端在请求时动态决定，无法如实命名）→ 不注入，避免谎报。
    */
   private buildModelIdContext(): string {
-    // 没有 per-agent 模型覆盖 → 继承会话模型，不注入说明。
-    if (!this.modelOverride) {
+    // 子 Agent 实际运行模型：override 优先，否则继承会话模型。
+    const effectiveModel = this.modelOverride || this.config.getModel();
+
+    // 'auto'/空 表示服务端动态决定，无法如实命名 → 不注入。
+    if (!effectiveModel || effectiveModel === 'auto') {
       return '';
     }
 
     // 解析展示用的模型名：自定义模型用其真实 modelId，内置模型直接用 id。
-    let modelName = this.modelOverride;
-    if (isCustomModel(this.modelOverride)) {
-      const customConfig = this.config.getCustomModelConfig(this.modelOverride);
+    let modelName = effectiveModel;
+    if (isCustomModel(effectiveModel)) {
+      const customConfig = this.config.getCustomModelConfig(effectiveModel);
       if (customConfig?.modelId) {
         modelName = customConfig.modelId;
       }
     }
 
-    return `\n\n---\n\n${t('subagent.model.override.notice', { model: modelName })}`;
+    // 有显式 override 用更强的 override 文案；否则用继承会话模型的文案。
+    const noticeKey = this.modelOverride
+      ? 'subagent.model.override.notice'
+      : 'subagent.model.inherited.notice';
+
+    return `\n\n---\n\n${t(noticeKey, { model: modelName })}`;
   }
 
   /**
