@@ -28,6 +28,7 @@ import {
   coreEvents,
   CoreEvent,
   SessionManager as CoreSessionManager,
+  generateCustomModelId,
 } from 'deepv-code-core';
 import * as acp from '@agentclientprotocol/sdk';
 import * as fs from 'node:fs/promises';
@@ -512,21 +513,32 @@ export class Session {
     const client = cfg.getGeminiClient?.();
     const signal = abortSignal ?? new AbortController().signal;
 
+    // Normalize stale model ID: if the session stored an old-hash custom model
+    // ID that no longer matches the current config (e.g. baseUrl changed),
+    // resolve it via getCustomModelConfig and replace with the current canonical ID.
+    const effectiveModelId = (() => {
+      if (!modelId.startsWith('custom:')) return modelId;
+      const found = (this.config as unknown as { getCustomModelConfig?: (id: string) => unknown }).getCustomModelConfig?.(modelId);
+      if (!found) return modelId;
+      const canonical = generateCustomModelId(found as Parameters<typeof generateCustomModelId>[0]);
+      return canonical !== modelId ? canonical : modelId;
+    })();
+
     if (client?.switchModel) {
-      const result = await client.switchModel(modelId, signal);
+      const result = await client.switchModel(effectiveModelId, signal);
       // switchModel already does config.setModel + chat.setSpecifiedModel +
       // setTools + history compression internally on success.
-      if (result?.success !== false) this.persistPreferredModel(modelId);
+      if (result?.success !== false) this.persistPreferredModel(effectiveModelId);
       return result;
     }
 
     // Minimal fallback — Config only, no compression, no tool re-registration.
-    cfg.setModel?.(modelId);
+    cfg.setModel?.(effectiveModelId);
     const chat = this.chat as unknown as {
       setSpecifiedModel?: (modelId: string) => void;
     };
-    chat.setSpecifiedModel?.(modelId);
-    this.persistPreferredModel(modelId);
+    chat.setSpecifiedModel?.(effectiveModelId);
+    this.persistPreferredModel(effectiveModelId);
     return null;
   }
 
