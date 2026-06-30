@@ -44,6 +44,22 @@ export interface BridgeCallbacks {
   log(line: string): void;
 }
 
+/**
+ * Electron IPC serializes Error objects into plain JSON-RPC error objects
+ * { code, message, data: { details } }. This helper extracts a human-readable
+ * string from whatever shape the caught value has.
+ */
+function extractAcpErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const details = (e['data'] as Record<string, unknown>)?.['details'];
+    if (typeof details === 'string' && details) return details;
+    if (typeof e['message'] === 'string' && e['message']) return e['message'];
+  }
+  return String(err);
+}
+
 /** UI mode -> DeepCode core ApprovalMode id (default/yolo). */
 function toApprovalModeId(mode: PermissionMode): string {
   return mode === 'yolo' ? 'yolo' : 'default';
@@ -629,7 +645,7 @@ export class AcpSessionBridge {
         this.cb.setStatus('idle');
         return;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = extractAcpErrorMessage(err);
       this.cb.emit({ kind: 'error', message });
       this.cb.setStatus('error');
     } finally {

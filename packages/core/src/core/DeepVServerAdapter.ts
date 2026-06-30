@@ -1124,6 +1124,8 @@ export class DeepVServerAdapter implements ContentGenerator {
           ...(thinkingOverride && { thinking: thinkingOverride }),
         };
         return callCustomModelStream(resolvedConfig, request, request.config?.abortSignal);
+      } else {
+        throw new Error(`Custom model configuration not found for: ${modelToUse}`);
       }
     }
 

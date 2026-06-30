@@ -444,7 +444,16 @@ function GeneralModelSection() {
       .listCustom()
       .then((custom) => {
         if (!alive) return;
-        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
+        const seen = new Set<string>(fromBuiltins.map((o) => o.value));
+        const deduped = [
+          ...fromBuiltins,
+          ...custom.map((c) => ({ value: c.id, label: c.label })).filter(({ value }) => {
+            if (seen.has(value)) return false;
+            seen.add(value);
+            return true;
+          }),
+        ];
+        setModelOpts(deduped);
       })
       .catch(() => alive && setModelOpts(fromBuiltins));
     return () => {

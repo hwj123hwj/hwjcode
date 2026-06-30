@@ -194,10 +194,15 @@ function EmptyState() {
       .listCustom()
       .then((custom) => {
         if (!alive) return;
+        const seen = new Set<string>();
         const opts = [
           ...[...builtins].map(([value, label]) => ({ value, label })),
           ...custom.map((c) => ({ value: c.id, label: c.label })),
-        ];
+        ].filter(({ value }) => {
+          if (seen.has(value)) return false;
+          seen.add(value);
+          return true;
+        });
         setModels(opts);
       })
       .catch(() => alive && setModels([...builtins].map(([value, label]) => ({ value, label }))));

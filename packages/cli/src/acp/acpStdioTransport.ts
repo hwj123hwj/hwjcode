@@ -8,9 +8,13 @@ import { type Config, createWorkingStdio } from 'deepv-code-core';
 import { runExitCleanup } from '../utils/cleanup.js';
 import * as acp from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { LoadedSettings } from '../config/settings.js';
 import type { CliArgs } from '../config/config.js';
 import { GeminiAgent } from './acpRpcDispatcher.js';
+import { loadCustomModels } from '../config/customModelsStorage.js';
 
 /**
  * Redirect all process-wide `console.log/info/warn/debug` output to stderr.
@@ -122,6 +126,21 @@ export async function runAcpClient(
     stream,
   );
 
+  // Watch custom-models.json for changes so Desktop saves take effect
+  // without restarting the backend process.
+  const customModelsFile = path.join(os.homedir(), '.easycode-user', 'custom-models.json');
+  fs.watchFile(
+    customModelsFile,
+    { persistent: false, interval: 500 },
+    () => {
+      try {
+        config.setCustomModels(loadCustomModels());
+      } catch {
+        // ignore — file may be mid-write
+      }
+    },
+  );
+
   // Keep libuv busy so the process survives between `session/prompt` turns
   // (see `pinEventLoopUntilClosed` for the full rationale). Without this,
   // a process that finished its first prompt and has no pending tool
@@ -159,6 +178,7 @@ export async function runAcpClient(
     await connection.closed;
   } finally {
     pin.dispose();
+    fs.unwatchFile(customModelsFile);
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);
     await runExitCleanup();

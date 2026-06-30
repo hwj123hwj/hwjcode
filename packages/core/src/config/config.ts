@@ -680,10 +680,32 @@ export class Config {
 
     // 旧格式兼容: custom:{displayName}
     const withoutPrefix = modelId.replace('custom:', '');
-    // 检查是否为新格式（包含 @ 表示 hash）
     if (!withoutPrefix.includes('@')) {
       // 纯旧格式，通过 displayName 匹配
       return this.customModels?.find(model => model.displayName === withoutPrefix && model.enabled !== false);
+    }
+
+    // Stale-hash fallback: baseUrl 变更后 hash 改变，session 里存的旧 modelId
+    // 无法精确匹配。从 custom:{provider}:{modelId}@{hash} 中提取 provider+modelId
+    // 做多级回退匹配，让旧对话仍能找到更新后的配置。
+    const staleMatch = modelId.match(/^custom:([^:]+):(.+)@[a-z0-9]+$/);
+    if (staleMatch) {
+      const [, provider, embeddedModelId] = staleMatch;
+      const enabled = this.customModels?.filter((m) => m.enabled !== false && m.provider === provider) ?? [];
+
+      // 1. 精确匹配 modelId
+      const exact = enabled.find((m) => m.modelId === embeddedModelId);
+      if (exact) return exact;
+
+      // 2. 前缀匹配：session 里可能存了不含斜杠后半段的旧 modelId
+      //    e.g. 'gpt-5.4-nano' 对应当前 'gpt-5.4-nano/kimi-k2.7-code'
+      const prefix = enabled.find(
+        (m) => m.modelId.startsWith(embeddedModelId + '/') || embeddedModelId.startsWith(m.modelId + '/'),
+      );
+      if (prefix) return prefix;
+
+      // 3. 同 provider 唯一配置兜底
+      if (enabled.length === 1) return enabled[0];
     }
 
     return undefined;
