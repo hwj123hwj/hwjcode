@@ -984,6 +984,47 @@ select {
   align-items: flex-end;
   margin-bottom: 22px;
 }
+.msg-user-row.editing {
+  align-items: stretch;
+}
+.msg-user-row.editing .msg-user {
+  width: 100%;
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-user-edit-input {
+  width: 100%;
+  min-height: 56px;
+  max-height: 250px;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.msg-user-edit-input:focus {
+  border-color: var(--border-input-focus, var(--accent));
+}
+.msg-user-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.msg-user-edit-actions .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  height: 26px;
+  font-weight: 500;
+  border-radius: 6px;
+}
 .msg-user-meta {
   display: flex;
   align-items: center;

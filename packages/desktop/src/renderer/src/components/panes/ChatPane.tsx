@@ -170,8 +170,13 @@ function ChatItemView({
   onRewind: (beforeUserMessageIndex: number) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(item.text);
+  const editTaRef = useRef<HTMLTextAreaElement>(null);
+
   const lang = useStore((s) => s.lang);
-  const setPromptDraft = useStore((s) => s.setPromptDraft);
+  const rewindTo = useStore((s) => s.rewindTo);
+  const sendPrompt = useStore((s) => s.sendPrompt);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -179,15 +184,58 @@ function ChatItemView({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleEdit = () => {
-    if (userIndex !== undefined) {
-      onRewind(userIndex);
-      setPromptDraft(sessionId, item.text);
-    }
+  const handleSave = async () => {
+    if (!editText.trim()) return;
+    setIsEditing(false);
+    await rewindTo(sessionId, userIndex!);
+    await sendPrompt(sessionId, editText, [], []);
   };
+
+  useEffect(() => {
+    if (isEditing && editTaRef.current) {
+      const ta = editTaRef.current;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 250) + 'px';
+    }
+  }, [editText, isEditing]);
 
   switch (item.kind) {
     case 'user':
+      if (isEditing) {
+        return (
+          <div className="msg-user-row editing">
+            <div className="msg-user">
+              <textarea
+                ref={editTaRef}
+                className="msg-user-edit-input"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSave();
+                  } else if (e.key === 'Escape') {
+                    setIsEditing(false);
+                    setEditText(item.text);
+                  }
+                }}
+                autoFocus
+              />
+              <div className="msg-user-edit-actions">
+                <button className="btn primary xsmall" onClick={handleSave}>
+                  {t('common.save') ?? '保存'}
+                </button>
+                <button className="btn xsmall" onClick={() => {
+                  setIsEditing(false);
+                  setEditText(item.text);
+                }}>
+                  {t('common.cancel') ?? '取消'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
       return (
         <div className="msg-user-row">
           <div className="msg-user">
@@ -206,7 +254,7 @@ function ChatItemView({
               <Icon name={copied ? 'check' : 'copy'} size={13} />
             </button>
             {isLastUser && userIndex !== undefined && (
-              <button className="msg-meta-btn" onClick={handleEdit} title={t('chat.rewindTitle')}>
+              <button className="msg-meta-btn" onClick={() => setIsEditing(true)} title={t('chat.rewindTitle')}>
                 <Icon name="edit" size={13} />
               </button>
             )}
