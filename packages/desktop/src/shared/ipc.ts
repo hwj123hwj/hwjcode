@@ -33,6 +33,7 @@ export const IpcInvoke = {
   SessionCancel: 'session:cancel',
   SessionSetModel: 'session:set-model',
   SessionSetMode: 'session:set-mode',
+  SessionSetThinking: 'session:set-thinking',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
   SessionDelete: 'session:delete',
@@ -237,6 +238,16 @@ export interface ModelInfo {
 }
 
 /**
+ * Single-string encoding of the backend's extended-thinking config, shared with
+ * the CLI's `/thinking` vocabulary and the ACP `thinking` config option:
+ *   - `off`  → thinking disabled
+ *   - `auto` → provider/model default
+ *   - low|medium|high|xhigh|max → thinking on at that reasoning effort
+ * See `packages/cli/src/acp/acpUtils.ts` (`thinkingConfigToOptionValue`).
+ */
+export type ThinkingMode = 'off' | 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
  * A locally-installed external editor/IDE detected for the file browser's
  * "Open in" menu. `id` is a stable key the renderer passes back to `ide.open`;
  * `name` is the display label. The concrete launch command stays in the main
@@ -266,6 +277,12 @@ export interface SessionMeta {
   permissionMode: PermissionMode;
   model?: string;
   availableModels: ModelInfo[];
+  /**
+   * Current extended-thinking mode/effort for this session, surfaced from the
+   * backend's ACP `thinking` config option. Undefined until the session has
+   * started. Switched via `sessions.setThinking`.
+   */
+  thinking?: ThinkingMode;
   /** Cumulative token usage from the latest usage_update. */
   tokenUsed?: number;
   tokenSize?: number;
@@ -1017,6 +1034,7 @@ export interface EasycodeBridge {
     cancel(sessionId: string): Promise<void>;
     setModel(sessionId: string, modelId: string): Promise<void>;
     setMode(sessionId: string, mode: PermissionMode): Promise<void>;
+    setThinking(sessionId: string, thinking: ThinkingMode): Promise<void>;
     rewind(sessionId: string, beforeUserMessageIndex: number): Promise<RewindResult>;
     onEvent(cb: (env: SessionEventEnvelope) => void): () => void;
     onStatus(cb: (env: SessionStatusEnvelope) => void): () => void;

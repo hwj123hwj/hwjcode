@@ -51,6 +51,7 @@ import {
   extractAskAnswers,
   toAcpToolKind,
   iconToAcpKind,
+  optionValueToThinkingConfig,
 } from './acpUtils.js';
 import { getAcpErrorMessage } from './acpErrors.js';
 import type { GenerateContentResponse } from '@google/genai';
@@ -588,6 +589,12 @@ export class Session {
       };
     } else if (configId === 'mode' && typeof value === 'string') {
       this.setMode(value);
+    } else if (configId === 'thinking' && typeof value === 'string') {
+      // Switch extended-thinking mode/effort. `setThinkingConfig` updates the
+      // in-memory Config and persists to the project/user settings, exactly
+      // like the interactive `/thinking` command — so the change survives
+      // restarts and is shared with the CLI.
+      this.config.setThinkingConfig(optionValueToThinkingConfig(value));
     }
     return {};
   }

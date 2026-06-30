@@ -1,10 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, type ChatItem, type SessionView } from '../../store';
+import { useStore, type ChatItem, type SessionView, type ViewDensity } from '../../store';
 import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
-import { Icon } from '../Icon';
+import { Icon, toolKindIcon } from '../Icon';
 import { AgentIcon } from '../AgentIcon';
 import { useT, type TFunc } from '../../i18n/useT';
+
+/** A `kind: 'tool'` transcript entry. */
+type ToolItem = Extract<ChatItem, { kind: 'tool' }>;
+
+/** One render slot: either a normal chat item, or a run of consecutive tools. */
+type RenderUnit =
+  | { type: 'item'; item: ChatItem; userIndex?: number; isLastUser: boolean }
+  | { type: 'tools'; key: string; items: ToolItem[] };
+
+const isToolRunning = (it: ToolItem): boolean =>
+  it.status === 'pending' || it.status === 'in_progress';
+
+/** Whether a tool call has anything to show when expanded (mirrors ToolCall). */
+const toolHasBody = (it: ToolItem): boolean =>
+  it.content.some((c) => c.text || c.diff) ||
+  !!it.terminalOutput ||
+  (it.locations?.length ?? 0) > 0;
 
 export function ChatPane({ view }: { view: SessionView }) {
   const density = view.density;
@@ -28,8 +45,30 @@ export function ChatPane({ view }: { view: SessionView }) {
     bottomRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [view.transcript, showDots]);
 
-  let userIndex = -1;
+  // Fold the flat transcript into render units, merging runs of consecutive tool
+  // calls so they can collapse under a single "已运行 X 条命令" header. Non-tool
+  // items (and tools while in summary density, which are hidden) pass through.
   const totalUserMessages = view.transcript.filter((x) => x.kind === 'user').length;
+  const units: RenderUnit[] = [];
+  let userIndex = -1;
+  for (const item of view.transcript) {
+    if (item.kind === 'tool' && density !== 'summary') {
+      const last = units[units.length - 1];
+      if (last && last.type === 'tools') {
+        last.items.push(item);
+      } else {
+        units.push({ type: 'tools', key: `tools-${item.id}`, items: [item] });
+      }
+      continue;
+    }
+    if (item.kind === 'user') userIndex++;
+    units.push({
+      type: 'item',
+      item,
+      userIndex: item.kind === 'user' ? userIndex : undefined,
+      isLastUser: item.kind === 'user' && userIndex === totalUserMessages - 1,
+    });
+  }
 
   return (
     <div className="pane-body">
@@ -45,22 +84,29 @@ export function ChatPane({ view }: { view: SessionView }) {
             </div>
           </div>
         )}
-        {view.transcript.map((item) => {
-          if (item.kind === 'user') userIndex++;
-          return (
-            <ChatItemView
-              key={item.id}
-              item={item}
+        {units.map((u) =>
+          u.type === 'tools' ? (
+            <ToolGroup
+              key={u.key}
+              items={u.items}
               density={density}
               t={t}
-              userIndex={item.kind === 'user' ? userIndex : undefined}
-              isLastUser={item.kind === 'user' && userIndex === totalUserMessages - 1}
+              onOpenFile={(p) => openFile(p)}
+            />
+          ) : (
+            <ChatItemView
+              key={u.item.id}
+              item={u.item}
+              density={density}
+              t={t}
+              userIndex={u.userIndex}
+              isLastUser={u.isLastUser}
               sessionId={view.meta.id}
               onOpenFile={(p) => openFile(p)}
               onRewind={(idx) => void rewindTo(view.meta.id, idx)}
             />
-          );
-        })}
+          ),
+        )}
         {showDots && (
           <div className="msg msg-assistant typing-row">
             {(view.meta.agentType === 'claude-code' || view.meta.agentType === 'codex') && (
@@ -224,4 +270,128 @@ function ChatItemView({
     default:
       return null;
   }
+}
+
+/**
+ * A run of consecutive tool calls. Three-layer fold:
+ *  - Layer 0: a single "已运行 X 条命令" header that collapses the whole run
+ *    (multi-item runs only). Auto-expands while any tool is still running and in
+ *    verbose density; once the run finishes it auto-collapses, unless the user
+ *    has toggled it manually.
+ *  - Layer 1: each tool as a weak single-line summary ({@link ToolEntry}).
+ *  - Layer 2: clicking a summary expands the full {@link ToolCall} detail.
+ */
+function ToolGroup({
+  items,
+  density,
+  t,
+  onOpenFile,
+}: {
+  items: ToolItem[];
+  density: ViewDensity;
+  t: TFunc;
+  onOpenFile: (path: string) => void;
+}) {
+  const [groupOverride, setGroupOverride] = useState<boolean | null>(null);
+  const isMulti = items.length > 1;
+  const anyRunning = items.some(isToolRunning);
+  const groupDefault = anyRunning || density === 'verbose';
+  const groupOpen = !isMulti || (groupOverride ?? groupDefault);
+
+  return (
+    <div className="tool-group">
+      {isMulti && (
+        <button
+          className="tool-group-head"
+          onClick={() => setGroupOverride(!(groupOverride ?? groupDefault))}
+        >
+          <Icon name="terminal" size={13} className="tool-group-ico" />
+          <span className="tool-group-label">{t('tool.ranCount', { n: items.length })}</span>
+          {anyRunning && <Icon name="loader" size={11} spin />}
+          <Icon
+            name={groupOpen ? 'chevron-down' : 'chevron-right'}
+            size={14}
+            className="tool-group-chevron"
+          />
+        </button>
+      )}
+      {groupOpen && (
+        <div className={isMulti ? 'tool-group-items' : undefined}>
+          {items.map((it) => (
+            <ToolEntry
+              key={it.id}
+              item={it}
+              density={density}
+              t={t}
+              indent={isMulti}
+              onOpenFile={onOpenFile}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One tool call rendered as a weak single-line summary that expands to the full
+ * {@link ToolCall} detail on click. Running tools (and verbose density) default
+ * to expanded. The nested ToolCall's own head is hidden via CSS so this line is
+ * the single header — keeping ToolCall itself unchanged.
+ */
+function ToolEntry({
+  item,
+  density,
+  t,
+  indent,
+  onOpenFile,
+}: {
+  item: ToolItem;
+  density: ViewDensity;
+  t: TFunc;
+  indent: boolean;
+  onOpenFile: (path: string) => void;
+}) {
+  const hasBody = toolHasBody(item);
+  const running = isToolRunning(item);
+  const [override, setOverride] = useState<boolean | null>(null);
+  const detailDefault = running || density === 'verbose';
+  const open = hasBody && (override ?? detailDefault);
+
+  return (
+    <div className={`tool-entry${indent ? ' indent' : ''}${item.status === 'failed' ? ' failed' : ''}`}>
+      <button
+        className="tool-entry-line"
+        title={item.title}
+        style={{ cursor: hasBody ? 'pointer' : 'default' }}
+        onClick={() => hasBody && setOverride(!(override ?? detailDefault))}
+      >
+        <Icon name={toolKindIcon(item.toolKind)} size={13} className="tool-entry-ico" />
+        <span className="tool-entry-text">{t('tool.ranItem', { title: item.title })}</span>
+        {running && <Icon name="loader" size={11} spin className="tool-entry-spin" />}
+        {hasBody && (
+          <Icon
+            name={open ? 'chevron-down' : 'chevron-right'}
+            size={12}
+            className="tool-entry-chevron"
+          />
+        )}
+      </button>
+      {open && (
+        <div className="tool-entry-detail">
+          <ToolCall
+            title={item.title}
+            toolKind={item.toolKind}
+            status={item.status}
+            locations={item.locations}
+            content={item.content}
+            terminalOutput={item.terminalOutput}
+            rawInput={item.rawInput}
+            defaultOpen={true}
+            onOpenFile={onOpenFile}
+          />
+        </div>
+      )}
+    </div>
+  );
 }

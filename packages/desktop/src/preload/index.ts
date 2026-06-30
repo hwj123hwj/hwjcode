@@ -41,6 +41,7 @@ import type {
   PermissionRequest,
   PermissionResponse,
   PromptOptions,
+  ThinkingMode,
   RewindResult,
   SaveCustomModelResult,
   SessionEventEnvelope,
@@ -96,6 +97,8 @@ const bridge: EasycodeBridge = {
       ipcRenderer.invoke(IpcInvoke.SessionSetModel, id, modelId) as Promise<void>,
     setMode: (id, mode: PermissionMode) =>
       ipcRenderer.invoke(IpcInvoke.SessionSetMode, id, mode) as Promise<void>,
+    setThinking: (id, thinking: ThinkingMode) =>
+      ipcRenderer.invoke(IpcInvoke.SessionSetThinking, id, thinking) as Promise<void>,
     rewind: (id, idx) => ipcRenderer.invoke(IpcInvoke.SessionRewind, id, idx) as Promise<RewindResult>,
     onEvent: (cb) => on<SessionEventEnvelope>(IpcEvent.SessionEvent, cb),
     onStatus: (cb) => on<SessionStatusEnvelope>(IpcEvent.SessionStatus, cb),

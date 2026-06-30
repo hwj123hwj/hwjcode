@@ -196,6 +196,19 @@ export const zh = {
   'prompt.addAttachment': '添加附件 / 图片',
   'prompt.hint': 'Enter 发送 · Shift+Enter 换行 · {paste} 粘贴图片 · 点击回形针添加附件',
 
+  // ── thinking（扩展思考 / 推理强度）─────────────────────────────────────────
+  'thinking.title': '思考',
+  'thinking.toggleDesc': '可针对更复杂的任务进行思考',
+  'thinking.effort.title': '思考强度',
+  'thinking.help': '强度越高，回答越深入，但耗时更长、消耗额度更快。',
+  'thinking.default': '默认',
+  'thinking.effort.low': '低',
+  'thinking.effort.medium': '中',
+  'thinking.effort.high': '高',
+  'thinking.effort.max': '最高',
+  'thinking.state.off': '关闭',
+  'thinking.state.auto': '自动',
+
   // ── settings · general + custom models ─────────────────────────────────────────────
   'settings.title': '设置',
   'settings.subtitlePre': '与 CLI 共用 ',
@@ -331,6 +344,10 @@ export const zh = {
   'tool.status.in_progress': '执行中',
   'tool.status.completed': '完成',
   'tool.status.failed': '失败',
+
+  // ── grouped tool calls (collapsible runs) ──────────────────────────────────────────────
+  'tool.ranCount': '已运行 {n} 条命令',
+  'tool.ranItem': '已运行 {title}',
 
   // ── tool result summaries (single-line description, VSCode-plugin style) ───────────────
   'tool.sum.read': '读取 {name}，{n} 行',

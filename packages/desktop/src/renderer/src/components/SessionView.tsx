@@ -9,6 +9,7 @@ import { WorkspaceToggles } from './workspace/WorkspaceToggles';
 import { Icon, type IconName } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/ipc';
+import { CustomSelect } from './CustomSelect';
 
 const api = window.easycode;
 
@@ -348,32 +349,29 @@ function EmptyState() {
               </div>
 
               {/* Model selector */}
-              <span className="chip">
-                <Icon name="cpu" size={14} />
-                <select value={model} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">{t('prompt.defaultModel')}</option>
-                  {models.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <CustomSelect
+                value={model}
+                options={[
+                  { value: '', label: t('prompt.defaultModel') },
+                  ...models.map((m) => ({ value: m.value, label: m.label })),
+                ]}
+                icon="cpu"
+                onChange={(val) => setModel(val)}
+              />
 
               {/* Permission mode */}
-              <span className="chip accent">
-                <Icon name="shield" size={14} />
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as PermissionMode)}
-                >
-                  {PERMISSION_MODES.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {t(`permMode.${m.id}`)}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <CustomSelect
+                value={mode}
+                options={PERMISSION_MODES.map((m) => ({
+                  value: m.id,
+                  label: t(`permMode.${m.id}`),
+                  description: t(`permMode.${m.id}.hint`),
+                }))}
+                icon="shield"
+                accent
+                preferUp
+                onChange={(val) => setMode(val as PermissionMode)}
+              />
 
               <span className="grow" />
 
