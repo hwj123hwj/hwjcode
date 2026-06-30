@@ -10,6 +10,10 @@ import {
   parseShellPath,
   ensurePathFromLoginShell,
   PATH_MARKER,
+  ENV_MARKER,
+  ENV_MARKER_END,
+  parseShellEnv,
+  ensureFullEnvFromLoginShell,
 } from './shellPath.js';
 
 describe('mergePaths', () => {
@@ -127,5 +131,103 @@ describe('ensurePathFromLoginShell', () => {
     });
     expect(changed).toBe(true);
     expect(env.PATH).toBe('/usr/local/bin:/usr/bin');
+  });
+});
+
+// ── Full environment capture tests ────────────────────────────────────
+
+describe('parseShellEnv', () => {
+  it('extracts key=value pairs between markers', () => {
+    const stdout = `banner text\n${ENV_MARKER}\nPATH=/usr/bin\nHOME=/Users/test\nNODE_ENV=development\n${ENV_MARKER_END}\ntrailing`;
+    const result = parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set());
+    expect(result).not.toBeNull();
+    expect(result!.get('PATH')).toBe('/usr/bin');
+    expect(result!.get('HOME')).toBe('/Users/test');
+    expect(result!.get('NODE_ENV')).toBe('development');
+  });
+
+  it('excludes vars in the exclude set', () => {
+    const stdout = `${ENV_MARKER}\nPATH=/usr/bin\nHOME=/Users/test\n_\n${ENV_MARKER_END}`;
+    const result = parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set(['HOME', '_']));
+    expect(result).not.toBeNull();
+    expect(result!.has('PATH')).toBe(true);
+    expect(result!.has('HOME')).toBe(false);
+    expect(result!.has('_')).toBe(false);
+    expect(result!.size).toBe(1);
+  });
+
+  it('returns null when start marker is absent', () => {
+    const stdout = 'no marker here\nPATH=/usr/bin\n';
+    expect(parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set())).toBeNull();
+  });
+
+  it('returns null when end marker is absent', () => {
+    const stdout = `${ENV_MARKER}\nPATH=/usr/bin\n`;
+    expect(parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set())).toBeNull();
+  });
+
+  it('returns empty map when block between markers is empty', () => {
+    const stdout = `${ENV_MARKER}\n${ENV_MARKER_END}`;
+    const result = parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set());
+    expect(result).not.toBeNull();
+    expect(result!.size).toBe(0);
+  });
+
+  it('handles multiline values (preserves them)', () => {
+    const stdout = `${ENV_MARKER}\nKEY=line1\\nline2\nPATH=/usr/bin\n${ENV_MARKER_END}`;
+    const result = parseShellEnv(stdout, ENV_MARKER, ENV_MARKER_END, new Set());
+    expect(result!.get('PATH')).toBe('/usr/bin');
+  });
+});
+
+describe('ensureFullEnvFromLoginShell', () => {
+  it('is a no-op on win32', () => {
+    const changed = ensureFullEnvFromLoginShell({
+      platform: 'win32',
+    });
+    expect(changed).toBe(false);
+  });
+
+  it('merges login-shell env vars into a sparse env on darwin', () => {
+    const env: Record<string, string | undefined> = { PATH: '/usr/bin:/bin', SHELL: '/bin/zsh' };
+    const changed = ensureFullEnvFromLoginShell({
+      platform: 'darwin',
+      env,
+      runLoginShell: () =>
+        `${ENV_MARKER}\nPATH=/opt/homebrew/bin:/usr/bin:/bin\nMY_API_KEY=abc123\nNVM_DIR=/Users/test/.nvm\n${ENV_MARKER_END}`,
+    });
+    expect(changed).toBe(true);
+    // PATH should NOT be overwritten (existing value takes priority)
+    expect(env.PATH).toBe('/usr/bin:/bin');
+    // New vars should be merged
+    expect(env.MY_API_KEY).toBe('abc123');
+    expect(env.NVM_DIR).toBe('/Users/test/.nvm');
+  });
+
+  it('returns false when the shell probe fails', () => {
+    const env: Record<string, string | undefined> = { PATH: '/usr/bin:/bin' };
+    const changed = ensureFullEnvFromLoginShell({
+      platform: 'darwin',
+      env,
+      runLoginShell: () => null,
+    });
+    expect(changed).toBe(false);
+  });
+
+  it('excludes Electron-internal vars from the login shell', () => {
+    const env: Record<string, string | undefined> = { SHELL: '/bin/zsh' };
+    const changed = ensureFullEnvFromLoginShell({
+      platform: 'darwin',
+      env,
+      runLoginShell: () =>
+        `${ENV_MARKER}\nPATH=/usr/bin\nHOME=/other/home\nPWD=/tmp\n_=/usr/bin/env\n${ENV_MARKER_END}`,
+    });
+    expect(changed).toBe(true);
+    // HOME should NOT be overwritten
+    expect(env.HOME).toBeUndefined();
+    // PWD should NOT be merged
+    expect(env.PWD).toBeUndefined();
+    // _ should NOT be merged
+    expect(env._).toBeUndefined();
   });
 });

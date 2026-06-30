@@ -11,7 +11,7 @@ import { app, BrowserWindow, Menu, shell, nativeTheme, nativeImage } from 'elect
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
-import { ensurePathFromLoginShell } from './shellPath.js';
+import { ensurePathFromLoginShell, ensureFullEnvFromLoginShell } from './shellPath.js';
 import { createTray, destroyTray } from './tray.js';
 import { IpcEvent } from '../shared/ipc.js';
 import { destroyOverlay } from './computerUse/overlay.js';
@@ -238,6 +238,10 @@ function bootstrap(): void {
     // external agent detection (claude/codex) and the `npx` ACP bridge spawns
     // can find their binaries. No-op on Windows.
     ensurePathFromLoginShell();
+    // Also repair ALL environment variables (not just PATH), so the spawned
+    // `easycode --acp` backend inherits the user's shell-configured env vars
+    // (API keys, tool paths, nvm/pyenv, etc.) even when launched from Finder/Dock.
+    ensureFullEnvFromLoginShell();
     // Windows shows toast notifications under this AppUserModelID; without it
     // the turn-complete notifications either don't appear or show as an
     // unbranded "electron.app.…" sender. Must match electron-builder.yml's
