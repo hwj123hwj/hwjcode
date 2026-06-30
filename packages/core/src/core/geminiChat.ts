@@ -847,6 +847,9 @@ export class GeminiChat {
     const finalContents: Content[] = [];
     const finalToolCallStack: { [id: string]: boolean } = {};
     const finalToolCallNames: { [name: string]: boolean } = {};
+    // Track functionCalls WITHOUT ids (Gemini-native style) so we can
+    // correctly pair CLI-annotated functionResponses that DO carry an id.
+    const finalNoIdCallNames: { [name: string]: boolean } = {};
 
     for (const content of fixedContents) {
       // 记录所有 function call
@@ -854,7 +857,10 @@ export class GeminiChat {
         content.parts.forEach(part => {
           if (part.functionCall) {
             if (part.functionCall.id) finalToolCallStack[part.functionCall.id] = true;
-            if (part.functionCall.name) finalToolCallNames[part.functionCall.name] = true;
+            if (part.functionCall.name) {
+              finalToolCallNames[part.functionCall.name] = true;
+              if (!part.functionCall.id) finalNoIdCallNames[part.functionCall.name] = true;
+            }
           }
         });
         finalContents.push(content);
@@ -867,21 +873,28 @@ export class GeminiChat {
           const respId = typeof response.id === 'string' && response.id.length > 0 ? response.id : undefined;
           const hasMatchingId = !!respId && !!finalToolCallStack[respId];
           const hasMatchingName = response.name && finalToolCallNames[response.name];
+          // True when there is a Gemini-style functionCall (no id) with the same name.
+          // This covers the case where Gemini emits fc without id, but CLI
+          // tool-scheduler annotates the fr with a callId → the fr carries
+          // an id the fc never had, so the strict id-match would falsely
+          // classify it as orphan.
+          const hasIdlessMatch = !!(response.name && finalNoIdCallNames[response.name]);
 
-          // 🐛 修复（用户实拍 Bedrock 400，id=toolu_bdrk_01LX34yHPMS4XDGJsDcYuWTc）：
-          //   fr 若**带了精确 id**，就必须能在前文找到 id 完全相同的 functionCall。
-          //   否则说明它的 tool_use 确实丢了（典型：上下文压缩切走了携带该 tool_use
-          //   的 model 消息，只剩这条带真实 Bedrock id 的 fr）——这是真·孤立 fr，必须移除。
+          // 🐛 修复（用户实拍 Bedrock 400 + easyrouter 400）：
           //
-          //   旧实现用 `hasMatchingId || hasMatchingName`：只要历史**别处**还有一个
-          //   **同名**工具调用（哪怕 id 完全不同），name 兜底就会误放行这条 id 失配的
-          //   孤立 fr；转成 Anthropic tool_result 后 tool_use_id 在前文找不到对应
-          //   tool_use → Bedrock/Anthropic 直接 400:
-          //     unexpected `tool_use_id` found in `tool_result` blocks.
+          //   Case A (Bedrock): fr 带了精确 id（如 toolu_bdrk_xxx），但搜寻不到相同 id
+          //   的 functionCall → 原 fc 已被上下文压缩切走。此时即使 name 匹配也不能放行，
+          //   否则 Anthropic 路由会报 unexpected tool_use_id。
           //
-          //   正确语义：name 兜底只服务于「fr 无 id」的 Gemini 原生历史（Gemini 协议
-          //   不强制 callId）。一旦 fr 自带 id，就以 id 为准、不再降级到 name 模糊匹配。
-          const keep = respId ? hasMatchingId : hasMatchingName;
+          //   Case B (Gemini + CLI): fr 带了 CLI tool-scheduler 写入的 callId，
+          //   但 Gemini 原生的 functionCall 无 id。若只看 id → 误删合法配对。
+          //   需要检查是否存在同名且无 id 的 functionCall（idlessMatch）。
+          //
+          //   因此：fr 有 id → 先精确 id 匹配；失败再看 name+idlessMatch（Gemini 路径）；
+          //   仍失败才是真孤儿。fr 无 id → 只做 name 模糊匹配（Gemini 路径）。
+          const keep = respId
+            ? (hasMatchingId || hasIdlessMatch)   // id match OR Gemini-native fc (no id)
+            : hasMatchingName;                     // fr无id, name模糊匹配
 
           if (keep) {
             return true;
