@@ -23,6 +23,7 @@ import {
 import path from 'node:path';
 import { pickTrayLang, trayLabels } from './trayLabels.js';
 import type { SessionHub } from './sessionHub.js';
+import type { SessionMeta } from '../shared/ipc.js';
 // Bundled by electron-vite (`?asset`) and copied into out/ — the same app icon
 // the window/taskbar and notifications use. We only ship a colored 256×256 PNG
 // (build/icon.png); there's no dedicated monochrome tray/template asset, so the
@@ -32,6 +33,15 @@ import appIcon from '../../build/icon.png?asset';
 export interface TrayDeps {
   /** Restore (un-minimize), show (un-hide from tray) and focus the main window. */
   showWindow: () => void;
+  /**
+   * Surface the window AND ask the renderer to bring this session to the front
+   * (resuming its backend if needed) — mirrors a turn-complete notification
+   * click. Without this, a tray click would only show the window, leaving the
+   * previously-active session on screen.
+   */
+  focusSession: (sessionId: string) => void;
+  /** Surface the window AND ask the renderer to start a new chat session. */
+  newChat: () => void;
   /** Flag a real quit and tear the app down (bypasses the close-to-tray guard). */
   quit: () => void;
   hub?: SessionHub;
@@ -55,6 +65,27 @@ function buildTrayIcon(): NativeImage {
   return source.resize({ width: size, height: size });
 }
 
+/**
+ * The OS context menu sizes itself to its widest item, so an untruncated
+ * session title (or a long path) can stretch it most of the way across the
+ * screen. Clamp every dynamic label to a sane character budget with an ellipsis.
+ */
+const MAX_LABEL_LEN = 48;
+function truncateLabel(text: string): string {
+  return text.length > MAX_LABEL_LEN ? `${text.slice(0, MAX_LABEL_LEN - 1)}…` : text;
+}
+
+/**
+ * Compose a session's menu label: its title, plus the project folder in parens
+ * for project-bound sessions. A chat session's cwd is a throwaway
+ * `chats/<uuid>` dir whose basename is a meaningless UUID (and often identical
+ * to the title), so we omit it. The result is clamped to {@link MAX_LABEL_LEN}.
+ */
+function sessionLabel(s: SessionMeta): string {
+  const projName = s.kind === 'project' && s.cwd ? `   (${path.basename(s.cwd)})` : '';
+  return truncateLabel(`${s.title}${projName}`);
+}
+
 function rebuildMenu(deps: TrayDeps) {
   if (!tray) return;
 
@@ -68,7 +99,12 @@ function rebuildMenu(deps: TrayDeps) {
   const recentSessions = sortedSessions.slice(0, recentCount);
   const moreSessions = sortedSessions.slice(recentCount);
 
-  const activeSession = sessions.find((s) => s.status !== 'dormant');
+  // A session is "live" unless its backend has exited — the same mapping the
+  // renderer uses for its dormant badge (SessionView: status === 'exited'). The
+  // earlier `!== 'dormant'` compared against a status that never exists on the
+  // wire type, so it always matched and the status line was effectively always
+  // shown.
+  const activeSession = sessions.find((s) => s.status !== 'exited');
   const isRunning = activeSession !== undefined;
 
   const mainWin = BrowserWindow.getAllWindows()[0];
@@ -88,7 +124,7 @@ function rebuildMenu(deps: TrayDeps) {
   if (activeSession && activeSession.cwd) {
     const projName = path.basename(activeSession.cwd);
     menuItems.push({
-      label: labels.currentProject.replace('{name}', projName),
+      label: truncateLabel(labels.currentProject.replace('{name}', projName)),
       enabled: false,
     });
   }
@@ -102,11 +138,10 @@ function rebuildMenu(deps: TrayDeps) {
     menuItems.push({ label: labels.recent, enabled: false });
 
     recentSessions.forEach((s) => {
-      const projName = s.cwd ? `   (${path.basename(s.cwd)})` : '';
       menuItems.push({
-        label: `${s.title}${projName}`,
+        label: sessionLabel(s),
         click: () => {
-          deps.showWindow();
+          deps.focusSession(s.id);
         },
       });
     });
@@ -114,15 +149,12 @@ function rebuildMenu(deps: TrayDeps) {
     if (moreSessions.length > 0) {
       menuItems.push({
         label: labels.more,
-        submenu: moreSessions.map((s) => {
-          const projName = s.cwd ? `   (${path.basename(s.cwd)})` : '';
-          return {
-            label: `${s.title}${projName}`,
-            click: () => {
-              deps.showWindow();
-            },
-          };
-        }),
+        submenu: moreSessions.map((s) => ({
+          label: sessionLabel(s),
+          click: () => {
+            deps.focusSession(s.id);
+          },
+        })),
       });
     }
 
@@ -133,7 +165,7 @@ function rebuildMenu(deps: TrayDeps) {
   menuItems.push({
     label: labels.newChat,
     click: () => {
-      deps.showWindow();
+      deps.newChat();
     },
   });
 

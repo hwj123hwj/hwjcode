@@ -389,7 +389,8 @@ select {
   z-index: 2;
   -webkit-app-region: no-drag;
 }
-[data-platform='darwin'] .sidebar-collapse-btn {
+[data-platform='darwin'] .sidebar-collapse-btn,
+[data-platform='win32'] .sidebar-collapse-btn {
   top: 38px;
 }
 .sidebar-head {
@@ -397,20 +398,20 @@ select {
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
-/* macOS uses titleBarStyle:'hiddenInset', so the red/yellow/green traffic-light
-   buttons float over the top-left of the sidebar. Push the header content down
-   so the logo/brand clears them. ~22px extra lands the brand just below the
-   controls; the draggable header still lets users move the window. */
-[data-platform='darwin'] .sidebar-head {
+/* macOS uses titleBarStyle:'hiddenInset' and Windows uses titleBarStyle:'hidden',
+   so we push the header content down on both platforms to clear the system buttons and drag area. */
+[data-platform='darwin'] .sidebar-head,
+[data-platform='win32'] .sidebar-head {
   padding-top: 36px;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: -0.01em;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.025em;
   padding: 4px 4px 12px;
 }
 .brand-mark {
@@ -420,6 +421,19 @@ select {
   object-fit: cover;
   box-shadow: var(--shadow-sm);
   flex: none;
+  /* 默认是深色模式，使用智能反色将黑色 Logo 变成高雅柔和的亮白色 */
+  filter: invert(0.9) opacity(0.85);
+  transition: filter 0.25s ease;
+}
+
+/* 浅色模式下，恢复为原本准备的黑色 Logo */
+:root[data-theme='light'] .brand-mark {
+  filter: none;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) .brand-mark {
+    filter: none;
+  }
 }
 .brand-version {
   margin-top: -8px;
@@ -842,6 +856,8 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
 }
 .toolbar-status {
   display: inline-flex;
@@ -849,10 +865,21 @@ select {
   gap: 6px;
   font-size: 12px;
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 .toolbar .chip,
 .toolbar button {
   -webkit-app-region: no-drag;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.toolbar .btn-text {
+  display: inline;
+}
+@media (max-width: 640px) {
+  .toolbar .btn-text {
+    display: none;
+  }
 }
 
 .workspace {
@@ -956,6 +983,47 @@ select {
   flex-direction: column;
   align-items: flex-end;
   margin-bottom: 22px;
+}
+.msg-user-row.editing {
+  align-items: stretch;
+}
+.msg-user-row.editing .msg-user {
+  width: 100%;
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-user-edit-input {
+  width: 100%;
+  min-height: 56px;
+  max-height: 250px;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.msg-user-edit-input:focus {
+  border-color: var(--border-input-focus, var(--accent));
+}
+.msg-user-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.msg-user-edit-actions .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  height: 26px;
+  font-weight: 500;
+  border-radius: 6px;
 }
 .msg-user-meta {
   display: flex;
@@ -1752,7 +1820,7 @@ select {
 
 /* ── prompt bar ────────────────────────────────────────────────────────── */
 .promptbar {
-  border-top: 1px solid var(--border);
+  border-top: none;
   padding: 12px 16px 14px;
   background: var(--bg);
 }
@@ -1829,11 +1897,12 @@ select {
 }
 .prompt-input-wrap {
   display: flex;
-  align-items: flex-end;
-  gap: 9px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   border: 1px solid var(--border-input, var(--border-strong));
-  border-radius: 24px;
-  padding: 14px 20px;
+  border-radius: 20px;
+  padding: 10px 12px 8px 16px;
   background: var(--bg-prompt-input, var(--bg-elev));
   box-shadow: var(--prompt-shadow, 0 2px 8px rgba(0, 0, 0, 0.04));
   transition: border-color 0.14s, box-shadow 0.14s;
@@ -1847,7 +1916,7 @@ select {
   box-shadow: var(--prompt-shadow-focus, 0 8px 30px rgba(0, 0, 0, 0.08)) !important;
 }
 .prompt-input {
-  flex: 1;
+  width: 100%;
   border: none;
   outline: none;
   resize: none;
@@ -1856,12 +1925,110 @@ select {
   font-family: inherit;
   font-size: 13.5px;
   max-height: 200px;
-  min-height: 42px;
+  min-height: 70px;
   line-height: 1.55;
-  padding: 2px 0;
+  padding: 4px 4px 0;
 }
 .prompt-input::placeholder {
   color: var(--text-faint);
+}
+/* Footer toolbar inside the input box: controls split into a left group
+   (attach + permission) and a right group (context ring + model + send). */
+.prompt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.prompt-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Toolbar selects read as quiet, borderless pills until hovered, so the bar
+   stays calm; the accent (permission) keeps its colour but drops its fill. */
+.prompt-toolbar .chip {
+  border-color: transparent;
+  background: transparent;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.prompt-toolbar .chip:hover {
+  border-color: transparent;
+  background: var(--bg-hover);
+}
+.prompt-toolbar .chip.accent {
+  background: transparent;
+  border-color: transparent;
+}
+.prompt-toolbar .chip.accent:hover {
+  background: var(--bg-chip-accent, var(--accent-weak));
+}
+/* Context-usage ring + its hover tooltip. */
+.ctx-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  outline: none;
+  cursor: default;
+}
+.ctx-ring-track {
+  fill: none;
+  stroke: var(--bg-sunken);
+  stroke-width: 2.5;
+}
+.ctx-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.25s ease;
+}
+.ctx-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 50%;
+  transform: translate(50%, 4px);
+  min-width: 150px;
+  padding: 9px 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.14s, transform 0.14s, visibility 0.14s;
+  z-index: 9999;
+  pointer-events: none;
+}
+.ctx-ring:hover .ctx-tip,
+.ctx-ring:focus-visible .ctx-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(50%, 0);
+}
+.ctx-tip-title {
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+.ctx-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  line-height: 1.7;
+}
+.ctx-tip-row > span:first-child {
+  color: var(--text-dim);
+}
+.ctx-tip-row > span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 /* Attachment tray above the input: image thumbnails + file chips. */
 .prompt-attachments {
@@ -1950,7 +2117,7 @@ select {
   color: var(--accent-text);
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
   flex: none;
@@ -4397,6 +4564,10 @@ body.resizing * {
   gap: 2px;
   -webkit-app-region: no-drag;
 }
+[data-platform='win32'] .ws-toggles {
+  /* 智能在 Windows 平台下，在最右侧留出原生三控制键的高度与宽度，并紧贴其左侧对齐，自适应任何右侧栏折叠/开启状态，绝对不会被系统按钮盖住 */
+  margin-right: calc(env(titlebar-area-width, 138px) - 8px);
+}
 .empty-titlebar {
   display: flex;
   align-items: center;
@@ -4456,6 +4627,9 @@ body.resizing * {
   border-left: 1px solid var(--border);
   background: var(--bg-elev);
   overflow-y: auto;
+}
+[data-platform='win32'] .rsidebar-rail {
+  padding-top: 44px; /* 36px titlebar height + 8px default padding */
 }
 .rail-item {
   display: flex;

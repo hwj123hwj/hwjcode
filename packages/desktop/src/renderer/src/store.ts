@@ -498,6 +498,14 @@ export const useStore = create<StoreState>((set, get) => ({
       get().focusSession(sessionId);
     });
 
+    // The tray "New Chat" item was clicked: drop back to the default empty chat
+    // page (the centered composer shown when no session is active) rather than
+    // auto-creating a session — letting the user decide when to actually start
+    // one keeps the click instant (no backend spawn on the click path).
+    api.sessions.onNewChatRequest(() => {
+      set({ activeSessionId: undefined });
+    });
+
     api.backend.onLog((line) => {
       set((s) => ({ backendLog: [...s.backendLog.slice(-400), line] }));
     });

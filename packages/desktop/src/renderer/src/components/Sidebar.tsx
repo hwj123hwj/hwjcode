@@ -6,7 +6,7 @@ import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
 import { useT, type TFunc } from '../i18n/useT';
-import appIcon from '../../../public/app-icon.png';
+import appIcon from '../../../public/logo_black.png';
 import feishuIcon from '../../../public/feishu_logo.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
 
