@@ -74,14 +74,14 @@ export function SessionView() {
         {dormant && (
           <button className="btn" style={{ padding: '6px 12px' }} onClick={() => void resume(meta.id)}>
             <Icon name="play" size={14} />
-            {t('session.resume')}
+            <span className="btn-text">{t('session.resume')}</span>
           </button>
         )}
 
         <div ref={viewsRef} style={{ position: 'relative' }}>
           <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>
             <Icon name="columns" size={14} />
-            {t('session.views')}
+            <span className="btn-text">{t('session.views')}</span>
           </button>
           {viewsOpen && (
             <div className="menu-pop" style={{ right: 0, top: '110%' }}>

@@ -193,6 +193,9 @@ export const zh = {
   'prompt.cwdHint': '工作文件夹在会话创建时固定。如需更换，请新建一个会话。',
   'prompt.defaultModel': '默认模型',
   'prompt.contextUsage': '上下文用量',
+  'prompt.ctxUsed': '已用',
+  'prompt.ctxTotal': '总计',
+  'prompt.ctxRemaining': '剩余',
   'prompt.addAttachment': '添加附件 / 图片',
   'prompt.hint': 'Enter 发送 · Shift+Enter 换行 · {paste} 粘贴图片 · 点击回形针添加附件',
 

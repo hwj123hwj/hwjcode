@@ -197,6 +197,9 @@ export const en = {
   'prompt.cwdHint': "A session's working folder is fixed when it's created. To switch, start a new session.",
   'prompt.defaultModel': 'Default model',
   'prompt.contextUsage': 'Context usage',
+  'prompt.ctxUsed': 'Used',
+  'prompt.ctxTotal': 'Total',
+  'prompt.ctxRemaining': 'Remaining',
   'prompt.addAttachment': 'Add attachment / image',
   'prompt.hint': 'Enter to send · Shift+Enter for a newline · {paste} to paste an image · click the clip to attach',
 

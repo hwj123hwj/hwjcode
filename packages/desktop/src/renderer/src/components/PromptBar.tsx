@@ -3,7 +3,7 @@ import { useStore, type SessionView } from '../store';
 import { Icon, type IconName } from './Icon';
 import { AgentIcon } from './AgentIcon';
 import { CustomSelect } from './CustomSelect';
-import { useT } from '../i18n/useT';
+import { useT, type TFunc } from '../i18n/useT';
 import {
   PERMISSION_MODES,
   type AgentKind,
@@ -467,93 +467,16 @@ export function PromptBar({ view }: { view: SessionView }) {
     ...(meta.availableModels ?? []).map((m) => ({ value: m.modelId, label: m.name })),
   ];
 
+  const isExternalAgent = !!meta.agentType && meta.agentType !== 'easy-code';
+  // The folder/branch chip + external-agent badge live in the footer row now
+  // (sharing a line with the disclaimer), so the whole top area is freed for a
+  // taller textarea. Shown only when there's something to show — a plain chat
+  // session has neither a real folder nor an external agent.
+  const showFooterMeta = meta.kind !== 'chat' || isExternalAgent;
+
   return (
     <div className="promptbar">
       <div className="promptbar-inner">
-        <div className="prompt-config">
-          {/* Directory chip is meaningless for directory-less chat sessions
-              (their cwd is an internal ~/.easycode-user/chats/<id> folder), so
-              only show it for project-bound sessions. */}
-          {meta.kind !== 'chat' && (
-            <div style={{ position: 'relative', display: 'inline-block' }}>
-              <button
-                className="chip interactive"
-                style={{ border: 'none', background: 'var(--bg-elev)', color: 'var(--text-dim)', padding: '5px 12px' }}
-                title={meta.cwd}
-                onClick={() => setShowCwdHint((s) => !s)}
-              >
-                <Icon name="folder" size={14} style={{ marginRight: '6px' }} />
-                <span>{projectName(meta.cwd)}</span>
-                {git && (
-                  <span className="chip-branch" style={{ marginLeft: '4px' }}>
-                    ({git.branch}
-                    {git.dirty ? '*' : ''})
-                  </span>
-                )}
-              </button>
-              {showCwdHint && (
-                <div className="menu-pop" style={{
-                  position: 'absolute',
-                  bottom: 'calc(100% + 8px)',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '260px',
-                  padding: '10px 14px',
-                  fontSize: '12.5px',
-                  lineHeight: '1.45',
-                  color: 'var(--text)',
-                  background: 'var(--bg-elev)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '10px',
-                  boxShadow: 'var(--shadow-lg)',
-                  zIndex: 9999,
-                  textAlign: 'center',
-                  whiteSpace: 'normal'
-                }}>
-                  {t('prompt.cwdHint')}
-                </div>
-              )}
-            </div>
-          )}
-          {meta.agentType && meta.agentType !== 'easy-code' && (
-            <span className="chip accent" title={t('prompt.externalAgentTitle')}>
-              <AgentIcon agent={meta.agentType} size={15} />
-              {AGENT_BADGE[meta.agentType].label}
-            </span>
-          )}
-          <CustomSelect
-            value={meta.model ?? ''}
-            options={modelOptions}
-            icon="cpu"
-            preferUp
-            onChange={(val) => void setModel(meta.id, val)}
-          />
-          {/* Permission modes are an Easy Code concept; external agents drive
-              their own approval flow (surfaced via the permission dialog). */}
-          {(!meta.agentType || meta.agentType === 'easy-code') && (
-            <CustomSelect
-              value={meta.permissionMode}
-              options={PERMISSION_MODES.map((m) => ({
-                value: m.id,
-                label: t(`permMode.${m.id}`),
-                description: t(`permMode.${m.id}.hint`),
-              }))}
-              icon="shield"
-              accent
-              preferUp
-              onChange={(val) => void setMode(meta.id, val as PermissionMode)}
-            />
-          )}
-          {ctxPct != null ? (
-            <span className="chip" title={t('prompt.contextUsage')}>
-              <span className="token-bar">
-                <div style={{ width: `${Math.min(100, ctxPct)}%` }} />
-              </span>
-              {ctxPct}%
-            </span>
-          ) : null}
-        </div>
-
         {attachments.length > 0 && (
           <div className="prompt-attachments">
             {attachments.map((a) =>
@@ -636,24 +559,152 @@ export function PromptBar({ view }: { view: SessionView }) {
             }}
             onPaste={onPaste}
           />
-          <button className="btn-attach" title={t('prompt.addAttachment')} onClick={() => void pickAttachments()}>
-            <Icon name="paperclip" size={16} />
-          </button>
-          {busy ? (
-            <button className="btn-stop" onClick={() => void cancel(meta.id)}>
-              <Icon name="stop" size={14} />
-              {t('common.stop')}
-            </button>
-          ) : null}
-          <button
-            className="btn-send"
-            disabled={!text.trim() && attachments.length === 0}
-            onClick={() => void submit()}
-          >
-            <Icon name="send" size={16} />
-          </button>
+          {/* Footer toolbar: attach + permission on the left, context ring +
+              model + send on the right (mirrors the reference design). */}
+          <div className="prompt-toolbar">
+            <div className="prompt-toolbar-group">
+              <button
+                className="btn-attach"
+                title={t('prompt.addAttachment')}
+                onClick={() => void pickAttachments()}
+              >
+                <Icon name="paperclip" size={16} />
+              </button>
+              {/* Permission modes are an Easy Code concept; external agents drive
+                  their own approval flow (surfaced via the permission dialog). */}
+              {!isExternalAgent && (
+                <CustomSelect
+                  value={meta.permissionMode}
+                  options={PERMISSION_MODES.map((m) => ({
+                    value: m.id,
+                    label: t(`permMode.${m.id}`),
+                    description: t(`permMode.${m.id}.hint`),
+                  }))}
+                  icon="shield"
+                  accent
+                  preferUp
+                  onChange={(val) => void setMode(meta.id, val as PermissionMode)}
+                />
+              )}
+            </div>
+            <div className="prompt-toolbar-group">
+              {ctxPct != null && (
+                <ContextRing
+                  pct={ctxPct}
+                  used={meta.tokenUsed ?? 0}
+                  total={meta.tokenSize ?? 0}
+                  t={t}
+                />
+              )}
+              <CustomSelect
+                value={meta.model ?? ''}
+                options={modelOptions}
+                icon="cpu"
+                preferUp
+                onChange={(val) => void setModel(meta.id, val)}
+              />
+              {busy ? (
+                <button className="btn-stop" onClick={() => void cancel(meta.id)}>
+                  <Icon name="stop" size={14} />
+                  {t('common.stop')}
+                </button>
+              ) : (
+                <button
+                  className="btn-send"
+                  disabled={!text.trim() && attachments.length === 0}
+                  onClick={() => void submit()}
+                >
+                  <Icon name="send" size={16} />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="hint">{t('prompt.hint', { paste: PASTE_SHORTCUT })}</div>
+        <div className="hint">
+          {t('prompt.hint', { paste: PASTE_SHORTCUT })}
+          {showFooterMeta && (
+            <>
+              {' · '}
+              {!isChat && (
+                <>
+                  <Icon name="folder" size={11} />
+                  {' '}{projectName(cwd)}
+                  {git && (
+                    <span className="chip-branch">{' ('}{git.branch}{git.dirty ? '*' : ''})</span>
+                  )}
+                </>
+              )}
+              {isExternalAgent && (
+                <>
+                  {' · '}
+                  <AgentIcon agent={meta.agentType!} size={12} />
+                  {' '}{AGENT_BADGE[meta.agentType! as keyof typeof AGENT_BADGE]?.label ?? ''}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Format a token count compactly in thousands, e.g. 12500 → "12.5K", 200000 → "200K". */
+function fmtK(n: number): string {
+  const k = n / 1000;
+  return (k >= 100 ? Math.round(k) : Math.round(k * 10) / 10) + 'K';
+}
+
+/**
+ * Context-window usage as a small ring (filled to the used %), with a tooltip on
+ * hover/focus breaking down used vs. total tokens and used vs. remaining percent.
+ * Replaces the old horizontal token bar.
+ */
+function ContextRing({
+  pct,
+  used,
+  total,
+  t,
+}: {
+  pct: number;
+  used: number;
+  total: number;
+  t: TFunc;
+}) {
+  const R = 7;
+  const CIRC = 2 * Math.PI * R;
+  const dash = (Math.min(100, Math.max(0, pct)) / 100) * CIRC;
+  return (
+    <div className="ctx-ring" tabIndex={0} title={t('prompt.contextUsage')}>
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <circle className="ctx-ring-track" cx="9" cy="9" r={R} />
+        <circle
+          className="ctx-ring-fill"
+          cx="9"
+          cy="9"
+          r={R}
+          strokeDasharray={`${dash} ${CIRC}`}
+          transform="rotate(-90 9 9)"
+        />
+      </svg>
+      <div className="ctx-tip" role="tooltip">
+        <div className="ctx-tip-title">{t('prompt.contextUsage')}</div>
+        <div className="ctx-tip-row">
+          <span>{t('prompt.ctxUsed')}</span>
+          <span>{fmtK(used)}</span>
+        </div>
+        <div className="ctx-tip-row">
+          <span>{t('prompt.ctxTotal')}</span>
+          <span>{fmtK(total)}</span>
+        </div>
+        <div className="ctx-tip-row">
+          <span>{t('prompt.ctxUsed')}</span>
+          <span>{pct}%</span>
+        </div>
+        <div className="ctx-tip-row">
+          <span>{t('prompt.ctxRemaining')}</span>
+          <span>{Math.max(0, 100 - pct)}%</span>
+        </div>
       </div>
     </div>
   );

@@ -125,6 +125,8 @@ export const IpcEvent = {
   FeishuChanged: 'feishu:changed',
   /** Main asks the renderer to surface a session (e.g. notification clicked). */
   SessionFocusRequest: 'session:focus-request',
+  /** Main asks the renderer to start a new chat (e.g. tray "New Chat" clicked). */
+  NewChatRequest: 'session:new-chat-request',
   /** Version-update state changed (check result, download done, error, …). */
   UpdateStatus: 'update:status',
   /** Streamed download progress for an in-flight update download. */
@@ -1044,6 +1046,11 @@ export interface EasycodeBridge {
      * background. Payload is the session id to focus.
      */
     onFocusRequest(cb: (sessionId: string) => void): () => void;
+    /**
+     * Main -> renderer: start a new chat. Fired when the user clicks the tray
+     * "New Chat" item while the window is hidden/in the background. No payload.
+     */
+    onNewChatRequest(cb: () => void): () => void;
   };
   models: {
     /** List the user's custom models (shared with the CLI). */

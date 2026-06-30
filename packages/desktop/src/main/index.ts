@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { ensurePathFromLoginShell } from './shellPath.js';
 import { createTray, destroyTray } from './tray.js';
+import { IpcEvent } from '../shared/ipc.js';
 import { destroyOverlay } from './computerUse/overlay.js';
 import type { SessionHub } from './sessionHub.js';
 import type { FeishuManager } from './feishu.js';
@@ -53,6 +54,41 @@ function showMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
   mainWindow.focus();
+}
+
+/**
+ * Push an event to the renderer. If the window was just (re)created and its page
+ * is still loading, defer the send until `did-finish-load` so the intent isn't
+ * dropped before the renderer has wired up its IPC listeners. (In the normal
+ * tray case the window is only hidden, not destroyed, so it sends immediately.)
+ */
+function sendToRenderer(channel: string, payload?: unknown): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const wc = win.webContents;
+  if (wc.isLoading()) {
+    wc.once('did-finish-load', () => {
+      if (!wc.isDestroyed()) wc.send(channel, payload);
+    });
+  } else {
+    wc.send(channel, payload);
+  }
+}
+
+/**
+ * Tray "session" click: surface the window, then ask the renderer to bring that
+ * session to the front (the renderer resumes its backend if it isn't live).
+ * Showing the window alone would leave the previously-active session on screen.
+ */
+function focusSessionFromTray(sessionId: string): void {
+  showMainWindow();
+  sendToRenderer(IpcEvent.SessionFocusRequest, sessionId);
+}
+
+/** Tray "New Chat" click: surface the window, then ask the renderer to start one. */
+function newChatFromTray(): void {
+  showMainWindow();
+  sendToRenderer(IpcEvent.NewChatRequest, undefined);
 }
 
 /** Flag a real quit so the window's close handler lets it through, then exit. */
@@ -108,8 +144,13 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1c1e' : '#ffffff',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#F8F8F6',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : (process.platform === 'win32' ? 'hidden' : 'default'),
+    titleBarOverlay: process.platform === 'win32' ? {
+      color: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#F8F8F6',
+      symbolColor: nativeTheme.shouldUseDarkColors ? '#C2C1B6' : '#202124',
+      height: 36,
+    } : undefined,
     title: 'Easy Code',
     icon: appIcon,
     // The traditional File/Edit/View/Window/Help menu bar is meaningless for
@@ -131,6 +172,22 @@ function createWindow(): void {
   });
 
   mainWindow.on('ready-to-show', () => mainWindow?.show());
+
+  const handleThemeUpdate = (): void => {
+    const isDark = nativeTheme.shouldUseDarkColors;
+    mainWindow?.setBackgroundColor(isDark ? '#1F1F1E' : '#F8F8F6');
+    if (process.platform === 'win32') {
+      mainWindow?.setTitleBarOverlay({
+        color: isDark ? '#1F1F1E' : '#F8F8F6',
+        symbolColor: isDark ? '#C2C1B6' : '#202124',
+        height: 36,
+      });
+    }
+  };
+  nativeTheme.on('updated', handleThemeUpdate);
+  mainWindow.on('closed', () => {
+    nativeTheme.off('updated', handleThemeUpdate);
+  });
 
   // Closing the window (X on Windows/Linux, red button / Cmd+W on macOS) hides
   // it to the tray rather than quitting — the standard "stays running in the
@@ -205,7 +262,13 @@ function bootstrap(): void {
     createWindow();
     // System tray: closing the window hides it here, so the tray is the way
     // back to a visible window (and to an explicit Quit).
-    createTray({ showWindow: showMainWindow, quit: quitApp, hub: hub || undefined });
+    createTray({
+      showWindow: showMainWindow,
+      focusSession: focusSessionFromTray,
+      newChat: newChatFromTray,
+      quit: quitApp,
+      hub: hub || undefined,
+    });
     // Kick off the version-update lifecycle (startup check + periodic poll). It
     // delays its first check internally so it never competes with boot.
     updater.start();

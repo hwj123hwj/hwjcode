@@ -103,6 +103,7 @@ const bridge: EasycodeBridge = {
     onEvent: (cb) => on<SessionEventEnvelope>(IpcEvent.SessionEvent, cb),
     onStatus: (cb) => on<SessionStatusEnvelope>(IpcEvent.SessionStatus, cb),
     onFocusRequest: (cb) => on<string>(IpcEvent.SessionFocusRequest, cb),
+    onNewChatRequest: (cb) => on<void>(IpcEvent.NewChatRequest, cb),
   },
   models: {
     listCustom: () =>
