@@ -130,6 +130,12 @@ export interface SessionView {
   activePane: PaneKind;
   /** Whether the last transcript item is an open assistant block we append to. */
   draftAssistantId?: string;
+  /**
+   * True while an existing session is being resumed from disk and its prior
+   * conversation is replaying (transcript was cleared, history not back yet).
+   * Drives the restoring skeleton so we don't show the new-session placeholder.
+   */
+  restoring?: boolean;
   /** Open file in the file pane. */
   openFile?: { path: string; content: string };
   promptDraft?: string;
@@ -594,7 +600,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         sessions: {
           ...s.sessions,
-          [id]: { ...v, transcript: [], plan: [], draftAssistantId: undefined },
+          [id]: { ...v, transcript: [], plan: [], draftAssistantId: undefined, restoring: true },
         },
         activeSessionId: id,
       };
@@ -609,6 +615,13 @@ export const useStore = create<StoreState>((set, get) => ({
       }));
     } finally {
       resumingSessions.delete(id);
+      // Replay has been kicked off; clear the restoring flag. The skeleton stays
+      // until then OR until the first replayed item lands (whichever comes first,
+      // since the skeleton is also gated on an empty transcript).
+      set((s) => {
+        const v = s.sessions[id];
+        return v ? { sessions: { ...s.sessions, [id]: { ...v, restoring: false } } } : {};
+      });
     }
   },
 

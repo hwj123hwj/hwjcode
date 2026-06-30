@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { Icon, type IconName } from './Icon';
 import { AgentIcon } from './AgentIcon';
@@ -26,10 +26,47 @@ const AGENTS: {
   { id: 'codex', label: 'Codex', icon: 'terminal', hint: 'agent.codexHint' },
 ];
 
+/** Last path segment of a project directory (handles both / and \ separators). */
+function projectName(path: string): string {
+  const trimmed = path.replace(/[/\\]+$/, '');
+  const seg = trimmed.split(/[/\\]/).pop();
+  return seg || trimmed;
+}
+
+/** Max recent-project shortcuts to surface, to keep the dialog uncluttered. */
+const MAX_RECENT_PROJECTS = 6;
+
+/**
+ * Whether to show the "Environment" selector. Hidden for now because only local
+ * mode is supported — the single "Local" chip just wastes vertical space. Kept
+ * behind a flag (rather than deleted) so remote environments can restore it.
+ */
+const SHOW_ENVIRONMENT = false;
+
 export function NewSessionDialog({ onClose }: { onClose: () => void }) {
   const createSession = useStore((s) => s.createSession);
   const createChatSession = useStore((s) => s.createChatSession);
+  const sessions = useStore((s) => s.sessions);
+  const order = useStore((s) => s.order);
   const t = useT();
+
+  // Recent project directories, deduced from existing project sessions. `order`
+  // is newest-first, so iterating it and deduping by path yields most-recent-first
+  // unique directories; cap the count so the dialog stays tidy.
+  const recentProjects = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { path: string; name: string }[] = [];
+    for (const id of order) {
+      const meta = sessions[id]?.meta;
+      if (!meta || meta.kind !== 'project') continue;
+      const path = meta.cwd?.trim();
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      result.push({ path, name: projectName(path) });
+      if (result.length >= MAX_RECENT_PROJECTS) break;
+    }
+    return result;
+  }, [sessions, order]);
   // 'project' binds a working directory; 'chat' is a directory-less "just chat"
   // session (the Chats section) — no folder to pick.
   const [sessionType, setSessionType] = useState<'project' | 'chat'>('project');
@@ -39,7 +76,7 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
     claudeCode: false,
     codex: false,
   });
-  const [mode, setMode] = useState<PermissionMode>('default');
+  const [mode, setMode] = useState<PermissionMode>('yolo');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -105,13 +142,19 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
               {error}
             </div>
           )}
-          <label className="field-label">{t('newSession.environment')}</label>
-          <div className="prompt-config">
-            <span className="chip accent">
-              <Icon name="laptop" size={14} />
-              {t('common.local')}
-            </span>
-          </div>
+          {/* Environment selector — hidden while only local mode is supported.
+              Flip SHOW_ENVIRONMENT back to true when remote environments land. */}
+          {SHOW_ENVIRONMENT && (
+            <>
+              <label className="field-label">{t('newSession.environment')}</label>
+              <div className="prompt-config">
+                <span className="chip accent">
+                  <Icon name="laptop" size={14} />
+                  {t('common.local')}
+                </span>
+              </div>
+            </>
+          )}
 
           <label className="field-label">{t('newSession.type')}</label>
           <div className="prompt-config">
@@ -154,15 +197,33 @@ export function NewSessionDialog({ onClose }: { onClose: () => void }) {
           {sessionType === 'project' && (
             <>
               <label className="field-label">{t('newSession.projectDir')}</label>
-              <div className="prompt-input-wrap">
+              {recentProjects.length > 0 && (
+                <div className="recent-projects">
+                  <div className="sub recent-projects-label">{t('newSession.recentProjects')}</div>
+                  <div className="prompt-config">
+                    {recentProjects.map((p) => (
+                      <span
+                        key={p.path}
+                        className={`chip interactive ${cwd === p.path ? 'accent' : ''}`}
+                        title={p.path}
+                        onClick={() => setCwd(p.path)}
+                      >
+                        {cwd === p.path && <Icon name="check" size={13} />}
+                        <Icon name="folder" size={14} />
+                        {p.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="dir-picker">
                 <input
-                  className="prompt-input"
-                  style={{ height: 22 }}
+                  className="dir-picker-input"
                   placeholder={t('newSession.pickFolderPlaceholder')}
                   value={cwd}
                   onChange={(e) => setCwd(e.target.value)}
                 />
-                <button className="btn" onClick={pick}>
+                <button className="btn dir-picker-browse" onClick={pick}>
                   <Icon name="folder-open" size={14} />
                   {t('newSession.browse')}
                 </button>

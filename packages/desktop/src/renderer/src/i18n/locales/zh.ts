@@ -151,6 +151,7 @@ export const zh = {
   'newSession.pickFolderPlaceholder': '选择一个文件夹…',
   'newSession.pickFolderOptionalPlaceholder': '留空则直接闲聊，不绑定目录',
   'newSession.browse': '浏览…',
+  'newSession.recentProjects': '最近的项目',
   'newSession.permissionMode': '权限模式',
   'newSession.externalAgentNote': '{agent} 将以其自身的权限策略运行；需要确认时会弹出授权请求。',
   'newSession.start': '开始会话',
@@ -432,6 +433,7 @@ export const zh = {
   // ── chat pane ───────────────────────────────────────────────────────────────────────────────
   'chat.emptyTitle': '开始与 Easy Code 对话',
   'chat.worksIn': '它会在 {cwd} 中工作',
+  'chat.restoring': '正在恢复会话…',
   'chat.aiResponding': 'AI 正在响应',
   'chat.attachedImage': '附带图片',
   'chat.thought': '思考',
@@ -440,6 +442,7 @@ export const zh = {
   // ── plan / tasks / terminal / file panes ───────────────────────────────────────────────────────
   'plan.empty': '尚无计划',
   'todo.title': '任务清单',
+  'todo.stepLabel': '第 {step}/{total} 步',
   'tasks.summary': '{running} 进行中 / {total} 总计',
   'tasks.empty': '暂无工具调用',
   'terminal.noOutput': '（暂无命令输出）',

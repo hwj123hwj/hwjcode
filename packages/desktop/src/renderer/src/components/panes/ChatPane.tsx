@@ -17,6 +17,15 @@ type RenderUnit =
 const isToolRunning = (it: ToolItem): boolean =>
   it.status === 'pending' || it.status === 'in_progress';
 
+/**
+ * Internal continuation marker the backend injects when stitching a resumed/
+ * continued turn. It's not real user input, so we hide it from the transcript at
+ * display time (the data itself is left untouched in the store).
+ */
+const CONTINUATION_MARKER = '[Conversation continues]';
+const isHiddenMarker = (it: ChatItem): boolean =>
+  'text' in it && it.text.trim() === CONTINUATION_MARKER;
+
 /** Whether a tool call has anything to show when expanded (mirrors ToolCall). */
 const toolHasBody = (it: ToolItem): boolean =>
   it.content.some((c) => c.text || c.diff) ||
@@ -32,14 +41,20 @@ export function ChatPane({ view }: { view: SessionView }) {
   const t = useT();
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Display transcript: drop internal continuation markers so they never render
+  // as a user bubble. Everything below renders off this filtered view.
+  const transcript = view.transcript.filter((it) => !isHiddenMarker(it));
+
   // The backend reports 'thinking' from prompt submit through turn_end (covering
   // model streaming and tool runs) and 'starting' while the bridge spins up. In
   // either state the agent is working, so show the typing indicator.
   const busy = view.meta.status === 'thinking' || view.meta.status === 'starting';
   // Once the assistant has started streaming visible text this turn, the bubble
-  // itself shows progress — only show the standalone dots before that.
-  const last = view.transcript[view.transcript.length - 1];
-  const showDots = busy && (!last || last.kind !== 'assistant');
+  // itself shows progress — only show the standalone dots before that. While
+  // restoring, the skeleton already shows its own loading dots, so suppress this
+  // standalone indicator to avoid a duplicate set of dots.
+  const last = transcript[transcript.length - 1];
+  const showDots = busy && (!last || last.kind !== 'assistant') && !view.restoring;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -48,10 +63,10 @@ export function ChatPane({ view }: { view: SessionView }) {
   // Fold the flat transcript into render units, merging runs of consecutive tool
   // calls so they can collapse under a single "已运行 X 条命令" header. Non-tool
   // items (and tools while in summary density, which are hidden) pass through.
-  const totalUserMessages = view.transcript.filter((x) => x.kind === 'user').length;
+  const totalUserMessages = transcript.filter((x) => x.kind === 'user').length;
   const units: RenderUnit[] = [];
   let userIndex = -1;
-  for (const item of view.transcript) {
+  for (const item of transcript) {
     if (item.kind === 'tool' && density !== 'summary') {
       const last = units[units.length - 1];
       if (last && last.type === 'tools') {
@@ -73,17 +88,22 @@ export function ChatPane({ view }: { view: SessionView }) {
   return (
     <div className="pane-body">
       <div className="transcript">
-        {view.transcript.length === 0 && (
-          <div className="empty" style={{ height: 280 }}>
-            <div className="empty-inner">
-              <span className="empty-mark">
-                <Icon name="sparkle" size={24} />
-              </span>
-              <div className="empty-title">{t('chat.emptyTitle')}</div>
-              <div className="hint">{t('chat.worksIn', { cwd: view.meta.cwd })}</div>
+        {transcript.length === 0 &&
+          (view.restoring ? (
+            // Existing session being restored: show a chat-shaped skeleton, not
+            // the new-session placeholder.
+            <RestoringSkeleton t={t} />
+          ) : (
+            <div className="empty" style={{ height: 280 }}>
+              <div className="empty-inner">
+                <span className="empty-mark">
+                  <Icon name="sparkle" size={24} />
+                </span>
+                <div className="empty-title">{t('chat.emptyTitle')}</div>
+                <div className="hint">{t('chat.worksIn', { cwd: view.meta.cwd })}</div>
+              </div>
             </div>
-          </div>
-        )}
+          ))}
         {units.map((u) =>
           u.type === 'tools' ? (
             <ToolGroup
@@ -120,6 +140,44 @@ export function ChatPane({ view }: { view: SessionView }) {
           </div>
         )}
         <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A shimmering, chat-shaped skeleton shown while an existing session is being
+ * restored and its prior conversation replays. Mimics a couple of message rows
+ * so the wait reads as "loading this conversation", not "blank new session".
+ */
+function RestoringSkeleton({ t }: { t: TFunc }) {
+  return (
+    <div className="chat-skeleton" aria-busy="true" aria-label={t('chat.restoring')}>
+      <div className="sk-row sk-left">
+        <div className="sk-avatar sk-shimmer" />
+        <div className="sk-lines">
+          <div className="sk-line sk-shimmer" style={{ width: '68%' }} />
+          <div className="sk-line sk-shimmer" style={{ width: '90%' }} />
+          <div className="sk-line sk-shimmer" style={{ width: '44%' }} />
+        </div>
+      </div>
+      <div className="sk-row sk-right">
+        <div className="sk-bubble sk-shimmer" style={{ width: '52%' }} />
+      </div>
+      <div className="sk-row sk-left">
+        <div className="sk-avatar sk-shimmer" />
+        <div className="sk-lines">
+          <div className="sk-line sk-shimmer" style={{ width: '84%' }} />
+          <div className="sk-line sk-shimmer" style={{ width: '58%' }} />
+        </div>
+      </div>
+      <div className="sk-caption">
+        <div className="typing-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+        {t('chat.restoring')}
       </div>
     </div>
   );
