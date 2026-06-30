@@ -205,7 +205,7 @@ function bootstrap(): void {
     createWindow();
     // System tray: closing the window hides it here, so the tray is the way
     // back to a visible window (and to an explicit Quit).
-    createTray({ showWindow: showMainWindow, quit: quitApp });
+    createTray({ showWindow: showMainWindow, quit: quitApp, hub: hub || undefined });
     // Kick off the version-update lifecycle (startup check + periodic poll). It
     // delays its first check internally so it never competes with boot.
     updater.start();

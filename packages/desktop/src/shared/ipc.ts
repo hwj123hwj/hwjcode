@@ -61,6 +61,11 @@ export const IpcInvoke = {
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
   ModelsDeleteCustom: 'models:delete-custom',
+  // MCP servers (shared ~/.easycode-user/settings.json `mcpServers` + `excludeMCPServers`)
+  McpList: 'mcp:list',
+  McpSave: 'mcp:save',
+  McpDelete: 'mcp:delete',
+  McpSetEnabled: 'mcp:set-enabled',
   // user settings (shared ~/.easycode-user/settings.json)
   SettingsGet: 'settings:get',
   SettingsUpdate: 'settings:update',
@@ -307,6 +312,64 @@ export interface CustomModelEntry extends CustomModelInput {
 }
 
 export interface SaveCustomModelResult {
+  ok: boolean;
+  error?: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// MCP servers (stored in ~/.easycode-user/settings.json, shared w/ CLI)
+//
+// Add/edit/delete persists the `mcpServers` map — the very map the CLI and
+// every spawned `easycode --acp` backend read on session start. Enable/disable
+// toggles membership in the sibling `excludeMCPServers` array, which core honours
+// natively (see packages/core / cli loadCliConfig), so a disabled server simply
+// isn't loaded by the next created session. Both take effect on the next session
+// start, matching how the rest of the desktop's shared settings behave.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * MCP transport kind, derived from which connection field the stored config
+ * carries: `httpUrl` → streamable HTTP, `url` → SSE, otherwise a local `stdio`
+ * child process launched from `command`.
+ */
+export type McpTransport = 'stdio' | 'sse' | 'http';
+
+/** The user-editable fields of an MCP server entry. */
+export interface McpServerInput {
+  /** Unique server name — the key in the `mcpServers` map. */
+  name: string;
+  transport: McpTransport;
+  /** stdio: executable to launch. */
+  command?: string;
+  /** stdio: arguments passed to `command`. */
+  args?: string[];
+  /** stdio: extra environment variables (supports ${ENV_VAR}, resolved by the backend). */
+  env?: Record<string, string>;
+  /** stdio: working directory for the child process. */
+  cwd?: string;
+  /** sse: server URL. */
+  url?: string;
+  /** http: streamable-HTTP server URL. */
+  httpUrl?: string;
+  /** sse/http: extra request headers. */
+  headers?: Record<string, string>;
+  /** Connection timeout in milliseconds. */
+  timeout?: number;
+  /** Trust the server — skip the per-tool confirmation prompt. */
+  trust?: boolean;
+  /** Free-form description shown in the list. */
+  description?: string;
+  /** Whether the server is enabled (drives `excludeMCPServers` membership). */
+  enabled?: boolean;
+}
+
+/** A stored MCP server, with its resolved transport + enabled state. */
+export interface McpServerEntry extends McpServerInput {
+  transport: McpTransport;
+  enabled: boolean;
+}
+
+export interface SaveMcpServerResult {
   ok: boolean;
   error?: string;
 }
@@ -976,6 +1039,23 @@ export interface EasycodeBridge {
       originalDisplayName?: string,
     ): Promise<SaveCustomModelResult>;
     deleteCustom(displayName: string): Promise<void>;
+  };
+  mcp: {
+    /** List the configured MCP servers (shared with the CLI), with enabled state. */
+    list(): Promise<McpServerEntry[]>;
+    /**
+     * Add or update an MCP server (keyed by `name`). Pass `originalName` when an
+     * edit renamed the server so the old entry — and its enabled state — migrate
+     * instead of orphaning. Takes effect on the next created session.
+     */
+    save(input: McpServerInput, originalName?: string): Promise<SaveMcpServerResult>;
+    /** Remove an MCP server by name (also drops it from the disabled list). */
+    delete(name: string): Promise<void>;
+    /**
+     * Enable/disable a server without editing its config. Toggles membership in
+     * the shared `excludeMCPServers` list; the next created session honours it.
+     */
+    setEnabled(name: string, enabled: boolean): Promise<void>;
   };
   settings: {
     /** Read the shared user settings (the same file the CLI's `/config` edits). */

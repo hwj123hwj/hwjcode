@@ -19,6 +19,9 @@ import type {
   CustomModelInput,
   DesktopUserSettings,
   DetectedIde,
+  McpServerEntry,
+  McpServerInput,
+  SaveMcpServerResult,
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
@@ -109,6 +112,14 @@ const bridge: EasycodeBridge = {
       ) as Promise<SaveCustomModelResult>,
     deleteCustom: (displayName) =>
       ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
+  },
+  mcp: {
+    list: () => ipcRenderer.invoke(IpcInvoke.McpList) as Promise<McpServerEntry[]>,
+    save: (input: McpServerInput, originalName?: string) =>
+      ipcRenderer.invoke(IpcInvoke.McpSave, input, originalName) as Promise<SaveMcpServerResult>,
+    delete: (name: string) => ipcRenderer.invoke(IpcInvoke.McpDelete, name) as Promise<void>,
+    setEnabled: (name: string, enabled: boolean) =>
+      ipcRenderer.invoke(IpcInvoke.McpSetEnabled, name, enabled) as Promise<void>,
   },
   settings: {
     get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,

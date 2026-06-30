@@ -421,7 +421,7 @@ export function Sidebar() {
           title={customModelOnly ? t('sidebar.exitCustomModelMode') : t('common.logout')}
           onClick={() => (customModelOnly ? exitCustomModelMode() : void api.auth.logout())}
         >
-          <Icon name="power" size={15} />
+          <Icon name="logout" size={15} />
         </button>
       </div>
 

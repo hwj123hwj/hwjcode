@@ -290,7 +290,7 @@ function EmptyState() {
             <textarea
               ref={taRef}
               className="empty-input"
-              rows={2}
+              rows={3}
               placeholder={t('session.emptyPlaceholder')}
               value={text}
               disabled={busy}

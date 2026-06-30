@@ -108,6 +108,8 @@ export function PromptBar({ view }: { view: SessionView }) {
   const cancel = useStore((s) => s.cancel);
   const setMode = useStore((s) => s.setMode);
   const setModel = useStore((s) => s.setModel);
+  const promptDraft = useStore((s) => s.sessions[view.meta.id]?.promptDraft);
+  const setPromptDraft = useStore((s) => s.setPromptDraft);
   const t = useT();
 
   const [text, setText] = useState('');
@@ -121,6 +123,15 @@ export function PromptBar({ view }: { view: SessionView }) {
   // exposes. Only shown while the whole input is a bare `/token` (no args yet).
   const [cmd, setCmd] = useState<{ matches: SlashCommand[]; active: number } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (promptDraft !== undefined) {
+      setText(promptDraft);
+      setPromptDraft(view.meta.id, undefined);
+      // Give the focus slightly later to make sure text value has propagated
+      setTimeout(() => taRef.current?.focus(), 50);
+    }
+  }, [promptDraft, view.meta.id, setPromptDraft]);
   // True while an IME (e.g. Chinese pinyin) is composing. Using a ref — not
   // state — so onKeyDown reads the latest value synchronously without a
   // re-render race. macOS IMEs fire Enter to "commit" the composition; we must

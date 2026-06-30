@@ -9,6 +9,9 @@ import type {
   CustomModelInput,
   CustomModelProvider,
   DesktopUserSettings,
+  McpServerEntry,
+  McpServerInput,
+  McpTransport,
   ModelOverrides,
   ProjectMemoryMode,
   ShellOption,
@@ -90,6 +93,7 @@ export type SectionId =
   | 'computerUse'
   | 'generalModel'
   | 'models'
+  | 'mcp'
   | 'about';
 
 interface SectionDef {
@@ -135,6 +139,7 @@ const GROUPS: GroupDef[] = [
       { id: 'computerUse', icon: 'laptop', labelKey: 'settings.navComputerUse', Component: ComputerUseSection },
       { id: 'generalModel', icon: 'switch', labelKey: 'settings.navGeneralModel', Component: GeneralModelSection },
       { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
+      { id: 'mcp', icon: 'wrench', labelKey: 'settings.navMcp', Component: McpSection },
     ],
   },
   {
@@ -1044,6 +1049,418 @@ function ModelsSection() {
                 onChange={(e) => patch({ enabled: e.target.checked })}
               />
               {t('settings.enableModel')}
+            </label>
+          </div>
+
+          <div className="settings-pane-foot">
+            <button className="btn" onClick={() => setForm(null)}>
+              {t('common.back')}
+            </button>
+            <button className="btn primary" disabled={busy} onClick={save}>
+              {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
+              {t('common.save')}
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ── MCP 服务器 ──────────────────────────────────────────────────────────────
+ * Reads/writes the shared `~/.easycode-user/settings.json` `mcpServers` map (the
+ * same store the CLI and every spawned `easycode --acp` backend read), so a
+ * server added/edited here is loaded by the next created session. The
+ * enable/disable toggle flips membership in the sibling `excludeMCPServers`
+ * list, which core honours natively — the desktop counterpart of the VSCode
+ * plugin's per-server switch, expressed through shared settings since the
+ * desktop's backend is a separate process.
+ */
+
+const MCP_TRANSPORTS: Array<{ id: McpTransport; labelKey: TranslationKey }> = [
+  { id: 'stdio', labelKey: 'settings.mcpTransportStdio' },
+  { id: 'sse', labelKey: 'settings.mcpTransportSse' },
+  { id: 'http', labelKey: 'settings.mcpTransportHttp' },
+];
+
+/** Editable form state — keeps args/env/headers as raw multi-line text. */
+interface McpForm {
+  name: string;
+  transport: McpTransport;
+  command: string;
+  argsText: string;
+  envText: string;
+  cwd: string;
+  url: string;
+  httpUrl: string;
+  headersText: string;
+  timeout: string;
+  trust: boolean;
+  description: string;
+  enabled: boolean;
+}
+
+const EMPTY_MCP_FORM: McpForm = {
+  name: '',
+  transport: 'stdio',
+  command: '',
+  argsText: '',
+  envText: '',
+  cwd: '',
+  url: '',
+  httpUrl: '',
+  headersText: '',
+  timeout: '',
+  trust: false,
+  description: '',
+  enabled: true,
+};
+
+/** Split a textarea into trimmed, non-empty lines. */
+function toLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/** Parse `KEY=VALUE` lines into an object (first `=` splits; later ones kept). */
+function parseEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of toLines(text)) {
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+/** Parse `KEY: VALUE` header lines into an object. */
+function parseHeaders(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of toLines(text)) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    out[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+  }
+  return out;
+}
+
+function recordToLines(rec: Record<string, string> | undefined, sep: string): string {
+  if (!rec) return '';
+  return Object.entries(rec)
+    .map(([k, v]) => `${k}${sep}${v}`)
+    .join('\n');
+}
+
+function entryToForm(s: McpServerEntry): McpForm {
+  return {
+    name: s.name,
+    transport: s.transport,
+    command: s.command ?? '',
+    argsText: (s.args ?? []).join('\n'),
+    envText: recordToLines(s.env, '='),
+    cwd: s.cwd ?? '',
+    url: s.url ?? '',
+    httpUrl: s.httpUrl ?? '',
+    headersText: recordToLines(s.headers, ': '),
+    timeout: typeof s.timeout === 'number' ? String(s.timeout) : '',
+    trust: s.trust === true,
+    description: s.description ?? '',
+    enabled: s.enabled !== false,
+  };
+}
+
+function formToInput(f: McpForm): McpServerInput {
+  const args = toLines(f.argsText);
+  const env = parseEnv(f.envText);
+  const headers = parseHeaders(f.headersText);
+  const timeout = f.timeout.trim() ? Number(f.timeout) : undefined;
+  return {
+    name: f.name.trim(),
+    transport: f.transport,
+    command: f.command,
+    args: args.length ? args : undefined,
+    env: Object.keys(env).length ? env : undefined,
+    cwd: f.cwd,
+    url: f.url,
+    httpUrl: f.httpUrl,
+    headers: Object.keys(headers).length ? headers : undefined,
+    timeout: typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0 ? timeout : undefined,
+    trust: f.trust,
+    description: f.description,
+    enabled: f.enabled,
+  };
+}
+
+function McpSection() {
+  const t = useT();
+  const [servers, setServers] = useState<McpServerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<McpForm | null>(null);
+  /** name of the server being edited (undefined when adding). */
+  const [editingName, setEditingName] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = async () => {
+    setLoading(true);
+    const list = await api.mcp.list();
+    setServers(list);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const startAdd = () => {
+    setError('');
+    setEditingName(undefined);
+    setForm({ ...EMPTY_MCP_FORM });
+  };
+
+  const startEdit = (s: McpServerEntry) => {
+    setError('');
+    setEditingName(s.name);
+    setForm(entryToForm(s));
+  };
+
+  const remove = async (s: McpServerEntry) => {
+    await api.mcp.delete(s.name);
+    await refresh();
+  };
+
+  /** Flip a server's enabled state inline (without opening the editor). */
+  const toggleEnabled = async (s: McpServerEntry) => {
+    await api.mcp.setEnabled(s.name, !s.enabled);
+    await refresh();
+  };
+
+  const save = async () => {
+    if (!form) return;
+    if (!form.name.trim()) return setError(t('settings.errMcpName'));
+    if (form.transport === 'stdio' && !form.command.trim()) return setError(t('settings.errMcpCommand'));
+    if (form.transport === 'sse' && !form.url.trim()) return setError(t('settings.errMcpUrl'));
+    if (form.transport === 'http' && !form.httpUrl.trim()) return setError(t('settings.errMcpUrl'));
+    setBusy(true);
+    setError('');
+    const res = await api.mcp.save(formToInput(form), editingName);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? t('settings.saveFailed'));
+      return;
+    }
+    setForm(null);
+    setEditingName(undefined);
+    await refresh();
+  };
+
+  const patch = (p: Partial<McpForm>) => setForm((f) => (f ? { ...f, ...p } : f));
+
+  return (
+    <>
+      {error && (
+        <div className="login-err">
+          <Icon name="alert" size={15} />
+          {error}
+        </div>
+      )}
+
+      {!form && (
+        <>
+          <div className="setting-desc" style={{ marginBottom: 12 }}>
+            {t('settings.mcpDesc')}
+          </div>
+          <div className="cm-list">
+            {loading && (
+              <div className="cm-empty">
+                <span className="spinner" /> {t('common.loading')}
+              </div>
+            )}
+            {!loading && servers.length === 0 && (
+              <div className="cm-empty">{t('settings.noMcpServers')}</div>
+            )}
+            {servers.map((s) => (
+              <div className="cm-row" key={s.name}>
+                <div className="cm-row-main">
+                  <span className="cm-name">{s.name}</span>
+                  <span className="cm-badge">{s.transport}</span>
+                  {!s.enabled && <span className="cm-badge muted">{t('settings.mcpDisabled')}</span>}
+                </div>
+                <div className="cm-row-sub">
+                  {s.transport === 'stdio'
+                    ? [s.command, ...(s.args ?? [])].filter(Boolean).join(' ')
+                    : s.url || s.httpUrl}
+                </div>
+                <div className="cm-actions">
+                  <label
+                    className="mcp-toggle"
+                    title={s.enabled ? t('settings.mcpDisabled') : t('settings.mcpEnableServer')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={s.enabled}
+                      onChange={() => void toggleEnabled(s)}
+                    />
+                  </label>
+                  <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(s)}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button className="icon-btn" title={t('common.delete')} onClick={() => void remove(s)}>
+                    <Icon name="delete" size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn" onClick={startAdd}>
+            <Icon name="plus" size={14} />
+            {t('settings.addMcpServer')}
+          </button>
+        </>
+      )}
+
+      {form && (
+        <>
+          <div className="cm-form">
+            <label className="field-label">{t('settings.name')}</label>
+            <input
+              className="prompt-input cm-input"
+              placeholder={t('settings.mcpNamePlaceholder')}
+              value={form.name}
+              onChange={(e) => patch({ name: e.target.value })}
+            />
+
+            <label className="field-label">{t('settings.mcpTransport')}</label>
+            <div className="prompt-config">
+              {MCP_TRANSPORTS.map((tr) => (
+                <span
+                  key={tr.id}
+                  className={`chip interactive ${form.transport === tr.id ? 'accent' : ''}`}
+                  onClick={() => patch({ transport: tr.id })}
+                >
+                  {form.transport === tr.id && <Icon name="check" size={13} />}
+                  {t(tr.labelKey)}
+                </span>
+              ))}
+            </div>
+
+            {form.transport === 'stdio' && (
+              <>
+                <label className="field-label">{t('settings.mcpCommand')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder={t('settings.mcpCommandPlaceholder')}
+                  value={form.command}
+                  onChange={(e) => patch({ command: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpArgs')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpArgsPlaceholder')}
+                  value={form.argsText}
+                  onChange={(e) => patch({ argsText: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpEnv')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpEnvPlaceholder')}
+                  value={form.envText}
+                  onChange={(e) => patch({ envText: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpCwd')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  value={form.cwd}
+                  onChange={(e) => patch({ cwd: e.target.value })}
+                />
+              </>
+            )}
+
+            {form.transport === 'sse' && (
+              <>
+                <label className="field-label">{t('settings.mcpUrl')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder="https://example.com/sse"
+                  value={form.url}
+                  onChange={(e) => patch({ url: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpHeaders')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpHeadersPlaceholder')}
+                  value={form.headersText}
+                  onChange={(e) => patch({ headersText: e.target.value })}
+                />
+              </>
+            )}
+
+            {form.transport === 'http' && (
+              <>
+                <label className="field-label">{t('settings.mcpUrl')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder="https://example.com/mcp"
+                  value={form.httpUrl}
+                  onChange={(e) => patch({ httpUrl: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpHeaders')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpHeadersPlaceholder')}
+                  value={form.headersText}
+                  onChange={(e) => patch({ headersText: e.target.value })}
+                />
+              </>
+            )}
+
+            <label className="field-label">{t('settings.mcpTimeout')}</label>
+            <input
+              className="prompt-input cm-input"
+              type="number"
+              placeholder={t('settings.mcpTimeoutPlaceholder')}
+              value={form.timeout}
+              onChange={(e) => patch({ timeout: e.target.value })}
+            />
+
+            <label className="field-label">{t('settings.mcpDescription')}</label>
+            <input
+              className="prompt-input cm-input"
+              value={form.description}
+              onChange={(e) => patch({ description: e.target.value })}
+            />
+
+            <label className="cm-check">
+              <input
+                type="checkbox"
+                checked={form.trust}
+                onChange={(e) => patch({ trust: e.target.checked })}
+              />
+              {t('settings.mcpTrust')}
+            </label>
+
+            <label className="cm-check">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => patch({ enabled: e.target.checked })}
+              />
+              {t('settings.mcpEnableServer')}
             </label>
           </div>
 
