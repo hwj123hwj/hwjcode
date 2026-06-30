@@ -61,6 +61,28 @@ describe('attachmentFormatter', () => {
       expect(output).toContain('@[File #');
       expect(output).toContain('src/config.ts');
     });
+
+    it('should NOT convert npm package names like @upstash/context7-mcp', () => {
+      const input = '@upstash/context7-mcp';
+      const output = formatAttachmentReferencesForDisplay(input);
+      // Should remain unchanged - npm packages without extension are not file references
+      expect(output).toBe('@upstash/context7-mcp');
+    });
+
+    it('should NOT convert npm scoped packages without extension', () => {
+      const input = 'Use @aws-sdk/client-s3 for AWS operations';
+      const output = formatAttachmentReferencesForDisplay(input);
+      // Should remain unchanged
+      expect(output).toBe('Use @aws-sdk/client-s3 for AWS operations');
+    });
+
+    it('should convert file paths with extensions regardless of scope format', () => {
+      const input = '@src/my-lib.ts @styles/theme.css';
+      const output = formatAttachmentReferencesForDisplay(input);
+      expect(output).toContain('@[File #');
+      expect(output).toContain('src/my-lib.ts');
+      expect(output).toContain('styles/theme.css');
+    });
   });
 
   describe('ensureQuotesAroundAttachments', () => {
@@ -135,6 +157,20 @@ describe('attachmentFormatter', () => {
       const input = '@[File #"C:\\Users\\name\\file.ts"]';
       const output = ensureQuotesAroundAttachments(input);
       expect(output).toBe('@"C:\\Users\\name\\file.ts"');
+    });
+
+    it('should NOT convert npm package names like @upstash/context7-mcp', () => {
+      const input = '@upstash/context7-mcp';
+      const output = ensureQuotesAroundAttachments(input);
+      // Should remain unchanged - npm packages are not file references
+      expect(output).toBe('@upstash/context7-mcp');
+    });
+
+    it('should NOT convert npm scoped packages without extension', () => {
+      const input = 'Use @aws-sdk/client-s3 for AWS operations';
+      const output = ensureQuotesAroundAttachments(input);
+      // Should remain unchanged
+      expect(output).toBe('Use @aws-sdk/client-s3 for AWS operations');
     });
   });
 });
