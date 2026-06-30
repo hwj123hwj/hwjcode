@@ -116,6 +116,17 @@ async function callGeminiLoopDetectionAPI(
  * Monitors tool call repetitions and content sentence repetitions.
  */
 export class LoopDetectionService {
+  /**
+   * 「畸形工具调用文本」签名正则。命中任一即认为模型把 tool_use 降级成了
+   * 纯文本。已收紧到"真的想调工具"的形态，避免误报：
+   * - <function_calls> 包裹的 invoke（完整 Anthropic 工具调用包裹）
+   * - 带有效工具名（双引号 name="..."）的裸 <invoke>，含 antml: 命名空间变体
+   */
+  private static readonly MALFORMED_TOOL_CALL_PATTERNS: RegExp[] = [
+    /<function_calls>\s*<(antml:)?invoke\s+name=/i,
+    /<(antml:)?invoke\s+name="[^"]+"\s*>/i,
+  ];
+
   private readonly config: Config;
   private promptId = '';
   private isPreviewModel: boolean = false;
@@ -573,6 +584,48 @@ Please analyze the conversation history to determine the possibility that the co
       }
     }
     return false;
+  }
+
+  /**
+   * 检测整轮 assistant 文本里是否存在「畸形工具调用」特征 —— 即模型把
+   * tool_use 降级成了纯文本输出（字面量 <invoke name="...">），而不是发出
+   * 结构化工具调用。
+   *
+   * 注意：本方法只「报信号」（返回布尔），不做任何自愈动作。自愈链由持有
+   * GeminiClient / tryCompressChat 的 client.ts 负责编排。
+   *
+   * 与 checkContentLoop 的「重复度」算法不同，这是「签名匹配」：畸形工具调用
+   * 通常只出现一次，不构成重复，重复检测抓不到。
+   *
+   * 收紧策略（降低误报）：
+   * 1. 只认「真的想调工具」的形态：<function_calls> 包裹的 invoke，或带有效
+   *    工具名的裸 <invoke name="...">（含 antml: 命名空间变体）。
+   * 2. 排除围栏代码块 ``` ``` 内的内容 —— 用户/助手在讨论工具调用语法、写
+   *    文档或教程时合法地引用 <invoke>，不应触发自愈。
+   *
+   * @param fullText 整轮 assistant 输出的纯文本
+   * @returns 命中畸形工具调用特征返回 true
+   */
+  detectMalformedToolCallText(fullText: string): boolean {
+    if (!fullText || fullText.length === 0) {
+      return false;
+    }
+
+    // 1. 先剥离围栏代码块，避免把"讨论语法/文档/教程"里的 <invoke> 误判
+    const withoutFencedCode = fullText.replace(/```[\s\S]*?```/g, '');
+
+    // 2. 签名匹配：命中任一即视为模型想调工具但降级成了文本
+    const matched = LoopDetectionService.MALFORMED_TOOL_CALL_PATTERNS.some((p) =>
+      p.test(withoutFencedCode),
+    );
+
+    if (matched) {
+      console.warn(
+        `[LoopDetection] Malformed tool-call-as-text detected: model emitted a literal <invoke> block instead of a structured tool_use.`,
+      );
+    }
+
+    return matched;
   }
 
   /**
