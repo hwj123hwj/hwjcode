@@ -23,6 +23,7 @@ import type {
   PlanEntry,
   SessionMeta,
   SlashCommand,
+  ThinkingMode,
   ToolCallContent,
   ToolCallStatus,
   ToolLocation,
@@ -223,6 +224,7 @@ interface StoreState {
   cancel: (id: string) => Promise<void>;
   setModel: (id: string, modelId: string) => Promise<void>;
   setMode: (id: string, mode: PermissionMode) => Promise<void>;
+  setThinking: (id: string, thinking: ThinkingMode) => Promise<void>;
   rewindTo: (id: string, beforeUserMessageIndex: number) => Promise<void>;
   respondPermission: (
     requestId: string,
@@ -685,6 +687,11 @@ export const useStore = create<StoreState>((set, get) => ({
   setMode: async (id, mode) => {
     await api.sessions.setMode(id, mode);
     patchMeta(set, id, { permissionMode: mode });
+  },
+
+  setThinking: async (id, thinking) => {
+    await api.sessions.setThinking(id, thinking);
+    patchMeta(set, id, { thinking });
   },
 
   rewindTo: async (id, beforeUserMessageIndex) => {

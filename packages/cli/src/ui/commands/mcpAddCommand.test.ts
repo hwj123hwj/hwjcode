@@ -85,6 +85,71 @@ describe('mcpAddCommand', () => {
     expect(mockSettings.setValue).toHaveBeenCalled();
   });
 
+  it('should write MCP servers to the User (global) scope by default', async () => {
+    await addCommand.action!(mockContext, 'my-server --command npx');
+
+    expect(mockSettings.setValue).toHaveBeenCalledWith(
+      SettingScope.User,
+      'mcpServers',
+      expect.objectContaining({
+        'my-server': expect.objectContaining({ command: 'npx' }),
+      }),
+    );
+  });
+
+  it('should preserve quoted command, args, env and headers values', async () => {
+    await addCommand.action!(
+      mockContext,
+      'tavily --command npx --args "-y" --args "tavily-mcp@latest" --env "TAVILY_API_KEY=tvly-abc def" --headers "X-Token=a b"',
+    );
+
+    expect(mockSettings.setValue).toHaveBeenCalled();
+    const [, , updatedServers] = (mockSettings.setValue as any).mock.calls[0];
+    const cfg = updatedServers['tavily'];
+
+    expect(cfg.command).toBe('npx');
+    expect(cfg.args).toEqual(['-y', 'tavily-mcp@latest']);
+    expect(cfg.env).toEqual({ TAVILY_API_KEY: 'tvly-abc def' });
+    expect(cfg.headers).toEqual({ 'X-Token': 'a b' });
+  });
+
+  it('should split a full command line passed via --command into command + args', async () => {
+    await addCommand.action!(
+      mockContext,
+      'context7 --command "npx -y @upstash/context7-mcp --api-key ctx7-secret"',
+    );
+
+    expect(mockSettings.setValue).toHaveBeenCalled();
+    const [, , updatedServers] = (mockSettings.setValue as any).mock.calls[0];
+    const cfg = updatedServers['context7'];
+
+    expect(cfg.command).toBe('npx');
+    expect(cfg.args).toEqual([
+      '-y',
+      '@upstash/context7-mcp',
+      '--api-key',
+      'ctx7-secret',
+    ]);
+  });
+
+  it('should split a single quoted --args value into multiple args', async () => {
+    await addCommand.action!(
+      mockContext,
+      'context7 --command npx --args "-y @upstash/context7-mcp --api-key ctx7-secret"',
+    );
+
+    const [, , updatedServers] = (mockSettings.setValue as any).mock.calls[0];
+    const cfg = updatedServers['context7'];
+
+    expect(cfg.command).toBe('npx');
+    expect(cfg.args).toEqual([
+      '-y',
+      '@upstash/context7-mcp',
+      '--api-key',
+      'ctx7-secret',
+    ]);
+  });
+
   it('should validate custom server parameters', async () => {
     const result = await addCommand.action!(mockContext, 'my-server');
 

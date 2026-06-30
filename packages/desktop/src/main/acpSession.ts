@@ -31,6 +31,7 @@ import type {
   PermissionRequest,
   PermissionResponse,
   SessionRunStatus,
+  ThinkingMode,
   ToolCallContent,
   AcpToolKind,
 } from '../shared/ipc.js';
@@ -182,6 +183,34 @@ function modelsOf(resp: unknown): {
 function modeOf(resp: unknown): string | undefined {
   const modes = (resp as { modes?: { currentModeId?: unknown } }).modes;
   return typeof modes?.currentModeId === 'string' ? modes.currentModeId : undefined;
+}
+
+const THINKING_MODES: readonly ThinkingMode[] = [
+  'off',
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
+/**
+ * Pull the current extended-thinking value out of the handshake's
+ * `configOptions[id="thinking"]` selector (the Easy Code backend advertises it
+ * alongside `model`). Returns undefined when the agent doesn't expose it, so the
+ * UI can hide the thinking control for backends that lack the knob.
+ */
+function thinkingOf(resp: unknown): ThinkingMode | undefined {
+  const cfg = (resp as { configOptions?: unknown }).configOptions;
+  if (!Array.isArray(cfg)) return undefined;
+  const opt = cfg.find(
+    (o) => o && typeof o === 'object' && (o as { id?: unknown }).id === 'thinking',
+  ) as { currentValue?: unknown } | undefined;
+  const value = opt?.currentValue;
+  return typeof value === 'string' && (THINKING_MODES as string[]).includes(value)
+    ? (value as ThinkingMode)
+    : undefined;
 }
 
 /**
@@ -405,6 +434,8 @@ export interface StartResult {
   availableModels: ModelInfo[];
   model?: string;
   mode: PermissionMode;
+  /** Current extended-thinking value, or undefined if the agent has no knob. */
+  thinking?: ThinkingMode;
 }
 
 export class AcpSessionBridge {
@@ -558,6 +589,7 @@ export class AcpSessionBridge {
       availableModels: available,
       model: current,
       mode,
+      thinking: thinkingOf(resp),
     };
   }
 
@@ -628,6 +660,23 @@ export class AcpSessionBridge {
         modelId,
       });
     }
+  }
+
+  /**
+   * Switch extended-thinking mode/effort via the ACP `thinking` config option.
+   * The Easy Code backend routes this to `Config.setThinkingConfig` (same path
+   * as the `/thinking` command), so it both takes effect immediately and
+   * persists. No-op for agents that didn't advertise the option.
+   */
+  async setThinking(thinking: ThinkingMode): Promise<void> {
+    if (!this.connection || !this.acpSessionId) return;
+    await this.connection
+      .setSessionConfigOption({
+        sessionId: this.acpSessionId,
+        configId: 'thinking',
+        value: thinking,
+      })
+      .catch((err) => this.cb.log(`setThinking failed: ${String(err)}`));
   }
 
   async setMode(mode: PermissionMode): Promise<void> {

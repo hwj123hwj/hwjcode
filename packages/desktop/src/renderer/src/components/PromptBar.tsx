@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { Icon, type IconName } from './Icon';
 import { AgentIcon } from './AgentIcon';
+import { CustomSelect } from './CustomSelect';
 import { useT } from '../i18n/useT';
 import {
   PERMISSION_MODES,
@@ -9,7 +10,9 @@ import {
   type DirEntry,
   type PermissionMode,
   type SlashCommand,
+  type ThinkingMode,
 } from '@shared/ipc';
+import type { SelectOption } from './CustomSelect';
 
 const api = window.easycode;
 
@@ -108,11 +111,13 @@ export function PromptBar({ view }: { view: SessionView }) {
   const cancel = useStore((s) => s.cancel);
   const setMode = useStore((s) => s.setMode);
   const setModel = useStore((s) => s.setModel);
+  const setThinking = useStore((s) => s.setThinking);
   const promptDraft = useStore((s) => s.sessions[view.meta.id]?.promptDraft);
   const setPromptDraft = useStore((s) => s.setPromptDraft);
   const t = useT();
 
   const [text, setText] = useState('');
+  const [showCwdHint, setShowCwdHint] = useState(false);
   const [atPaths, setAtPaths] = useState<Record<string, string>>({}); // name -> abs path
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [mention, setMention] = useState<{ token: string; entries: DirEntry[]; active: number } | null>(
@@ -132,6 +137,12 @@ export function PromptBar({ view }: { view: SessionView }) {
       setTimeout(() => taRef.current?.focus(), 50);
     }
   }, [promptDraft, view.meta.id, setPromptDraft]);
+
+  useEffect(() => {
+    if (!showCwdHint) return;
+    const timer = setTimeout(() => setShowCwdHint(false), 3500);
+    return () => clearTimeout(timer);
+  }, [showCwdHint]);
   // True while an IME (e.g. Chinese pinyin) is composing. Using a ref — not
   // state — so onKeyDown reads the latest value synchronously without a
   // re-render race. macOS IMEs fire Enter to "commit" the composition; we must
@@ -405,6 +416,57 @@ export function PromptBar({ view }: { view: SessionView }) {
       ? Math.round((meta.tokenUsed! / meta.tokenSize) * 100)
       : null;
 
+  // ── Model selector options, with an inline "Effort" submenu for extended
+  //    thinking pinned at the TOP (so it stays visible above the long, scrollable
+  //    model list). Shown for Easy Code sessions; external agents (Claude Code /
+  //    Codex) drive their own reasoning controls, so it's hidden for them.
+  const isEasyCode = !meta.agentType || meta.agentType === 'easy-code';
+  const EFFORTS = ['low', 'medium', 'high', 'max'] as const;
+  type Effort = (typeof EFFORTS)[number];
+  const effortLabel = (e: Effort) => t(`thinking.effort.${e}`);
+  // Fall back to 'auto' for display when the backend hasn't reported a value yet
+  // (older backend, or session not fully started) so the control is never hidden.
+  const thinking: ThinkingMode = meta.thinking ?? 'auto';
+  const thinkingOn = thinking !== 'off';
+  const currentEffort = (EFFORTS as readonly string[]).includes(thinking)
+    ? (thinking as Effort)
+    : undefined;
+  const effortHint =
+    thinking === 'off'
+      ? t('thinking.state.off')
+      : currentEffort
+        ? effortLabel(currentEffort)
+        : t('thinking.state.auto');
+
+  const effortOption: SelectOption = {
+    value: '__effort__',
+    label: t('thinking.effort.title'),
+    hint: effortHint,
+    dividerAfter: true,
+    submenu: {
+      header: t('thinking.help'),
+      value: currentEffort,
+      onChange: (eff) => void setThinking(meta.id, eff as ThinkingMode),
+      options: EFFORTS.map((e) => ({
+        value: e,
+        label: effortLabel(e),
+        ...(e === 'low' ? { badge: t('thinking.default') } : {}),
+      })),
+      toggle: {
+        label: t('thinking.title'),
+        description: t('thinking.toggleDesc'),
+        checked: thinkingOn,
+        onChange: (on) => void setThinking(meta.id, on ? (currentEffort ?? 'low') : 'off'),
+      },
+    },
+  };
+
+  const modelOptions: SelectOption[] = [
+    ...(isEasyCode ? [effortOption] : []),
+    ...(!meta.model ? [{ value: '', label: t('prompt.defaultModel') }] : []),
+    ...(meta.availableModels ?? []).map((m) => ({ value: m.modelId, label: m.name })),
+  ];
+
   return (
     <div className="promptbar">
       <div className="promptbar-inner">
@@ -413,20 +475,45 @@ export function PromptBar({ view }: { view: SessionView }) {
               (their cwd is an internal ~/.easycode-user/chats/<id> folder), so
               only show it for project-bound sessions. */}
           {meta.kind !== 'chat' && (
-            <span
-              className="chip interactive"
-              title={meta.cwd}
-              onClick={() => window.alert(t('prompt.cwdHint'))}
-            >
-              <Icon name="folder" size={14} />
-              {projectName(meta.cwd)}
-              {git && (
-                <span className="chip-branch">
-                  ({git.branch}
-                  {git.dirty ? '*' : ''})
-                </span>
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <button
+                className="chip interactive"
+                style={{ border: 'none', background: 'var(--bg-elev)', color: 'var(--text-dim)', padding: '5px 12px' }}
+                title={meta.cwd}
+                onClick={() => setShowCwdHint((s) => !s)}
+              >
+                <Icon name="folder" size={14} style={{ marginRight: '6px' }} />
+                <span>{projectName(meta.cwd)}</span>
+                {git && (
+                  <span className="chip-branch" style={{ marginLeft: '4px' }}>
+                    ({git.branch}
+                    {git.dirty ? '*' : ''})
+                  </span>
+                )}
+              </button>
+              {showCwdHint && (
+                <div className="menu-pop" style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 8px)',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '260px',
+                  padding: '10px 14px',
+                  fontSize: '12.5px',
+                  lineHeight: '1.45',
+                  color: 'var(--text)',
+                  background: 'var(--bg-elev)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  boxShadow: 'var(--shadow-lg)',
+                  zIndex: 9999,
+                  textAlign: 'center',
+                  whiteSpace: 'normal'
+                }}>
+                  {t('prompt.cwdHint')}
+                </div>
               )}
-            </span>
+            </div>
           )}
           {meta.agentType && meta.agentType !== 'easy-code' && (
             <span className="chip accent" title={t('prompt.externalAgentTitle')}>
@@ -434,33 +521,28 @@ export function PromptBar({ view }: { view: SessionView }) {
               {AGENT_BADGE[meta.agentType].label}
             </span>
           )}
-          <span className="chip">
-            <Icon name="cpu" size={14} />
-            <select value={meta.model ?? ''} onChange={(e) => void setModel(meta.id, e.target.value)}>
-              {!meta.model && <option value="">{t('prompt.defaultModel')}</option>}
-              {(meta.availableModels ?? []).map((m) => (
-                <option key={m.modelId} value={m.modelId}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </span>
+          <CustomSelect
+            value={meta.model ?? ''}
+            options={modelOptions}
+            icon="cpu"
+            preferUp
+            onChange={(val) => void setModel(meta.id, val)}
+          />
           {/* Permission modes are an Easy Code concept; external agents drive
               their own approval flow (surfaced via the permission dialog). */}
           {(!meta.agentType || meta.agentType === 'easy-code') && (
-            <span className="chip accent">
-              <Icon name="shield" size={14} />
-              <select
-                value={meta.permissionMode}
-                onChange={(e) => void setMode(meta.id, e.target.value as PermissionMode)}
-              >
-                {PERMISSION_MODES.map((m) => (
-                  <option key={m.id} value={m.id} title={t(`permMode.${m.id}.hint`)}>
-                    {t(`permMode.${m.id}`)}
-                  </option>
-                ))}
-              </select>
-            </span>
+            <CustomSelect
+              value={meta.permissionMode}
+              options={PERMISSION_MODES.map((m) => ({
+                value: m.id,
+                label: t(`permMode.${m.id}`),
+                description: t(`permMode.${m.id}.hint`),
+              }))}
+              icon="shield"
+              accent
+              preferUp
+              onChange={(val) => void setMode(meta.id, val as PermissionMode)}
+            />
           )}
           {ctxPct != null ? (
             <span className="chip" title={t('prompt.contextUsage')}>

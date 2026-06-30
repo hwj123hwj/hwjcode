@@ -7,6 +7,7 @@
 import {
   type Config,
   type CustomModelConfig,
+  type ThinkingConfig,
   type ToolResult,
   type ToolCallConfirmationDetails,
   type ToolConfirmationPayload,
@@ -571,10 +572,68 @@ const FALLBACK_MODEL_IDS: Array<{
 ];
 
 /**
+ * Canonical single-string encoding of {@link ThinkingConfig} used by the
+ * `thinking` ACP config option. Mirrors the `/thinking` CLI subcommands so the
+ * desktop/IDE picker and the interactive CLI agree on the same vocabulary:
+ *   - `off`  → thinking disabled (`{mode:'off'}`)
+ *   - `auto` → provider/model default (`{mode:'auto'}`)
+ *   - low|medium|high|xhigh|max → thinking on at that effort (`{mode:'on'}`)
+ */
+export const THINKING_OPTION_VALUES = [
+  'off',
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+export type ThinkingOptionValue = (typeof THINKING_OPTION_VALUES)[number];
+
+/** Collapse a {@link ThinkingConfig} to its single-string option value. */
+export function thinkingConfigToOptionValue(
+  cfg: ThinkingConfig | undefined,
+): ThinkingOptionValue {
+  if (!cfg || cfg.mode === 'auto') return 'auto';
+  if (cfg.mode === 'off') return 'off';
+  // mode === 'on' → reflect the effort. Default to 'high' to match the hidden
+  // `/thinking on` shortcut, which enables high-effort thinking.
+  const effort = cfg.effort;
+  if (
+    effort === 'low' ||
+    effort === 'medium' ||
+    effort === 'high' ||
+    effort === 'xhigh' ||
+    effort === 'max'
+  ) {
+    return effort;
+  }
+  return 'high';
+}
+
+/** Expand a single-string option value back to a {@link ThinkingConfig}. */
+export function optionValueToThinkingConfig(value: string): ThinkingConfig {
+  switch (value) {
+    case 'off':
+      return { mode: 'off', effort: 'auto' };
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'xhigh':
+    case 'max':
+      return { mode: 'on', effort: value };
+    case 'auto':
+    default:
+      return { mode: 'auto', effort: 'auto' };
+  }
+}
+
+/**
  * Snapshot the full `configOptions[]` array a client should see right now.
  *
  * The shape matches ACP's `SessionConfigOption`. We currently expose:
  *   - `model` (select): switches the LLM.
+ *   - `thinking` (select): extended-thinking mode / reasoning effort.
  *
  * The model list is pulled from `Config.getCloudModels()` — the authoritative
  * list that the proxy server provides via `/web-api/models`. When that cache
@@ -639,7 +698,29 @@ export function buildConfigOptionsSnapshot(
       ...(o.description ? { description: o.description } : {}),
     })),
   };
-  return [modelOption];
+
+  const thinkingValue =
+    (overrides.get('thinking') as string | undefined) ??
+    thinkingConfigToOptionValue(config.getThinkingConfig?.());
+  const thinkingOption: acp.SessionConfigOption = {
+    id: 'thinking',
+    type: 'select',
+    name: 'Thinking',
+    description: 'Extended thinking mode and reasoning effort',
+    category: 'thought_level',
+    currentValue: thinkingValue,
+    options: [
+      { value: 'off', name: 'Off' },
+      { value: 'auto', name: 'Auto' },
+      { value: 'low', name: 'Low' },
+      { value: 'medium', name: 'Medium' },
+      { value: 'high', name: 'High' },
+      { value: 'xhigh', name: 'X-High' },
+      { value: 'max', name: 'Max' },
+    ],
+  };
+
+  return [modelOption, thinkingOption];
 }
 
 /**

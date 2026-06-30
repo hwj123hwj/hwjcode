@@ -71,6 +71,7 @@ import type {
   PermissionResponse,
   PromptOptions,
   ThemeMode,
+  ThinkingMode,
 } from '../shared/ipc.js';
 
 /** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
@@ -159,6 +160,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.SessionSetMode, (_e, id: string, mode: PermissionMode) =>
     hub.setMode(id, mode),
+  );
+  ipcMain.handle(IpcInvoke.SessionSetThinking, (_e, id: string, thinking: ThinkingMode) =>
+    hub.setThinking(id, thinking),
   );
   ipcMain.handle(IpcInvoke.SessionRewind, (_e, id: string, idx: number) => hub.rewind(id, idx));
 

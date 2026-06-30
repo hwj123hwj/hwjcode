@@ -200,6 +200,19 @@ export const en = {
   'prompt.addAttachment': 'Add attachment / image',
   'prompt.hint': 'Enter to send · Shift+Enter for a newline · {paste} to paste an image · click the clip to attach',
 
+  // ── thinking (extended thinking / reasoning effort) ────────────────────────
+  'thinking.title': 'Thinking',
+  'thinking.toggleDesc': 'Can think for more complex tasks',
+  'thinking.effort.title': 'Effort',
+  'thinking.help': 'Higher effort means more thorough responses, but takes longer and uses your limits faster.',
+  'thinking.default': 'Default',
+  'thinking.effort.low': 'Low',
+  'thinking.effort.medium': 'Medium',
+  'thinking.effort.high': 'High',
+  'thinking.effort.max': 'Max',
+  'thinking.state.off': 'Off',
+  'thinking.state.auto': 'Auto',
+
   // ── settings · general + custom models ─────────────────────────────────────────────
   'settings.title': 'Settings',
   'settings.subtitlePre': 'Shares the CLI’s config files under ',
@@ -337,6 +350,10 @@ export const en = {
   'tool.status.in_progress': 'Running',
   'tool.status.completed': 'Done',
   'tool.status.failed': 'Failed',
+
+  // ── grouped tool calls (collapsible runs) ──────────────────────────────────────────────
+  'tool.ranCount': 'Ran {n} commands',
+  'tool.ranItem': 'Ran {title}',
 
   // ── tool result summaries (single-line description, VSCode-plugin style) ───────────────
   'tool.sum.read': 'Read {name}, {n} lines',

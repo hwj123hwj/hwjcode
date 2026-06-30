@@ -1118,6 +1118,119 @@ select {
 }
 
 /* tool call card */
+/* ── grouped tool calls (collapsible runs) ───────────────────────────────── */
+.tool-group {
+  margin-bottom: 12px;
+}
+/* Layer 0: "已运行 X 条命令" run header. */
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 5px 2px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: color 0.14s;
+}
+.tool-group-head:hover {
+  color: var(--text-dim);
+}
+.tool-group-ico {
+  flex: none;
+  color: var(--text-faint);
+}
+.tool-group-label {
+  flex: 0 1 auto;
+}
+.tool-group-chevron {
+  color: var(--text-faint);
+  display: inline-grid;
+  place-items: center;
+}
+/* Slight indent so grouped summaries read as children of the run header. */
+.tool-group-items {
+  display: flex;
+  flex-direction: column;
+  padding-left: 8px;
+  margin-left: 8px;
+  border-left: 1px solid var(--border);
+}
+/* Layer 1: a weak single-line summary for one tool call. */
+.tool-entry {
+  display: flex;
+  flex-direction: column;
+}
+.tool-entry-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 2px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  text-align: left;
+  border-radius: var(--radius-xs);
+  transition: color 0.14s;
+}
+.tool-entry-line:hover {
+  color: var(--text-dim);
+}
+.tool-entry-ico {
+  flex: none;
+  color: var(--text-faint);
+}
+.tool-entry-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-entry-spin {
+  flex: none;
+  color: var(--amber);
+}
+/* Flag a failed tool call without the heavy boxed accent. */
+.tool-entry.failed .tool-entry-ico,
+.tool-entry.failed .tool-entry-text {
+  color: var(--red);
+}
+.tool-entry-chevron {
+  flex: none;
+  color: var(--text-faint);
+  display: inline-grid;
+  place-items: center;
+}
+/* Layer 2: the nested full ToolCall detail. Its own head is redundant with the
+   summary line above, so hide it — the line is the single header. */
+.tool-entry-detail {
+  margin: 2px 0 8px;
+}
+.tool-entry-detail > .tool > .tool-head {
+  display: none;
+}
+.tool-entry-detail > .tool {
+  margin-bottom: 0;
+  /* The status accent classes (.tool-completed/.tool-failed/...) set a 2px
+     `border-left` — transparent for completed — which, with the head hidden,
+     leaves the detail box's left edge invisible. Restore a normal 1px border so
+     the box is fully enclosed. */
+  border-left: 1px solid var(--border);
+}
+.tool-entry-detail > .tool:hover {
+  border-left-color: var(--border-strong);
+}
+.tool-entry-detail > .tool > .tool-body {
+  border-top: none;
+}
+
 .tool {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3836,6 +3949,10 @@ textarea.cm-input {
 .menu-pop button:hover {
   background: var(--bg-hover);
 }
+.menu-pop button.active {
+  background: var(--bg-settings-active, var(--bg-hover));
+  font-weight: 500;
+}
 .menu-pop button .ic {
   color: var(--text-faint);
 }
@@ -3844,6 +3961,144 @@ textarea.cm-input {
 }
 .menu-pop button .ic.placeholder {
   opacity: 0;
+}
+
+/* ── CustomSelect: rich rows, submenu flyout, toggle switch ───────────────── */
+.cs-menu {
+  padding: 5px;
+}
+/* The menu + flyout are flex siblings inside `.cs-pop-row`, but they also carry
+   `.menu-pop` (position:absolute) for their card look. Absolute children drop
+   out of the flex flow and stack at the same origin — overriding back to
+   `relative` lets them actually sit side by side. */
+.cs-pop-row .cs-menu {
+  position: relative;
+}
+/* A row inside the CustomSelect menu / flyout. Scoped under .cs-menu so it wins
+   over the generic `.menu-pop button` rule. */
+.cs-menu .cs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.cs-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.cs-row-label-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cs-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-row-desc {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-faint);
+  white-space: normal;
+}
+.cs-row-hint {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.cs-row-badge {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+}
+.cs-menu .cs-row-check {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.cs-menu .cs-row-chevron {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.cs-flyout-header {
+  padding: 8px 10px 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+  white-space: normal;
+}
+.cs-divider {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border);
+}
+.cs-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+/* Toggle switch. Scoped under .cs-menu so it beats the generic `.menu-pop
+   button` rule (which would otherwise force width:100% + flex + padding on this
+   button, stretching it across the whole row). */
+.cs-menu .cs-switch {
+  flex: none;
+  width: 36px;
+  min-width: 36px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  background: var(--border-strong);
+  transition: background 0.15s ease;
+  position: relative;
+  display: inline-block;
+}
+.cs-menu .cs-switch[data-on='true'],
+.cs-menu .cs-switch[data-on='true']:hover {
+  background: var(--blue);
+}
+.cs-menu .cs-switch:hover {
+  background: var(--border-strong);
+}
+.cs-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+.cs-switch[data-on='true'] .cs-switch-knob {
+  transform: translateX(16px);
 }
 .token-bar {
   width: 64px;
