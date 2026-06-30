@@ -39,6 +39,12 @@ import {
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import {
+  deleteMcpServer,
+  listMcpServers,
+  saveMcpServer,
+  setMcpServerEnabled,
+} from './mcpServers.js';
+import {
   getCustomInstructions,
   getUserSettings,
   saveCustomInstructions,
@@ -58,6 +64,7 @@ import type {
   CustomModelInput,
   DesktopUserSettings,
   FeishuDomain,
+  McpServerInput,
   FeishuManualInput,
   FeishuQrBegin,
   PermissionMode,
@@ -195,6 +202,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.ModelsDeleteCustom, (_e, displayName: string) =>
     deleteCustomModel(displayName),
+  );
+
+  // ── MCP servers (shared ~/.easycode-user/settings.json) ───────────────────
+  ipcMain.handle(IpcInvoke.McpList, () => listMcpServers());
+  ipcMain.handle(IpcInvoke.McpSave, (_e, input: McpServerInput, originalName?: string) =>
+    saveMcpServer(input, originalName),
+  );
+  ipcMain.handle(IpcInvoke.McpDelete, (_e, name: string) => deleteMcpServer(name));
+  ipcMain.handle(IpcInvoke.McpSetEnabled, (_e, name: string, enabled: boolean) =>
+    setMcpServerEnabled(name, enabled),
   );
 
   // ── user settings (shared with CLI's /config) ─────────────────────────────

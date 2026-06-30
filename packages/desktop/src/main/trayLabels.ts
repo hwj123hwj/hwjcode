@@ -19,12 +19,38 @@ export interface TrayLabels {
   open: string;
   quit: string;
   tooltip: string;
+  recent: string;
+  more: string;
+  newChat: string;
+  currentProject: string;
+  statusRunning: string;
+  statusBackground: string;
 }
 
 /** The full label set per supported tray language. Tooltip stays the brand name. */
 const LABELS: Record<TrayLang, TrayLabels> = {
-  zh: { open: '打开', quit: '退出', tooltip: 'Easy Code' },
-  en: { open: 'Open', quit: 'Quit', tooltip: 'Easy Code' },
+  zh: {
+    open: '打开 Easy Code',
+    quit: '退出',
+    tooltip: 'Easy Code',
+    recent: '最近对话',
+    more: '更多',
+    newChat: '新建对话',
+    currentProject: '当前项目：{name}',
+    statusRunning: '状态：正在运行',
+    statusBackground: '状态：后台运行',
+  },
+  en: {
+    open: 'Open Easy Code',
+    quit: 'Exit',
+    tooltip: 'Easy Code',
+    recent: 'Recent',
+    more: 'More',
+    newChat: 'New Chat',
+    currentProject: 'Current Project: {name}',
+    statusRunning: 'Status: Running',
+    statusBackground: 'Status: Background',
+  },
 };
 
 /**
