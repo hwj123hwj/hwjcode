@@ -367,3 +367,131 @@ describe('LoopDetectionService - Preview Model Strict Checking', () => {
     expect(loggers.logLoopDetected).toHaveBeenCalledTimes(1);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// 「畸形工具调用文本」签名检测：detectMalformedToolCallText
+//
+// 检测模型把 tool_use 降级成纯文本输出的情况（字面量工具调用标记）。
+// 与「重复度」内容检测不同，这是「签名匹配」——单次出现即命中。
+// 收紧策略：只认"真的想调工具"的形态，并排除围栏代码块内的讨论/文档/教程。
+//
+// 注意：本测试用拼接（LT='<'）构造 XML 工具调用标签，源码中不出现完整的
+// 字面量标签——否则会被各类工具链的工具调用解析器误吞。
+// ───────────────────────────────────────────────────────────────────────────
+describe('LoopDetectionService - detectMalformedToolCallText (畸形工具调用签名)', () => {
+  let service: LoopDetectionService;
+
+  // 用拼接构造标签，源码中不出现完整字面量标签
+  const LT = '<';
+  const inv = (name: string) => `${LT}invoke name="${name}">`;
+  const invClose = `${LT}/invoke>`;
+  const fcOpen = `${LT}function_calls>`;
+  const fcClose = `${LT}/function_calls>`;
+  const param = (n: string, v: string) =>
+    `${LT}parameter name="${n}">${v}${LT}/parameter>`;
+
+  beforeEach(() => {
+    const mockConfig = {
+      getTelemetryEnabled: () => true,
+      getModel: () => 'gemini-2.0-flash',
+    } as unknown as Config;
+    service = new LoopDetectionService(mockConfig);
+    vi.clearAllMocks();
+  });
+
+  describe('应命中（返回 true）', () => {
+    it('完整 function_calls 包裹的 invoke', () => {
+      const text =
+        fcOpen + inv('read_file') + param('filePath', '/tmp/test') + invClose + fcClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('裸 invoke（run_shell_command）', () => {
+      const text = inv('run_shell_command') + param('command', 'ls') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('带 antml 命名空间的裸 invoke', () => {
+      const text =
+        `${LT}antml:invoke name="read_file">` +
+        param('filePath', '/tmp/test') +
+        `${LT}/antml:invoke>`;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('带 antml 命名空间的完整包裹', () => {
+      const text =
+        `${LT}function_calls>${LT}antml:invoke name="read_file">x${LT}/antml:invoke>${LT}/function_calls>`;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('正文里夹杂一句话 + 一个 invoke 也命中', () => {
+      const text = '我来读取文件。\n' + inv('read_file') + param('filePath', '/a') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('多个 invoke 混合', () => {
+      const text =
+        inv('read_file') + param('filePath', '/a') + invClose +
+        '\n' +
+        inv('run_shell_command') + param('command', 'ls') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it.each([
+      'read_file',
+      'run_shell_command',
+      'search_file_content',
+      'glob',
+      'write_file',
+      'edit_file',
+    ])('各种常见工具名都能命中：%s', (toolName) => {
+      const text = inv(toolName) + param('x', 'y') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+
+    it('参数是 JSON 的 invoke', () => {
+      const text =
+        inv('edit_file') + param('args', '{"path":"/a","old":"x","new":"y"}') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(true);
+    });
+  });
+
+  describe('不应命中（返回 false）', () => {
+    it('空字符串', () => {
+      expect(service.detectMalformedToolCallText('')).toBe(false);
+    });
+
+    it('普通对话文本', () => {
+      const text = '好的，我已经完成了你要求的修改，所有测试都通过了。';
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+
+    it('围栏代码块内的 invoke（讨论语法/教程）应被剥离', () => {
+      const inner = inv('test') + param('x', 'y') + invClose;
+      const text = '下面是一个工具调用的例子：\n```xml\n' + inner + '\n```\n以上就是用法。';
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+
+    it('用户讨论 invoke 语法（无引号 name=...，不在代码块内）', () => {
+      // 形如 name=... 没有用双引号包裹有效工具名 → 不算"真的想调工具"
+      const text = `你应该用 ${LT}invoke name=...> 来调用工具，记得带上参数。`;
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+
+    it('只有 invoke 没有 name 属性', () => {
+      const text = `${LT}invoke>` + param('x', 'y') + invClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+
+    it('正常代码内容（非 XML 工具调用）', () => {
+      const text = 'function foo() {\n  return bar.invoke({ name: "x" });\n}';
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+
+    it('只有 function_calls 包裹但没有 invoke', () => {
+      const text = fcOpen + '\n' + fcClose;
+      expect(service.detectMalformedToolCallText(text)).toBe(false);
+    });
+  });
+});
