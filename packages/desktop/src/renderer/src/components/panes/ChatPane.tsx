@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore, type ChatItem, type SessionView } from '../../store';
 import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
@@ -29,6 +29,7 @@ export function ChatPane({ view }: { view: SessionView }) {
   }, [view.transcript, showDots]);
 
   let userIndex = -1;
+  const totalUserMessages = view.transcript.filter((x) => x.kind === 'user').length;
 
   return (
     <div className="pane-body">
@@ -53,6 +54,8 @@ export function ChatPane({ view }: { view: SessionView }) {
               density={density}
               t={t}
               userIndex={item.kind === 'user' ? userIndex : undefined}
+              isLastUser={item.kind === 'user' && userIndex === totalUserMessages - 1}
+              sessionId={view.meta.id}
               onOpenFile={(p) => openFile(p)}
               onRewind={(idx) => void rewindTo(view.meta.id, idx)}
             />
@@ -76,11 +79,38 @@ export function ChatPane({ view }: { view: SessionView }) {
   );
 }
 
+function formatTimestamp(ts?: number, lang: string = 'zh'): string {
+  const val = ts || Date.now();
+  const d = new Date(val);
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const hrs = pad(d.getHours());
+  const mins = pad(d.getMinutes());
+
+  if (isToday) {
+    return `${hrs}:${mins}`;
+  } else {
+    if (lang === 'zh') {
+      return `${d.getMonth() + 1}月${d.getDate()}日 ${hrs}:${mins}`;
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${months[d.getMonth()]} ${d.getDate()} ${hrs}:${mins}`;
+    }
+  }
+}
+
 function ChatItemView({
   item,
   density,
   t,
   userIndex,
+  isLastUser,
+  sessionId,
   onOpenFile,
   onRewind,
 }: {
@@ -88,13 +118,32 @@ function ChatItemView({
   density: SessionView['density'];
   t: TFunc;
   userIndex?: number;
+  isLastUser?: boolean;
+  sessionId: string;
   onOpenFile: (path: string) => void;
   onRewind: (beforeUserMessageIndex: number) => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const lang = useStore((s) => s.lang);
+  const setPromptDraft = useStore((s) => s.setPromptDraft);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const handleEdit = () => {
+    if (userIndex !== undefined) {
+      onRewind(userIndex);
+      setPromptDraft(sessionId, item.text);
+    }
+  };
+
   switch (item.kind) {
     case 'user':
       return (
-        <div className="msg">
+        <div className="msg-user-row">
           <div className="msg-user">
             {item.images && item.images.length > 0 && (
               <div className="msg-images">
@@ -104,13 +153,15 @@ function ChatItemView({
               </div>
             )}
             {item.text && <span className="msg-user-text">{item.text}</span>}
-            {userIndex !== undefined && (
-              <button
-                className="icon-btn rewind-btn"
-                title={t('chat.rewindTitle')}
-                onClick={() => onRewind(userIndex)}
-              >
-                <Icon name="rewind" size={14} />
+          </div>
+          <div className="msg-user-meta">
+            <span className="msg-meta-time">{formatTimestamp(item.timestamp, lang)}</span>
+            <button className="msg-meta-btn" onClick={() => handleCopy(item.text)} title={t('common.copy')}>
+              <Icon name={copied ? 'check' : 'copy'} size={13} />
+            </button>
+            {isLastUser && userIndex !== undefined && (
+              <button className="msg-meta-btn" onClick={handleEdit} title={t('chat.rewindTitle')}>
+                <Icon name="edit" size={13} />
               </button>
             )}
           </div>
@@ -121,6 +172,12 @@ function ChatItemView({
       return (
         <div className="msg msg-assistant">
           <Markdown text={item.text} />
+          <div className="msg-assistant-meta">
+            <span className="msg-meta-time">{formatTimestamp(item.timestamp, lang)}</span>
+            <button className="msg-meta-btn" onClick={() => handleCopy(item.text)} title={t('common.copy')}>
+              <Icon name={copied ? 'check' : 'copy'} size={13} />
+            </button>
+          </div>
         </div>
       );
 

@@ -99,11 +99,11 @@ export const WORKSPACE_SIZE_LIMITS = {
 } as const;
 
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; images?: string[] }
-  | { kind: 'assistant'; id: string; text: string }
-  | { kind: 'thought'; id: string; text: string }
-  | { kind: 'system'; id: string; text: string }
-  | { kind: 'error'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; images?: string[]; timestamp?: number }
+  | { kind: 'assistant'; id: string; text: string; timestamp?: number }
+  | { kind: 'thought'; id: string; text: string; timestamp?: number }
+  | { kind: 'system'; id: string; text: string; timestamp?: number }
+  | { kind: 'error'; id: string; text: string; timestamp?: number }
   | {
       kind: 'tool';
       id: string;
@@ -115,6 +115,7 @@ export type ChatItem =
       content: ToolCallContent[];
       terminalOutput?: string;
       rawInput?: Record<string, unknown>;
+      timestamp?: number;
     };
 
 export interface SessionView {
@@ -130,6 +131,7 @@ export interface SessionView {
   draftAssistantId?: string;
   /** Open file in the file pane. */
   openFile?: { path: string; content: string };
+  promptDraft?: string;
 }
 
 interface StoreState {
@@ -228,6 +230,7 @@ interface StoreState {
     answers?: AskAnswersPayload,
   ) => Promise<void>;
   setDensity: (id: string, density: ViewDensity) => void;
+  setPromptDraft: (id: string, text: string | undefined) => void;
   togglePane: (id: string, pane: PaneKind) => void;
   setActivePane: (id: string, pane: PaneKind) => void;
   refreshDiff: (id: string) => Promise<void>;
@@ -658,6 +661,7 @@ export const useStore = create<StoreState>((set, get) => ({
         id: newId(),
         text: stripImageHints(text),
         images: displayImages.length ? displayImages : undefined,
+        timestamp: Date.now(),
       };
       return {
         sessions: {
@@ -720,6 +724,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setDensity: (id, density) => updateView(set, id, (v) => ({ ...v, density })),
+
+  setPromptDraft: (id, text) => updateView(set, id, (v) => ({ ...v, promptDraft: text })),
 
   togglePane: (id, pane) =>
     updateView(set, id, (v) => {
@@ -1009,7 +1015,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         t[t.length - 1] = { ...last, text: last.text + event.text };
         return { ...view, transcript: t };
       }
-      const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text };
+      const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text, timestamp: Date.now() };
       return { ...view, transcript: [...t, item], draftAssistantId: item.id };
     }
 
@@ -1019,7 +1025,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
       if (last && last.kind === 'thought') {
         t[t.length - 1] = { ...last, text: last.text + event.text };
       } else {
-        t.push({ kind: 'thought', id: newId(), text: event.text });
+        t.push({ kind: 'thought', id: newId(), text: event.text, timestamp: Date.now() });
       }
       return { ...view, transcript: t };
     }
@@ -1029,7 +1035,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         ...view,
         transcript: [
           ...view.transcript,
-          { kind: 'user', id: newId(), text: stripImageHints(event.text) },
+          { kind: 'user', id: newId(), text: stripImageHints(event.text), timestamp: Date.now() },
         ],
       };
 
