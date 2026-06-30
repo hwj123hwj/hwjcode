@@ -40,6 +40,8 @@
   --amber-weak: rgba(214, 169, 74, 0.14);
   --blue: #74a3ef;
   --blue-weak: rgba(116, 163, 239, 0.14);
+  /* Brand/logo light purple (sampled from the logo gradient, ~#8E89FE). Theme-independent. */
+  --logo-purple: #8E89FE;
 
   --radius-lg: 14px;
   --radius: 10px;
@@ -2130,19 +2132,28 @@ select {
   opacity: 0.35;
   cursor: default;
 }
+/* Stop button: a solid black circular button with a white square glyph (mirrors
+   the round send button). Uses --text/--bg-elev so it stays high-contrast in both
+   themes — black-on-light, white-on-dark. */
 .btn-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--red);
-  background: var(--red-weak);
-  color: var(--red);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
+  border: none;
+  background: var(--text);
+  color: var(--bg-elev);
+  width: 32px;
   height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
   flex: none;
-  font-weight: 500;
-  font-size: 12.5px;
+  cursor: pointer;
+  transition: opacity 0.14s, background 0.14s;
+}
+.btn-stop:hover {
+  opacity: 0.85;
+}
+.btn-stop .ic {
+  /* Render the stop square as a solid (filled) glyph, not an outline. */
+  fill: currentColor;
 }
 .hint {
   font-size: 11px;
@@ -2285,104 +2296,83 @@ select {
   align-self: center;
   width: calc(100% - 32px);
   max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  z-index: 5;
+}
+/* Detail list — its own floating card above the pill. */
+.sticky-todo-card {
+  width: 100%;
+  max-height: 26vh;
+  overflow-y: auto;
+  padding: 6px 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  z-index: 5;
-  animation: todoSlideUp 0.22s ease-out;
+  /* Smooth fade/slide-in when the detail list expands (hover or pin), no jump. */
+  animation: todoContentFadeIn 0.18s ease-out;
 }
-.sticky-todo-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 12px;
-  cursor: pointer;
-  transition: background 0.15s ease;
+@keyframes todoContentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.sticky-todo-header:hover {
-  background: var(--bg-hover);
-}
-.sticky-todo-panel.expanded .sticky-todo-header {
-  border-bottom: 1px solid var(--border);
-}
-.sticky-todo-head-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.sticky-todo-icon {
-  color: var(--accent);
-  flex: none;
-}
-.sticky-todo-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-.sticky-todo-count {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.sticky-todo-head-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-faint);
-  flex: none;
-}
-.sticky-todo-bar {
-  width: 64px;
-  height: 4px;
-  background: var(--bg-sunken);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.sticky-todo-bar-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s ease;
-}
-.sticky-todo-chevron {
-  transition: transform 0.2s ease;
-}
-.sticky-todo-chevron.up {
-  transform: rotate(180deg);
-}
-.sticky-todo-content {
-  max-height: 26vh;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.sticky-todo-content .todo-item-row {
+.sticky-todo-card .todo-item-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 4px 12px;
+  padding: 5px 12px;
 }
-.sticky-todo-content .todo-item-text {
+.sticky-todo-card .todo-item-text {
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--text);
 }
-.sticky-todo-content .todo-item-text.completed,
-.sticky-todo-content .todo-item-text.cancelled {
+.sticky-todo-card .todo-item-text.completed,
+.sticky-todo-card .todo-item-text.cancelled {
   color: var(--text-faint);
-  text-decoration: line-through;
 }
-.sticky-todo-content .todo-item-text.in_progress {
+.sticky-todo-card .todo-item-text.in_progress {
   color: var(--text);
   font-weight: 500;
+}
+/* Compact step pill — centered, rounded, with a spinner. */
+.sticky-todo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  animation: todoSlideUp 0.22s ease-out;
+}
+.sticky-todo-pill:hover {
+  background: var(--bg-hover);
+}
+.sticky-todo-pill-spinner {
+  color: var(--logo-purple);
+  flex: none;
+}
+.sticky-todo-pill-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 /* status checkbox */
 .sticky-todo-panel .todo-checkbox {
@@ -2720,6 +2710,46 @@ select {
 }
 .field-label:first-child {
   margin-top: 0;
+}
+/* Recent-project shortcuts in the New Session dialog. */
+.recent-projects {
+  margin-bottom: 8px;
+}
+.recent-projects-label {
+  margin-bottom: 6px;
+}
+/* Compact project-directory picker: the standard file-picker pattern — a path
+   input that takes most of the width with a small Browse button inline on the
+   right. Kept on one tight row so the section doesn't waste vertical space. */
+.dir-picker {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-input, var(--border-strong));
+  border-radius: 12px;
+  padding: 5px 6px 5px 12px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+}
+.dir-picker-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 2px 0;
+}
+.dir-picker-input::placeholder {
+  color: var(--text-faint);
+}
+.dir-picker-browse {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12.5px;
 }
 
 /* ── settings · shared field rows (used by the settings sections) ─────────── */
@@ -3951,6 +3981,81 @@ textarea.cm-input {
   color: var(--text);
   margin-bottom: 4px;
 }
+
+/* ── restoring-session skeleton ──────────────────────────────────────────────
+   A chat-shaped shimmer shown while an existing session's prior conversation is
+   replayed, so a restore never reuses the new-session placeholder. */
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 12px 12px;
+}
+.sk-row {
+  display: flex;
+  gap: 12px;
+}
+.sk-left {
+  justify-content: flex-start;
+}
+.sk-right {
+  justify-content: flex-end;
+}
+.sk-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: none;
+}
+.sk-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+  max-width: 78%;
+  padding-top: 3px;
+}
+.sk-line {
+  height: 11px;
+  border-radius: 6px;
+}
+.sk-bubble {
+  height: 40px;
+  border-radius: 14px;
+}
+/* Moving highlight sweep. Base/shine reference theme vars so it reads in both
+   light and dark; the motion (not the contrast) is what signals "loading". */
+.sk-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-sunken) 0%,
+    var(--border) 50%,
+    var(--bg-sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: skShimmer 1.4s ease-in-out infinite;
+}
+@keyframes skShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.sk-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
 /* Codex-style "just type" composer card on the empty state. */
 .empty-card {
   display: flex;

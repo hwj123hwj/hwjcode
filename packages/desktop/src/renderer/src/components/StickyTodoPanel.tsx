@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatItem, SessionView } from '../store';
 import { Icon } from './Icon';
-import { useT } from '../i18n/useT';
+import { useT, type TFunc } from '../i18n/useT';
 
 type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -83,40 +83,38 @@ function TodoPanel({
   data,
   collapsed,
   onToggle,
-  title,
+  t,
 }: {
   data: TodoData;
   collapsed: boolean;
   onToggle: () => void;
-  title: string;
+  t: TFunc;
 }) {
+  // Internal hover state — responds instantly without round-tripping through the
+  // parent, so the detail list expands the moment the pointer enters.
+  const [hovered, setHovered] = useState(false);
+
   const items = data.items;
   const done = items.filter((i) => i.status === 'completed' || i.status === 'cancelled').length;
   const total = items.length;
-  const progress = total > 0 ? (done / total) * 100 : 0;
+  // Current step = completed count + 1, capped at the total.
+  const currentStep = Math.min(done + 1, total);
 
   if (total === 0) return null;
 
-  return (
-    <div className={`sticky-todo-panel ${collapsed ? 'collapsed' : 'expanded'}`}>
-      <div className="sticky-todo-header" onClick={onToggle}>
-        <div className="sticky-todo-head-left">
-          <Icon name="tasks" size={14} className="sticky-todo-icon" />
-          <span className="sticky-todo-title">{data.title || title}</span>
-          <span className="sticky-todo-count">
-            ({done}/{total})
-          </span>
-        </div>
-        <div className="sticky-todo-head-right">
-          <div className="sticky-todo-bar">
-            <div className="sticky-todo-bar-fill" style={{ width: `${progress}%` }} />
-          </div>
-          <Icon name="chevron-down" size={14} className={`sticky-todo-chevron ${collapsed ? 'up' : ''}`} />
-        </div>
-      </div>
+  // Show the detail list on hover, or when the user has pinned it open (a click
+  // on the pill toggles `collapsed`). Otherwise only the compact pill shows.
+  const showDetails = hovered || !collapsed;
 
-      {!collapsed && (
-        <div className="sticky-todo-content">
+  return (
+    <div
+      className="sticky-todo-panel"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Detail list — a standalone card that floats above the step pill. */}
+      {showDetails && (
+        <div className="sticky-todo-card">
           {items.map((item) => (
             <div key={item.id} className={`todo-item-row ${item.status}`}>
               <StatusCheckbox status={item.status} />
@@ -125,6 +123,12 @@ function TodoPanel({
           ))}
         </div>
       )}
+
+      {/* Compact step pill — always visible, centered, with a spinner. */}
+      <div className="sticky-todo-pill" onClick={onToggle}>
+        <Icon name="loader" size={14} spin className="sticky-todo-pill-spinner" />
+        <span className="sticky-todo-pill-label">{t('todo.stepLabel', { step: currentStep, total })}</span>
+      </div>
     </div>
   );
 }
@@ -161,8 +165,9 @@ export function SessionTodoPanel({ view }: { view: SessionView }) {
       setVisible(false);
       turnStartSigRef.current = latestTodos ? JSON.stringify(latestTodos.items) : '';
     } else if (falling && visible) {
-      // Turn finished: collapse (but keep it available) rather than yank it away.
-      setCollapsed(true);
+      // Turn finished: hide the whole panel (regardless of completion). It
+      // re-appears in compact form the next time the agent updates the list.
+      setVisible(false);
     }
     prevActiveRef.current = active;
     // Intentionally keyed on `active` only — this is an edge detector.
@@ -175,7 +180,8 @@ export function SessionTodoPanel({ view }: { view: SessionView }) {
       const sig = JSON.stringify(latestTodos.items);
       if (sig !== turnStartSigRef.current) {
         setVisible(true);
-        setCollapsed(false);
+        // Default to the compact "Step X/Y" form; hovering reveals the details.
+        setCollapsed(true);
       }
     }
   }, [latestTodos, active]);
@@ -187,7 +193,7 @@ export function SessionTodoPanel({ view }: { view: SessionView }) {
       data={latestTodos}
       collapsed={collapsed}
       onToggle={() => setCollapsed((c) => !c)}
-      title={t('todo.title')}
+      t={t}
     />
   );
 }

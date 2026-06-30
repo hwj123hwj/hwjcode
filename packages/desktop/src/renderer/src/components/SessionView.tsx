@@ -167,10 +167,14 @@ function EmptyState() {
   const [busy, setBusy] = useState(false);
   // null cwd → a directory-less chat; a string → a project-bound session.
   const [cwd, setCwd] = useState<string | null>(null);
-  const [mode, setMode] = useState<PermissionMode>('default');
+  const [mode, setMode] = useState<PermissionMode>('yolo');
   // '' → let the backend pick the default model; otherwise a modelId/custom id.
   const [model, setModel] = useState('');
   const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  // Display name of the user's configured default model, when it can be resolved
+  // to a name (via a prior session's availableModels or a custom model). Empty
+  // string → unknown, so the picker falls back to the generic "Default model".
+  const [defaultModelLabel, setDefaultModelLabel] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -190,22 +194,26 @@ function EmptyState() {
         if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
       }
     }
-    void api.models
-      .listCustom()
-      .then((custom) => {
-        if (!alive) return;
-        const seen = new Set<string>();
-        const opts = [
-          ...[...builtins].map(([value, label]) => ({ value, label })),
-          ...custom.map((c) => ({ value: c.id, label: c.label })),
-        ].filter(({ value }) => {
-          if (seen.has(value)) return false;
-          seen.add(value);
-          return true;
-        });
-        setModels(opts);
-      })
-      .catch(() => alive && setModels([...builtins].map(([value, label]) => ({ value, label }))));
+    void Promise.all([
+      api.models.listCustom().catch(() => [] as Awaited<ReturnType<typeof api.models.listCustom>>),
+      api.settings.get().catch(() => null),
+    ]).then(([custom, settings]) => {
+      if (!alive) return;
+      const seen = new Set<string>();
+      const opts = [
+        ...[...builtins].map(([value, label]) => ({ value, label })),
+        ...custom.map((c) => ({ value: c.id, label: c.label })),
+      ].filter(({ value }) => {
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      });
+      setModels(opts);
+      // Resolve the configured default model id to a display name, when we can.
+      const defaultId = settings?.defaultModel?.trim();
+      const label = defaultId ? opts.find((o) => o.value === defaultId)?.label : undefined;
+      setDefaultModelLabel(label ?? '');
+    });
     return () => {
       alive = false;
     };
@@ -311,20 +319,20 @@ function EmptyState() {
                   onClick={() => setMenuOpen((o) => !o)}
                   title={cwd ?? t('session.emptyChatTarget')}
                 >
-                  <Icon name="folder" size={14} />
+                  <Icon name={cwd ? 'folder' : 'chat'} size={14} />
                   {targetLabel}
                   <Icon name="chevron-down" size={12} />
                 </button>
                 {menuOpen && (
                   <div className="empty-menu">
                     <button
-                      className={`empty-menu-item ${!cwd ? 'active' : ''}`}
+                      className="empty-menu-item"
                       onClick={() => {
                         setCwd(null);
                         setMenuOpen(false);
                       }}
                     >
-                      <Icon name="sparkle" size={14} />
+                      <Icon name="chat" size={14} />
                       {t('session.emptyChatTarget')}
                     </button>
                     {recentProjects.length > 0 && (
@@ -357,7 +365,7 @@ function EmptyState() {
               <CustomSelect
                 value={model}
                 options={[
-                  { value: '', label: t('prompt.defaultModel') },
+                  { value: '', label: defaultModelLabel || t('prompt.defaultModel') },
                   ...models.map((m) => ({ value: m.value, label: m.label })),
                 ]}
                 icon="cpu"

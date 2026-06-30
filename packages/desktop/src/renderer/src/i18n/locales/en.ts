@@ -154,6 +154,7 @@ export const en = {
   'newSession.pickFolderPlaceholder': 'Choose a folder…',
   'newSession.pickFolderOptionalPlaceholder': 'Leave empty to just chat, no directory',
   'newSession.browse': 'Browse…',
+  'newSession.recentProjects': 'Recent projects',
   'newSession.permissionMode': 'Permission mode',
   'newSession.externalAgentNote':
     '{agent} runs with its own permission policy; you’ll be prompted when it needs approval.',
@@ -438,6 +439,7 @@ export const en = {
   // ── chat pane ───────────────────────────────────────────────────────────────────────────────
   'chat.emptyTitle': 'Start a conversation with Easy Code',
   'chat.worksIn': 'It works in {cwd}',
+  'chat.restoring': 'Restoring conversation…',
   'chat.aiResponding': 'AI is responding',
   'chat.attachedImage': 'Attached image',
   'chat.thought': 'Thinking',
@@ -446,6 +448,7 @@ export const en = {
   // ── plan / tasks / terminal / file panes ───────────────────────────────────────────────────────
   'plan.empty': 'No plan yet',
   'todo.title': 'Tasks',
+  'todo.stepLabel': 'Step {step}/{total}',
   'tasks.summary': '{running} running / {total} total',
   'tasks.empty': 'No tool calls yet',
   'terminal.noOutput': '(no command output yet)',

@@ -604,9 +604,13 @@ export function PromptBar({ view }: { view: SessionView }) {
                 onChange={(val) => void setModel(meta.id, val)}
               />
               {busy ? (
-                <button className="btn-stop" onClick={() => void cancel(meta.id)}>
+                <button
+                  className="btn-stop"
+                  onClick={() => void cancel(meta.id)}
+                  title={t('common.stop')}
+                  aria-label={t('common.stop')}
+                >
                   <Icon name="stop" size={14} />
-                  {t('common.stop')}
                 </button>
               ) : (
                 <button
