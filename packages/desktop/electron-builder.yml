@@ -3,12 +3,6 @@ productName: Easy Code
 directories:
   output: release/${version}
   buildResources: build
-# We ship artifacts via GitLab CI (artifacts/manual upload), not electron-builder's
-# own publish providers. Without this, building from a git tag makes
-# electron-builder implicitly try to resolve a publish target, which then fails
-# because package.json has no "repository" field (needed for the GitHub/GitLab
-# provider auto-detection) — see electron-builder issue on implicit publish.
-publish: never
 files:
   - out/**/*
   - package.json

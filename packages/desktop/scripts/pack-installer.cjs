@@ -82,7 +82,13 @@ function runElectronBuilder() {
   const ebBin = path.join(path.dirname(ebPkgJson), binRel);
   const stamp = buildStamp();
   console.log(`[pack-installer] BUILD_TIME=${stamp}`);
-  execFileSync(process.execPath, [ebBin, ...targets], {
+  // Building from a git tag makes electron-builder implicitly try to resolve a
+  // publish target (see "Implicit publishing triggered by git tag" in its
+  // output), which then fails since package.json has no "repository" field.
+  // `publish: never` in electron-builder.yml doesn't reliably disable this on
+  // 26.x (it gets misparsed as a custom publisher module name); the CLI flag
+  // is the documented, working way to opt out.
+  execFileSync(process.execPath, [ebBin, ...targets, '--publish', 'never'], {
     cwd: desktopDir,
     stdio: 'inherit',
     env: { ...process.env, BUILD_TIME: stamp },
