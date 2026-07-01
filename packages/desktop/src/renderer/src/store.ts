@@ -159,6 +159,13 @@ interface StoreState {
    * 401s when not signed in).
    */
   defaultCustomModelId?: string;
+  /**
+   * Monotonically-increasing counter bumped whenever a custom model is saved or
+   * deleted. Components that list custom models subscribe to this value so they
+   * re-fetch from disk instead of showing a stale snapshot.
+   */
+  customModelsRev: number;
+  bumpCustomModelsRev: () => void;
   sessions: Record<string, SessionView>;
   order: string[]; // session ids, newest first
   activeSessionId?: string;
@@ -397,6 +404,8 @@ export const useStore = create<StoreState>((set, get) => ({
   auth: null,
   customModelOnly: false,
   defaultCustomModelId: undefined,
+  customModelsRev: 0,
+  bumpCustomModelsRev: () => set((s) => ({ customModelsRev: s.customModelsRev + 1 })),
   sessions: {},
   order: [],
   permissionQueue: [],
@@ -950,7 +959,21 @@ async function resolveDefaultModel(s: StoreState, explicit?: string): Promise<st
     /* settings unreadable — fall back below */
   }
   if (s.customModelOnly) {
-    return globalDefault?.startsWith('custom:') ? globalDefault : s.defaultCustomModelId;
+    // Always read from disk so adds/deletes after app start are reflected
+    // immediately — the cached defaultCustomModelId may be stale.
+    const liveCustomId = await firstEnabledCustomModelId();
+    if (globalDefault?.startsWith('custom:')) {
+      const all = await api.models.listCustom().catch(() => []);
+      const still = all.some((m) => m.id === globalDefault && m.enabled !== false);
+      return still ? globalDefault : liveCustomId;
+    }
+    return liveCustomId;
+  }
+  // Signed-in path: validate any saved custom: default still exists.
+  if (globalDefault?.startsWith('custom:')) {
+    const all = await api.models.listCustom().catch(() => []);
+    const still = all.some((m) => m.id === globalDefault && m.enabled !== false);
+    if (!still) return undefined; // deleted — let backend pick
   }
   return globalDefault;
 }
