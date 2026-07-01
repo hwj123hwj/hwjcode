@@ -93,7 +93,7 @@ export interface BrowserTab {
 
 /** Clamp ranges for the draggable regions (kept in sync with the CSS guards). */
 export const WORKSPACE_SIZE_LIMITS = {
-  sidebarWidth: { min: 220, max: 480, default: 272 },
+  sidebarWidth: { min: 220, max: 480, default: 236 },
   rightWidth: { min: 340, max: 900, default: 560 },
   bottomHeight: { min: 120, max: 720, default: 300 },
   fileTreeWidth: { min: 160, max: 480, default: 240 },

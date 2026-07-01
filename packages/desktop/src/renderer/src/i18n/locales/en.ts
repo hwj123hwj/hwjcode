@@ -192,6 +192,11 @@ export const en = {
   'diff.pickFile': 'Select a file to view its diff',
   'diff.commentPlaceholder': 'Write a review comment, press Enter to submit…',
   'diff.addCommentTitle': 'Click a line to add a comment',
+  'diff.expandLines': 'Expand {n} unchanged lines',
+  'diff.toggleFile': 'Collapse / expand this file',
+  'diff.viewChanges': 'View changes',
+  'diff.commit': 'Commit changes',
+  'diff.commitTitle': 'Ask the agent to commit the changes',
 
   // ── prompt bar ────────────────────────────────────────────────────────────────────
   'prompt.placeholder': 'Type a message — @ to reference files, / for commands…',
