@@ -137,6 +137,10 @@ release-desktop-win:
     # npm pkg set 代替，同版本重跑（例如重试同一个 tag）也不会失败。
     - npm pkg set version="$env:NEW_VERSION"
     - npm run pack:win
+    # 文件名带 BUILD_TIME 时间戳，用通配符定位实际产物再上传。
+    - $exePath = (Get-ChildItem "release\$env:NEW_VERSION\*.exe" | Select-Object -First 1).FullName
+    - Write-Host "Uploading $exePath to GCS"
+    - gcs upload $exePath
   artifacts:
     paths:
       - packages/desktop/release/**/*.exe
