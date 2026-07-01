@@ -78,9 +78,13 @@ export function buildRelaunchScript(opts: BuildRelaunchScriptOptions): string {
   const LOG_PATH = JSON.stringify(logPath ?? null);
 
   // 依据安装模式，生成 npm install 的参数数组（或空表示跳过）。
+  // npm 模式追加 --prefer-online：强制联网校验，避免 npm cache 返回旧版本。
   let INSTALL_ARGS = 'null';
+  let VERIFY_CMD = 'null';
   if (install.type === 'npm') {
-    INSTALL_ARGS = JSON.stringify(['install', '-g', `${install.packageName}@latest`]);
+    INSTALL_ARGS = JSON.stringify(['install', '-g', `${install.packageName}@latest`, '--prefer-online']);
+    // 安装后验证版本号：npm info <pkg> version 返回 registry 上的最新版本
+    VERIFY_CMD = JSON.stringify(['info', install.packageName, 'version']);
   } else if (install.type === 'tgz') {
     INSTALL_ARGS = JSON.stringify(['install', '-g', install.path]);
   }
@@ -92,6 +96,7 @@ const fs = require('node:fs');
 
 const PARENT_PID = ${PARENT_PID};
 const INSTALL_ARGS = ${INSTALL_ARGS}; // null = skip install (restart only)
+const VERIFY_CMD = ${VERIFY_CMD}; // null = skip version verification
 const RELAUNCH_CMD = ${RELAUNCH_CMD};
 const RELAUNCH_ARGS = ${RELAUNCH_ARGS};
 const SCRIPT_PATH = ${SCRIPT_PATH};
@@ -143,7 +148,7 @@ async function main() {
   }
   log('[Relauncher] Parent exited or timeout.');
 
-  // 2) 按需安装
+  // 2) 按需安装（npm 模式带 --prefer-online 强制联网，避免缓存旧版本）
   if (INSTALL_ARGS) {
     log('[Relauncher] Installing: npm ' + INSTALL_ARGS.join(' '));
     const install = spawnSync('npm', INSTALL_ARGS, { stdio: 'ignore', shell: true });
@@ -152,6 +157,28 @@ async function main() {
       log('[Relauncher] ERROR: Install failed.');
       cleanupSelf();
       process.exit(install.status || 1);
+    }
+  }
+
+  // 2.5) 版本验证（仅 npm 模式）：对比 registry 最新版本与本地安装版本
+  if (VERIFY_CMD) {
+    var remoteVer = '';
+    var localVer = '';
+    try {
+      var remote = spawnSync('npm', VERIFY_CMD, { shell: true, encoding: 'utf8' });
+      if (remote.status === 0) {
+        remoteVer = (remote.stdout || '').trim();
+      }
+    } catch (_) { /* best-effort */ }
+    try {
+      var local = spawnSync(RELAUNCH_CMD, ['--version'], { shell: true, encoding: 'utf8' });
+      if (local.status === 0) {
+        localVer = (local.stdout || '').trim();
+      }
+    } catch (_) { /* best-effort */ }
+    log('[Relauncher] Version check: remote=' + remoteVer + ', local=' + localVer);
+    if (remoteVer && localVer && remoteVer !== localVer) {
+      log('[Relauncher] WARNING: Version mismatch! Remote=' + remoteVer + ' but local=' + localVer + '. This may indicate a stale cache or PATH issue.');
     }
   }
 

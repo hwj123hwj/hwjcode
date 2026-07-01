@@ -257,8 +257,7 @@ export class OpenCliTool extends BaseTool<OpenCliParams, OpenCliResult> {
         '- Prerequisites: the opencli daemon, the Browser Bridge Chrome extension, and a logged-in Chrome. If a command fails with daemon-not-running or extension-not-connected, run args=["doctor"] and follow its guidance.',
         '- not-logged-in / auth_required: the user must log in to the site in their Chrome; opencli reuses that session.',
         '- stale-ref / selector errors: re-run `state` and use a fresh ref.',
-      ].join('
-'),
+      ].join('\n'),
       Icon.Globe,
       {
         type: Type.OBJECT,
@@ -1064,8 +1063,7 @@ export class OpenCliTool extends BaseTool<OpenCliParams, OpenCliResult> {
           '👉 OpenCLI is not installed. Install it globally, then simply re-run this command — the tool re-probes automatically, so NO restart of easycode is needed:',
           `    npm install -g ${OPENCLI_PACKAGE}`,
           '   (on macOS/Linux this may require sudo). If it still reports "not-installed" after a successful install, the global bin dir is likely not on this process\'s PATH: run `where opencli` (Windows) or `which opencli` (macOS/Linux) and pass that path via the tool\'s `binaryPath` parameter.',
-        ].join('
-');
+        ].join('\n');
       default:
         return '';
     }

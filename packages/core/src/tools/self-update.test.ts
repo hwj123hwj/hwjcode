@@ -38,11 +38,27 @@ describe('buildRelaunchScript', () => {
     expect(script).toContain('process.kill');
   });
 
-  it('npm mode embeds `<pkg>@latest` install', () => {
+  it('npm mode embeds `<pkg>@latest` install with --prefer-online', () => {
     const script = buildRelaunchScript({ ...base, install: npmMode });
     expect(script).toContain('hwjcode@latest');
     expect(script).toContain('install');
     expect(script).toContain('-g');
+    expect(script).toContain('--prefer-online');
+    // npm 模式生成版本验证命令
+    expect(script).toContain('VERIFY_CMD');
+    expect(script).toContain('npm');
+    expect(script).toContain('info');
+    expect(script).toContain('version');
+  });
+
+  it('npm mode embeds version verification logic', () => {
+    const script = buildRelaunchScript({ ...base, install: npmMode });
+    // 版本验证块
+    expect(script).toContain('Version check');
+    expect(script).toContain('remoteVer');
+    expect(script).toContain('localVer');
+    expect(script).toContain('--version');
+    expect(script).toContain('Version mismatch');
   });
 
   it('tgz mode embeds the local tgz absolute path install', () => {
@@ -51,11 +67,16 @@ describe('buildRelaunchScript', () => {
     expect(script).toContain('install');
     expect(script).toContain('-g');
     expect(script).not.toContain('@latest');
+    // tgz 模式的 INSTALL_ARGS 不含 --prefer-online
+    expect(script).toContain('VERIFY_CMD = null');
+    const tgzLine = script.match(/INSTALL_ARGS = (.+);/);
+    expect(tgzLine?.[1]).not.toContain('--prefer-online');
   });
 
   it('none mode (restart only) installs nothing — INSTALL_ARGS is null', () => {
     const script = buildRelaunchScript({ ...base, install: noneMode });
     expect(script).toContain('INSTALL_ARGS = null');
+    expect(script).toContain('VERIFY_CMD = null');
     expect(script).not.toContain('@latest');
     expect(script).toContain('hwjcode');
     expect(script).toContain('--feishu');
