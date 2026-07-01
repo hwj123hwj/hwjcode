@@ -21,7 +21,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { MermaidConfig } from 'mermaid';
 import { Icon } from './Icon';
-import { useT } from '../i18n/useT';
+import { useT, type TFunc } from '../i18n/useT';
 
 /* ── lazy mermaid loader ─────────────────────────────────────────────────── */
 
@@ -74,19 +74,94 @@ function themeConfig(): MermaidConfig {
 }
 
 let renderSeq = 0;
+// mermaid's `render()` mutates shared/module-level state (theme config, an
+// internal DOM counter, temporary measuring nodes) and isn't safe to call
+// concurrently. New chats stream diagrams in one at a time, so this never
+// mattered — but resuming a session replays the *entire* prior transcript at
+// once, mounting every Mermaid block together and firing their renders in
+// the same tick. Serialize them through one queue so restores render exactly
+// like a live chat did.
+let renderQueue: Promise<unknown> = Promise.resolve();
 /** Render `code` to an SVG string, cleaning up any stray nodes mermaid leaves. */
-async function renderToSvg(code: string): Promise<string> {
-  const mermaid = await getMermaid();
-  mermaid.initialize(themeConfig());
-  const id = `mmd-${++renderSeq}`;
+function renderToSvg(code: string): Promise<string> {
+  const run = async (): Promise<string> => {
+    const mermaid = await getMermaid();
+    mermaid.initialize(themeConfig());
+    const id = `mmd-${++renderSeq}`;
+    try {
+      const { svg } = await mermaid.render(id, code);
+      return svg;
+    } finally {
+      // mermaid appends a temporary measuring node to <body>; remove it (and the
+      // `d…` error node it may leave on a parse failure) so they don't accumulate.
+      document.getElementById(id)?.remove();
+      document.getElementById(`d${id}`)?.remove();
+    }
+  };
+  const result = renderQueue.then(run, run);
+  // Keep the queue alive even if this render fails, but never let it carry a
+  // rejection forward (that would poison every later render in the chain).
+  renderQueue = result.catch(() => undefined);
+  return result;
+}
+
+/* ── SVG export helpers ──────────────────────────────────────────────────── */
+
+/** Base64-encode a UTF-8 string (`btoa` alone only handles latin1). */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+/**
+ * Rasterize an SVG string to a base64 PNG via an offscreen canvas (2× for
+ * crispness), filling the diagram background so the export isn't transparent.
+ * Rejects if the browser taints the canvas (can happen for SVGs with embedded
+ * HTML labels) — callers fall back to saving the raw vector SVG.
+ */
+async function svgToPngBase64(svgMarkup: string): Promise<string> {
+  const el = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml')
+    .documentElement;
+  let w = parseFloat(el.getAttribute('width') || '');
+  let h = parseFloat(el.getAttribute('height') || '');
+  if (!w || !h) {
+    const vb = (el.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    if (vb.length === 4) {
+      w = w || vb[2];
+      h = h || vb[3];
+    }
+  }
+  w = w || 800;
+  h = h || 600;
+  const scale = 2;
+  const url = URL.createObjectURL(
+    new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
+  );
   try {
-    const { svg } = await mermaid.render(id, code);
-    return svg;
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error('svg load failed'));
+      im.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    const bg = getComputedStyle(document.documentElement)
+      .getPropertyValue('--bg-sunken')
+      .trim();
+    ctx.fillStyle = bg || '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    // `toDataURL` throws (SecurityError) if the canvas got tainted — the caller
+    // catches it and saves the SVG instead.
+    return canvas.toDataURL('image/png').split(',')[1] ?? '';
   } finally {
-    // mermaid appends a temporary measuring node to <body>; remove it (and the
-    // `d…` error node it may leave on a parse failure) so they don't accumulate.
-    document.getElementById(id)?.remove();
-    document.getElementById(`d${id}`)?.remove();
+    URL.revokeObjectURL(url);
   }
 }
 
@@ -127,7 +202,9 @@ export function Mermaid({ code }: { code: string }) {
   const [showSource, setShowSource] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const downloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,9 +242,33 @@ export function Mermaid({ code }: { code: string }) {
     });
   };
 
+  // Export the rendered diagram via a native "Save As" dialog. Prefer a PNG
+  // raster; if the canvas can't be exported (tainted), fall back to the vector
+  // SVG, which always works. A brief check confirms a successful save.
+  const download = async () => {
+    if (!svg) return;
+    let mimeType = 'image/png';
+    let name = 'diagram.png';
+    let data: string;
+    try {
+      data = await svgToPngBase64(svg);
+      if (!data) throw new Error('empty png');
+    } catch {
+      mimeType = 'image/svg+xml';
+      name = 'diagram.svg';
+      data = utf8ToBase64(svg);
+    }
+    const saved = await window.easycode.workspace.saveImageAs(name, mimeType, data);
+    if (!saved) return;
+    setDownloaded(true);
+    if (downloadTimer.current) clearTimeout(downloadTimer.current);
+    downloadTimer.current = setTimeout(() => setDownloaded(false), 1400);
+  };
+
   useEffect(
     () => () => {
       if (copyTimer.current) clearTimeout(copyTimer.current);
+      if (downloadTimer.current) clearTimeout(downloadTimer.current);
     },
     [],
   );
@@ -198,6 +299,17 @@ export function Mermaid({ code }: { code: string }) {
             onClick={() => setZoomed(true)}
           >
             <Icon name="maximize" size={14} />
+          </button>
+        )}
+        {hasDiagram && !showSource && (
+          <button
+            type="button"
+            className="mermaid-tool-btn"
+            title={downloaded ? t('mermaid.downloaded') : t('mermaid.download')}
+            aria-label={downloaded ? t('mermaid.downloaded') : t('mermaid.download')}
+            onClick={() => void download()}
+          >
+            <Icon name={downloaded ? 'check' : 'download'} size={14} />
           </button>
         )}
         <button
@@ -243,14 +355,34 @@ export function Mermaid({ code }: { code: string }) {
         </>
       )}
 
-      {zoomed && svg && <MermaidZoom svg={svg} onClose={() => setZoomed(false)} />}
+      {zoomed && svg && (
+        <MermaidZoom
+          svg={svg}
+          onClose={() => setZoomed(false)}
+          onDownload={download}
+          downloaded={downloaded}
+          t={t}
+        />
+      )}
     </div>
   );
 }
 
 /* ── zoom overlay: wheel to scale, drag to pan ───────────────────────────── */
 
-function MermaidZoom({ svg, onClose }: { svg: string; onClose: () => void }) {
+function MermaidZoom({
+  svg,
+  onClose,
+  onDownload,
+  downloaded,
+  t,
+}: {
+  svg: string;
+  onClose: () => void;
+  onDownload: () => void;
+  downloaded: boolean;
+  t: TFunc;
+}) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
@@ -284,14 +416,29 @@ function MermaidZoom({ svg, onClose }: { svg: string; onClose: () => void }) {
 
   return (
     <div className="mermaid-zoom-backdrop" onClick={onClose}>
-      <button
-        type="button"
-        className="mermaid-zoom-close"
-        aria-label="close"
-        onClick={onClose}
-      >
-        <Icon name="x" size={18} />
-      </button>
+      <div className="mermaid-zoom-actions">
+        <button
+          type="button"
+          className="mermaid-zoom-btn"
+          title={downloaded ? t('mermaid.downloaded') : t('mermaid.download')}
+          aria-label={downloaded ? t('mermaid.downloaded') : t('mermaid.download')}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload();
+          }}
+        >
+          <Icon name={downloaded ? 'check' : 'download'} size={18} />
+        </button>
+        <button
+          type="button"
+          className="mermaid-zoom-btn"
+          title={t('common.close')}
+          aria-label={t('common.close')}
+          onClick={onClose}
+        >
+          <Icon name="x" size={18} />
+        </button>
+      </div>
       <div
         className="mermaid-zoom-stage"
         onClick={(e) => e.stopPropagation()}

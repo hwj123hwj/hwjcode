@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
+import { SearchDialog } from './SearchDialog';
 import { SettingsDialog, type SectionId } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
@@ -61,11 +62,11 @@ export function Sidebar() {
   const auth = useStore((s) => s.auth);
   const customModelOnly = useStore((s) => s.customModelOnly);
   const exitCustomModelMode = useStore((s) => s.exitCustomModelMode);
-  const filter = useStore((s) => s.sidebarFilter);
-  const setFilter = useStore((s) => s.setSidebarFilter);
+  const createChatSession = useStore((s) => s.createChatSession);
   const t = useT();
 
   const [showNew, setShowNew] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SectionId>('general');
   const [showFeishu, setShowFeishu] = useState(false);
@@ -116,14 +117,9 @@ export function Sidebar() {
 
   const { chats, projects } = useMemo(() => {
     const views = order.map((id) => sessions[id]).filter(Boolean) as SessionView[];
-    const filtered = views.filter((v) => {
-      if (filter.status === 'active' && v.meta.archived) return false;
-      if (filter.status === 'archived' && !v.meta.archived) return false;
-      if (filter.query && !v.meta.title.toLowerCase().includes(filter.query.toLowerCase())) {
-        return false;
-      }
-      return true;
-    });
+    // The sidebar now shows only active sessions; archived chats are managed in
+    // Settings → Archived chats. Title search moved to the search palette.
+    const filtered = views.filter((v) => !v.meta.archived);
     const chatViews: SessionView[] = [];
     // Key project groups by full cwd (not basename) so two different paths that
     // share a final segment don't collapse into one group.
@@ -142,7 +138,7 @@ export function Sidebar() {
       g.views.push(v);
     }
     return { chats: chatViews, projects: [...projectMap.values()] };
-  }, [order, sessions, filter]);
+  }, [order, sessions]);
 
   const onClick = (meta: SessionMeta) => {
     // focusSession resumes (respawns backend + replays history) when the session
@@ -299,32 +295,17 @@ export function Sidebar() {
         >
           v{__APP_VERSION__}
         </button>
-        <button className="btn-new" onClick={() => setShowNew(true)}>
-          <Icon name="plus" size={15} />
-          {t('sidebar.newSession')}
-        </button>
       </div>
 
-      <div className="sidebar-filters">
-        <div className="seg">
-          {(['active', 'all', 'archived'] as const).map((st) => (
-            <button
-              key={st}
-              className={filter.status === st ? 'active' : ''}
-              onClick={() => setFilter({ status: st })}
-            >
-              {t(`sidebar.${st}`)}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="sidebar-search">
-        <Icon name="search" size={14} />
-        <input
-          placeholder={t('sidebar.searchPlaceholder')}
-          value={filter.query}
-          onChange={(e) => setFilter({ query: e.target.value })}
-        />
+      <div className="sidebar-actions">
+        <button className="sidebar-action" onClick={() => setShowNew(true)}>
+          <Icon name="edit" size={16} />
+          {t('sidebar.newChat')}
+        </button>
+        <button className="sidebar-action" onClick={() => setShowSearch(true)}>
+          <Icon name="search" size={16} />
+          {t('sidebar.search')}
+        </button>
       </div>
 
       <div className="session-list">
@@ -426,6 +407,17 @@ export function Sidebar() {
       </div>
 
       {showNew && <NewSessionDialog onClose={() => setShowNew(false)} />}
+      {showSearch && (
+        <SearchDialog
+          onClose={() => setShowSearch(false)}
+          onNewChat={() => void createChatSession()}
+          onOpenFolder={() => setShowNew(true)}
+          onOpenSettings={() => {
+            setSettingsTab('general');
+            setShowSettings(true);
+          }}
+        />
+      )}
       {showSettings && (
         <SettingsDialog initialTab={settingsTab} onClose={() => setShowSettings(false)} />
       )}

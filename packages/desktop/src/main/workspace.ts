@@ -105,6 +105,40 @@ export async function saveClipboardImage(
   }
 }
 
+/** File-type filters for the "Save image as" dialog, keyed by mime type. */
+const IMAGE_SAVE_FILTERS: Record<string, Electron.FileFilter[]> = {
+  'image/png': [{ name: 'PNG 图片', extensions: ['png'] }],
+  'image/svg+xml': [{ name: 'SVG 矢量图', extensions: ['svg'] }],
+};
+
+/**
+ * Prompt a native "Save As" dialog and write the given base64 `dataB64` to the
+ * chosen path. Used by the Mermaid "download" button to export the rendered
+ * diagram (PNG or SVG). Returns the saved path, or null when the user cancels or
+ * the write fails.
+ */
+export async function saveImageAs(
+  parent: BrowserWindow | undefined,
+  defaultName: string,
+  mimeType: string,
+  dataB64: string,
+): Promise<string | null> {
+  try {
+    if (!dataB64) return null;
+    const filters = IMAGE_SAVE_FILTERS[mimeType] ?? [{ name: '所有文件', extensions: ['*'] }];
+    const result = await dialog.showSaveDialog(parent!, {
+      title: '保存图表',
+      defaultPath: defaultName,
+      filters,
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, Buffer.from(dataB64, 'base64'));
+    return result.filePath;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Read a bitmap from the OS clipboard as base64 PNG. Electron's main-process
  * clipboard is far more reliable than the renderer's `ClipboardEvent` on
