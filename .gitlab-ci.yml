@@ -141,10 +141,17 @@ release-desktop-win:
     - npm pkg set version="$env:NEW_VERSION"
     - npm run pack:win
     - $exePath = "release\$env:NEW_VERSION\EasyCode-v$env:NEW_VERSION-$env:BUILD_TIME.exe"
-    - Write-Host "Uploading $exePath to GCS"
-    # 非交互式 shell executor 会话不继承登录终端的用户级 PATH，gcs 不在其中，
-    # 因此用完整路径直接调用。整行加引号：裸 `&` 在 YAML 里是锚点语法，会导致解析报错。
-    - '& "D:\projects\gcs_tool\gcs.exe" upload $exePath'
+    - $absExePath = (Resolve-Path $exePath).Path
+    - Write-Host "Uploading $absExePath to GCS"
+    # gcs.exe 跑成本机 HTTP 服务（127.0.0.1:4278），上传就是一次 JSON POST——
+    # 不依赖 gcs 自己的本地配置文件，绕开了 SYSTEM 服务账户读不到用户级
+    # gcs config 的问题。用 Invoke-RestMethod（不是 curl 别名 Invoke-WebRequest）
+    # 因为 PowerShell 5.1 的 curl 参数不兼容真正的 curl。
+    - |
+      $body = @{ file_path = $absExePath; name = "EasyCode-v$env:NEW_VERSION-win.exe" } | ConvertTo-Json
+      $result = Invoke-RestMethod -Uri "http://127.0.0.1:4278/upload" -Method Post -ContentType "application/json" -Body $body
+      Write-Host "Uploaded: $($result | ConvertTo-Json -Compress)"
+      if (-not $result.ok) { throw "gcs upload failed" }
   artifacts:
     paths:
       - packages/desktop/release/**/*.exe
