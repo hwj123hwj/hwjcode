@@ -38,6 +38,7 @@
 | [feishu-integration](wiki/feishu-integration.md) | entity | Feishu / Lark Bot Integration - WebSocket long-polling gateway |
 | [nl-command-dispatch](wiki/nl-command-dispatch.md) | concept | Natural Language Command Dispatch — NL keyword → slash command rewrite (3 mechanisms) |
 | [esbuild-stale-js-bug](wiki/esbuild-stale-js-bug.md) | concept | Critical build trap — esbuild ships stale .js artifacts from src/ instead of .ts source |
+| [mimo-assistant](wiki/mimo-assistant.md) | entity | MiMo AI Assistant — Xiaomi's 1T parameter model, code analysis & knowledge management |
 
 ### Classes / Components
 

@@ -1,6 +1,6 @@
 ---
 type: entity
-date: 2026-06-21
+date: 2026-07-01
 tags: [self-update, npm, tool, feishu, restart, cache]
 sources: [source-hwjcode-rename, source-version-build-bugs-2026-06-21]
 ---
@@ -56,22 +56,21 @@ SelfUpdateTool 仅在飞书网关模式下动态注册，支持从 npm 安装最
 
 ## Known Issues
 
-### npm 缓存导致安装旧版本
+### ~~npm 缓存导致安装旧版本~~ (已修复 ✅ 2026-07-01)
 
 > 详见 [[source-version-build-bugs-2026-06-21]] Bug 3。
 
-外挂脚本执行 `npm install -g hwjcode@latest` 时未清除 npm cache。npm 可能直接使用本地缓存的旧版本 tarball，导致"更新"后实际版本未变。
+**历史问题**：外挂脚本执行 `npm install -g hwjcode@latest` 时未清除 npm cache。npm 可能直接使用本地缓存的旧版本 tarball，导致"更新"后实际版本未变。
 
-**当前缓解**：用户手动执行自更新前可先运行 `npm cache clean --force`。
+**修复方案**（2026-07-01）：
+- npm 模式的 install 参数追加 `--prefer-online`，强制联网校验，绕过 npm cache
+- 安装后新增版本验证步骤：对比 `npm info <pkg> version`（registry 最新版本）与 `<pkg> --version`（本地安装版本），不匹配时记录 WARNING 日志
 
-**建议修复方向**：
-- 外挂脚本在 install 前执行 `spawnSync('npm', ['cache', 'clean', '--force'])`
-- 或使用 `npm install -g hwjcode@latest --prefer-online` 强制联网校验
-- 安装后验证版本号
+### ~~外挂脚本无版本验证~~ (已修复 ✅ 2026-07-01)
 
-### 外挂脚本无版本验证
+**历史问题**：install 成功后仅检查 `exitCode === 0`，不验证实际安装的版本是否为目标版本。
 
-install 成功后仅检查 `exitCode === 0`，不验证实际安装的版本是否为目标版本。建议添加 `hwjcode --version` 验证步骤。
+**修复方案**：npm 模式安装后执行版本验证，日志写入 `~/.easycode-user/cli-debug.log`。
 
 ### Login Shell PATH 不一致
 

@@ -8,6 +8,23 @@
 - Created [[opt-in-tools]]: 按需启用机制页面，6 工具默认禁用，需 coreTools 配置
 - Commit: `de8cacc4` (merge PR #4), `50fd5aaf` (fix opt-in prompt cleanup bugs)
 
+## [2026-06-26] feat | MiMo Assistant Documentation
+
+Added documentation for MiMo AI Assistant identity and capabilities.
+
+### Pages Created
+- `wiki/mimo-assistant.md` — MiMo-v2.5-pro identity, capabilities, working style, recent activities, and development rules
+
+### Pages Updated
+- `index.md` — Added mimo-assistant entry to Entities section
+
+### Key Information Documented
+- Identity: MiMo-v2.5-pro, 1T parameters, 1M context window, developed by Xiaomi MiMo Team
+- Capabilities: Code analysis, bug detection, knowledge management, TDD, cross-platform support
+- Working style: Chinese communication, file verification before editing, specific test execution
+- Recent activities: OpenCliTool hint message fix (2026-06-26), commit analysis (2026-06-25)
+- Development rules: TDD for CLI/Core, file verification, specific testing, knowledge base updates, git hygiene
+
 ## [2026-06-21] ingest | CLI 版本锁死 & 自定义模型压缩 token=0 & 自更新缓存问题
 
 从对话中提取三个互相关联的 Bug：esbuild define 将根 package.json 版本烙入 bundle 导致版本号锁死、DeepVServerAdapter.countTokens 对自定义模型返回 0 导致压缩失效、self-update 外挂脚本未清除 npm cache。

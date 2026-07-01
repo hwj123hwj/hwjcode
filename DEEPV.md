@@ -109,6 +109,7 @@ Easy Code (Monorepo)
 - 用户要求交流时：1) 不使用浮夸的赞美和认同；2) 保持独立思辨能力，对用户的说法进行批判性判断，不盲从（用户说的不一定都对）；3) 用词严谨专业，不使用网络用语。
 - 始终使用中文进行交流。
 - 在 Easy Code 项目中提交代码时，不要自动提升 package.json 版本号。只有当用户明确要求提升版本号时才提升，否则保持版本号不变。
+- hwjcode 发版推 tag 时禁止用 git push --tags 批量推送。GitHub Actions 限制：一次 push 超过 3 个 tag 不会创建任何事件，会导致 CI/CD 不触发。正确做法：先 git push origin master 推分支，再 git push origin <tag> 单独推目标 tag。
 
 ## Easy Code Added Memories
 - DeepV Code → Easy Code 品牌改名时，MCP OAuth 相关的 "Gemini" 标识符必须保留不改——因为对外需以 Gemini 身份才能被第三方 OAuth 服务授权识别（对方系统只认 Gemini）。品牌改名只针对用户可见的文案提示，不动这类对外身份标识符。
