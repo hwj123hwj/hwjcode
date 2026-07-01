@@ -142,7 +142,9 @@ release-desktop-win:
     - npm run pack:win
     - $exePath = "release\$env:NEW_VERSION\EasyCode-v$env:NEW_VERSION-$env:BUILD_TIME.exe"
     - Write-Host "Uploading $exePath to GCS"
-    - gcs upload $exePath
+    # 非交互式 shell executor 会话不继承登录终端的用户级 PATH，gcs 不在其中，
+    # 因此用完整路径直接调用。
+    - & "C:\Users\cm\.local\bin\gcs.exe" upload $exePath
   artifacts:
     paths:
       - packages/desktop/release/**/*.exe
