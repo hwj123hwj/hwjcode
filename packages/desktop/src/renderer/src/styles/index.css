@@ -1369,6 +1369,10 @@ select {
   flex-direction: column;
   align-items: flex-start;
   white-space: normal;
+  /* Constrain the column so its children (chiefly `.md`) can't push it wider
+     than the transcript and spill a horizontal scrollbar into `.pane-body`. */
+  min-width: 0;
+  max-width: 100%;
 }
 .msg-user-row {
   display: flex;
@@ -1959,6 +1963,20 @@ select {
 }
 
 /* markdown */
+.md {
+  /* `.md` is a flex child of `.msg-assistant` (align-items: flex-start), so its
+     default `min-width: auto` lets it grow to its content's min-content width and
+     overflow the 820px `.transcript`. That overflow leaks to `.pane-body`, whose
+     `overflow-y: auto` makes the horizontal axis compute to `auto` too — hence a
+     stray horizontal scrollbar. `min-width: 0` lets it shrink back to the
+     container; `overflow-wrap: anywhere` (inherited by p/li/td/inline-code/links)
+     keeps long URLs and tokens from re-inflating min-content. Wide code blocks,
+     tables and mermaid diagrams then scroll inside their own overflow-x:auto
+     containers instead of stretching the pane. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 .md p {
   margin: 0 0 12px;
 }
