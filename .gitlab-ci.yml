@@ -133,7 +133,9 @@ release-desktop-win:
     - $env:NEW_VERSION = $CI_COMMIT_TAG -replace '^desktop-win-release-v', ''
     - npm run bundle
     - cd packages/desktop
-    - npm version "$env:NEW_VERSION" --no-git-tag-version --force
+    # npm version 在版本号未变化时会报错退出（Version not changed）——用
+    # npm pkg set 代替，同版本重跑（例如重试同一个 tag）也不会失败。
+    - npm pkg set version="$env:NEW_VERSION"
     - npm run pack:win
   artifacts:
     paths:
