@@ -265,11 +265,14 @@ function bootstrap(): void {
     // `easycode --acp` backend inherits the user's shell-configured env vars
     // (API keys, tool paths, nvm/pyenv, etc.) even when launched from Finder/Dock.
     ensureFullEnvFromLoginShell();
-    // Windows shows toast notifications under this AppUserModelID; without it
-    // the turn-complete notifications either don't appear or show as an
-    // unbranded "electron.app.…" sender. Must match electron-builder.yml's
-    // `appId`.
-    if (process.platform === 'win32') app.setAppUserModelId('ai.deepvlab.easycode.desktop');
+    // Windows resolves the taskbar icon (and pinning/grouping) through the
+    // AppUserModelID: it must match the AUMID electron-builder writes into the
+    // installed Start-Menu shortcut, which is the `appId` from
+    // electron-builder.yml. A mismatch orphans the running window from that
+    // shortcut, so the taskbar falls back to the generic Electron icon — and
+    // toast notifications lose their branding. Keep this string in sync with
+    // electron-builder.yml's `appId` (com.bot.easycode.desktop).
+    if (process.platform === 'win32') app.setAppUserModelId('com.bot.easycode.desktop');
     if (process.platform === 'darwin') {
       // Build the app menu explicitly so its first item reads "Easy Code" — the
       // default macOS menu shows "Electron" in dev/unpackaged runs regardless
