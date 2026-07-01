@@ -3,6 +3,12 @@ productName: Easy Code
 directories:
   output: release/${version}
   buildResources: build
+# We ship artifacts via GitLab CI, not electron-builder's own publish providers.
+# An empty array (not the "never" string, which crashes updateInfoBuilder's
+# computeChannelNames with "Cannot read properties of null (reading 'channel')"
+# on 26.x when building from a git tag) fully disables both the implicit
+# publish attempt and the latest.yml auto-update metadata generation.
+publish: []
 files:
   - out/**/*
   - package.json
