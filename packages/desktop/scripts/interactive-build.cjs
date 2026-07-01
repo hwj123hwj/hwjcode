@@ -65,6 +65,23 @@ function readPasswordFromKeychain(appleId) {
   }
 }
 
+// 当环境变量没有 APPLE_ID 时，从 Keychain 中自动发现 Apple ID
+// 查找 service=EC_APPLE_NOTARY 的条目，提取其账户名
+function findAppleIdFromKeychain() {
+  try {
+    const { execFileSync } = require('node:child_process');
+    // security find-generic-password -s EC_APPLE_NOTARY -g 会把 acct 打印到 stderr
+    const out = execFileSync('security', [
+      'find-generic-password', '-s', 'EC_APPLE_NOTARY', '-g'
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // stderr contains "acct"<blob>="xxx@xxx.com"
+    const match = out.match(/"acct"<blob>="([^"]+)"/);
+    return match ? match[1].trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 // 递归扫描 release 目录，返回实际生成的 .dmg 文件路径（相对项目根，按修改时间新→旧）。
 // 不再写死版本号/文件名，以实际产物为准。
 function findDmgFiles(releaseDir) {
@@ -96,6 +113,13 @@ async function main() {
     let applePassword = (process.env.APPLE_APP_SPECIFIC_PASSWORD || process.env.APPLE_ID_PASSWORD || '').trim();
     const appleTeamId = (process.env.APPLE_TEAM_ID || '6LUTP4CUH2').trim();
 
+    // 在 env 缺失时，主动从 Keychain 发现凭证（兼容 Electron 启动无 shell profile 的场景）
+    if (!appleId) {
+      const keychainAppleId = findAppleIdFromKeychain();
+      if (keychainAppleId) {
+        appleId = keychainAppleId;
+      }
+    }
     if (appleId && !applePassword) {
       applePassword = readPasswordFromKeychain(appleId);
     }

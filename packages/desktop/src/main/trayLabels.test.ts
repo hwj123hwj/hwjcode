@@ -30,8 +30,8 @@ describe('pickTrayLang', () => {
 
 describe('trayLabels', () => {
   it('returns localized Open/Quit labels', () => {
-    expect(trayLabels('zh')).toMatchObject({ open: '打开', quit: '退出' });
-    expect(trayLabels('en')).toMatchObject({ open: 'Open', quit: 'Quit' });
+    expect(trayLabels('zh')).toMatchObject({ open: '打开 Easy Code', quit: '退出' });
+    expect(trayLabels('en')).toMatchObject({ open: 'Open Easy Code', quit: 'Exit' });
   });
 
   it('keeps the brand name as the tooltip in both languages', () => {

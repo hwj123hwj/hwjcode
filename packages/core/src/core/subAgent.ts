@@ -21,9 +21,10 @@ import { SubAgentAdapter } from './subAgentAdapter.js';
 import { TaskPrompts } from './taskPrompts.js';
 import { SessionManager } from '../services/sessionManager.js';
 import { CompressionService } from '../services/compressionService.js';
-import { SceneManager, SceneType } from './sceneManager.js';
+import { SceneType } from './sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
 import { AgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
+import { isCustomModel } from '../types/customModel.js';
 
 // ─── SubAgent 超时与内存保护常量 ───
 
@@ -323,12 +324,53 @@ export class SubAgent {
    * 构建子agent固定系统提示（不包含任务描述）
    */
   private buildSystemPrompt(): string {
+    let systemPrompt: string;
     if (this.agentDefinition) {
-      return this.agentDefinition.systemPrompt;
+      systemPrompt = this.agentDefinition.systemPrompt;
+    } else {
+      const availableTools = this.getAvailableToolNames();
+      systemPrompt = TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
     }
 
-    const availableTools = this.getAvailableToolNames();
-    return TaskPrompts.buildSubAgentFixedSystemPrompt(availableTools, this.context.maxTurns);
+    return systemPrompt + this.buildModelIdContext();
+  }
+
+  /**
+   * 构建模型身份说明，追加到子 Agent 系统提示末尾。
+   *
+   * 让子 Agent 永远知道自己实际运行在哪个模型上，使其被问到"你是什么模型"时能如实
+   * 回答（与主会话始终带 `Current Model:` 行的行为对齐），也便于真机验证模型解析是否
+   * 正确。实际模型 = per-agent override（modelOverrides.codeExpert / .verification）
+   * 优先，否则继承当前会话模型 config.getModel()。
+   *
+   * - 有显式 override → 注入 override 文案（强调"用户为该子代理显式配置"）。
+   * - 无 override 但会话模型可具名 → 注入"继承会话"文案。
+   * - 模型为 'auto' 或空（由服务端在请求时动态决定，无法如实命名）→ 不注入，避免谎报。
+   */
+  private buildModelIdContext(): string {
+    // 子 Agent 实际运行模型：override 优先，否则继承会话模型。
+    const effectiveModel = this.modelOverride || this.config.getModel();
+
+    // 'auto'/空 表示服务端动态决定，无法如实命名 → 不注入。
+    if (!effectiveModel || effectiveModel === 'auto') {
+      return '';
+    }
+
+    // 解析展示用的模型名：自定义模型用其真实 modelId，内置模型直接用 id。
+    let modelName = effectiveModel;
+    if (isCustomModel(effectiveModel)) {
+      const customConfig = this.config.getCustomModelConfig(effectiveModel);
+      if (customConfig?.modelId) {
+        modelName = customConfig.modelId;
+      }
+    }
+
+    // 有显式 override 用更强的 override 文案；否则用继承会话模型的文案。
+    const noticeKey = this.modelOverride
+      ? 'subagent.model.override.notice'
+      : 'subagent.model.inherited.notice';
+
+    return `\n\n---\n\n${t(noticeKey, { model: modelName })}`;
   }
 
   /**
@@ -940,7 +982,8 @@ export class SubAgent {
 
     try {
       const currentHistory = this.subAgentChat.getHistory(true); // 使用精选历史进行压缩
-      const compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 尊重用户在 /config 中自定义的压缩模型；未设置时回退到场景默认值。
+      const compressionModel = this.config.getCompressionModel();
       const historyModel = this.config.getModel(); // subAgent历史使用的模型，用于测算长度
 
       // 使用压缩服务检查并执行压缩

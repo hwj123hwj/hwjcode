@@ -14,17 +14,17 @@
 
 :root {
   /* warm charcoal dark theme (default) */
-  --bg: #262624;
-  --bg-elev: #2f2e2c;
-  --bg-raised: #383735;
-  --bg-sunken: #1e1d1b;
-  --bg-hover: rgba(255, 255, 255, 0.045);
-  --bg-active: rgba(255, 255, 255, 0.07);
+  --bg: #1F1F1E;
+  --bg-elev: #1E1E1D;
+  --bg-raised: #1F1F1E;
+  --bg-sunken: #121212;
+  --bg-hover: #121212;
+  --bg-active: #121212;
   --border: #3a3937;
-  --border-strong: #4d4b48;
-  --text: #f3f1ea;
-  --text-dim: #b3b0a6;
-  --text-faint: #807d74;
+  --border-strong: #565552;
+  --text: #FFFFFF;
+  --text-dim: #C2C1B6;
+  --text-faint: #97958C;
 
   --accent: #d97757;
   --accent-hover: #e08a6e;
@@ -40,6 +40,8 @@
   --amber-weak: rgba(214, 169, 74, 0.14);
   --blue: #74a3ef;
   --blue-weak: rgba(116, 163, 239, 0.14);
+  /* Brand/logo light purple (sampled from the logo gradient, ~#8E89FE). Theme-independent. */
+  --logo-purple: #8E89FE;
 
   --radius-lg: 14px;
   --radius: 10px;
@@ -56,21 +58,59 @@
   --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.34), 0 24px 56px rgba(0, 0, 0, 0.5);
 
   --ring: 0 0 0 3px var(--accent-weak);
+
+  /* Specific additions */
+  --bg-btn: #353534;
+  --bg-btn-hover: #3F3F3E;
+  --bg-avatar: #C3C2B7;
+  --text-avatar: #1E1E1D;
+  --color-username: #C3C2B7;
+  --bg-user-profile: #1E1E1D;
+  --bg-user-msg: #121212;
+
+  --border-input: #565552;
+  --border-input-hover: #8A8984;
+  --border-input-focus: #d97757;
+  --bg-prompt-input: #1F1F1E;
+  --bg-input-field: #1F1F1E;
+
+  --bg-session-hover: #121212;
+  --bg-session-active: #121212;
+  --border-session-active: transparent;
+
+  --bg-settings-hover: #353534;
+  --bg-settings-active: #3F3F3E;
+
+  --toggle-bg: #3E3D3A;
+  --toggle-active-bg: #387CE5;
+
+  --prompt-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --prompt-shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.35);
+  --prompt-shadow-focus: 0 8px 30px rgba(0, 0, 0, 0.35);
+
+  --bg-chip-accent: #353534;
+  --border-chip-accent: #565552;
+  --color-chip-accent: #FFFFFF;
+
+  --bg-btn-primary: #FFFFFF;
+  --border-btn-primary: #FFFFFF;
+  --color-btn-primary: #1F1F1E;
+  --bg-btn-primary-hover: #EFEEEB;
 }
 
 /* Light palette — explicit user choice. */
 :root[data-theme='light'] {
-  --bg: #ffffff;
-  --bg-elev: #faf9f5;
-  --bg-raised: #ffffff;
-  --bg-sunken: #f3f1ea;
-  --bg-hover: rgba(20, 18, 14, 0.04);
-  --bg-active: rgba(20, 18, 14, 0.06);
-  --border: #e9e6dd;
-  --border-strong: #d6d2c6;
-  --text: #1f1e1c;
-  --text-dim: #6a685f;
-  --text-faint: #9b988d;
+  --bg: #F8F8F6;
+  --bg-elev: #F7F7F5;
+  --bg-raised: #FFFFFF;
+  --bg-sunken: #EFEEEB;
+  --bg-hover: #EFEEEB;
+  --bg-active: #EFEEEB;
+  --border: #D3D3D1;
+  --border-strong: #D3D3D1;
+  --text: #0B0B0B;
+  --text-dim: #7B7974;
+  --text-faint: #7B7974;
 
   --accent: #c25a3c;
   --accent-hover: #b04e32;
@@ -90,22 +130,60 @@
   --shadow-sm: 0 1px 2px rgba(20, 18, 14, 0.06);
   --shadow: 0 2px 6px rgba(20, 18, 14, 0.06), 0 8px 24px rgba(20, 18, 14, 0.09);
   --shadow-lg: 0 8px 16px rgba(20, 18, 14, 0.08), 0 24px 56px rgba(20, 18, 14, 0.16);
+
+  /* Specific additions */
+  --bg-btn: #FFFFFF;
+  --bg-btn-hover: #EFEEEB;
+  --bg-avatar: #EFEEEB;
+  --text-avatar: #0B0B0B;
+  --color-username: #0B0B0B;
+  --bg-user-profile: #F7F7F6;
+  --bg-user-msg: #EFEEEB;
+
+  --border-input: #D3D3D1;
+  --border-input-hover: #B0B0AE;
+  --border-input-focus: #c25a3c;
+  --bg-prompt-input: #FFFFFF;
+  --bg-input-field: #FFFFFF;
+
+  --bg-session-hover: #EFEEEB;
+  --bg-session-active: #EFEEEB;
+  --border-session-active: transparent;
+
+  --bg-settings-hover: #F0F0EF;
+  --bg-settings-active: #E3E3E2;
+
+  --toggle-bg: #D2D2CE;
+  --toggle-active-bg: #1970e6;
+
+  --prompt-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --prompt-shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.08);
+  --prompt-shadow-focus: 0 8px 30px rgba(0, 0, 0, 0.08);
+
+  --bg-chip-accent: #EFEEEB;
+  --border-chip-accent: #D3D3D1;
+  --color-chip-accent: #0B0B0B;
+
+  --bg-btn-primary: #0B0B0B;
+  --border-btn-primary: #0B0B0B;
+  --color-btn-primary: #FFFFFF;
+  --bg-btn-primary-hover: #2E2E2C;
 }
 
 /* Light palette — system mode (no explicit choice) following the OS preference. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']):not([data-theme='light']) {
-    --bg: #ffffff;
-    --bg-elev: #faf9f5;
-    --bg-raised: #ffffff;
-    --bg-sunken: #f3f1ea;
-    --bg-hover: rgba(20, 18, 14, 0.04);
-    --bg-active: rgba(20, 18, 14, 0.06);
-    --border: #e9e6dd;
-    --border-strong: #d6d2c6;
-    --text: #1f1e1c;
-    --text-dim: #6a685f;
-    --text-faint: #9b988d;
+    --bg: #F8F8F6;
+    --bg-elev: #F7F7F5;
+    --bg-raised: #FFFFFF;
+    --bg-sunken: #EFEEEB;
+    --bg-hover: #EFEEEB;
+    --bg-active: #EFEEEB;
+    --border: #D3D3D1;
+    --border-strong: #D3D3D1;
+    --text: #0B0B0B;
+    --text-dim: #7B7974;
+    --text-faint: #7B7974;
 
     --accent: #c25a3c;
     --accent-hover: #b04e32;
@@ -125,6 +203,44 @@
     --shadow-sm: 0 1px 2px rgba(20, 18, 14, 0.06);
     --shadow: 0 2px 6px rgba(20, 18, 14, 0.06), 0 8px 24px rgba(20, 18, 14, 0.09);
     --shadow-lg: 0 8px 16px rgba(20, 18, 14, 0.08), 0 24px 56px rgba(20, 18, 14, 0.16);
+
+    /* Specific additions */
+    --bg-btn: #FFFFFF;
+    --bg-btn-hover: #EFEEEB;
+    --bg-avatar: #EFEEEB;
+    --text-avatar: #0B0B0B;
+    --color-username: #0B0B0B;
+    --bg-user-profile: #F7F7F6;
+    --bg-user-msg: #EFEEEB;
+
+    --border-input: #D3D3D1;
+    --border-input-hover: #B0B0AE;
+    --border-input-focus: #c25a3c;
+    --bg-prompt-input: #FFFFFF;
+    --bg-input-field: #FFFFFF;
+
+    --bg-session-hover: #EFEEEB;
+    --bg-session-active: #EFEEEB;
+    --border-session-active: transparent;
+
+    --bg-settings-hover: #F0F0EF;
+    --bg-settings-active: #E3E3E2;
+
+    --toggle-bg: #D2D2CE;
+    --toggle-active-bg: #1970e6;
+
+    --prompt-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    --prompt-shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.08);
+    --prompt-shadow-focus: 0 8px 30px rgba(0, 0, 0, 0.08);
+
+    --bg-chip-accent: #EFEEEB;
+    --border-chip-accent: #D3D3D1;
+    --color-chip-accent: #0B0B0B;
+
+    --bg-btn-primary: #0B0B0B;
+    --border-btn-primary: #0B0B0B;
+    --color-btn-primary: #FFFFFF;
+    --bg-btn-primary-hover: #2E2E2C;
   }
 }
 
@@ -275,7 +391,8 @@ select {
   z-index: 2;
   -webkit-app-region: no-drag;
 }
-[data-platform='darwin'] .sidebar-collapse-btn {
+[data-platform='darwin'] .sidebar-collapse-btn,
+[data-platform='win32'] .sidebar-collapse-btn {
   top: 38px;
 }
 .sidebar-head {
@@ -283,20 +400,20 @@ select {
   padding: 14px 14px 6px;
   -webkit-app-region: drag;
 }
-/* macOS uses titleBarStyle:'hiddenInset', so the red/yellow/green traffic-light
-   buttons float over the top-left of the sidebar. Push the header content down
-   so the logo/brand clears them. ~22px extra lands the brand just below the
-   controls; the draggable header still lets users move the window. */
-[data-platform='darwin'] .sidebar-head {
+/* macOS uses titleBarStyle:'hiddenInset' and Windows uses titleBarStyle:'hidden',
+   so we push the header content down on both platforms to clear the system buttons and drag area. */
+[data-platform='darwin'] .sidebar-head,
+[data-platform='win32'] .sidebar-head {
   padding-top: 36px;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 600;
-  font-size: 14px;
-  letter-spacing: -0.01em;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.025em;
   padding: 4px 4px 12px;
 }
 .brand-mark {
@@ -306,6 +423,19 @@ select {
   object-fit: cover;
   box-shadow: var(--shadow-sm);
   flex: none;
+  /* 默认是深色模式，使用智能反色将黑色 Logo 变成高雅柔和的亮白色 */
+  filter: invert(0.9) opacity(0.85);
+  transition: filter 0.25s ease;
+}
+
+/* 浅色模式下，恢复为原本准备的黑色 Logo */
+:root[data-theme='light'] .brand-mark {
+  filter: none;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) .brand-mark {
+    filter: none;
+  }
 }
 .brand-version {
   margin-top: -8px;
@@ -317,6 +447,17 @@ select {
   color: var(--text-dim);
   letter-spacing: 0.02em;
   -webkit-app-region: no-drag;
+  /* Rendered as a <button> so it opens Settings → 关于; strip the native button
+     chrome so it still looks like the plain version label it replaced. */
+  display: block;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.brand-version:hover {
+  color: var(--text);
 }
 .btn-new {
   -webkit-app-region: no-drag;
@@ -476,11 +617,11 @@ select {
   transition: background 0.12s;
 }
 .session-item:hover {
-  background: var(--bg-hover);
+  background: var(--bg-session-hover, var(--bg-hover));
 }
 .session-item.active {
-  background: var(--accent-weak);
-  border-color: var(--accent-border);
+  background: var(--bg-session-active, var(--accent-weak));
+  border-color: var(--border-session-active, var(--accent-border));
 }
 .session-row {
   display: flex;
@@ -603,9 +744,19 @@ select {
   top: 7px;
   display: none;
   gap: 2px;
+  /* Semi-opaque background so action buttons don't visually merge with the
+     time text underneath when they overlap on narrow chat cards. */
+  background: var(--bg-elev);
+  border-radius: var(--radius-xs);
+  padding: 1px;
 }
 .session-item:hover .session-actions {
   display: flex;
+}
+/* On chat cards (single-line, compact padding) the hover actions overlap the
+   right-aligned time. Hide the time while hovering so icons have clear space. */
+.session-item.chat-item:hover .session-time {
+  visibility: hidden;
 }
 .icon-btn {
   border: none;
@@ -646,14 +797,15 @@ select {
   align-items: center;
   gap: 9px;
   font-size: 12.5px;
-  color: var(--text-dim);
+  background: var(--bg-user-profile, transparent);
+  color: var(--color-username, var(--text-dim));
 }
 .avatar {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: linear-gradient(150deg, var(--accent), var(--accent-hover));
-  color: var(--accent-text);
+  background: var(--bg-avatar, linear-gradient(150deg, var(--accent), var(--accent-hover)));
+  color: var(--text-avatar, var(--accent-text));
   display: grid;
   place-items: center;
   font-size: 11px;
@@ -706,6 +858,8 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
 }
 .toolbar-status {
   display: inline-flex;
@@ -713,10 +867,21 @@ select {
   gap: 6px;
   font-size: 12px;
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 .toolbar .chip,
 .toolbar button {
   -webkit-app-region: no-drag;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.toolbar .btn-text {
+  display: inline;
+}
+@media (max-width: 640px) {
+  .toolbar .btn-text {
+    display: none;
+  }
 }
 
 .workspace {
@@ -797,16 +962,118 @@ select {
 }
 .msg-user {
   position: relative;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 15px;
+  background: var(--bg-user-msg, var(--bg-elev));
+  border: none;
+  border-radius: 18px;
+  padding: 10px 16px;
   white-space: pre-wrap;
   word-break: break-word;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
+  margin-left: auto;
+  width: fit-content;
+  max-width: 75%;
 }
 .msg-assistant {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   white-space: normal;
+}
+.msg-user-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 22px;
+}
+.msg-user-row.editing {
+  align-items: stretch;
+}
+.msg-user-row.editing .msg-user {
+  width: 100%;
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-user-edit-input {
+  width: 100%;
+  min-height: 56px;
+  max-height: 250px;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.msg-user-edit-input:focus {
+  border-color: var(--border-input-focus, var(--accent));
+}
+.msg-user-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.msg-user-edit-actions .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  height: 26px;
+  font-weight: 500;
+  border-radius: 6px;
+}
+.msg-user-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  user-select: none;
+}
+.msg-user-row:hover .msg-user-meta {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg-assistant-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  user-select: none;
+}
+.msg-assistant:hover .msg-assistant-meta {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg-meta-time {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.msg-meta-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+.msg-meta-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 .typing-dots {
   display: inline-flex;
@@ -921,6 +1188,119 @@ select {
 }
 
 /* tool call card */
+/* ── grouped tool calls (collapsible runs) ───────────────────────────────── */
+.tool-group {
+  margin-bottom: 12px;
+}
+/* Layer 0: "已运行 X 条命令" run header. */
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 5px 2px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: color 0.14s;
+}
+.tool-group-head:hover {
+  color: var(--text-dim);
+}
+.tool-group-ico {
+  flex: none;
+  color: var(--text-faint);
+}
+.tool-group-label {
+  flex: 0 1 auto;
+}
+.tool-group-chevron {
+  color: var(--text-faint);
+  display: inline-grid;
+  place-items: center;
+}
+/* Slight indent so grouped summaries read as children of the run header. */
+.tool-group-items {
+  display: flex;
+  flex-direction: column;
+  padding-left: 8px;
+  margin-left: 8px;
+  border-left: 1px solid var(--border);
+}
+/* Layer 1: a weak single-line summary for one tool call. */
+.tool-entry {
+  display: flex;
+  flex-direction: column;
+}
+.tool-entry-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 2px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  text-align: left;
+  border-radius: var(--radius-xs);
+  transition: color 0.14s;
+}
+.tool-entry-line:hover {
+  color: var(--text-dim);
+}
+.tool-entry-ico {
+  flex: none;
+  color: var(--text-faint);
+}
+.tool-entry-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-entry-spin {
+  flex: none;
+  color: var(--amber);
+}
+/* Flag a failed tool call without the heavy boxed accent. */
+.tool-entry.failed .tool-entry-ico,
+.tool-entry.failed .tool-entry-text {
+  color: var(--red);
+}
+.tool-entry-chevron {
+  flex: none;
+  color: var(--text-faint);
+  display: inline-grid;
+  place-items: center;
+}
+/* Layer 2: the nested full ToolCall detail. Its own head is redundant with the
+   summary line above, so hide it — the line is the single header. */
+.tool-entry-detail {
+  margin: 2px 0 8px;
+}
+.tool-entry-detail > .tool > .tool-head {
+  display: none;
+}
+.tool-entry-detail > .tool {
+  margin-bottom: 0;
+  /* The status accent classes (.tool-completed/.tool-failed/...) set a 2px
+     `border-left` — transparent for completed — which, with the head hidden,
+     leaves the detail box's left edge invisible. Restore a normal 1px border so
+     the box is fully enclosed. */
+  border-left: 1px solid var(--border);
+}
+.tool-entry-detail > .tool:hover {
+  border-left-color: var(--border-strong);
+}
+.tool-entry-detail > .tool > .tool-body {
+  border-top: none;
+}
+
 .tool {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1442,7 +1822,7 @@ select {
 
 /* ── prompt bar ────────────────────────────────────────────────────────── */
 .promptbar {
-  border-top: 1px solid var(--border);
+  border-top: none;
   padding: 12px 16px 14px;
   background: var(--bg);
 }
@@ -1477,12 +1857,12 @@ select {
   color: var(--text);
 }
 .chip.accent {
-  border-color: var(--accent-border);
-  color: var(--accent);
-  background: var(--accent-weak);
+  border-color: var(--border-chip-accent, var(--accent-border));
+  color: var(--color-chip-accent, var(--accent));
+  background: var(--bg-chip-accent, var(--accent-weak));
 }
 .chip.accent .ic {
-  color: var(--accent);
+  color: var(--color-chip-accent, var(--accent));
 }
 .chip.interactive {
   cursor: pointer;
@@ -1494,35 +1874,51 @@ select {
   color: var(--text-faint);
 }
 .chip select {
+  -webkit-appearance: none;
+  appearance: none;
   border: none;
-  background: transparent;
+  background-color: transparent;
   color: inherit;
   font-size: 12px;
   outline: none;
   cursor: pointer;
   max-width: 160px;
+  padding-right: 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%237B7974' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat !important;
+  background-position: right center !important;
+  background-size: 10px !important;
+}
+[data-theme='dark'] .chip select,
+:root:not([data-theme='light']) .chip select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2397958C' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
 }
 .chip select option {
-  color: var(--text);
-  background: var(--bg-raised);
+  color: var(--text) !important;
+  background-color: var(--bg-elev) !important;
 }
 .prompt-input-wrap {
   display: flex;
-  align-items: flex-end;
-  gap: 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  background: var(--bg-elev);
-  box-shadow: var(--shadow-sm);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  border: 1px solid var(--border-input, var(--border-strong));
+  border-radius: 20px;
+  padding: 10px 12px 8px 16px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+  box-shadow: var(--prompt-shadow, 0 2px 8px rgba(0, 0, 0, 0.04));
   transition: border-color 0.14s, box-shadow 0.14s;
 }
+.prompt-input-wrap:hover {
+  border-color: var(--border-input-hover, var(--border-strong));
+  box-shadow: var(--prompt-shadow-hover, 0 8px 30px rgba(0, 0, 0, 0.08));
+}
 .prompt-input-wrap:focus-within {
-  border-color: var(--accent-border);
-  box-shadow: var(--ring);
+  border-color: var(--border-input-hover, var(--border-strong)) !important;
+  box-shadow: var(--prompt-shadow-focus, 0 8px 30px rgba(0, 0, 0, 0.08)) !important;
 }
 .prompt-input {
-  flex: 1;
+  width: 100%;
   border: none;
   outline: none;
   resize: none;
@@ -1531,11 +1927,110 @@ select {
   font-family: inherit;
   font-size: 13.5px;
   max-height: 200px;
+  min-height: 70px;
   line-height: 1.55;
-  padding: 2px 0;
+  padding: 4px 4px 0;
 }
 .prompt-input::placeholder {
   color: var(--text-faint);
+}
+/* Footer toolbar inside the input box: controls split into a left group
+   (attach + permission) and a right group (context ring + model + send). */
+.prompt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.prompt-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Toolbar selects read as quiet, borderless pills until hovered, so the bar
+   stays calm; the accent (permission) keeps its colour but drops its fill. */
+.prompt-toolbar .chip {
+  border-color: transparent;
+  background: transparent;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.prompt-toolbar .chip:hover {
+  border-color: transparent;
+  background: var(--bg-hover);
+}
+.prompt-toolbar .chip.accent {
+  background: transparent;
+  border-color: transparent;
+}
+.prompt-toolbar .chip.accent:hover {
+  background: var(--bg-chip-accent, var(--accent-weak));
+}
+/* Context-usage ring + its hover tooltip. */
+.ctx-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  outline: none;
+  cursor: default;
+}
+.ctx-ring-track {
+  fill: none;
+  stroke: var(--bg-sunken);
+  stroke-width: 2.5;
+}
+.ctx-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.25s ease;
+}
+.ctx-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 50%;
+  transform: translate(50%, 4px);
+  min-width: 150px;
+  padding: 9px 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.14s, transform 0.14s, visibility 0.14s;
+  z-index: 9999;
+  pointer-events: none;
+}
+.ctx-ring:hover .ctx-tip,
+.ctx-ring:focus-visible .ctx-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(50%, 0);
+}
+.ctx-tip-title {
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--text);
+}
+.ctx-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  line-height: 1.7;
+}
+.ctx-tip-row > span:first-child {
+  color: var(--text-dim);
+}
+.ctx-tip-row > span:last-child {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 /* Attachment tray above the input: image thumbnails + file chips. */
 .prompt-attachments {
@@ -1624,7 +2119,7 @@ select {
   color: var(--accent-text);
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-sm);
+  border-radius: 50%;
   display: grid;
   place-items: center;
   flex: none;
@@ -1637,19 +2132,28 @@ select {
   opacity: 0.35;
   cursor: default;
 }
+/* Stop button: a solid black circular button with a white square glyph (mirrors
+   the round send button). Uses --text/--bg-elev so it stays high-contrast in both
+   themes — black-on-light, white-on-dark. */
 .btn-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--red);
-  background: var(--red-weak);
-  color: var(--red);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
+  border: none;
+  background: var(--text);
+  color: var(--bg-elev);
+  width: 32px;
   height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
   flex: none;
-  font-weight: 500;
-  font-size: 12.5px;
+  cursor: pointer;
+  transition: opacity 0.14s, background 0.14s;
+}
+.btn-stop:hover {
+  opacity: 0.85;
+}
+.btn-stop .ic {
+  /* Render the stop square as a solid (filled) glyph, not an outline. */
+  fill: currentColor;
 }
 .hint {
   font-size: 11px;
@@ -1688,6 +2192,48 @@ select {
 .mention-item.active,
 .mention-item:hover {
   background: var(--accent-weak);
+}
+
+/* slash-command autocomplete */
+.command-pop {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  width: 420px;
+  max-width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 40;
+  padding: 4px;
+}
+.command-item {
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius-xs);
+}
+.command-item.active,
+.command-item:hover {
+  background: var(--accent-weak);
+}
+.command-name {
+  font-family: var(--mono);
+  color: var(--text);
+}
+.command-desc {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── plan / tasks ──────────────────────────────────────────────────────── */
@@ -1750,104 +2296,83 @@ select {
   align-self: center;
   width: calc(100% - 32px);
   max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  z-index: 5;
+}
+/* Detail list — its own floating card above the pill. */
+.sticky-todo-card {
+  width: 100%;
+  max-height: 26vh;
+  overflow-y: auto;
+  padding: 6px 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  z-index: 5;
-  animation: todoSlideUp 0.22s ease-out;
+  /* Smooth fade/slide-in when the detail list expands (hover or pin), no jump. */
+  animation: todoContentFadeIn 0.18s ease-out;
 }
-.sticky-todo-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 12px;
-  cursor: pointer;
-  transition: background 0.15s ease;
+@keyframes todoContentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.sticky-todo-header:hover {
-  background: var(--bg-hover);
-}
-.sticky-todo-panel.expanded .sticky-todo-header {
-  border-bottom: 1px solid var(--border);
-}
-.sticky-todo-head-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.sticky-todo-icon {
-  color: var(--accent);
-  flex: none;
-}
-.sticky-todo-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-.sticky-todo-count {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.sticky-todo-head-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-faint);
-  flex: none;
-}
-.sticky-todo-bar {
-  width: 64px;
-  height: 4px;
-  background: var(--bg-sunken);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.sticky-todo-bar-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s ease;
-}
-.sticky-todo-chevron {
-  transition: transform 0.2s ease;
-}
-.sticky-todo-chevron.up {
-  transform: rotate(180deg);
-}
-.sticky-todo-content {
-  max-height: 26vh;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-.sticky-todo-content .todo-item-row {
+.sticky-todo-card .todo-item-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 4px 12px;
+  padding: 5px 12px;
 }
-.sticky-todo-content .todo-item-text {
+.sticky-todo-card .todo-item-text {
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--text);
 }
-.sticky-todo-content .todo-item-text.completed,
-.sticky-todo-content .todo-item-text.cancelled {
+.sticky-todo-card .todo-item-text.completed,
+.sticky-todo-card .todo-item-text.cancelled {
   color: var(--text-faint);
-  text-decoration: line-through;
 }
-.sticky-todo-content .todo-item-text.in_progress {
+.sticky-todo-card .todo-item-text.in_progress {
   color: var(--text);
   font-weight: 500;
+}
+/* Compact step pill — centered, rounded, with a spinner. */
+.sticky-todo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  animation: todoSlideUp 0.22s ease-out;
+}
+.sticky-todo-pill:hover {
+  background: var(--bg-hover);
+}
+.sticky-todo-pill-spinner {
+  color: var(--logo-purple);
+  flex: none;
+}
+.sticky-todo-pill-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 /* status checkbox */
 .sticky-todo-panel .todo-checkbox {
@@ -2175,16 +2700,56 @@ select {
   max-height: 320px;
 }
 .field-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-faint);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
   display: block;
-  margin: 14px 0 7px;
+  margin: 18px 0 8px;
 }
 .field-label:first-child {
   margin-top: 0;
+}
+/* Recent-project shortcuts in the New Session dialog. */
+.recent-projects {
+  margin-bottom: 8px;
+}
+.recent-projects-label {
+  margin-bottom: 6px;
+}
+/* Compact project-directory picker: the standard file-picker pattern — a path
+   input that takes most of the width with a small Browse button inline on the
+   right. Kept on one tight row so the section doesn't waste vertical space. */
+.dir-picker {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-input, var(--border-strong));
+  border-radius: 12px;
+  padding: 5px 6px 5px 12px;
+  background: var(--bg-prompt-input, var(--bg-elev));
+}
+.dir-picker-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 2px 0;
+}
+.dir-picker-input::placeholder {
+  color: var(--text-faint);
+}
+.dir-picker-browse {
+  flex: none;
+  padding: 5px 12px;
+  font-size: 12.5px;
 }
 
 /* ── settings · shared field rows (used by the settings sections) ─────────── */
@@ -2225,6 +2790,36 @@ select {
   border-left-color: var(--amber);
   background: var(--amber-weak);
   color: var(--amber);
+}
+/* 关于面板：VSCode 风格的版本/环境信息表 */
+.about-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.about-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.about-row + .about-row {
+  border-top: 1px solid var(--border);
+}
+.about-label {
+  flex: 0 0 auto;
+  min-width: 200px;
+  color: var(--text-dim);
+}
+.about-value {
+  flex: 1 1 auto;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-all;
+  user-select: text;
 }
 .saved-flag {
   display: inline-flex;
@@ -2364,19 +2959,19 @@ select {
   flex: 1;
 }
 .settings-nav-item:hover {
-  background: var(--bg-hover);
+  background: var(--bg-settings-hover, var(--bg-hover));
   color: var(--text);
 }
 .settings-nav-item:hover .ic {
-  color: var(--text-dim);
+  color: var(--text);
 }
 .settings-nav-item.active {
-  background: var(--accent-weak);
+  background: var(--bg-settings-active, var(--accent-weak));
   color: var(--text);
   font-weight: 500;
 }
 .settings-nav-item.active .ic {
-  color: var(--accent);
+  color: var(--text);
 }
 .settings-nav-foot {
   padding: 8px;
@@ -2427,17 +3022,22 @@ select {
   max-height: 60vh;
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elev);
+  border: 1px solid var(--border-input, var(--border-strong));
+  border-radius: 8px;
+  background: var(--bg-input-field, var(--bg-elev));
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
   resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.instructions-area:hover {
+  border-color: var(--border-input-hover, var(--border-strong));
 }
 .instructions-area:focus {
-  border-color: var(--accent-border);
+  border-color: #1970e6;
+  box-shadow: 0 0 0 1px #1970e6;
   outline: none;
 }
 .instructions-area:disabled {
@@ -2532,11 +3132,31 @@ select {
   top: 8px;
   right: 8px;
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
 }
 .cm-input {
   width: 100%;
-  height: 22px;
+  height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: 8px;
+  background: var(--bg-input-field, var(--bg-elev));
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.cm-input:hover {
+  border-color: var(--border-input-hover, var(--border-strong));
+}
+.cm-input:focus {
+  border-color: #1970e6;
+  box-shadow: 0 0 0 1px #1970e6;
+}
+.cm-input::placeholder {
+  color: var(--text-faint);
 }
 .cm-check {
   display: flex;
@@ -2546,30 +3166,119 @@ select {
   font-size: 13px;
   color: var(--text);
 }
+.setting-toggle input[type="checkbox"],
+.cm-check input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  border-radius: 99px;
+  background: var(--toggle-bg);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  outline: none;
+  margin: 0;
+  vertical-align: middle;
+  flex: none;
+}
+.setting-toggle input[type="checkbox"]::after,
+.cm-check input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.setting-toggle input[type="checkbox"]:checked,
+.cm-check input[type="checkbox"]:checked {
+  background: var(--toggle-active-bg);
+}
+.setting-toggle input[type="checkbox"]:checked::after,
+.cm-check input[type="checkbox"]:checked::after {
+  transform: translateX(14px);
+}
+/* Multi-line inputs (MCP args / env / headers) — override the fixed-height
+ * single-line `.cm-input` so the textarea grows and can be resized. */
+textarea.cm-input {
+  height: auto;
+  min-height: 38px;
+  padding: 10px 12px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+/* Compact on/off switch used in the MCP server list row (left of edit/delete).
+ * Mirrors the VSCode plugin's per-server toggle so the two UIs feel the same. */
+.mcp-toggle {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 17px;
+  flex: none;
+}
+.mcp-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.mcp-toggle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s;
+}
+.mcp-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.mcp-toggle:has(input:checked)::before {
+  background: var(--accent);
+}
+.mcp-toggle:has(input:checked)::after {
+  transform: translateX(13px);
+}
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   border: 1px solid var(--border-strong);
-  background: var(--bg-elev);
+  background: var(--bg-btn, var(--bg-elev));
   color: var(--text);
-  border-radius: var(--radius-sm);
-  padding: 8px 15px;
+  border-radius: 99px;
+  padding: 8px 18px;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 13.5px;
   transition: border-color 0.14s, background 0.14s;
 }
 .btn:hover {
-  border-color: var(--accent-border);
+  border-color: var(--border-input-hover, var(--accent-border));
+  background: var(--bg-btn-hover, var(--bg-elev));
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+  background: var(--bg-btn-primary, var(--accent));
+  border-color: var(--border-btn-primary, var(--accent));
+  color: var(--color-btn-primary, var(--accent-text));
 }
 .btn.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--bg-btn-primary-hover, var(--accent-hover));
+  border-color: var(--bg-btn-primary-hover, var(--accent-hover));
 }
 .btn.danger {
   background: var(--red-weak);
@@ -2786,10 +3495,253 @@ select {
   border: 1px solid var(--border);
   color: var(--text-muted, var(--text-faint));
 }
+
+/* ── feishu authorization (owner + allowlist graphical config) ──────────── */
+.feishu-auth {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.feishu-auth-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted, var(--text-faint));
+  margin-bottom: 10px;
+}
+.feishu-auth-head .ic {
+  color: var(--text-faint);
+}
+.feishu-auth-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.feishu-auth-key {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, var(--text-faint));
+  flex: none;
+}
+.feishu-auth-allow-label {
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+.feishu-auth-owner-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.feishu-auth-id {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.feishu-auth-owner-view .feishu-auth-id {
+  flex: 1;
+}
+.feishu-auth-badge {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.feishu-auth-badge.ok {
+  color: var(--green, #3fb950);
+  border-color: color-mix(in srgb, var(--green, #3fb950) 45%, var(--border));
+}
+.feishu-auth-badge.pending {
+  color: var(--amber, #d29922);
+  border-color: color-mix(in srgb, var(--amber, #d29922) 45%, var(--border));
+}
+.feishu-auth-owner-view .btn,
+.feishu-auth-item .btn {
+  flex: none;
+  margin-left: auto;
+}
+.feishu-auth-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.feishu-auth-edit .cm-input,
+.feishu-auth-add .cm-input {
+  flex: 1;
+  min-width: 0;
+}
+.feishu-auth-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+.feishu-auth-empty {
+  font-size: 12px;
+  color: var(--text-faint);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+}
+.feishu-auth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.feishu-auth-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.feishu-auth-item .feishu-auth-id {
+  flex: 1;
+}
+.feishu-auth-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.feishu-auth-restart {
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--amber, #d29922);
+  background: color-mix(in srgb, var(--amber, #d29922) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber, #d29922) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+}
 .feishu-setup {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+.feishu-setup-platform {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.feishu-setup-platform-label {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.feishu-setup-seg {
+  width: 200px;
+  flex: none;
+}
+.feishu-method-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.feishu-method-card {
+  display: flex;
+  align-items: center;
   gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.feishu-method-card:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+}
+.feishu-method-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.feishu-method-card--primary {
+  border-color: var(--accent-border);
+  background: var(--accent-weak);
+}
+.feishu-method-card--primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  box-shadow: 0 0 0 3px var(--accent-weak);
+}
+.feishu-method-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.feishu-method-card--primary .feishu-method-card__icon {
+  background: rgba(255, 255, 255, 0.08);
+}
+.feishu-method-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.feishu-method-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.feishu-method-card__badge {
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: var(--accent-text);
+  letter-spacing: 0.02em;
+}
+.feishu-method-card__desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.feishu-method-card__arrow {
+  font-size: 18px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: transform 0.15s, color 0.15s;
+}
+.feishu-method-card:hover:not(:disabled) .feishu-method-card__arrow {
+  transform: translateX(2px);
+  color: var(--text-dim);
 }
 .feishu-domain {
   display: flex;
@@ -2828,6 +3780,58 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── feishu live gateway output (the real diagnostic surface) ───────────── */
+.feishu-logpanel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.feishu-logpanel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 8px 11px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted, var(--text-faint));
+  text-align: left;
+}
+.feishu-logpanel-head:hover {
+  background: var(--bg-raised, var(--bg-elev));
+}
+.feishu-logpanel-head .ic {
+  color: var(--text-faint);
+}
+.feishu-logpanel-head .status-dot {
+  margin-left: 2px;
+}
+.feishu-logpanel-size {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.feishu-logpanel-body {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg, var(--bg-elev));
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted, var(--text-faint));
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── login ─────────────────────────────────────────────────────────────── */
@@ -2977,20 +3981,101 @@ select {
   color: var(--text);
   margin-bottom: 4px;
 }
+
+/* ── restoring-session skeleton ──────────────────────────────────────────────
+   A chat-shaped shimmer shown while an existing session's prior conversation is
+   replayed, so a restore never reuses the new-session placeholder. */
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 12px 12px;
+}
+.sk-row {
+  display: flex;
+  gap: 12px;
+}
+.sk-left {
+  justify-content: flex-start;
+}
+.sk-right {
+  justify-content: flex-end;
+}
+.sk-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: none;
+}
+.sk-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+  max-width: 78%;
+  padding-top: 3px;
+}
+.sk-line {
+  height: 11px;
+  border-radius: 6px;
+}
+.sk-bubble {
+  height: 40px;
+  border-radius: 14px;
+}
+/* Moving highlight sweep. Base/shine reference theme vars so it reads in both
+   light and dark; the motion (not the contrast) is what signals "loading". */
+.sk-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-sunken) 0%,
+    var(--border) 50%,
+    var(--bg-sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: skShimmer 1.4s ease-in-out infinite;
+}
+@keyframes skShimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.sk-caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
 /* Codex-style "just type" composer card on the empty state. */
 .empty-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
-  background: var(--bg-elevated, var(--bg-hover));
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md, 12px);
-  padding: 12px 12px 10px;
-  transition: border-color 0.12s;
+  background: var(--bg-prompt-input, var(--bg-elev));
+  border: 1px solid var(--border-input, var(--border-strong));
+  border-radius: 24px;
+  padding: 14px 20px;
+  box-shadow: var(--prompt-shadow, 0 2px 8px rgba(0, 0, 0, 0.04));
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.empty-card:hover {
+  border-color: var(--border-input-hover, var(--border-strong));
+  box-shadow: var(--prompt-shadow-hover, 0 8px 30px rgba(0, 0, 0, 0.08));
 }
 .empty-card:focus-within {
-  border-color: var(--accent);
+  border-color: var(--border-input-hover, var(--border-strong)) !important;
+  box-shadow: var(--prompt-shadow-focus, 0 8px 30px rgba(0, 0, 0, 0.08)) !important;
 }
 .empty-input {
   width: 100%;
@@ -3003,7 +4088,7 @@ select {
   font-size: 14px;
   line-height: 1.5;
   max-height: 180px;
-  min-height: 44px;
+  min-height: 64px;
 }
 .empty-input::placeholder {
   color: var(--text-faint);
@@ -3028,7 +4113,6 @@ select {
 }
 .empty-controls .chip select {
   border: none;
-  background: transparent;
   outline: none;
   font: inherit;
   color: inherit;
@@ -3137,6 +4221,10 @@ select {
 .menu-pop button:hover {
   background: var(--bg-hover);
 }
+.menu-pop button.active {
+  background: var(--bg-settings-active, var(--bg-hover));
+  font-weight: 500;
+}
 .menu-pop button .ic {
   color: var(--text-faint);
 }
@@ -3145,6 +4233,144 @@ select {
 }
 .menu-pop button .ic.placeholder {
   opacity: 0;
+}
+
+/* ── CustomSelect: rich rows, submenu flyout, toggle switch ───────────────── */
+.cs-menu {
+  padding: 5px;
+}
+/* The menu + flyout are flex siblings inside `.cs-pop-row`, but they also carry
+   `.menu-pop` (position:absolute) for their card look. Absolute children drop
+   out of the flex flow and stack at the same origin — overriding back to
+   `relative` lets them actually sit side by side. */
+.cs-pop-row .cs-menu {
+  position: relative;
+}
+/* A row inside the CustomSelect menu / flyout. Scoped under .cs-menu so it wins
+   over the generic `.menu-pop button` rule. */
+.cs-menu .cs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.cs-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.cs-row-label-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cs-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-row-desc {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-faint);
+  white-space: normal;
+}
+.cs-row-hint {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.cs-row-badge {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+}
+.cs-menu .cs-row-check {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.cs-menu .cs-row-chevron {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.cs-flyout-header {
+  padding: 8px 10px 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+  white-space: normal;
+}
+.cs-divider {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border);
+}
+.cs-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+/* Toggle switch. Scoped under .cs-menu so it beats the generic `.menu-pop
+   button` rule (which would otherwise force width:100% + flex + padding on this
+   button, stretching it across the whole row). */
+.cs-menu .cs-switch {
+  flex: none;
+  width: 36px;
+  min-width: 36px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  background: var(--border-strong);
+  transition: background 0.15s ease;
+  position: relative;
+  display: inline-block;
+}
+.cs-menu .cs-switch[data-on='true'],
+.cs-menu .cs-switch[data-on='true']:hover {
+  background: var(--blue);
+}
+.cs-menu .cs-switch:hover {
+  background: var(--border-strong);
+}
+.cs-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+.cs-switch[data-on='true'] .cs-switch-knob {
+  transform: translateX(16px);
 }
 .token-bar {
   width: 64px;
@@ -3443,6 +4669,10 @@ body.resizing * {
   gap: 2px;
   -webkit-app-region: no-drag;
 }
+[data-platform='win32'] .ws-toggles {
+  /* 智能在 Windows 平台下，在最右侧留出原生三控制键的高度与宽度，并紧贴其左侧对齐，自适应任何右侧栏折叠/开启状态，绝对不会被系统按钮盖住 */
+  margin-right: calc(env(titlebar-area-width, 138px) - 8px);
+}
 .empty-titlebar {
   display: flex;
   align-items: center;
@@ -3468,8 +4698,8 @@ body.resizing * {
   color: var(--text);
 }
 .ws-toggle.active {
-  background: var(--accent-weak);
-  color: var(--accent);
+  background: var(--bg-settings-active, var(--accent-weak));
+  color: var(--text, var(--accent));
 }
 
 /* right feature sidebar: content panel (flex) + rail (fixed list) */
@@ -3503,6 +4733,9 @@ body.resizing * {
   background: var(--bg-elev);
   overflow-y: auto;
 }
+[data-platform='win32'] .rsidebar-rail {
+  padding-top: 44px; /* 36px titlebar height + 8px default padding */
+}
 .rail-item {
   display: flex;
   align-items: center;
@@ -3524,11 +4757,11 @@ body.resizing * {
   color: var(--text);
 }
 .rail-item.active {
-  background: var(--accent-weak);
-  color: var(--accent);
+  background: var(--bg-settings-active, var(--accent-weak));
+  color: var(--text, var(--accent));
 }
 .rail-item.active .ic {
-  color: var(--accent);
+  color: var(--text, var(--accent));
 }
 .rail-label {
   flex: 1;

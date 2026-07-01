@@ -638,17 +638,31 @@ export class DeepVServerAdapter implements ContentGenerator {
 
         // 优先 id 精确配对：找一个未消耗、id 相同的槽
         if (fr.id) {
-          const slot = slots.find((s) => !s.consumed && s.id === fr.id);
-          if (slot) {
-            slot.consumed = true;
+          const idSlot = slots.find((s) => !s.consumed && s.id === fr.id);
+          if (idSlot) {
+            idSlot.consumed = true;
             return true;
           }
-        }
-        // 回退 name 配对：找一个未消耗、name 相同的槽（覆盖 Gemini 无 id 及并行同名）
-        if (fr.name) {
-          const slot = slots.find((s) => !s.consumed && s.name === fr.name);
-          if (slot) {
-            slot.consumed = true;
+          // 🐛 Id match failed. Before falling through to name match, check
+          // if there is a Gemini-style idless fc (no id) with the same name.
+          // This handles: Gemini emits fc without id, CLI annotates fr with
+          // a callId → the fr carries an id the fc never had. An idless
+          // match is valid (Gemini → CLI bridge). But matching a slot that
+          // has a DIFFERENT id means the original fc was cut (Bedrock case).
+          if (fr.name) {
+            const idlessSlot = slots.find(
+              (s) => !s.consumed && s.name === fr.name && !s.id,
+            );
+            if (idlessSlot) {
+              idlessSlot.consumed = true;
+              return true;
+            }
+          }
+        } else if (fr.name) {
+          // fr has no id — name-based fuzzy match (Gemini protocol)
+          const nameSlot = slots.find((s) => !s.consumed && s.name === fr.name);
+          if (nameSlot) {
+            nameSlot.consumed = true;
             return true;
           }
         }
@@ -1151,6 +1165,8 @@ export class DeepVServerAdapter implements ContentGenerator {
           ...(thinkingOverride && { thinking: thinkingOverride }),
         };
         return callCustomModelStream(resolvedConfig, request, request.config?.abortSignal);
+      } else {
+        throw new Error(`Custom model configuration not found for: ${modelToUse}`);
       }
     }
 

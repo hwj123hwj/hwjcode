@@ -35,6 +35,7 @@ export * from './core/nonInteractiveToolExecutor.js';
 export * from './tools/task.js';
 export * from './core/subAgent.js';
 export * from './core/proxyAuth.js';
+export * from './core/cloudModels.js';
 export * from './core/toolSchedulerAdapter.js';
 export { ToolExecutionEngine } from './core/toolExecutionEngine.js';
 export * from './core/mainAgentAdapter.js';

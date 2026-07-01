@@ -108,6 +108,7 @@ import { IDEContextDetailDisplay } from './components/IDEContextDetailDisplay.js
 import { ReasoningDisplay } from './components/ReasoningDisplay.js';
 import { HealthyUseReminder } from './components/HealthyUseReminder.js';
 import { FeishuStatusDashboard, type FeishuProjectRoute, type FeishuMessageLogEntry } from './components/FeishuStatusDashboard.js';
+import { shouldEnableFeishuAutoStartFallback } from './utils/feishuAutoStart.js';
 import { useHistoryCleanup } from './hooks/useHistoryCleanup.js';
 import { HistoryCleanupDialog } from './components/HistoryCleanupDialog.js';
 import { useHistory } from './hooks/useHistoryManager.js';
@@ -2982,13 +2983,16 @@ const App = ({ config, settings, startupWarnings = [], version, promptExtensions
     handleSlashCommand,
   ]);
 
-  // 🔄 --feishu 自启兜底（重启场景专用）：
-  //    detached 进程无 TTY 时，Ink 降级渲染可能导致 useEffect 依赖不更新，
-  //    `/feishu start` 永远不触发。此轮询在重启场景下作为兜底，确保一定启动。
+  // 🔄 --feishu 自启兜底（无 TTY 场景专用）：
+  //    detached / 桌面 spawn 的进程无 TTY 时，Ink 降级渲染可能导致上面那个
+  //    state 驱动的 useEffect 依赖不更新，`/feishu start` 永远不触发。
+  //    此轮询作为兜底，确保一定启动。覆盖两类无 TTY 场景：
+  //      - 自更新重启：外挂设置了 EASYCODE_STARTUP_DELAY_MS；
+  //      - 桌面托管：Electron 桌面端 spawn，设置了 EASYCODE_DESKTOP_MANAGED=1
+  //        （stdio piped，无 TTY）——这正是“桌面版显示已启动、实际网关没起”的根因。
   useEffect(() => {
     if (!config.getFeishuAutoStart?.() || feishuAutoStartTriggered.current) return;
-    // 仅在重启场景（外挂设置了 EASYCODE_STARTUP_DELAY_MS）启用
-    if (!process.env.EASYCODE_STARTUP_DELAY_MS) return;
+    if (!shouldEnableFeishuAutoStartFallback()) return;
 
     const startupDelay = parseInt(process.env.EASYCODE_STARTUP_DELAY_MS || '0', 10);
     const timer = setInterval(() => {

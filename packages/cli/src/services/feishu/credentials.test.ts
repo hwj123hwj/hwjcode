@@ -36,6 +36,7 @@ const {
   saveCredentials,
   clearCredentials,
   isSenderAuthorized,
+  shouldAutoBindOwner,
   CredentialsLoadError,
 } = await import('./credentials.js');
 type FeishuCredentials = import('./credentials.js').FeishuCredentials;
@@ -204,5 +205,60 @@ describe('isSenderAuthorized', () => {
     };
     expect(isSenderAuthorized(ownerOnly, 'ou_owner')).toBe(true);
     expect(isSenderAuthorized(ownerOnly, 'ou_other')).toBe(false);
+  });
+});
+
+describe('shouldAutoBindOwner', () => {
+  // A freshly QR-set-up Bot: ownerOpenId is the registration (dvcode) space id
+  // that can never match Bot-app events, marked awaiting first-use confirmation.
+  const awaiting: FeishuCredentials = {
+    appId: 'cli_x',
+    appSecret: 'sec_x',
+    domain: 'feishu',
+    ownerOpenId: 'ou_registration_space',
+    ownerVerified: false,
+  };
+
+  it('binds the first p2p sender when owner is awaiting confirmation', () => {
+    expect(shouldAutoBindOwner(awaiting, 'ou_botapp_space', 'p2p')).toBe(true);
+  });
+
+  it('also binds when no owner was ever set (manual setup, awaiting)', () => {
+    const manual: FeishuCredentials = {
+      appId: 'cli_x',
+      appSecret: 'sec_x',
+      domain: 'feishu',
+      ownerVerified: false,
+    };
+    expect(shouldAutoBindOwner(manual, 'ou_botapp_space', 'p2p')).toBe(true);
+  });
+
+  it('never binds from a group message (anti-hijack)', () => {
+    expect(shouldAutoBindOwner(awaiting, 'ou_botapp_space', 'group')).toBe(false);
+  });
+
+  it('never binds from a topic message (anti-hijack)', () => {
+    expect(shouldAutoBindOwner(awaiting, 'ou_botapp_space', 'topic')).toBe(false);
+  });
+
+  it('never binds an empty sender id', () => {
+    expect(shouldAutoBindOwner(awaiting, '', 'p2p')).toBe(false);
+  });
+
+  it('never binds once the owner is verified (ownerVerified=true)', () => {
+    const verified: FeishuCredentials = { ...awaiting, ownerVerified: true };
+    expect(shouldAutoBindOwner(verified, 'ou_anyone', 'p2p')).toBe(false);
+  });
+
+  it('never binds legacy credentials where ownerVerified is absent', () => {
+    // Upgrade safety: a working Bot set up before this field existed must not
+    // be silently re-bound to whoever DMs first after the upgrade.
+    const legacy: FeishuCredentials = {
+      appId: 'cli_x',
+      appSecret: 'sec_x',
+      domain: 'feishu',
+      ownerOpenId: 'ou_owner',
+    };
+    expect(shouldAutoBindOwner(legacy, 'ou_attacker', 'p2p')).toBe(false);
   });
 });

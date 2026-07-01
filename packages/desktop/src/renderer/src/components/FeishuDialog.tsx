@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Icon } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
@@ -76,6 +76,11 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  // Live gateway output. "running=true" only means the child process is alive —
+  // it does NOT prove the WebSocket connected to Feishu. The real state (connect
+  // handshake, scope audit, crashes) lives in the child's output, exposed here.
+  const [showLog, setShowLog] = useState(false);
+  const logRef = useRef<HTMLPreElement | null>(null);
 
   // Manual form.
   const [appId, setAppId] = useState('');
@@ -84,6 +89,12 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
   // QR flow.
   const [qr, setQr] = useState<FeishuQrBegin | null>(null);
+
+  // Authorization management (owner + allowlist), driven via /feishu pass-through.
+  const [authBusy, setAuthBusy] = useState(false);
+  const [ownerEditing, setOwnerEditing] = useState(false);
+  const [ownerInput, setOwnerInput] = useState('');
+  const [allowInput, setAllowInput] = useState('');
 
   const refreshExternal = () =>
     api.feishu.detectExternal().then(setExternal).catch(() => setExternal([]));
@@ -111,6 +122,14 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
 
   const running = !!status?.running;
   const configured = !!status?.credsConfigured;
+  const logText = status?.logTail?.trim() ?? '';
+
+  // Keep the live log scrolled to the newest output while the panel is open.
+  useEffect(() => {
+    if (showLog && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logText, showLog]);
 
   const submitManual = async () => {
     if (!appId.trim() || !appSecret.trim()) {
@@ -171,6 +190,9 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError('');
     setInfo('');
+    // Reveal the live output immediately so the user can watch the gateway
+    // actually connect (or fail) instead of trusting a static "running" badge.
+    setShowLog(true);
     const res = await api.feishu.start();
     setBusy(false);
     if (res.status) setStatus(res.status);
@@ -211,6 +233,40 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
     setBusy(false);
     setInfo(t('feishu.credsCleared'));
   };
+
+  // Run a /feishu authorization subcommand (allow/deny/owner) through the
+  // backend pass-through. Returns whether it succeeded so callers can clear
+  // their input only on success. Refreshes status from the result.
+  const runFeishu = async (args: string): Promise<boolean> => {
+    setAuthBusy(true);
+    setError('');
+    setInfo('');
+    const res = await api.feishu.runCommand(args);
+    setAuthBusy(false);
+    if (res.status) setStatus(res.status);
+    if (!res.ok) {
+      setError(res.error ?? t('feishu.auth.cmdFailed'));
+      return false;
+    }
+    if (res.message) setInfo(res.message.trim());
+    return true;
+  };
+
+  const beginEditOwner = () => {
+    setOwnerInput(status?.ownerOpenId ?? '');
+    setOwnerEditing(true);
+  };
+  const saveOwner = async () => {
+    const id = ownerInput.trim();
+    if (!id) return;
+    if (await runFeishu(`owner ${id}`)) setOwnerEditing(false);
+  };
+  const addAllow = async () => {
+    const id = allowInput.trim();
+    if (!id) return;
+    if (await runFeishu(`allow ${id}`)) setAllowInput('');
+  };
+  const removeAllow = (id: string) => void runFeishu(`deny ${id}`);
 
   const openQrUrl = () => {
     if (qr) void api.workspace.openExternal(qr.qrUrl);
@@ -280,15 +336,142 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                     name: status?.platform === 'lark' ? 'Lark' : t('feishu.platformFeishu'),
                   })}
                 </span>
-                {status?.ownerOpenId && (
-                  <span title={status.ownerOpenId}>
-                    {t('feishu.owner', { id: status.ownerOpenId.slice(0, 10) })}
-                  </span>
-                )}
-                {!!status?.allowlistCount && <span>{t('feishu.allowlist', { n: status.allowlistCount })}</span>}
               </div>
             )}
           </div>
+
+          {/* Primary actions. */}
+          {configured && mode === 'idle' && (
+            <div className="feishu-actions">
+              {running ? (
+                <button className="btn danger" disabled={busy} onClick={() => void stop()}>
+                  <Icon name="stop" size={14} />
+                  {t('feishu.stopGateway')}
+                </button>
+              ) : (
+                <button className="btn primary" disabled={busy} onClick={() => void start()}>
+                  <Icon name="play" size={14} />
+                  {t('feishu.startGateway')}
+                </button>
+              )}
+              <button className="btn" disabled={busy} onClick={() => setMode('manual')}>
+                {t('feishu.reconfigure')}
+              </button>
+              <button className="btn ghost" disabled={busy || running} onClick={() => void clearCreds()}>
+                {t('common.logout')}
+              </button>
+            </div>
+          )}
+
+          {/* Authorization management: owner + allowlist. Graphical config that
+              passes /feishu allow|deny|owner through to the backend (the exact
+              CLI command logic), instead of typing slash commands by hand. */}
+          {configured && mode === 'idle' && (
+            <div className="feishu-auth">
+              <div className="feishu-auth-head">
+                <Icon name="shield" size={14} />
+                <span>{t('feishu.auth.title')}</span>
+              </div>
+
+              {/* Owner */}
+              <div className="feishu-auth-row">
+                <span className="feishu-auth-key">{t('feishu.auth.ownerLabel')}</span>
+                {ownerEditing ? (
+                  <div className="feishu-auth-edit">
+                    <input
+                      className="prompt-input cm-input"
+                      placeholder={t('feishu.auth.ownerPlaceholder')}
+                      value={ownerInput}
+                      onChange={(e) => setOwnerInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void saveOwner();
+                        if (e.key === 'Escape') setOwnerEditing(false);
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      className="btn primary"
+                      disabled={authBusy || !ownerInput.trim()}
+                      onClick={() => void saveOwner()}
+                    >
+                      {authBusy ? <span className="spinner" /> : <Icon name="check" size={13} />}
+                      {t('feishu.auth.save')}
+                    </button>
+                    <button className="btn ghost" disabled={authBusy} onClick={() => setOwnerEditing(false)}>
+                      {t('common.cancel')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="feishu-auth-owner-view">
+                    <code className="feishu-auth-id" title={status?.ownerOpenId}>
+                      {status?.ownerOpenId || t('feishu.auth.ownerNone')}
+                    </code>
+                    {status?.ownerOpenId && (
+                      <span
+                        className={`feishu-auth-badge ${status?.ownerVerified === false ? 'pending' : 'ok'}`}
+                      >
+                        {status?.ownerVerified === false
+                          ? t('feishu.auth.unverified')
+                          : t('feishu.auth.verified')}
+                      </span>
+                    )}
+                    <button className="btn ghost" disabled={authBusy} onClick={beginEditOwner}>
+                      <Icon name="edit" size={13} />
+                      {t('feishu.auth.edit')}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="feishu-auth-hint">{t('feishu.auth.ownerHint')}</div>
+
+              {/* Allowlist */}
+              <div className="feishu-auth-key feishu-auth-allow-label">
+                {t('feishu.auth.allowlistLabel')}
+              </div>
+              {(status?.allowlist?.length ?? 0) === 0 ? (
+                <div className="feishu-auth-empty">{t('feishu.auth.allowlistEmpty')}</div>
+              ) : (
+                <div className="feishu-auth-list">
+                  {status?.allowlist?.map((id) => (
+                    <div key={id} className="feishu-auth-item">
+                      <code className="feishu-auth-id" title={id}>
+                        {id}
+                      </code>
+                      <button
+                        className="btn ghost"
+                        disabled={authBusy}
+                        onClick={() => removeAllow(id)}
+                        title={t('feishu.auth.remove')}
+                      >
+                        <Icon name="x" size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="feishu-auth-add">
+                <input
+                  className="prompt-input cm-input"
+                  placeholder={t('feishu.auth.allowPlaceholder')}
+                  value={allowInput}
+                  onChange={(e) => setAllowInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void addAllow();
+                  }}
+                />
+                <button
+                  className="btn"
+                  disabled={authBusy || !allowInput.trim()}
+                  onClick={() => void addAllow()}
+                >
+                  {authBusy ? <span className="spinner" /> : <Icon name="plus" size={13} />}
+                  {t('feishu.auth.add')}
+                </button>
+              </div>
+
+              {running && <div className="feishu-auth-restart">{t('feishu.auth.restartHint')}</div>}
+            </div>
+          )}
 
           {/* Lobby: project↔group bindings + recent activity (GUI counterpart
               of the CLI's TUI dashboard). Shown once configured. */}
@@ -336,35 +519,12 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Primary actions. */}
-          {configured && mode === 'idle' && (
-            <div className="feishu-actions">
-              {running ? (
-                <button className="btn danger" disabled={busy} onClick={() => void stop()}>
-                  <Icon name="stop" size={14} />
-                  {t('feishu.stopGateway')}
-                </button>
-              ) : (
-                <button className="btn primary" disabled={busy} onClick={() => void start()}>
-                  <Icon name="play" size={14} />
-                  {t('feishu.startGateway')}
-                </button>
-              )}
-              <button className="btn" disabled={busy} onClick={() => setMode('manual')}>
-                {t('feishu.reconfigure')}
-              </button>
-              <button className="btn ghost" disabled={busy || running} onClick={() => void clearCreds()}>
-                {t('common.logout')}
-              </button>
-            </div>
-          )}
-
           {/* Setup: choose a method when unconfigured. */}
           {!configured && mode === 'idle' && (
             <div className="feishu-setup">
-              <div className="feishu-domain">
-                <span className="field-label">{t('feishu.platformLabel')}</span>
-                <div className="seg">
+              <div className="feishu-setup-platform">
+                <span className="feishu-setup-platform-label">{t('feishu.platformLabel')}</span>
+                <div className="seg feishu-setup-seg">
                   {(['feishu', 'lark'] as const).map((d) => (
                     <button
                       key={d}
@@ -376,13 +536,37 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
                   ))}
                 </div>
               </div>
-              <div className="feishu-methods">
-                <button className="btn primary" disabled={busy} onClick={() => void startQr()}>
-                  <Icon name="feishu" size={14} />
-                  {t('feishu.qrLogin')}
+              <div className="feishu-method-cards">
+                <button
+                  className="feishu-method-card feishu-method-card--primary"
+                  disabled={busy}
+                  onClick={() => void startQr()}
+                >
+                  <span className="feishu-method-card__icon">
+                    <Icon name="feishu" size={20} />
+                  </span>
+                  <span className="feishu-method-card__body">
+                    <span className="feishu-method-card__title">
+                      {t('feishu.qrLogin')}
+                      <span className="feishu-method-card__badge">{domain === 'lark' ? 'Recommended' : '推荐'}</span>
+                    </span>
+                    <span className="feishu-method-card__desc">{t('feishu.qrLoginDesc')}</span>
+                  </span>
+                  <span className="feishu-method-card__arrow">›</span>
                 </button>
-                <button className="btn" disabled={busy} onClick={() => setMode('manual')}>
-                  {t('feishu.manualEntry')}
+                <button
+                  className="feishu-method-card"
+                  disabled={busy}
+                  onClick={() => setMode('manual')}
+                >
+                  <span className="feishu-method-card__icon">
+                    <Icon name="edit" size={18} />
+                  </span>
+                  <span className="feishu-method-card__body">
+                    <span className="feishu-method-card__title">{t('feishu.manualEntry')}</span>
+                    <span className="feishu-method-card__desc">{t('feishu.manualEntryDesc')}</span>
+                  </span>
+                  <span className="feishu-method-card__arrow">›</span>
                 </button>
               </div>
             </div>
@@ -467,6 +651,33 @@ export function FeishuDialog({ onClose }: { onClose: () => void }) {
           {status?.lastError && (
             <div className="feishu-logtail" title={status.lastError}>
               {t('feishu.lastError', { msg: status.lastError })}
+            </div>
+          )}
+
+          {/* Live gateway output — the real diagnostic surface. A "running"
+              badge only means the child process is alive; whether it actually
+              connected to Feishu is only visible in this output. */}
+          {configured && (logText || running) && (
+            <div className="feishu-logpanel">
+              <button
+                type="button"
+                className="feishu-logpanel-head"
+                onClick={() => setShowLog((v) => !v)}
+              >
+                <Icon name={showLog ? 'chevron-down' : 'chevron-right'} size={13} />
+                <span>{t('feishu.detailsLog')}</span>
+                {running && <span className="status-dot idle" />}
+                {logText && (
+                  <span className="feishu-logpanel-size">
+                    {t('feishu.detailsLogSize', { n: logText.length })}
+                  </span>
+                )}
+              </button>
+              {showLog && (
+                <pre className="feishu-logpanel-body" ref={logRef}>
+                  {logText || t('feishu.detailsLogEmpty')}
+                </pre>
+              )}
             </div>
           )}
         </div>

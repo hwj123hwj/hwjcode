@@ -1,6 +1,6 @@
 {
-  "name": "hwjcode-cli",
-  "version": "1.1.60",
+  "name": "easycode-cli",
+  "version": "1.1.42",
   "description": "DeepV Code - AI-powered coding assistant with enhanced capabilities",
   "repository": {
     "type": "git",
@@ -9,7 +9,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "hwjcode": "dist/index.js"
+    "easycode": "dist/index.js"
   },
   "scripts": {
     "build": "node ../../scripts/build_package.js",

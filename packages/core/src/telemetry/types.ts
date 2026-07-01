@@ -310,6 +310,12 @@ export enum LoopType {
   CONSECUTIVE_IDENTICAL_TOOL_CALLS = 'consecutive_identical_tool_calls',
   CHANTING_IDENTICAL_SENTENCES = 'chanting_identical_sentences',
   LLM_DETECTED_LOOP = 'llm_detected_loop',
+  /**
+   * 模型把 tool_use 降级成了纯文本输出（如字面量 <invoke name="...">），
+   * 没有发出结构化工具调用，导致任务静默卡死。复用 loop_detected 遥测通道
+   * 上报，但处置走独立的自愈链（重试 → 压缩 → 微压缩 → 降级提示），而非硬停。
+   */
+  MALFORMED_TOOL_CALL_AS_TEXT = 'malformed_tool_call_as_text',
 }
 
 export class LoopDetectedEvent {

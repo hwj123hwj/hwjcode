@@ -43,8 +43,8 @@ import { CompressionService } from '../services/compressionService.js';
 import { MicroCompactService } from '../services/microCompactService.js';
 import { PostCompactRestorationService } from '../services/postCompactRestorationService.js';
 import { ideContext } from '../ide/ideContext.js';
-import { logFlashDecidedToContinue } from '../telemetry/loggers.js';
-import { FlashDecidedToContinueEvent, LoopType } from '../telemetry/types.js';
+import { logFlashDecidedToContinue, logLoopDetected } from '../telemetry/loggers.js';
+import { FlashDecidedToContinueEvent, LoopDetectedEvent, LoopType } from '../telemetry/types.js';
 import { logger } from '../utils/enhancedLogger.js';
 import {
   buildGoalContinuationMessage,
@@ -85,6 +85,14 @@ export class GeminiClient {
   private readonly postCompactRestoration: PostCompactRestorationService;
   private lastPromptId?: string;
   private isCompressing: boolean = false; // 压缩互斥锁，防止重入
+
+  /**
+   * 「畸形工具调用」自愈链当前所处的阶梯。0 = 未进入自愈。
+   * 每次检测到畸形工具调用文本 +1，由 healMalformedToolCall 按值决定动作：
+   *   1 → 轻量重试   2 → tryCompressChat   3 → microCompress   ≥4 → 降级提示用户
+   * 在每个新 prompt 边界重置（见 sendMessageStream 的 loopDetector.reset 处）。
+   */
+  private malformedRecoveryStep: number = 0;
 
   // 上次请求的Token使用量
   private sessionTokenCount: number = 0; //
@@ -929,6 +937,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     if (this.lastPromptId !== prompt_id) {
       this.loopDetector.reset(prompt_id);
+      // 新 prompt 边界：重置畸形工具调用自愈阶梯，让每个用户请求从头开始爬梯
+      this.malformedRecoveryStep = 0;
       this.lastPromptId = prompt_id;
     }
     this.sessionTurnCount++;
@@ -1089,7 +1099,13 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     const resultStream = turn.run(request, signal);
     let lastFinishReason: string | undefined;
+    // 累积整轮 assistant 纯文本输出，用于 turn 结束后检测「畸形工具调用文本」
+    let assistantText = '';
     for await (const event of resultStream) {
+      if (event.type === GeminiEventType.Content && typeof event.value === 'string') {
+        assistantText += event.value;
+      }
+
       if (this.loopDetector.addAndCheck(event)) {
         const loopType = this.loopDetector.getDetectedLoopType();
         logger.info(`[STOP-DEBUG] sendMessageStream: LOOP DETECTED, type=${loopType}, turn will be stopped`);
@@ -1130,6 +1146,36 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     if (pendingToolCallCount > 0) {
       logger.info(`[STOP-DEBUG] sendMessageStream: has ${pendingToolCallCount} pending tool calls, will be scheduled by CLI layer. Tools: [${turn.pendingToolCalls.map(tc => tc.name).join(', ')}]`);
+    }
+
+    // 🩹 畸形工具调用自愈：模型把 tool_use 降级成纯文本（字面量 <invoke>），
+    // 没有发出结构化工具调用，任务会静默卡死。三重门控确保是真故障：
+    //   - pendingToolCallCount===0：本轮确实没产生结构化工具调用
+    //   - lastFinishReason==='STOP'：narrate-then-stop 签名
+    //   - assistantText 命中签名正则
+    // （"先解释下轮再真调用"的情况会有 pending 或非 STOP，被排除）
+    if (
+      pendingToolCallCount === 0 &&
+      lastFinishReason === 'STOP' &&
+      signal &&
+      !signal.aborted &&
+      this.loopDetector.detectMalformedToolCallText(assistantText)
+    ) {
+      this.malformedRecoveryStep++;
+      // 复用 loop_detected 遥测通道上报（loop_type 区分，处置走独立自愈链）
+      logLoopDetected(
+        this.config,
+        new LoopDetectedEvent(LoopType.MALFORMED_TOOL_CALL_AS_TEXT, prompt_id),
+      );
+      logger.warn(
+        `[SELF-HEAL] Malformed tool-call-as-text detected (step ${this.malformedRecoveryStep}). Model emitted a literal <invoke> block instead of a structured tool_use. Entering recovery chain.`,
+      );
+      return yield* this.healMalformedToolCall(
+        signal,
+        prompt_id,
+        boundedTurns,
+        initialModel,
+      );
     }
 
     if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
@@ -1194,6 +1240,112 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
   // generateEmbedding 方法已移除 - 功能未被使用且已从服务端清理
 
+  /**
+   * 「畸形工具调用」自愈链。由 sendMessageStream 在检测到模型把 tool_use
+   * 降级为纯文本时调用。按 this.malformedRecoveryStep 的当前值逐级升级：
+   *
+   *   step 1 → 轻量重试（注入修正提示，要求仅以结构化 tool_use 重新发起）
+   *   step 2 → tryCompressChat（清空被污染的上下文，与 80% 阈值压缩完全一致）
+   *   step 3 → microCompress（runMicroCompactFallback 轻量瘦身）
+   *   step ≥4 → 降级提示用户
+   *
+   * 「成功」的判定是隐式的：任一步重试后若模型正常发出结构化 tool_use，
+   * 递归的 sendMessageStream 会走 pendingToolCalls>0 的正常路径返回，
+   * 不再回到检测分支，自愈链自然结束。只有再次失败才会回到检测分支、
+   * 把 step +1，从而自动升级到下一级。
+   *
+   * 注意：本方法是 client 的编排逻辑；LoopDetector 只负责 detectMalformedToolCallText
+   * 报信号，不持有 client 引用、不自愈。
+   */
+  private async *healMalformedToolCall(
+    signal: AbortSignal,
+    prompt_id: string,
+    boundedTurns: number,
+    initialModel: string,
+  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
+    const step = this.malformedRecoveryStep;
+    const nextTurns = Math.max(0, boundedTurns - 1);
+
+    const correctivePrompt = (extra: string = ''): PartListUnion => [
+      {
+        text:
+          '<system-reminder>\n' +
+          '上一轮你想调用的工具没有以结构化 tool_use 形式正确发出，而是被降级成了' +
+          '纯文本（字面量工具调用标记）输出，因此工具实际上没有被执行，任务卡住了。\n' +
+          extra +
+          '请立即仅以结构化 tool_use 重新发起你刚才想调用的那个工具，' +
+          '不要在正文里输出任何字面量工具调用标记文本。\n' +
+          '</system-reminder>',
+      },
+    ];
+
+    // Step 1：轻量重试 —— 只注入修正提示，不动上下文
+    if (step === 1) {
+      logger.warn('[SELF-HEAL] Step 1/4: lightweight retry with corrective prompt.');
+      return yield* this.sendMessageStream(
+        correctivePrompt(),
+        signal,
+        prompt_id,
+        nextTurns,
+        initialModel,
+      );
+    }
+
+    // Step 2：全量压缩 —— 清空被污染的上下文（tryCompressChat 自带 isCompressing 锁，重入安全）
+    if (step === 2) {
+      logger.warn('[SELF-HEAL] Step 2/4: retry failed, triggering full compression (tryCompressChat).');
+      try {
+        const compressed = await this.tryCompressChat(
+          prompt_id,
+          new AbortController().signal,
+          true,
+        );
+        if (compressed) {
+          // 复用流式协议的压缩气泡事件，让 UI 感知上下文已压缩
+          yield {
+            type: GeminiEventType.ChatCompressed,
+            value: { success: true, info: compressed },
+          };
+        }
+      } catch (err) {
+        logger.warn(
+          `[SELF-HEAL] Step 2 compression threw (non-fatal, will still retry): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return yield* this.sendMessageStream(
+        correctivePrompt('（上下文已压缩，请基于摘要继续。）\n'),
+        signal,
+        prompt_id,
+        nextTurns,
+        initialModel,
+      );
+    }
+
+    // Step 3：微压缩 —— 全量压缩仍救不回时，做一次轻量瘦身再试
+    if (step === 3) {
+      logger.warn('[SELF-HEAL] Step 3/4: compression did not resolve, attempting MicroCompact.');
+      const fallback = this.runMicroCompactFallback();
+      logger.warn(
+        `[SELF-HEAL] Step 3 MicroCompact applied=${fallback.applied}, cleared=${fallback.clearedCount}`,
+      );
+      return yield* this.sendMessageStream(
+        correctivePrompt(),
+        signal,
+        prompt_id,
+        nextTurns,
+        initialModel,
+      );
+    }
+
+    // Step ≥4：自愈链耗尽，降级明确提示用户
+    logger.error('[SELF-HEAL] Step 4/4: recovery chain exhausted, degrading to user notice.');
+    const notice =
+      '\n\n⚠️ 检测到模型多次将工具调用降级为纯文本输出，自动重试与上下文压缩均未能恢复。' +
+      '这通常是上游服务的临时故障。建议：直接重新发送你的上一条请求，或先执行 /compress 再重试。';
+    yield { type: GeminiEventType.Content, value: notice };
+    return new Turn(this.getChat(), prompt_id, this.config.getModel());
+  }
+
   async tryCompressChat(
     prompt_id: string,
     abortSignal: AbortSignal,
@@ -1222,7 +1374,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       }
 
       const curatedHistory = this.getChat().getHistory(true);
-      let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 用户可在 /config 中自定义压缩模型；未设置时回退到硬编码场景默认值。
+      let compressionModel = this.config.getCompressionModel();
 
       // 🚀 Dynamic Model Upgrade: If current token count exceeds Flash's limit (~1M),
       // upgrade the compression model so a 1M+ history can still fit.
@@ -1399,7 +1552,8 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     try {
       const curatedHistory = this.getChat().getHistory(true);
-      let compressionModel = SceneManager.getModelForScene(SceneType.COMPRESSION);
+      // 用户可在 /config 中自定义压缩模型；未设置时回退到硬编码场景默认值。
+      let compressionModel = this.config.getCompressionModel();
 
       // 🚀 Dynamic Model Upgrade: 与 tryCompressChat 路径保持一致 —— 自定义
       //   模型用户不能被强行改写为云端 'x-ai/grok-4.1-fast'，否则 DeepVServer

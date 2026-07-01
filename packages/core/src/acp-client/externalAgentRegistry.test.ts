@@ -32,15 +32,15 @@ describe('resolveExternalAgentSpec', () => {
     expect(spec.type).toBe('claude-code');
     expect(spec.label).toBe('Claude Code');
     expect(spec.command).toBe('npx');
-    expect(spec.args).toEqual(['-y', '@agentclientprotocol/claude-agent-acp@0.44.0']);
+    expect(spec.args).toEqual(['-y', '@agentclientprotocol/claude-agent-acp@0.52.0']);
   });
 
-  it('resolves codex to the zed-industries codex-acp npx bridge', () => {
+  it('resolves codex to the agentclientprotocol codex-acp npx bridge', () => {
     const spec = resolveExternalAgentSpec('codex', {});
     expect(spec.type).toBe('codex');
     expect(spec.label).toBe('Codex');
     expect(spec.command).toBe('npx');
-    expect(spec.args).toEqual(['-y', '@zed-industries/codex-acp@0.16.0']);
+    expect(spec.args).toEqual(['-y', '@agentclientprotocol/codex-acp@1.0.2']);
   });
 
   it('applies EASYCODE_CLAUDE_CODE_ACP_CMD override (command + args, split on whitespace)', () => {
@@ -70,7 +70,7 @@ describe('resolveExternalAgentSpec', () => {
       EASYCODE_CODEX_ACP_CMD: '   \t  ',
     });
     expect(spec.command).toBe('npx');
-    expect(spec.args).toEqual(['-y', '@zed-industries/codex-acp@0.16.0']);
+    expect(spec.args).toEqual(['-y', '@agentclientprotocol/codex-acp@1.0.2']);
   });
 
   it('throws for an unknown agent type', () => {

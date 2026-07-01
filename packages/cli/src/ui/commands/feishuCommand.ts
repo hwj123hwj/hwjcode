@@ -34,6 +34,7 @@ import {
   saveCredentials,
   clearCredentials,
   isSenderAuthorized,
+  shouldAutoBindOwner,
   CredentialsLoadError,
   FeishuCredentials,
 } from '../../services/feishu/credentials.js';
@@ -1796,7 +1797,14 @@ async function finalizeQrSetup(
     botOpenId: botInfo?.botOpenId,
     // The user who scanned the QR code becomes the Bot owner — only they
     // (and entries in `allowlist`) may invoke the agent. See B1 in MR review.
+    //
+    // ⚠️ `pollResult.openId` comes from the dvcode *registration* flow, which
+    // is a DIFFERENT Feishu app than the Bot we just created — and open_id is
+    // per-app scoped, so this id will never match the Bot-app events. Mark the
+    // owner as unverified so the first p2p message rebinds it to the real
+    // Bot-app open_id (see `shouldAutoBindOwner`).
     ownerOpenId: pollResult.openId,
+    ownerVerified: false,
   };
 
   await saveCredentials(creds);
@@ -1942,6 +1950,10 @@ async function handleManualSetup(
     domain,
     botName: botInfo?.botName,
     botOpenId: botInfo?.botOpenId,
+    // Manual setup has no scanning user, so no owner is known yet. Mark as
+    // awaiting first-use so the first p2p message binds the owner in the
+    // Bot-app open_id space (see `shouldAutoBindOwner`).
+    ownerVerified: false,
   };
 
   await saveCredentials(creds);
@@ -3201,20 +3213,46 @@ async function handleStart(context?: CommandContext): Promise<string> {
     // 触发 LLM/工具调用。任何其他人发送的消息直接拒绝，绝不会进入 agent 循环
     // 或访问本地文件系统，避免 Bot 成为远程 RCE 入口。
     if (!isSenderAuthorized(creds, msg.senderOpenId)) {
-      const reply = creds.ownerOpenId
-        ? `🛡️ 此 Bot 仅响应授权用户。如需使用，请联系 Bot 拥有者用 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
-        : `🛡️ 此 Bot 尚未配置授权用户。请 Bot 拥有者在 dvcode 中执行 \`/feishu allow ${msg.senderOpenId}\` 后再试。`;
-      tuiContext?.addItem(
-        {
-          type: 'info',
-          text: tp('feishu.tui.unauthorized_log', {
-            openId: msg.senderOpenId,
-            text: messageText.slice(0, 60),
-          }),
-        },
-        Date.now(),
-      );
-      return reply;
+      // 首次使用即绑定 owner（Trust-On-First-Use）。setup 记录的 owner open_id
+      // 来自 dvcode 注册流（另一个应用的 id 空间），与 Bot 应用事件里的 open_id
+      // 不在同一空间，真正的群主因此被误判为未授权。owner 的 Bot 应用 open_id
+      // 只能从 Bot 应用自身的私聊事件里拿到——故首条私聊在此绑定并持久化。
+      // 仅 p2p 且 ownerVerified===false 时触发（详见 shouldAutoBindOwner 的安全说明）。
+      if (shouldAutoBindOwner(creds, msg.senderOpenId, msg.chatType)) {
+        creds.ownerOpenId = msg.senderOpenId;
+        creds.ownerVerified = true;
+        try {
+          await saveCredentials(creds);
+        } catch (e) {
+          derror('feishu owner auto-bind: failed to persist credentials:', (e as Error)?.message);
+        }
+        tuiContext?.addItem(
+          {
+            type: 'info',
+            text: `🔗 已将首位私聊用户绑定为 Bot 拥有者：${msg.senderOpenId}`,
+          },
+          Date.now(),
+        );
+        // 绑定后视为已授权，继续走正常处理流程（不 return）
+      } else {
+        const reply =
+          creds.ownerVerified === false
+            ? `🛡️ 此 Bot 仅响应授权用户。\n如果你是 Bot 拥有者：请先**私聊 Bot**（单独发起会话）发送任意一条消息完成绑定，之后即可在群里使用。\n否则请联系 Bot 拥有者执行 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
+            : creds.ownerOpenId
+              ? `🛡️ 此 Bot 仅响应授权用户。如需使用，请联系 Bot 拥有者用 \`/feishu allow ${msg.senderOpenId}\` 添加你。`
+              : `🛡️ 此 Bot 尚未配置授权用户。请 Bot 拥有者在 dvcode 中执行 \`/feishu allow ${msg.senderOpenId}\` 后再试。`;
+        tuiContext?.addItem(
+          {
+            type: 'info',
+            text: tp('feishu.tui.unauthorized_log', {
+              openId: msg.senderOpenId,
+              text: messageText.slice(0, 60),
+            }),
+          },
+          Date.now(),
+        );
+        return reply;
+      }
     }
 
     // 🚫 拦截飞书侧的 /feishu start | /feishu stop 生命周期命令：
@@ -3496,6 +3534,10 @@ async function handleStart(context?: CommandContext): Promise<string> {
         proxy: activeConfig?.getProxy(),
         customProxyServerUrl: activeConfig?.getCustomProxyServerUrl(),
         mcpServers: activeConfig?.getMcpServers(),
+        // 🎯 继承子代理模型覆盖（Code Expert / Verification 等），否则飞书网关模式下
+        // 隔离 Config 的 modelOverrides 为空，getSubAgentModelOverride 永远返回 undefined，
+        // 子 agent 会错误地继承父会话模型而非 /config 中配置的专属模型。
+        modelOverrides: activeConfig?.getModelOverrides(),
       });
 
       try {
@@ -5904,6 +5946,47 @@ async function handleAllow(args: string): Promise<string> {
 }
 
 /**
+ * 设置（或覆盖式更换）Bot Owner，并标记为已确认（ownerVerified=true）。
+ *
+ * 用法：/feishu owner <openId>
+ *
+ * 与 `/feishu allow` 的区别：allow 仅在「owner 未绑定」时把 openId 设为 owner，
+ * 无法更换已有 owner；owner 命令则总是覆盖式设置，用于图形化「配置 / 修改 owner」。
+ * 标记 verified=true 是显式断言：之后 TOFU 自动绑定（仅在 ownerVerified===false 时
+ * 触发）不会再把 owner 改绑给下一个私聊的人。
+ */
+async function handleSetOwner(args: string): Promise<string> {
+  const openId = args.trim();
+  if (!openId) {
+    return [
+      t('feishu.owner.usage_title'),
+      '',
+      t('feishu.owner.usage_body'),
+    ].join('\n');
+  }
+  let creds: FeishuCredentials | null;
+  try {
+    creds = await loadCredentials();
+  } catch (e) {
+    return tp('feishu.allow.creds_load_failed', { error: (e as Error).message });
+  }
+  if (!creds) {
+    return t('feishu.allow.creds_missing');
+  }
+  // 已是该 owner 且已确认（含旧凭证 ownerVerified 缺省按已确认处理）→ 无需改动。
+  if (creds.ownerOpenId === openId && creds.ownerVerified !== false) {
+    return tp('feishu.owner.already', { openId });
+  }
+  const previous = creds.ownerOpenId;
+  creds.ownerOpenId = openId;
+  creds.ownerVerified = true;
+  await saveCredentials(creds);
+  return previous && previous !== openId
+    ? tp('feishu.owner.changed', { openId, previous })
+    : tp('feishu.owner.set', { openId });
+}
+
+/**
  * 从授权白名单移除 open_id（B1 — 授权管理）
  *
  * 用法：/feishu deny <openId>
@@ -6097,6 +6180,12 @@ function makeFeishuLikeCommand(domain: 'feishu' | 'lark'): SlashCommand {
         description: t('feishu.subcmd.allow.description'),
         kind: CommandKind.BUILT_IN,
         action: async (_ctx, args) => msg(await handleAllow(args)),
+      },
+      {
+        name: 'owner',
+        description: t('feishu.subcmd.owner.description'),
+        kind: CommandKind.BUILT_IN,
+        action: async (_ctx, args) => msg(await handleSetOwner(args)),
       },
       {
         name: 'deny',

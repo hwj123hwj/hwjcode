@@ -6,7 +6,13 @@
 
 import { CommandKind, CommandContext, MessageActionReturn, OpenDialogActionReturn, SlashCommand } from './types.js';
 import { SettingScope } from '../../config/settings.js';
-import { proxyAuthManager, Config, generateCustomModelId, isOurAuthError } from 'deepv-code-core';
+import {
+  proxyAuthManager,
+  Config,
+  generateCustomModelId,
+  fetchCloudModels,
+  CloudModelsAuthError,
+} from 'deepv-code-core';
 import { HistoryItemWithoutId } from '../types.js';
 import { t, tp } from '../utils/i18n.js';
 import { appEvents, AppEvent } from '../../utils/events.js';
@@ -39,15 +45,6 @@ const FALLBACK_MODELS: string[] = [];
 
 // 防止并发刷新：使用 Promise 缓存确保同时只有一个刷新在进行
 let refreshPromise: Promise<void> | null = null;
-
-
-
-interface ApiResponse<T> {
-  code: number;
-  success: boolean;
-  data: T;
-  message: string;
-}
 
 
 
@@ -195,54 +192,27 @@ export class AuthenticationRequiredError extends Error {
 
 /**
  * 从服务端获取模型列表
+ *
+ * 实际的网络请求/解析逻辑已下沉到 core 的 {@link fetchCloudModels}，
+ * 供 CLI（本函数）与 ACP 后端（refreshCloudModelsForAcp）共享，避免重复造轮子。
+ * 这里只负责把 core 的认证错误映射成 CLI 既有的 {@link AuthenticationRequiredError}
+ * 语义，并补充 displayName 列表。
  */
 async function fetchModelsFromServer(): Promise<{ models: ModelInfo[]; modelNames: string[] }> {
   try {
-    const userHeaders = await proxyAuthManager.getUserHeaders();
-    const proxyUrl = `${proxyAuthManager.getProxyServerUrl()}/web-api/models`;
-
     console.log('[ModelCommand] Fetching models from cloud server...');
-    const response = await fetch(proxyUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'DeepCode CLI',
-        ...userHeaders,
-      },
-    });
+    const models = await fetchCloudModels({ userAgent: 'DeepCode CLI' });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      if (response.status === 401 && isOurAuthError(errorText)) {
-        // 抛出特定的认证错误，让调用方可以区分处理
-        throw new AuthenticationRequiredError();
-      }
-      throw new Error(`API request failed (${response.status}): ${errorText}`);
-    }
-
-    const apiResponse: ApiResponse<ModelInfo[]> = await response.json();
-
-    if (!apiResponse.success) {
-      throw new Error(apiResponse.message || 'API request unsuccessful');
-    }
-
-    if (!apiResponse.data || !Array.isArray(apiResponse.data)) {
-      throw new Error('Server returned invalid data format - expected models array');
-    }
-
-    // 返回完整的模型信息和名称列表
-    const models = apiResponse.data;
-
-    // 按 displayName 字母顺序排序
-    models.sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-    // 模型信息已通过参数返回，不需要单独的缓存更新函数
-
-    const modelNames = ['auto', ...models.map(model => model.displayName)];
+    // 按 displayName 字母顺序排序（core 已排序，这里保持兜底）
+    const modelNames = ['auto', ...models.map((model) => model.displayName)];
 
     console.log(`[ModelCommand] Cloud server returned ${models.length} models`);
     return { models, modelNames };
   } catch (error) {
+    // 把 core 的认证错误转换成调用方期望的类型
+    if (error instanceof CloudModelsAuthError) {
+      throw new AuthenticationRequiredError();
+    }
     throw error;
   }
 }

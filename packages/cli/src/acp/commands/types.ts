@@ -43,4 +43,11 @@ export interface Command {
 export interface CommandExecutionResponse {
   readonly name: string;
   readonly data: unknown;
+  /**
+   * When set, the command expanded into a prompt that must be run through the
+   * model (a `submit_prompt` action), rather than echoed back as text. The ACP
+   * session injects this as the next user turn — mirroring the CLI, where
+   * `/init`, `/ppt`, etc. trigger a model generation instead of printing.
+   */
+  readonly submitPrompt?: string;
 }

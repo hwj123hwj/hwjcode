@@ -74,6 +74,7 @@ export interface CliArgs {
   proxy: string | undefined;
   update: boolean | undefined;
   continue: boolean | undefined;
+  new: boolean | undefined;
   session: string | undefined;
   listSessions: boolean | undefined;
   exportSession: string | undefined;
@@ -242,6 +243,12 @@ export async function parseArguments(extensions: Extension[] = []): Promise<CliA
       type: 'boolean',
       description: 'Continue from the last active session',
       default: true,
+    })
+    .option('new', {
+      alias: 'n',
+      type: 'boolean',
+      description: 'Start a new session (alias for --no-continue)',
+      default: false,
     })
     .option('session', {
       type: 'string',
@@ -659,6 +666,7 @@ export async function loadCliConfig(
     hooks: settings.hooks,
     healthyUse: settings.healthyUse ?? false,
     preferredLanguage: settings.preferredLanguage,
+    modelOverrides: settings.modelOverrides,
   });
 
   // Set memory file paths for display in UI

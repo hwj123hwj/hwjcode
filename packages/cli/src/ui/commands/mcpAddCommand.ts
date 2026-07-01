@@ -68,8 +68,34 @@ interface AddCommandOptions {
   excludeTools?: string[];
 }
 
+/**
+ * Splits a command-line style argument string into tokens, honouring single
+ * and double quotes so that values containing spaces (e.g.
+ * `--command "npx @my/server"` or `--env "KEY=a b c"`) are preserved as a
+ * single token with the surrounding quotes stripped.
+ *
+ * A naive `split(/\s+/)` would break such values apart and leave stray quote
+ * characters, causing every argument after the first whitespace to be dropped.
+ */
+function tokenize(input: string): string[] {
+  const tokens: string[] = [];
+  // Match: "double quoted" | 'single quoted' | bare-non-whitespace
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(input)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push(match[1]);
+    } else if (match[2] !== undefined) {
+      tokens.push(match[2]);
+    } else {
+      tokens.push(match[3]);
+    }
+  }
+  return tokens;
+}
+
 function parseArguments(args: string): { serverName?: string; options: AddCommandOptions } {
-  const parts = args.trim().split(/\s+/);
+  const parts = tokenize(args.trim());
   if (parts.length === 0 || parts[0] === '') {
     return { options: {} };
   }
@@ -115,14 +141,30 @@ function parseArguments(args: string): { serverName?: string; options: AddComman
         break;
       case '--command':
         if (nextArg && !nextArg.startsWith('--')) {
-          options.command = nextArg;
+          // A command value is frequently supplied as a full command line,
+          // e.g. --command "npx -y @upstash/context7-mcp --api-key KEY".
+          // Split it so the first token is the executable and every remaining
+          // token becomes an argument; otherwise the whole string would be
+          // stored as the command and all arguments would be lost.
+          const commandTokens = nextArg.split(/\s+/).filter(Boolean);
+          if (commandTokens.length > 0) {
+            options.command = commandTokens[0];
+            if (commandTokens.length > 1) {
+              options.args = [...(options.args || []), ...commandTokens.slice(1)];
+            }
+          }
           i++;
         }
         break;
       case '--args':
         if (nextArg && !nextArg.startsWith('--')) {
-          options.args = options.args || [];
-          options.args.push(nextArg);
+          // A single --args value may carry several whitespace-separated
+          // arguments, e.g. --args "-y @upstash/context7-mcp --api-key KEY".
+          // Split it so each token becomes its own argument; this also keeps
+          // the repeated form (--args "-y" --args "pkg") working, since a
+          // single-token value simply splits to itself.
+          const argTokens = nextArg.split(/\s+/).filter(Boolean);
+          options.args = [...(options.args || []), ...argTokens];
           i++;
         }
         break;
@@ -235,7 +277,8 @@ ${getAllTemplates().map((template, index) =>
 ${COLOR_MAGENTA}${t('mcp.wizard.examples')}${RESET_COLOR}
   ${COLOR_CYAN}/mcp add github${RESET_COLOR}                   # 添加GitHub服务器
   ${COLOR_CYAN}/mcp add sqlite --args "./data.db"${RESET_COLOR}   # 添加SQLite服务器
-  ${COLOR_CYAN}/mcp add custom --command "npx @my/server"${RESET_COLOR}
+  ${COLOR_CYAN}/mcp add context7 --command "npx -y @upstash/context7-mcp --api-key KEY"${RESET_COLOR}
+  ${COLOR_CYAN}/mcp add custom --command npx --args "-y @my/server"${RESET_COLOR}
 
 ${COLOR_GREY}${t('mcp.wizard.help.hint')}${RESET_COLOR}`
   };
@@ -289,7 +332,11 @@ async function addFromTemplate(
 
   // Save configuration
   try {
-    const scope = options.scope || SettingScope.Workspace;
+    // MCP servers are global configuration and must be written to the user
+    // home settings (~/.easycode-user/settings.json). Defaulting to Workspace
+    // scope would write to <projectRoot>/.easycode-user/settings.json, which is
+    // both the wrong location and a folder that should never appear in a project.
+    const scope = options.scope || SettingScope.User;
     const settings = context.services.settings;
 
     // Get current servers
@@ -396,7 +443,11 @@ async function addCustomServer(
 
   // Save configuration
   try {
-    const scope = options.scope || SettingScope.Workspace;
+    // MCP servers are global configuration and must be written to the user
+    // home settings (~/.easycode-user/settings.json). Defaulting to Workspace
+    // scope would write to <projectRoot>/.easycode-user/settings.json, which is
+    // both the wrong location and a folder that should never appear in a project.
+    const scope = options.scope || SettingScope.User;
     const settings = context.services.settings;
 
     // Get current servers

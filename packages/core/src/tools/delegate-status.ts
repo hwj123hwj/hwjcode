@@ -112,12 +112,12 @@ export class CheckDelegateStatusTool extends BaseTool<
     if (isFinished) {
       // Task is done — return the final result.
       if (task.answer?.trim()) {
-        const trimmed = task.answer.length > 2000
-          ? task.answer.slice(0, 2000) + '…'
+        const trimmed = task.answer.length > 5000
+          ? task.answer.slice(0, 5000) + '…'
           : task.answer;
         progressText = trimmed;
       } else if (task.output?.trim()) {
-        progressText = extractCompactSummary(task.output, 1500);
+        progressText = extractCompactSummary(task.output, 5000, 200);
       }
       if (task.error) {
         progressText += `\n\n⚠️ Error: ${task.error.slice(0, 500)}`;

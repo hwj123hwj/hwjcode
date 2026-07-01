@@ -394,7 +394,7 @@ export class DelegateToAgentTool extends BaseTool<
   /**
    * Default timeout for delegated tasks. Claude Code coding tasks can
    * legitimately run for many minutes (large refactors, running test suites,
-   * etc.), so we default to 60 minutes. Override with the environment
+   * etc.), so we default to 5 hours (300 minutes). Override with the environment
    * variable EASYCODE_CC_TIMEOUT_MINUTES.
    */
   static readonly DEFAULT_TIMEOUT_MS = (() => {
@@ -403,7 +403,7 @@ export class DelegateToAgentTool extends BaseTool<
       const mins = parseInt(env, 10);
       if (mins > 0) return mins * 60 * 1000;
     }
-    return 60 * 60 * 1000; // 60 minutes
+    return 5 * 60 * 60 * 1000; // 5 hours (300 minutes)
   })();
 
   /**
@@ -499,14 +499,14 @@ export function formatClaudeCodeTaskResult(task: BackgroundTask): string {
 
   if (task.answer?.trim()) {
     // The concise answer from Claude Code — typically a summary paragraph.
-    const trimmed = task.answer.length > 2000
-      ? task.answer.slice(0, 2000) + '…'
+    const trimmed = task.answer.length > 5000
+      ? task.answer.slice(0, 5000) + '…'
       : task.answer;
     result += `\n--- Answer ---\n${trimmed}\n`;
   } else if (task.output?.trim()) {
     // Fallback: extract just the tool call titles and final text, not the
-    // verbose transcript.  Keep under 1500 chars to protect context window.
-    const summary = extractCompactSummary(task.output, 1500);
+    // verbose transcript. Keep under 5000 chars and 200 lines to protect context window.
+    const summary = extractCompactSummary(task.output, 5000, 200);
     result += `\n--- Summary ---\n${summary}\n`;
   }
 
@@ -522,7 +522,7 @@ export function formatClaudeCodeTaskResult(task: BackgroundTask): string {
  * titles (lines starting with emoji markers) and the last few lines of
  * text output, discarding verbose file contents and diffs.
  */
-export function extractCompactSummary(transcript: string, maxLen: number): string {
+export function extractCompactSummary(transcript: string, maxLen: number, maxLines = 200): string {
   const lines = transcript.split('\n');
   const kept: string[] = [];
   let len = 0;
@@ -536,6 +536,7 @@ export function extractCompactSummary(transcript: string, maxLen: number): strin
     const candidate = isToolMarker || isShort ? line : line.slice(0, 100) + '…';
 
     if (len + candidate.length + 1 > maxLen) break;
+    if (kept.length >= maxLines) break;
     kept.unshift(candidate);
     len += candidate.length + 1;
   }

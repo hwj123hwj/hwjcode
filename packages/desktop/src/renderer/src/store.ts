@@ -23,6 +23,7 @@ import type {
   PlanEntry,
   SessionMeta,
   SlashCommand,
+  ThinkingMode,
   ToolCallContent,
   ToolCallStatus,
   ToolLocation,
@@ -99,11 +100,11 @@ export const WORKSPACE_SIZE_LIMITS = {
 } as const;
 
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; images?: string[] }
-  | { kind: 'assistant'; id: string; text: string }
-  | { kind: 'thought'; id: string; text: string }
-  | { kind: 'system'; id: string; text: string }
-  | { kind: 'error'; id: string; text: string }
+  | { kind: 'user'; id: string; text: string; images?: string[]; timestamp?: number }
+  | { kind: 'assistant'; id: string; text: string; timestamp?: number }
+  | { kind: 'thought'; id: string; text: string; timestamp?: number }
+  | { kind: 'system'; id: string; text: string; timestamp?: number }
+  | { kind: 'error'; id: string; text: string; timestamp?: number }
   | {
       kind: 'tool';
       id: string;
@@ -115,6 +116,7 @@ export type ChatItem =
       content: ToolCallContent[];
       terminalOutput?: string;
       rawInput?: Record<string, unknown>;
+      timestamp?: number;
     };
 
 export interface SessionView {
@@ -128,8 +130,15 @@ export interface SessionView {
   activePane: PaneKind;
   /** Whether the last transcript item is an open assistant block we append to. */
   draftAssistantId?: string;
+  /**
+   * True while an existing session is being resumed from disk and its prior
+   * conversation is replaying (transcript was cleared, history not back yet).
+   * Drives the restoring skeleton so we don't show the new-session placeholder.
+   */
+  restoring?: boolean;
   /** Open file in the file pane. */
   openFile?: { path: string; content: string };
+  promptDraft?: string;
 }
 
 interface StoreState {
@@ -221,6 +230,7 @@ interface StoreState {
   cancel: (id: string) => Promise<void>;
   setModel: (id: string, modelId: string) => Promise<void>;
   setMode: (id: string, mode: PermissionMode) => Promise<void>;
+  setThinking: (id: string, thinking: ThinkingMode) => Promise<void>;
   rewindTo: (id: string, beforeUserMessageIndex: number) => Promise<void>;
   respondPermission: (
     requestId: string,
@@ -228,6 +238,7 @@ interface StoreState {
     answers?: AskAnswersPayload,
   ) => Promise<void>;
   setDensity: (id: string, density: ViewDensity) => void;
+  setPromptDraft: (id: string, text: string | undefined) => void;
   togglePane: (id: string, pane: PaneKind) => void;
   setActivePane: (id: string, pane: PaneKind) => void;
   refreshDiff: (id: string) => Promise<void>;
@@ -493,6 +504,14 @@ export const useStore = create<StoreState>((set, get) => ({
       get().focusSession(sessionId);
     });
 
+    // The tray "New Chat" item was clicked: drop back to the default empty chat
+    // page (the centered composer shown when no session is active) rather than
+    // auto-creating a session — letting the user decide when to actually start
+    // one keeps the click instant (no backend spawn on the click path).
+    api.sessions.onNewChatRequest(() => {
+      set({ activeSessionId: undefined });
+    });
+
     api.backend.onLog((line) => {
       set((s) => ({ backendLog: [...s.backendLog.slice(-400), line] }));
     });
@@ -581,7 +600,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         sessions: {
           ...s.sessions,
-          [id]: { ...v, transcript: [], plan: [], draftAssistantId: undefined },
+          [id]: { ...v, transcript: [], plan: [], draftAssistantId: undefined, restoring: true },
         },
         activeSessionId: id,
       };
@@ -596,6 +615,13 @@ export const useStore = create<StoreState>((set, get) => ({
       }));
     } finally {
       resumingSessions.delete(id);
+      // Replay has been kicked off; clear the restoring flag. The skeleton stays
+      // until then OR until the first replayed item lands (whichever comes first,
+      // since the skeleton is also gated on an empty transcript).
+      set((s) => {
+        const v = s.sessions[id];
+        return v ? { sessions: { ...s.sessions, [id]: { ...v, restoring: false } } } : {};
+      });
     }
   },
 
@@ -658,6 +684,7 @@ export const useStore = create<StoreState>((set, get) => ({
         id: newId(),
         text: stripImageHints(text),
         images: displayImages.length ? displayImages : undefined,
+        timestamp: Date.now(),
       };
       return {
         sessions: {
@@ -681,6 +708,11 @@ export const useStore = create<StoreState>((set, get) => ({
   setMode: async (id, mode) => {
     await api.sessions.setMode(id, mode);
     patchMeta(set, id, { permissionMode: mode });
+  },
+
+  setThinking: async (id, thinking) => {
+    await api.sessions.setThinking(id, thinking);
+    patchMeta(set, id, { thinking });
   },
 
   rewindTo: async (id, beforeUserMessageIndex) => {
@@ -720,6 +752,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setDensity: (id, density) => updateView(set, id, (v) => ({ ...v, density })),
+
+  setPromptDraft: (id, text) => updateView(set, id, (v) => ({ ...v, promptDraft: text })),
 
   togglePane: (id, pane) =>
     updateView(set, id, (v) => {
@@ -1009,7 +1043,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         t[t.length - 1] = { ...last, text: last.text + event.text };
         return { ...view, transcript: t };
       }
-      const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text };
+      const item: ChatItem = { kind: 'assistant', id: newId(), text: event.text, timestamp: Date.now() };
       return { ...view, transcript: [...t, item], draftAssistantId: item.id };
     }
 
@@ -1019,7 +1053,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
       if (last && last.kind === 'thought') {
         t[t.length - 1] = { ...last, text: last.text + event.text };
       } else {
-        t.push({ kind: 'thought', id: newId(), text: event.text });
+        t.push({ kind: 'thought', id: newId(), text: event.text, timestamp: Date.now() });
       }
       return { ...view, transcript: t };
     }
@@ -1029,7 +1063,7 @@ function reduceEvent(view: SessionView, event: DesktopSessionEvent): SessionView
         ...view,
         transcript: [
           ...view.transcript,
-          { kind: 'user', id: newId(), text: stripImageHints(event.text) },
+          { kind: 'user', id: newId(), text: stripImageHints(event.text), timestamp: Date.now() },
         ],
       };
 

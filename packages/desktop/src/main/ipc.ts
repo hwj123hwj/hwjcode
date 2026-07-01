@@ -39,6 +39,12 @@ import {
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
 import {
+  deleteMcpServer,
+  listMcpServers,
+  saveMcpServer,
+  setMcpServerEnabled,
+} from './mcpServers.js';
+import {
   getCustomInstructions,
   getUserSettings,
   saveCustomInstructions,
@@ -49,6 +55,7 @@ import { setOverlayVisible } from './computerUse/overlay.js';
 import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
+import { getVersionInfo } from './appInfo.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
   ApiKeyLoginResult,
@@ -57,12 +64,14 @@ import type {
   CustomModelInput,
   DesktopUserSettings,
   FeishuDomain,
+  McpServerInput,
   FeishuManualInput,
   FeishuQrBegin,
   PermissionMode,
   PermissionResponse,
   PromptOptions,
   ThemeMode,
+  ThinkingMode,
 } from '../shared/ipc.js';
 
 /** What {@link registerIpc} hands back to the app entry for lifecycle teardown. */
@@ -152,6 +161,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.SessionSetMode, (_e, id: string, mode: PermissionMode) =>
     hub.setMode(id, mode),
   );
+  ipcMain.handle(IpcInvoke.SessionSetThinking, (_e, id: string, thinking: ThinkingMode) =>
+    hub.setThinking(id, thinking),
+  );
   ipcMain.handle(IpcInvoke.SessionRewind, (_e, id: string, idx: number) => hub.rewind(id, idx));
 
   // ── external agents ───────────────────────────────────────────────────────
@@ -181,6 +193,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.FeishuDetectExternal, () => feishu.detectExternal());
   ipcMain.handle(IpcInvoke.FeishuKillExternal, () => feishu.killExternal());
   ipcMain.handle(IpcInvoke.FeishuLobby, () => feishu.getLobby());
+  ipcMain.handle(IpcInvoke.FeishuRunCommand, (_e, args: string) =>
+    feishu.runFeishuCommand(args),
+  );
 
   // ── custom models ─────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.ModelsListCustom, () => listCustomModels());
@@ -191,6 +206,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   );
   ipcMain.handle(IpcInvoke.ModelsDeleteCustom, (_e, displayName: string) =>
     deleteCustomModel(displayName),
+  );
+
+  // ── MCP servers (shared ~/.easycode-user/settings.json) ───────────────────
+  ipcMain.handle(IpcInvoke.McpList, () => listMcpServers());
+  ipcMain.handle(IpcInvoke.McpSave, (_e, input: McpServerInput, originalName?: string) =>
+    saveMcpServer(input, originalName),
+  );
+  ipcMain.handle(IpcInvoke.McpDelete, (_e, name: string) => deleteMcpServer(name));
+  ipcMain.handle(IpcInvoke.McpSetEnabled, (_e, name: string, enabled: boolean) =>
+    setMcpServerEnabled(name, enabled),
   );
 
   // ── user settings (shared with CLI's /config) ─────────────────────────────
@@ -318,6 +343,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
   ipcMain.handle(IpcInvoke.UpdateInstall, () => updater.install());
   ipcMain.handle(IpcInvoke.UpdateSkip, (_e, version: string) => updater.skip(version));
   ipcMain.handle(IpcInvoke.UpdateSnooze, () => updater.snooze());
+
+  // ── app meta (About panel: version + environment info) ──────────────────────
+  ipcMain.handle(IpcInvoke.AppGetVersionInfo, () => getVersionInfo());
 
   return { hub, feishu, updater, terminals, computerUse };
 }

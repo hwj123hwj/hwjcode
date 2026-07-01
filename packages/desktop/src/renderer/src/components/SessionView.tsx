@@ -9,6 +9,7 @@ import { WorkspaceToggles } from './workspace/WorkspaceToggles';
 import { Icon, type IconName } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
 import { PERMISSION_MODES, type PermissionMode } from '@shared/ipc';
+import { CustomSelect } from './CustomSelect';
 
 const api = window.easycode;
 
@@ -73,14 +74,14 @@ export function SessionView() {
         {dormant && (
           <button className="btn" style={{ padding: '6px 12px' }} onClick={() => void resume(meta.id)}>
             <Icon name="play" size={14} />
-            {t('session.resume')}
+            <span className="btn-text">{t('session.resume')}</span>
           </button>
         )}
 
         <div ref={viewsRef} style={{ position: 'relative' }}>
           <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>
             <Icon name="columns" size={14} />
-            {t('session.views')}
+            <span className="btn-text">{t('session.views')}</span>
           </button>
           {viewsOpen && (
             <div className="menu-pop" style={{ right: 0, top: '110%' }}>
@@ -166,10 +167,14 @@ function EmptyState() {
   const [busy, setBusy] = useState(false);
   // null cwd → a directory-less chat; a string → a project-bound session.
   const [cwd, setCwd] = useState<string | null>(null);
-  const [mode, setMode] = useState<PermissionMode>('default');
+  const [mode, setMode] = useState<PermissionMode>('yolo');
   // '' → let the backend pick the default model; otherwise a modelId/custom id.
   const [model, setModel] = useState('');
   const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  // Display name of the user's configured default model, when it can be resolved
+  // to a name (via a prior session's availableModels or a custom model). Empty
+  // string → unknown, so the picker falls back to the generic "Default model".
+  const [defaultModelLabel, setDefaultModelLabel] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -189,17 +194,26 @@ function EmptyState() {
         if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
       }
     }
-    void api.models
-      .listCustom()
-      .then((custom) => {
-        if (!alive) return;
-        const opts = [
-          ...[...builtins].map(([value, label]) => ({ value, label })),
-          ...custom.map((c) => ({ value: c.id, label: c.label })),
-        ];
-        setModels(opts);
-      })
-      .catch(() => alive && setModels([...builtins].map(([value, label]) => ({ value, label }))));
+    void Promise.all([
+      api.models.listCustom().catch(() => [] as Awaited<ReturnType<typeof api.models.listCustom>>),
+      api.settings.get().catch(() => null),
+    ]).then(([custom, settings]) => {
+      if (!alive) return;
+      const seen = new Set<string>();
+      const opts = [
+        ...[...builtins].map(([value, label]) => ({ value, label })),
+        ...custom.map((c) => ({ value: c.id, label: c.label })),
+      ].filter(({ value }) => {
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      });
+      setModels(opts);
+      // Resolve the configured default model id to a display name, when we can.
+      const defaultId = settings?.defaultModel?.trim();
+      const label = defaultId ? opts.find((o) => o.value === defaultId)?.label : undefined;
+      setDefaultModelLabel(label ?? '');
+    });
     return () => {
       alive = false;
     };
@@ -285,7 +299,7 @@ function EmptyState() {
             <textarea
               ref={taRef}
               className="empty-input"
-              rows={2}
+              rows={3}
               placeholder={t('session.emptyPlaceholder')}
               value={text}
               disabled={busy}
@@ -305,20 +319,20 @@ function EmptyState() {
                   onClick={() => setMenuOpen((o) => !o)}
                   title={cwd ?? t('session.emptyChatTarget')}
                 >
-                  <Icon name="folder" size={14} />
+                  <Icon name={cwd ? 'folder' : 'chat'} size={14} />
                   {targetLabel}
                   <Icon name="chevron-down" size={12} />
                 </button>
                 {menuOpen && (
                   <div className="empty-menu">
                     <button
-                      className={`empty-menu-item ${!cwd ? 'active' : ''}`}
+                      className="empty-menu-item"
                       onClick={() => {
                         setCwd(null);
                         setMenuOpen(false);
                       }}
                     >
-                      <Icon name="sparkle" size={14} />
+                      <Icon name="chat" size={14} />
                       {t('session.emptyChatTarget')}
                     </button>
                     {recentProjects.length > 0 && (
@@ -348,32 +362,29 @@ function EmptyState() {
               </div>
 
               {/* Model selector */}
-              <span className="chip">
-                <Icon name="cpu" size={14} />
-                <select value={model} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">{t('prompt.defaultModel')}</option>
-                  {models.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <CustomSelect
+                value={model}
+                options={[
+                  { value: '', label: defaultModelLabel || t('prompt.defaultModel') },
+                  ...models.map((m) => ({ value: m.value, label: m.label })),
+                ]}
+                icon="cpu"
+                onChange={(val) => setModel(val)}
+              />
 
               {/* Permission mode */}
-              <span className="chip accent">
-                <Icon name="shield" size={14} />
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as PermissionMode)}
-                >
-                  {PERMISSION_MODES.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {t(`permMode.${m.id}`)}
-                    </option>
-                  ))}
-                </select>
-              </span>
+              <CustomSelect
+                value={mode}
+                options={PERMISSION_MODES.map((m) => ({
+                  value: m.id,
+                  label: t(`permMode.${m.id}`),
+                  description: t(`permMode.${m.id}.hint`),
+                }))}
+                icon="shield"
+                accent
+                preferUp
+                onChange={(val) => setMode(val as PermissionMode)}
+              />
 
               <span className="grow" />
 

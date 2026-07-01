@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore, type SessionView } from '../store';
 import { NewSessionDialog } from './NewSessionDialog';
-import { SettingsDialog } from './SettingsDialog';
+import { SettingsDialog, type SectionId } from './SettingsDialog';
 import { FeishuDialog } from './FeishuDialog';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
 import { useT, type TFunc } from '../i18n/useT';
-import appIcon from '../../../public/app-icon.png';
+import appIcon from '../../../public/logo_black.png';
 import feishuIcon from '../../../public/feishu_logo.png';
 import type { AgentKind, SessionMeta } from '@shared/ipc';
 
@@ -67,6 +67,7 @@ export function Sidebar() {
 
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SectionId>('general');
   const [showFeishu, setShowFeishu] = useState(false);
   const [feishuRunning, setFeishuRunning] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -287,7 +288,17 @@ export function Sidebar() {
           <img className="brand-mark" src={appIcon} alt="Easy Code" />
           Easy Code
         </div>
-        <div className="brand-version">v{__APP_VERSION__}</div>
+        <button
+          type="button"
+          className="brand-version"
+          title={t('settings.navAbout')}
+          onClick={() => {
+            setSettingsTab('about');
+            setShowSettings(true);
+          }}
+        >
+          v{__APP_VERSION__}
+        </button>
         <button className="btn-new" onClick={() => setShowNew(true)}>
           <Icon name="plus" size={15} />
           {t('sidebar.newSession')}
@@ -395,7 +406,14 @@ export function Sidebar() {
             height={16}
           />
         </button>
-        <button className="icon-btn" title={t('common.settings')} onClick={() => setShowSettings(true)}>
+        <button
+          className="icon-btn"
+          title={t('common.settings')}
+          onClick={() => {
+            setSettingsTab('general');
+            setShowSettings(true);
+          }}
+        >
           <Icon name="settings" size={15} />
         </button>
         <button
@@ -403,12 +421,14 @@ export function Sidebar() {
           title={customModelOnly ? t('sidebar.exitCustomModelMode') : t('common.logout')}
           onClick={() => (customModelOnly ? exitCustomModelMode() : void api.auth.logout())}
         >
-          <Icon name="power" size={15} />
+          <Icon name="logout" size={15} />
         </button>
       </div>
 
       {showNew && <NewSessionDialog onClose={() => setShowNew(false)} />}
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsDialog initialTab={settingsTab} onClose={() => setShowSettings(false)} />
+      )}
       {showFeishu && <FeishuDialog onClose={() => setShowFeishu(false)} />}
 
       {confirmDelete && (

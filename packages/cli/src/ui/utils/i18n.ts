@@ -357,6 +357,12 @@ export const translations = {
 
     // Tool Names
     'tool.edit': 'Edit',
+    'tool.ppt_generate': 'PPT Generate',
+    'tool.ppt_generate.description': 'Submit PPT outline and start generation task.\n\nThis tool will perform the following operations:\n1. Submit the current outline to the server\n2. Start the PPT generation task\n3. Automatically open browser to the PPT editing preview page\n4. Exit PPT editing mode\n\nMake sure to set the outline content (topic, page count, outline text) via ppt_outline tool before calling.',
+    'ppt_generate.param.confirm': 'Confirm submission (default true)',
+    'tool.ppt_outline': 'PPT Outline',
+    'tool.ppt_outline.description': 'Manage PPT outline content. Supports the following actions:\n- init: Initialize PPT editing mode, start creating new PPT\n- update: Update outline content (topic, page count, outline text)\n- view: View current outline state\n- clear: Clear current outline and exit PPT mode',
+
     // Web Search
     'websearch.results.returned': 'Search results for "{query}" returned.{truncated}',
     'websearch.results.truncated': ' (Content truncated)',
@@ -950,6 +956,24 @@ export const translations = {
     'config.status.project.memory.updated': '✅ Project memory mode updated to {mode}',
     'config.status.project.memory.reloading': '🔄 Reloading memory...',
 
+    // Advanced model overrides (compression & sub-agents)
+    'config.menu.modelOverrides': '🧩 Advanced Models',
+    'config.submenu.modelOverrides.title': 'Advanced Models - Override compression & sub-agent models',
+    'config.option.modelOverrides.compression': '🗜️ Compression model',
+    'config.option.modelOverrides.codeExpert': '🔍 Code Expert sub-agent',
+    'config.option.modelOverrides.verification': '✅ Verification sub-agent',
+    'config.value.modelOverrides.default': 'Default',
+    'config.value.modelOverrides.inherit': 'Inherit session',
+    'config.submenu.modelOverrides.pick.compression': 'Select compression model',
+    'config.submenu.modelOverrides.pick.codeExpert': 'Select Code Expert sub-agent model',
+    'config.submenu.modelOverrides.pick.verification': 'Select Verification sub-agent model',
+    'config.option.modelOverrides.useDefault': '↩️ Use default (auto-managed)',
+    'config.option.modelOverrides.inherit': '↩️ Inherit current session model',
+    'config.status.modelOverrides.updated': '✅ {target} → {model}',
+    'config.status.modelOverrides.cleared': '✅ {target} reset to default',
+    'config.hint.modelOverrides.loading': 'Loading models...',
+    'config.hint.modelOverrides.empty': 'No models available. Log in or add a custom model first.',
+
   'command.healthyUse.description': 'Manage healthy use reminders',
   'command.healthyUse.status': 'Healthy use reminder is currently {status}',
   'command.healthyUse.on': 'Healthy use reminder turned ON',
@@ -965,6 +989,12 @@ export const translations = {
   'healthy.reminder.agentRunning': "Agent is working in the background and won't be affected.",
   'healthy.reminder.waiting': 'Please wait {{seconds}}s to confirm...',
   'healthy.reminder.dismiss': ' Press [Enter] or [Space] to remind later ',
+    'acp.command.interactiveOnly': 'The `/{name}` command is interactive and can only be used in the Easy Code CLI.',
+    'acp.command.terminalOnly': 'The `/{name}` command runs only in the Easy Code CLI terminal and is not available in the desktop app.',
+    'acp.command.unknown': 'Unknown command: `/{name}`. Type `/help` to list available commands.',
+    'command.ppt.description': 'Create PowerPoint presentations with AI-assisted outline design',
+    'command.ppt.prompt': 'What topic would you like to create a PPT for?\n\nExamples:\n  /ppt "AI in Education"\n  /ppt "2025 Annual Summary" --pages 15',
+    'command.ppt.expected_pages': '\n\nExpected pages: {count}',
     'command.session.description': 'Session management - list, select and create conversation sessions',
     'command.trim.description': 'Manage automatic trailing space removal configuration (for C++, Python, etc.)',
     'command.myplan.description': 'Quick access to user information page',
@@ -1460,6 +1490,7 @@ export const translations = {
     'feishu.subcmd.status.description': 'Show the Feishu Bot connection status',
     'feishu.subcmd.logout.description': 'Clear Feishu credentials and disconnect',
     'feishu.subcmd.allow.description': 'Add a Feishu open_id to the authorization allowlist',
+    'feishu.subcmd.owner.description': 'Set or replace the Bot Owner open_id (marks it verified)',
     'feishu.subcmd.deny.description': 'Remove an open_id from the authorization allowlist',
     'feishu.subcmd.allowlist.description': 'List the current Bot Owner and authorization allowlist',
     'feishu.subcmd.help.description': 'Show Feishu help',
@@ -1585,6 +1616,13 @@ export const translations = {
     'feishu.allow.already_in_list': 'ℹ️ {openId} is already in the authorization allowlist.',
     'feishu.allow.added': '✅ Added {openId} to the authorization allowlist (total {count}).',
 
+    // Owner handler
+    'feishu.owner.usage_title': 'Usage: /feishu owner <openId>',
+    'feishu.owner.usage_body': 'Set (or replace) the Bot Owner — the open_id authorized to drive the Bot — and mark it verified.',
+    'feishu.owner.already': 'ℹ️ {openId} is already the verified Bot Owner.',
+    'feishu.owner.set': '✅ Set {openId} as Bot Owner (marked verified).',
+    'feishu.owner.changed': '✅ Changed Bot Owner from {previous} to {openId} (marked verified).',
+
     // Deny handler
     'feishu.deny.usage': 'Usage: /feishu deny <openId>',
     'feishu.deny.cannot_remove_owner': '❌ Cannot directly remove the Bot Owner ({openId}).\n\nTo change the Owner:\n  1. /feishu allow <new-owner-openId> first add the new owner to allowlist\n  2. /feishu logout clear all credentials and re-run setup',
@@ -1665,7 +1703,7 @@ export const translations = {
     'tip.shell.mode': '! - Enter/exit shell mode',
     'tip.ctrl.j': 'Ctrl+J - Multiline input',
     'tip.cli.update': 'easycode -u - Check for updates',
-    'tip.cli.cloud': 'hwjcode --cloud-mode - Enable cloud remote control',
+    'tip.cli.cloud': 'easycode --cloud-mode - Enable cloud remote control',
 
     // Skills System
     'skill.command.description': 'Manage AI Skills (Marketplace → Plugin → Skill)',
@@ -2032,6 +2070,12 @@ export const translations = {
 
     // Tool Names
     'tool.edit': '编辑',
+    'tool.ppt_generate': 'PPT生成',
+    'tool.ppt_generate.description': '提交PPT大纲并启动生成任务。\n\n此工具会执行以下操作：\n1. 将当前大纲提交到服务端\n2. 启动PPT生成任务\n3. 自动打开浏览器跳转到PPT编辑预览页面\n4. 退出PPT编辑模式\n\n调用前请确保已通过 ppt_outline 工具设置好大纲内容（主题、页数、大纲文本）。',
+    'ppt_generate.param.confirm': '确认提交（默认true）',
+    'tool.ppt_outline': 'PPT大纲',
+    'tool.ppt_outline.description': '管理PPT大纲内容。支持以下操作：\n- init: 初始化PPT编辑模式，开始创建新PPT\n- update: 更新大纲内容（主题、页数、大纲文本）\n- view: 查看当前大纲状态\n- clear: 清除当前大纲并退出PPT模式',
+
     // Web Search
     'websearch.results.returned': '"{query}"的搜索结果已返回。{truncated}',
     'websearch.results.truncated': '（内容已截断）',
@@ -2624,6 +2668,24 @@ export const translations = {
     'config.status.project.memory.updated': '✅ 项目记忆模式已更新为 {mode}',
     'config.status.project.memory.reloading': '🔄 正在重新加载记忆...',
 
+    // 高级模型覆盖（压缩 & 子代理）
+    'config.menu.modelOverrides': '🧩 高级模型',
+    'config.submenu.modelOverrides.title': '高级模型 - 自定义压缩与子代理使用的模型',
+    'config.option.modelOverrides.compression': '🗜️ 压缩模型',
+    'config.option.modelOverrides.codeExpert': '🔍 Code Expert 子代理',
+    'config.option.modelOverrides.verification': '✅ Verification 子代理',
+    'config.value.modelOverrides.default': '默认',
+    'config.value.modelOverrides.inherit': '继承会话',
+    'config.submenu.modelOverrides.pick.compression': '选择压缩模型',
+    'config.submenu.modelOverrides.pick.codeExpert': '选择 Code Expert 子代理模型',
+    'config.submenu.modelOverrides.pick.verification': '选择 Verification 子代理模型',
+    'config.option.modelOverrides.useDefault': '↩️ 使用默认（自动管理）',
+    'config.option.modelOverrides.inherit': '↩️ 继承当前会话模型',
+    'config.status.modelOverrides.updated': '✅ {target} → {model}',
+    'config.status.modelOverrides.cleared': '✅ {target} 已恢复默认',
+    'config.hint.modelOverrides.loading': '正在加载模型...',
+    'config.hint.modelOverrides.empty': '暂无可用模型，请先登录或添加自定义模型。',
+
   'command.healthyUse.description': '管理健康使用提醒',
   'command.healthyUse.status': '健康使用提醒当前为 {status}',
   'command.healthyUse.on': '已开启健康使用提醒',
@@ -2639,6 +2701,12 @@ export const translations = {
   'healthy.reminder.agentRunning': 'Agent 正在后台处理任务，不会受此提醒影响。',
   'healthy.reminder.waiting': '请在 {{seconds}} 秒后尝试确认...',
   'healthy.reminder.dismiss': ' 按 [回车] 或 [空格] 稍后提醒 ',
+    'acp.command.interactiveOnly': '`/{name}` 命令为交互式命令，仅可在 Easy Code 命令行中使用。',
+    'acp.command.terminalOnly': '`/{name}` 命令仅在 Easy Code 命令行终端中可用，桌面端不支持。',
+    'acp.command.unknown': '未知命令：`/{name}`。输入 `/help` 查看可用命令。',
+    'command.ppt.description': '通过AI辅助的大纲设计创建PowerPoint演示文稿',
+    'command.ppt.prompt': '请告诉我你想创建的PPT主题是什么？\n\n示例:\n  /ppt "AI在教育中的应用"\n  /ppt "2025年度总结" --pages 15',
+    'command.ppt.expected_pages': '\n\n预期页数: {count}页',
     'command.session.description': '会话管理 - 列出、选择和创建对话会话',
     'command.trim.description': '管理自动删除行末空格配置（适用于C++、Python等源代码）',
     'command.myplan.description': '快速打开用户信息页面',
@@ -3135,6 +3203,7 @@ export const translations = {
     'feishu.subcmd.status.description': '查看飞书 Bot 连接状态',
     'feishu.subcmd.logout.description': '清除飞书凭证并断开连接',
     'feishu.subcmd.allow.description': '将飞书 open_id 加入授权白名单',
+    'feishu.subcmd.owner.description': '设置或更换 Bot Owner 的 open_id（并标记为已确认）',
     'feishu.subcmd.deny.description': '从授权白名单中移除指定 open_id',
     'feishu.subcmd.allowlist.description': '列出当前 Bot 的 Owner 与授权白名单',
     'feishu.subcmd.help.description': '显示飞书帮助',
@@ -3256,6 +3325,13 @@ export const translations = {
     'feishu.allow.already_in_list': 'ℹ️ {openId} 已在授权白名单中。',
     'feishu.allow.added': '✅ 已将 {openId} 加入授权白名单 (共 {count} 人)。',
 
+    // Owner handler
+    'feishu.owner.usage_title': '用法: /feishu owner <openId>',
+    'feishu.owner.usage_body': '设置（或更换）Bot Owner —— 即被授权驱动 Bot 的 open_id，并标记为已确认。',
+    'feishu.owner.already': 'ℹ️ {openId} 已是已确认的 Bot Owner。',
+    'feishu.owner.set': '✅ 已将 {openId} 设为 Bot Owner（已标记为已确认）。',
+    'feishu.owner.changed': '✅ 已将 Bot Owner 从 {previous} 更换为 {openId}（已标记为已确认）。',
+
     // Deny handler
     'feishu.deny.usage': '用法: /feishu deny <openId>',
     'feishu.deny.cannot_remove_owner': '❌ 不能直接移除 Bot Owner ({openId})。\n\n如需更换 Owner，请：\n  1. /feishu allow <new-owner-openId> 先把新 Owner 加入白名单\n  2. /feishu logout 清除全部凭证后重新 setup',
@@ -3336,7 +3412,7 @@ export const translations = {
     'tip.shell.mode': '! - 进入/退出 Shell 模式',
     'tip.ctrl.j': 'Ctrl+J - 输入多行内容',
     'tip.cli.update': 'easycode -u - 检查更新',
-    'tip.cli.cloud': 'hwjcode --cloud-mode - 启用云端远程控制模式',
+    'tip.cli.cloud': 'easycode --cloud-mode - 启用云端远程控制模式',
 
     // Skills System
     'skill.command.description': '管理 AI Skills (Marketplace → Plugin → Skill)',

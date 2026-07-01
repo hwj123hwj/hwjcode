@@ -29,6 +29,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { resolveBackendEntry } from './backendLocator.js';
+import {
+  isAllowedFeishuAuthCommand,
+  buildFeishuCommandArgs,
+  parseFeishuCommandStdout,
+} from './feishuCommandRunner.js';
 import type {
   FeishuBinding,
   FeishuDomain,
@@ -38,6 +43,7 @@ import type {
   FeishuQrBegin,
   FeishuQrBeginResult,
   FeishuResult,
+  FeishuRunResult,
   FeishuStatus,
 } from '../shared/ipc.js';
 
@@ -53,6 +59,13 @@ interface StoredCredentials {
   botOpenId?: string;
   tenantName?: string;
   ownerOpenId?: string;
+  /**
+   * Whether {@link ownerOpenId} has been confirmed in the Bot app's own open_id
+   * space (TOFU first-DM binding). Must round-trip through every save path —
+   * dropping it would let the gateway re-bind a confirmed owner to whoever DMs
+   * next. Mirrors FeishuCredentials.ownerVerified in the CLI store.
+   */
+  ownerVerified?: boolean;
   allowlist?: string[];
 }
 
@@ -449,6 +462,16 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 const FEISHU_RESTART_EXIT_CODE = 97;
 
+/** How much of the gateway child's combined stdout/stderr we keep and surface
+ * to the UI's "details" panel. Big enough for the full WebSocket connect
+ * handshake + a stack trace, bounded so a chatty gateway can't grow unbounded. */
+const LOG_TAIL_MAX = 16_000;
+
+/** Min gap between log-driven status pushes, so a noisy child doesn't flood the
+ * IPC channel / React re-renders. The tail is always complete on the next tick;
+ * this only rate-limits how often we notify. */
+const LOG_EMIT_THROTTLE_MS = 250;
+
 // ── the manager ──────────────────────────────────────────────────────────────
 
 export class FeishuManager {
@@ -458,6 +481,8 @@ export class FeishuManager {
   private logTail = '';
   private pollCancelled = false;
   private stopping = false;
+  private logEmitTimer?: NodeJS.Timeout;
+  private logEmitPending = false;
 
   constructor(
     private readonly onChange: (status: FeishuStatus) => void,
@@ -471,7 +496,28 @@ export class FeishuManager {
   private appendLog(chunk: Buffer): void {
     const text = stripAnsi(chunk.toString('utf8'));
     if (!text.trim()) return;
-    this.logTail = (this.logTail + text).slice(-2000);
+    this.logTail = (this.logTail + text).slice(-LOG_TAIL_MAX);
+    // Stream live output to the UI so the user can watch the gateway actually
+    // boot (WebSocket connect, scope audit, crashes) instead of only seeing a
+    // static "running" badge. Throttled to avoid flooding IPC on a chatty child.
+    this.scheduleLogEmit();
+  }
+
+  /** Push the latest status (carrying logTail) to the UI, at most once per
+   * LOG_EMIT_THROTTLE_MS while output keeps arriving. */
+  private scheduleLogEmit(): void {
+    if (this.logEmitTimer) {
+      this.logEmitPending = true;
+      return;
+    }
+    this.emitChange();
+    this.logEmitTimer = setTimeout(() => {
+      this.logEmitTimer = undefined;
+      if (this.logEmitPending) {
+        this.logEmitPending = false;
+        this.scheduleLogEmit();
+      }
+    }, LOG_EMIT_THROTTLE_MS);
   }
 
   async getStatus(): Promise<FeishuStatus> {
@@ -481,12 +527,14 @@ export class FeishuManager {
       botName: creds?.botName,
       platform: creds?.domain,
       ownerOpenId: creds?.ownerOpenId,
+      ownerVerified: creds?.ownerVerified,
       allowlistCount: creds?.allowlist?.length ?? 0,
+      allowlist: creds?.allowlist ?? [],
       running: this.running,
       pid: this.running ? this.child?.pid : undefined,
       startedAt: this.running ? this.startedAt : undefined,
       lastError: this.lastError,
-      logTail: this.logTail.slice(-1500),
+      logTail: this.logTail,
     };
   }
 
@@ -510,6 +558,7 @@ export class FeishuManager {
       botName: probe.botName,
       botOpenId: probe.botOpenId,
       ownerOpenId: existing?.ownerOpenId,
+      ownerVerified: existing?.ownerVerified,
       allowlist: existing?.allowlist,
     });
     this.lastError = undefined;
@@ -554,6 +603,11 @@ export class FeishuManager {
         botName: probe.botName,
         botOpenId: probe.botOpenId,
         ownerOpenId: res.openId ?? existing?.ownerOpenId,
+        // A freshly scanned open_id comes from the dvcode registration flow's
+        // id space (not the Bot app's), so it's a guess awaiting first-DM TOFU
+        // confirmation — mark it unverified, mirroring the CLI's QR setup. When
+        // the scan returned no open_id we keep whatever was already confirmed.
+        ownerVerified: res.openId ? false : existing?.ownerVerified,
         allowlist: existing?.allowlist,
       });
       this.lastError = undefined;
@@ -572,6 +626,106 @@ export class FeishuManager {
     await clearCredentialsFile();
     this.emitChange();
     return this.getStatus();
+  }
+
+  /**
+   * Run a `/feishu` authorization subcommand (allow / deny / owner / allowlist)
+   * by spawning the bundled backend non-interactively — the exact same handlers
+   * the CLI/TUI use, loaded via BuiltinCommandLoader. The command mutates the
+   * shared credential store; we re-read status afterwards so the UI reflects it.
+   *
+   * This is pass-through, not a reimplementation: the owner-guard, dedupe,
+   * "set as owner when none", "cannot remove owner" rules all live in
+   * feishuCommand.ts and stay single-sourced.
+   *
+   * NOTE: a *running* gateway holds its credentials in an in-memory snapshot and
+   * does not re-read per message, so a change here only affects live sessions
+   * after the gateway is restarted. The dialog surfaces that hint.
+   */
+  async runFeishuCommand(rawArgs: string): Promise<FeishuRunResult> {
+    const args = (rawArgs ?? '').trim();
+    if (!isAllowedFeishuAuthCommand(args)) {
+      return {
+        ok: false,
+        error: `不支持的 /feishu 子命令：${args || '(空)'}`,
+        status: await this.getStatus(),
+      };
+    }
+    const creds = await loadCredentials();
+    if (!creds) {
+      return { ok: false, error: '尚未配置飞书凭证。', status: await this.getStatus() };
+    }
+
+    let entry: string;
+    try {
+      entry = resolveBackendEntry();
+    } catch (e) {
+      return { ok: false, error: errMsg(e), status: await this.getStatus() };
+    }
+
+    const spawnArgs = buildFeishuCommandArgs(entry, args);
+    const { code, stdout, stderr } = await new Promise<{
+      code: number | null;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
+      let out = '';
+      let err = '';
+      let done = false;
+      const finish = (c: number | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ code: c, stdout: out, stderr: err });
+      };
+      const child = spawn(process.execPath, spawnArgs, {
+        cwd: os.homedir(),
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          ...(process.env.DEEPX_SERVER_URL ? { DEEPX_SERVER_URL: process.env.DEEPX_SERVER_URL } : {}),
+          ...(process.env.DEEPX_WEB_URL ? { DEEPX_WEB_URL: process.env.DEEPX_WEB_URL } : {}),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      // Bound the wait so a wedged backend boot can't hang the IPC call forever.
+      const timer = setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          /* already gone */
+        }
+        finish(null);
+      }, 60_000);
+      child.stdout?.on('data', (b: Buffer) => {
+        out += b.toString('utf8');
+      });
+      child.stderr?.on('data', (b: Buffer) => {
+        err += b.toString('utf8');
+      });
+      child.on('error', (e) => {
+        err += errMsg(e);
+        finish(-1);
+      });
+      child.on('close', (c) => finish(c));
+    });
+
+    const parsed = parseFeishuCommandStdout(stripAnsi(stdout));
+    // Credentials may have changed on disk — refresh the broadcast status and
+    // hand the caller a fresh snapshot so the dialog re-renders owner/allowlist.
+    this.emitChange();
+    const status = await this.getStatus();
+
+    if (parsed.message && parsed.status !== 'error') {
+      return { ok: true, message: parsed.message, status };
+    }
+    const error =
+      parsed.error ||
+      parsed.message ||
+      stripAnsi(stderr).trim().split('\n').filter(Boolean).slice(-3).join('\n') ||
+      `命令执行失败 (exit ${code ?? 'null'})`;
+    return { ok: false, error, status };
   }
 
   detectExternal(): Promise<FeishuExternalProcess[]> {
@@ -648,7 +802,7 @@ export class FeishuManager {
 
     try {
       const entry = resolveBackendEntry();
-      const child = spawn(process.execPath, [entry, '--feishu'], {
+      const child = spawn(process.execPath, [entry, '--feishu', '--no-continue'], {
         cwd: os.homedir(),
         env: {
           ...process.env,

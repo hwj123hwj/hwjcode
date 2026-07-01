@@ -28,6 +28,7 @@ import {
   coreEvents,
   CoreEvent,
   SessionManager as CoreSessionManager,
+  generateCustomModelId,
 } from 'deepv-code-core';
 import * as acp from '@agentclientprotocol/sdk';
 import * as fs from 'node:fs/promises';
@@ -51,6 +52,7 @@ import {
   extractAskAnswers,
   toAcpToolKind,
   iconToAcpKind,
+  optionValueToThinkingConfig,
 } from './acpUtils.js';
 import { getAcpErrorMessage } from './acpErrors.js';
 import type { GenerateContentResponse } from '@google/genai';
@@ -512,21 +514,32 @@ export class Session {
     const client = cfg.getGeminiClient?.();
     const signal = abortSignal ?? new AbortController().signal;
 
+    // Normalize stale model ID: if the session stored an old-hash custom model
+    // ID that no longer matches the current config (e.g. baseUrl changed),
+    // resolve it via getCustomModelConfig and replace with the current canonical ID.
+    const effectiveModelId = (() => {
+      if (!modelId.startsWith('custom:')) return modelId;
+      const found = (this.config as unknown as { getCustomModelConfig?: (id: string) => unknown }).getCustomModelConfig?.(modelId);
+      if (!found) return modelId;
+      const canonical = generateCustomModelId(found as Parameters<typeof generateCustomModelId>[0]);
+      return canonical !== modelId ? canonical : modelId;
+    })();
+
     if (client?.switchModel) {
-      const result = await client.switchModel(modelId, signal);
+      const result = await client.switchModel(effectiveModelId, signal);
       // switchModel already does config.setModel + chat.setSpecifiedModel +
       // setTools + history compression internally on success.
-      if (result?.success !== false) this.persistPreferredModel(modelId);
+      if (result?.success !== false) this.persistPreferredModel(effectiveModelId);
       return result;
     }
 
     // Minimal fallback — Config only, no compression, no tool re-registration.
-    cfg.setModel?.(modelId);
+    cfg.setModel?.(effectiveModelId);
     const chat = this.chat as unknown as {
       setSpecifiedModel?: (modelId: string) => void;
     };
-    chat.setSpecifiedModel?.(modelId);
-    this.persistPreferredModel(modelId);
+    chat.setSpecifiedModel?.(effectiveModelId);
+    this.persistPreferredModel(effectiveModelId);
     return null;
   }
 
@@ -588,6 +601,12 @@ export class Session {
       };
     } else if (configId === 'mode' && typeof value === 'string') {
       this.setMode(value);
+    } else if (configId === 'thinking' && typeof value === 'string') {
+      // Switch extended-thinking mode/effort. `setThinkingConfig` updates the
+      // in-memory Config and persists to the project/user settings, exactly
+      // like the interactive `/thinking` command — so the change survives
+      // restarts and is shared with the CLI.
+      this.config.setThinkingConfig(optionValueToThinkingConfig(value));
     }
     return {};
   }
@@ -682,10 +701,9 @@ export class Session {
   }
 
   /**
-   * Emit the current list of slash commands to the IDE. DeepCode's ACP layer
-   * only ships a minimal set of built-ins (`/help`, `/memory`, `/init`,
-   * `/about`); the richer registry from gemini-cli can be plugged in via
-   * `acpCommandHandler.ts`.
+   * Emit the current list of slash commands to the IDE/desktop. The list is the
+   * union of the purpose-built headless commands and the real CLI command set
+   * (see `acpCommandBridge.ts`), so the desktop `/` popup matches the CLI.
    */
   async sendAvailableCommands(): Promise<void> {
     // Discover commands via the CommandHandler if present; fall back to a
@@ -693,7 +711,7 @@ export class Session {
     let commands: Array<{ name: string; description: string }> = [];
     try {
       const { CommandHandler } = await import('./acpCommandHandler.js');
-      commands = new CommandHandler().getAvailableCommands();
+      commands = await new CommandHandler().getAvailableCommands(this.config);
     } catch {
       commands = [
         { name: 'help', description: 'List available commands' },
@@ -723,11 +741,14 @@ export class Session {
       .map((c) => (c as { text: string }).text)
       .join('')
       .trim();
+    // When a slash command expands into a prompt (`submit_prompt`), we run that
+    // expanded text through the model instead of the raw command.
+    let submitPromptOverride: string | undefined;
     if (textChunks.startsWith('/') || textChunks.startsWith('$')) {
       try {
         const { CommandHandler } = await import('./acpCommandHandler.js');
         const handler = new CommandHandler();
-        const handled = await handler.handleCommand(textChunks, {
+        const result = await handler.handleCommand(textChunks, {
           config: this.config,
           settings: this._settings,
           sendMessage: async (text) => {
@@ -737,7 +758,9 @@ export class Session {
             });
           },
         });
-        if (handled) {
+        if (result.submitPrompt) {
+          submitPromptOverride = result.submitPrompt;
+        } else if (result.handled) {
           return { stopReason: 'end_turn' };
         }
       } catch {
@@ -763,7 +786,9 @@ export class Session {
     }
 
     const promptId = Math.random().toString(16).slice(2);
-    const parts = await this.resolvePrompt(req, abort.signal);
+    const parts = submitPromptOverride
+      ? [{ text: submitPromptOverride }]
+      : await this.resolvePrompt(req, abort.signal);
 
     let nextMessage: Content | null = {
       role: MESSAGE_ROLES.USER,

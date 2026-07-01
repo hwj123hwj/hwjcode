@@ -268,13 +268,27 @@ export class AcpSessionManager {
     // the IDE. Without this, the IDE picks from a stale fallback list and
     // the server rejects switches with a 500 "不支持的模型".
     //
-    // Always refresh (not just when the cache is empty): the settings cache
-    // can easily outlive a model rollback on the server side — we hit this
-    // with `claude-sonnet-4-5` lingering after the server replaced it with
-    // `claude-sonnet-4-6`. Fire-and-forget so a slow/broken network never
-    // blocks session/new; the snapshot will use whatever cache exists
-    // (even stale) and pick up the fresh list for the next snapshot.
-    void refreshCloudModelsForAcp(this.config);
+    // The desktop / IDE reads the model list straight out of the
+    // `session/new` | `session/load` response exactly ONCE and never re-reads
+    // it (see packages/desktop/src/main/acpSession.ts `modelsOf`). So when the
+    // local cache is COLD — a desktop-only user who never ran the interactive
+    // CLI, hence has no `cloudModels` in settings.json — we MUST await the
+    // fetch here, otherwise the first (and only) response advertises an empty
+    // list and the picker shows nothing. `refreshCloudModelsForAcp` also
+    // persists the result to settings.json, so subsequent launches start warm.
+    //
+    // With a WARM cache (CLI veteran, or a prior ACP launch) we refresh in the
+    // background: the snapshot already has a usable list and a slow/broken
+    // network must not block session creation. The refresh still picks up
+    // server-side model rollbacks for the next snapshot / launch. It's
+    // best-effort and never throws, so neither path can fail session creation.
+    const refresh = refreshCloudModelsForAcp(this.config, this.settings);
+    const hasCachedModels = (this.config.getCloudModels?.()?.length ?? 0) > 0;
+    if (hasCachedModels) {
+      void refresh;
+    } else {
+      await refresh;
+    }
   }
 
   private installFileSystemServiceIfSupported(

@@ -26,10 +26,23 @@ export function formatAttachmentReferencesForDisplay(text: string): string {
   });
 
   // 再处理 @path 形式（不含引号）
-  // 匹配非空白、非引号、非特殊标点的字符（包括点号用于扩展名，冒号用于 Windows 盘符或行号）
-  // 但后面必须跟空格、标点或行末
+  // 文件路径的特征：
+  // 1. 必须有真正的文件扩展名（末尾有 .xxx）或
+  // 2. 包含 Windows 盘符冒号（如 D:\）
+  // 不匹配 npm 包名形式，如 @scope/package 或 @package（这些没有扩展名）
   // 负向后查 (?<![a-zA-Z0-9]) 确保 @ 前面不是字母或数字（避免匹配邮箱中的 @）
   result = result.replace(/(?<![a-zA-Z0-9])@([a-zA-Z0-9_\-./\\:]+)(?=\s|$|[，,;；:：!！?？、。\)\]）】》>])/g, (match, path) => {
+    // 只有满足以下条件之一，才认为是文件引用：
+    // 1. 包含 Windows 盘符冒号（如 D:\）
+    // 2. 包含文件扩展名（.xx，至少有点号和1-5个字母的扩展名）
+    const hasDriveLetter = /^[a-zA-Z]:/.test(path);
+    const hasExtension = /\.[a-zA-Z0-9]{1,5}$/.test(path);
+
+    if (!hasDriveLetter && !hasExtension) {
+      // 不符合文件路径特征，保持原样（可能是 npm 包名或其他）
+      return match;
+    }
+
     const isImage = /\.(png|jpg|jpeg|gif|webp|bmp|svg|ico|heic|heif|avif|tiff?|raw)$/i.test(path);
     const type = isImage ? 'Image' : 'File';
     return `@[${type} #${invisibleQuote}${path}${invisibleQuote}]`;
@@ -57,6 +70,24 @@ export function getAttachmentSegments(text: string): AttachmentSegment[] {
   let match;
 
   while ((match = regex.exec(text)) !== null) {
+    // 检查是否是有效的文件路径
+    const pathValue = match[1] || match[2];
+    const isQuoted = !!match[1]; // @"..." 格式
+
+    // 对于有引号的格式，直接认为是文件引用
+    // 对于无引号的格式，检查是否满足文件路径特征
+    let isValidFilePath = isQuoted;
+    if (!isQuoted) {
+      const hasDriveLetter = /^[a-zA-Z]:/.test(pathValue);
+      const hasExtension = /\.[a-zA-Z0-9]{1,5}$/.test(pathValue);
+      isValidFilePath = hasDriveLetter || hasExtension;
+    }
+
+    if (!isValidFilePath) {
+      // 不是有效的文件路径，跳过这个匹配
+      continue;
+    }
+
     // 添加匹配前的文本
     if (match.index > lastIndex) {
       segments.push({
@@ -65,7 +96,6 @@ export function getAttachmentSegments(text: string): AttachmentSegment[] {
       });
     }
 
-    const pathValue = match[1] || match[2];
     const isImage = /\.(png|jpg|jpeg|gif|webp|bmp|svg|ico|heic|heif|avif|tiff?|raw)$/i.test(pathValue);
 
     segments.push({
@@ -75,7 +105,7 @@ export function getAttachmentSegments(text: string): AttachmentSegment[] {
       path: pathValue
     });
 
-    lastIndex = regex.lastIndex;
+    lastIndex = match.index + match[0].length;
   }
 
   // 添加剩余文本
@@ -146,8 +176,10 @@ export function formatAttachmentSegment(segment: AttachmentSegment, relativeCurs
  * Handles multiple formats:
  * 1. @[File #"path"] or @[Image #"path"] -> @"path"
  * 2. @clipboard -> @"clipboard"
- * 3. @path -> @"path"
+ * 3. @path -> @"path" (only if it looks like a file path)
  * 4. @"path" -> @"path" (already quoted, no change)
+ *
+ * Note: @scope/package format (npm packages) are NOT converted
  */
 export function ensureQuotesAroundAttachments(text: string): string {
   let result = text;
@@ -163,9 +195,20 @@ export function ensureQuotesAroundAttachments(text: string): string {
   // 所以在下面的正则中添加负向先行断言
 
   // 3. 处理 @path 形式（不含引号，不是 @[...] 格式，不是 @clipboard）
-  // 匹配文件路径字符（字母、数字、点、斜杠、下划线、连字符、冒号）
+  // 只转换满足文件路径特征的引用：
+  // - 包含 Windows 盘符冒号（如 D:\）
+  // - 包含文件扩展名
   // 负向后查 (?<![a-zA-Z0-9]) 确保 @ 前面不是字母或数字（避免匹配邮箱中的 @）
   result = result.replace(/(?<![a-zA-Z0-9])@(?!clipboard)(?!\[)([a-zA-Z0-9_\-./\\:]+)(?=\s|$|[，,;；:：!！?？、。\)\]）】》>])/g, (match, path) => {
+    // 检查是否满足文件路径特征
+    const hasDriveLetter = /^[a-zA-Z]:/.test(path);
+    const hasExtension = /\.[a-zA-Z0-9]{1,5}$/.test(path);
+
+    if (!hasDriveLetter && !hasExtension) {
+      // 不符合文件路径特征，保持原样（可能是 npm 包名或其他）
+      return match;
+    }
+
     return `@"${path}"`;
   });
 

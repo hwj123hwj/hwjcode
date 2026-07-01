@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   detectOpenAICompatibleVendor,
   applyOpenAIChatThinking,
+  isAdaptiveThinkingClaude,
   type ThinkingConfig,
 } from './customModel.js';
 
@@ -140,5 +141,45 @@ describe('applyOpenAIChatThinking', () => {
     const body: Record<string, unknown> = {};
     applyOpenAIChatThinking(body, 'deepseek-v4-pro', off);
     expect(body).toEqual({});
+  });
+});
+
+describe('isAdaptiveThinkingClaude', () => {
+  it('returns true for Mythos series', () => {
+    expect(isAdaptiveThinkingClaude('claude-mythos')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-mythos-1.0')).toBe(true);
+  });
+
+  it('returns true for Claude 4.6+ (major.minor)', () => {
+    expect(isAdaptiveThinkingClaude('claude-sonnet-4-6')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-opus-4.7')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-sonnet-4-7-20250219')).toBe(true);
+  });
+
+  it('returns true for Claude 5+ with major.minor', () => {
+    expect(isAdaptiveThinkingClaude('claude-sonnet-5.1')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-opus-5.0')).toBe(true);
+  });
+
+  it('returns true for Claude models with only major version (Sonnet 5)', () => {
+    expect(isAdaptiveThinkingClaude('claude-sonnet-5')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-5')).toBe(true);
+    expect(isAdaptiveThinkingClaude('claude-opus-5')).toBe(true);
+  });
+
+  it('returns true for Claude Sonnet 5 with date suffix', () => {
+    expect(isAdaptiveThinkingClaude('claude-sonnet-5-20251022')).toBe(true);
+  });
+
+  it('returns false for Claude 3.5 / 3.7 / 4.0', () => {
+    expect(isAdaptiveThinkingClaude('claude-sonnet-3.5')).toBe(false);
+    expect(isAdaptiveThinkingClaude('claude-sonnet-3-7')).toBe(false);
+    expect(isAdaptiveThinkingClaude('claude-opus-4.0')).toBe(false);
+  });
+
+  it('returns false for unrecognized / non-Claude models', () => {
+    expect(isAdaptiveThinkingClaude('gpt-5')).toBe(false);
+    expect(isAdaptiveThinkingClaude('deepseek-v4')).toBe(false);
+    expect(isAdaptiveThinkingClaude('')).toBe(false);
   });
 });

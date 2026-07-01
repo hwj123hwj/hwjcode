@@ -9,10 +9,15 @@ import type {
   CustomModelInput,
   CustomModelProvider,
   DesktopUserSettings,
+  McpServerEntry,
+  McpServerInput,
+  McpTransport,
+  ModelOverrides,
   ProjectMemoryMode,
   ShellOption,
   TerminalShellKind,
   ThemeMode,
+  VersionInfo,
 } from '@shared/ipc';
 
 const api = window.easycode;
@@ -41,6 +46,22 @@ const MEMORY_MODES: Array<{ id: ProjectMemoryMode; labelKey: TranslationKey; hin
   { id: 'none', labelKey: 'settings.memoryNone', hintKey: 'settings.memoryNoneHint' },
 ];
 
+/**
+ * Per-scene / per-sub-agent model overrides — mirrors the CLI `/config` "高级模型"
+ * submenu. `autoKey` labels the cleared (empty) state: compression falls back to
+ * the built-in default, sub-agents inherit the session model.
+ */
+const MODEL_OVERRIDE_FIELDS: Array<{
+  key: keyof ModelOverrides;
+  labelKey: TranslationKey;
+  descKey: TranslationKey;
+  autoKey: TranslationKey;
+}> = [
+  { key: 'compression', labelKey: 'settings.overrideCompression', descKey: 'settings.overrideCompressionDesc', autoKey: 'settings.overrideAutoDefault' },
+  { key: 'codeExpert', labelKey: 'settings.overrideCodeExpert', descKey: 'settings.overrideCodeExpertDesc', autoKey: 'settings.overrideInherit' },
+  { key: 'verification', labelKey: 'settings.overrideVerification', descKey: 'settings.overrideVerificationDesc', autoKey: 'settings.overrideInherit' },
+];
+
 /** GUI color-theme options shown as chips in the 外观 section. */
 const THEME_MODES: Array<{ id: ThemeMode; labelKey: TranslationKey }> = [
   { id: 'system', labelKey: 'settings.themeSystem' },
@@ -65,7 +86,15 @@ const SHELL_LABEL: Record<TerminalShellKind, TranslationKey> = {
  * `GROUPS`, and write its `*Section` component — the left-nav rail and the
  * content area are both generated from `GROUPS`, so nothing else needs to change.
  */
-export type SectionId = 'general' | 'appearance' | 'personalization' | 'computerUse' | 'models';
+export type SectionId =
+  | 'general'
+  | 'appearance'
+  | 'personalization'
+  | 'computerUse'
+  | 'generalModel'
+  | 'models'
+  | 'mcp'
+  | 'about';
 
 interface SectionDef {
   id: SectionId;
@@ -108,7 +137,15 @@ const GROUPS: GroupDef[] = [
     titleKey: 'settings.groupIntegration',
     sections: [
       { id: 'computerUse', icon: 'laptop', labelKey: 'settings.navComputerUse', Component: ComputerUseSection },
+      { id: 'generalModel', icon: 'switch', labelKey: 'settings.navGeneralModel', Component: GeneralModelSection },
       { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
+      { id: 'mcp', icon: 'wrench', labelKey: 'settings.navMcp', Component: McpSection },
+    ],
+  },
+  {
+    titleKey: 'settings.groupAbout',
+    sections: [
+      { id: 'about', icon: 'info', labelKey: 'settings.navAbout', Component: AboutSection },
     ],
   },
 ];
@@ -250,6 +287,7 @@ function useUserSettings() {
 
 /* ── 通用 ─────────────────────────────────────────────────────────────────
  * Display/reply language, project memory, healthy-use reminder, software update.
+ * Model selection lives in its own 通用模型设置 section (GeneralModelSection).
  */
 function GeneralSection() {
   const t = useT();
@@ -257,36 +295,9 @@ function GeneralSection() {
   const setLang = useStore((s) => s.setLang);
   const update = useStore((s) => s.update);
   const checkUpdate = useStore((s) => s.checkUpdate);
-  const order = useStore((s) => s.order);
-  const sessions = useStore((s) => s.sessions);
   const [checking, setChecking] = useState(false);
   const { settings, setSettings, patch, saved } = useUserSettings();
   const [replyLang, setReplyLang] = useState('');
-  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
-
-  // Build the default-model options the same way the new-session/empty-session
-  // pickers do: the built-in models cached on existing sessions' meta, merged
-  // with the user's custom models. No live session is needed here.
-  useEffect(() => {
-    let alive = true;
-    const builtins = new Map<string, string>();
-    for (const id of order) {
-      for (const m of sessions[id]?.meta.availableModels ?? []) {
-        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
-      }
-    }
-    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
-    void api.models
-      .listCustom()
-      .then((custom) => {
-        if (!alive) return;
-        setModelOpts([...fromBuiltins, ...custom.map((c) => ({ value: c.id, label: c.label }))]);
-      })
-      .catch(() => alive && setModelOpts(fromBuiltins));
-    return () => {
-      alive = false;
-    };
-  }, [order, sessions]);
 
   // Sync the reply-language input whenever settings (re)load.
   useEffect(() => {
@@ -357,17 +368,6 @@ function GeneralSection() {
       </div>
 
       <div className="setting-item">
-        <label className="field-label">{t('settings.defaultModel')}</label>
-        <ModelSelect
-          value={settings?.defaultModel ?? ''}
-          options={modelOpts}
-          autoLabel={t('settings.defaultModelAuto')}
-          onChange={(value) => void patch({ defaultModel: value })}
-        />
-        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
-      </div>
-
-      <div className="setting-item">
         <label className="field-label">{t('settings.projectMemory')}</label>
         <div className="prompt-config">
           {MEMORY_MODES.map((m) => (
@@ -409,6 +409,88 @@ function GeneralSection() {
           <span className="setting-desc">{updateStatus}</span>
         </div>
       </div>
+
+      <SavedToast show={saved} />
+    </>
+  );
+}
+
+/* ── 通用模型设置 ───────────────────────────────────────────────────────────
+ * Global default model + per-scene / per-sub-agent overrides (compression /
+ * Code Expert / Verification). Carved out of 通用 into its own nav item; still
+ * reads/writes the same `settings.json` keys (defaultModel / modelOverrides),
+ * so the data binding is unchanged.
+ */
+function GeneralModelSection() {
+  const t = useT();
+  const order = useStore((s) => s.order);
+  const sessions = useStore((s) => s.sessions);
+  const { settings, patch, saved } = useUserSettings();
+  const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
+
+  // Build the default-model options the same way the new-session/empty-session
+  // pickers do: the built-in models cached on existing sessions' meta, merged
+  // with the user's custom models. No live session is needed here.
+  useEffect(() => {
+    let alive = true;
+    const builtins = new Map<string, string>();
+    for (const id of order) {
+      for (const m of sessions[id]?.meta.availableModels ?? []) {
+        if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
+      }
+    }
+    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    void api.models
+      .listCustom()
+      .then((custom) => {
+        if (!alive) return;
+        const seen = new Set<string>(fromBuiltins.map((o) => o.value));
+        const deduped = [
+          ...fromBuiltins,
+          ...custom.map((c) => ({ value: c.id, label: c.label })).filter(({ value }) => {
+            if (seen.has(value)) return false;
+            seen.add(value);
+            return true;
+          }),
+        ];
+        setModelOpts(deduped);
+      })
+      .catch(() => alive && setModelOpts(fromBuiltins));
+    return () => {
+      alive = false;
+    };
+  }, [order, sessions]);
+
+  return (
+    <>
+      <div className="setting-item">
+        <label className="field-label">{t('settings.defaultModel')}</label>
+        <ModelSelect
+          value={settings?.defaultModel ?? ''}
+          options={modelOpts}
+          autoLabel={t('settings.defaultModelAuto')}
+          onChange={(value) => void patch({ defaultModel: value })}
+        />
+        <div className="setting-desc">{t('settings.defaultModelDesc')}</div>
+      </div>
+
+      {/* 高级模型覆盖：压缩 / Code Expert / Verification 子代理。空值=恢复默认。 */}
+      {MODEL_OVERRIDE_FIELDS.map((f) => (
+        <div className="setting-item" key={f.key}>
+          <label className="field-label">{t(f.labelKey)}</label>
+          <ModelSelect
+            value={settings?.modelOverrides?.[f.key] ?? ''}
+            options={modelOpts}
+            autoLabel={t(f.autoKey)}
+            onChange={(value) =>
+              void patch({
+                modelOverrides: { ...(settings?.modelOverrides ?? {}), [f.key]: value },
+              })
+            }
+          />
+          <div className="setting-desc">{t(f.descKey)}</div>
+        </div>
+      ))}
 
       <SavedToast show={saved} />
     </>
@@ -574,6 +656,68 @@ function ComputerUseSection() {
         <>
           <div className="setting-note setting-note-warn">{t('settings.computerUseExperimental')}</div>
           {isMac && <div className="setting-note">{t('settings.computerUseMacPerms')}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── 关于 ─────────────────────────────────────────────────────────────────
+ * VSCode-style version/environment readout: the desktop version, the bundled
+ * backend version (easycode-cli-core), the Electron/Chromium/Node/V8 runtime,
+ * and the OS. All values come from the main process via `app.getVersionInfo()`
+ * (see main/appInfo.ts); the runtime names are proper nouns and not translated.
+ */
+function AboutSection() {
+  const t = useT();
+  const [info, setInfo] = useState<VersionInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    void api.app.getVersionInfo().then(setInfo).catch(() => undefined);
+  }, []);
+
+  const rows: Array<{ label: string; value: string }> = info
+    ? [
+        { label: t('settings.aboutDesktop'), value: info.desktop },
+        { label: t('settings.aboutCliCore'), value: info.cliCore },
+        { label: 'Electron', value: info.electron },
+        { label: 'Chromium', value: info.chrome },
+        { label: 'Node.js', value: info.node },
+        { label: 'V8', value: info.v8 },
+        { label: t('settings.aboutOs'), value: info.os },
+      ]
+    : [];
+
+  const copy = async () => {
+    if (!info) return;
+    await api.clipboard.writeText(rows.map((r) => `${r.label}: ${r.value}`).join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <div className="setting-item">
+      {!info ? (
+        <div className="cm-empty">
+          <span className="spinner" /> {t('common.loading')}
+        </div>
+      ) : (
+        <>
+          <div className="about-rows">
+            {rows.map((r) => (
+              <div className="about-row" key={r.label}>
+                <span className="about-label">{r.label}</span>
+                <span className="about-value">{r.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="settings-pane-foot">
+            <button className="btn" onClick={() => void copy()}>
+              <Icon name="copy" size={14} />
+              {copied ? t('settings.aboutCopied') : t('settings.aboutCopy')}
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -905,6 +1049,418 @@ function ModelsSection() {
                 onChange={(e) => patch({ enabled: e.target.checked })}
               />
               {t('settings.enableModel')}
+            </label>
+          </div>
+
+          <div className="settings-pane-foot">
+            <button className="btn" onClick={() => setForm(null)}>
+              {t('common.back')}
+            </button>
+            <button className="btn primary" disabled={busy} onClick={save}>
+              {busy ? <span className="spinner" /> : <Icon name="check" size={14} />}
+              {t('common.save')}
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ── MCP 服务器 ──────────────────────────────────────────────────────────────
+ * Reads/writes the shared `~/.easycode-user/settings.json` `mcpServers` map (the
+ * same store the CLI and every spawned `easycode --acp` backend read), so a
+ * server added/edited here is loaded by the next created session. The
+ * enable/disable toggle flips membership in the sibling `excludeMCPServers`
+ * list, which core honours natively — the desktop counterpart of the VSCode
+ * plugin's per-server switch, expressed through shared settings since the
+ * desktop's backend is a separate process.
+ */
+
+const MCP_TRANSPORTS: Array<{ id: McpTransport; labelKey: TranslationKey }> = [
+  { id: 'stdio', labelKey: 'settings.mcpTransportStdio' },
+  { id: 'sse', labelKey: 'settings.mcpTransportSse' },
+  { id: 'http', labelKey: 'settings.mcpTransportHttp' },
+];
+
+/** Editable form state — keeps args/env/headers as raw multi-line text. */
+interface McpForm {
+  name: string;
+  transport: McpTransport;
+  command: string;
+  argsText: string;
+  envText: string;
+  cwd: string;
+  url: string;
+  httpUrl: string;
+  headersText: string;
+  timeout: string;
+  trust: boolean;
+  description: string;
+  enabled: boolean;
+}
+
+const EMPTY_MCP_FORM: McpForm = {
+  name: '',
+  transport: 'stdio',
+  command: '',
+  argsText: '',
+  envText: '',
+  cwd: '',
+  url: '',
+  httpUrl: '',
+  headersText: '',
+  timeout: '',
+  trust: false,
+  description: '',
+  enabled: true,
+};
+
+/** Split a textarea into trimmed, non-empty lines. */
+function toLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+/** Parse `KEY=VALUE` lines into an object (first `=` splits; later ones kept). */
+function parseEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of toLines(text)) {
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+/** Parse `KEY: VALUE` header lines into an object. */
+function parseHeaders(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of toLines(text)) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    out[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+  }
+  return out;
+}
+
+function recordToLines(rec: Record<string, string> | undefined, sep: string): string {
+  if (!rec) return '';
+  return Object.entries(rec)
+    .map(([k, v]) => `${k}${sep}${v}`)
+    .join('\n');
+}
+
+function entryToForm(s: McpServerEntry): McpForm {
+  return {
+    name: s.name,
+    transport: s.transport,
+    command: s.command ?? '',
+    argsText: (s.args ?? []).join('\n'),
+    envText: recordToLines(s.env, '='),
+    cwd: s.cwd ?? '',
+    url: s.url ?? '',
+    httpUrl: s.httpUrl ?? '',
+    headersText: recordToLines(s.headers, ': '),
+    timeout: typeof s.timeout === 'number' ? String(s.timeout) : '',
+    trust: s.trust === true,
+    description: s.description ?? '',
+    enabled: s.enabled !== false,
+  };
+}
+
+function formToInput(f: McpForm): McpServerInput {
+  const args = toLines(f.argsText);
+  const env = parseEnv(f.envText);
+  const headers = parseHeaders(f.headersText);
+  const timeout = f.timeout.trim() ? Number(f.timeout) : undefined;
+  return {
+    name: f.name.trim(),
+    transport: f.transport,
+    command: f.command,
+    args: args.length ? args : undefined,
+    env: Object.keys(env).length ? env : undefined,
+    cwd: f.cwd,
+    url: f.url,
+    httpUrl: f.httpUrl,
+    headers: Object.keys(headers).length ? headers : undefined,
+    timeout: typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0 ? timeout : undefined,
+    trust: f.trust,
+    description: f.description,
+    enabled: f.enabled,
+  };
+}
+
+function McpSection() {
+  const t = useT();
+  const [servers, setServers] = useState<McpServerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<McpForm | null>(null);
+  /** name of the server being edited (undefined when adding). */
+  const [editingName, setEditingName] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = async () => {
+    setLoading(true);
+    const list = await api.mcp.list();
+    setServers(list);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const startAdd = () => {
+    setError('');
+    setEditingName(undefined);
+    setForm({ ...EMPTY_MCP_FORM });
+  };
+
+  const startEdit = (s: McpServerEntry) => {
+    setError('');
+    setEditingName(s.name);
+    setForm(entryToForm(s));
+  };
+
+  const remove = async (s: McpServerEntry) => {
+    await api.mcp.delete(s.name);
+    await refresh();
+  };
+
+  /** Flip a server's enabled state inline (without opening the editor). */
+  const toggleEnabled = async (s: McpServerEntry) => {
+    await api.mcp.setEnabled(s.name, !s.enabled);
+    await refresh();
+  };
+
+  const save = async () => {
+    if (!form) return;
+    if (!form.name.trim()) return setError(t('settings.errMcpName'));
+    if (form.transport === 'stdio' && !form.command.trim()) return setError(t('settings.errMcpCommand'));
+    if (form.transport === 'sse' && !form.url.trim()) return setError(t('settings.errMcpUrl'));
+    if (form.transport === 'http' && !form.httpUrl.trim()) return setError(t('settings.errMcpUrl'));
+    setBusy(true);
+    setError('');
+    const res = await api.mcp.save(formToInput(form), editingName);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? t('settings.saveFailed'));
+      return;
+    }
+    setForm(null);
+    setEditingName(undefined);
+    await refresh();
+  };
+
+  const patch = (p: Partial<McpForm>) => setForm((f) => (f ? { ...f, ...p } : f));
+
+  return (
+    <>
+      {error && (
+        <div className="login-err">
+          <Icon name="alert" size={15} />
+          {error}
+        </div>
+      )}
+
+      {!form && (
+        <>
+          <div className="setting-desc" style={{ marginBottom: 12 }}>
+            {t('settings.mcpDesc')}
+          </div>
+          <div className="cm-list">
+            {loading && (
+              <div className="cm-empty">
+                <span className="spinner" /> {t('common.loading')}
+              </div>
+            )}
+            {!loading && servers.length === 0 && (
+              <div className="cm-empty">{t('settings.noMcpServers')}</div>
+            )}
+            {servers.map((s) => (
+              <div className="cm-row" key={s.name}>
+                <div className="cm-row-main">
+                  <span className="cm-name">{s.name}</span>
+                  <span className="cm-badge">{s.transport}</span>
+                  {!s.enabled && <span className="cm-badge muted">{t('settings.mcpDisabled')}</span>}
+                </div>
+                <div className="cm-row-sub">
+                  {s.transport === 'stdio'
+                    ? [s.command, ...(s.args ?? [])].filter(Boolean).join(' ')
+                    : s.url || s.httpUrl}
+                </div>
+                <div className="cm-actions">
+                  <label
+                    className="mcp-toggle"
+                    title={s.enabled ? t('settings.mcpDisabled') : t('settings.mcpEnableServer')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={s.enabled}
+                      onChange={() => void toggleEnabled(s)}
+                    />
+                  </label>
+                  <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(s)}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                  <button className="icon-btn" title={t('common.delete')} onClick={() => void remove(s)}>
+                    <Icon name="delete" size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn" onClick={startAdd}>
+            <Icon name="plus" size={14} />
+            {t('settings.addMcpServer')}
+          </button>
+        </>
+      )}
+
+      {form && (
+        <>
+          <div className="cm-form">
+            <label className="field-label">{t('settings.name')}</label>
+            <input
+              className="prompt-input cm-input"
+              placeholder={t('settings.mcpNamePlaceholder')}
+              value={form.name}
+              onChange={(e) => patch({ name: e.target.value })}
+            />
+
+            <label className="field-label">{t('settings.mcpTransport')}</label>
+            <div className="prompt-config">
+              {MCP_TRANSPORTS.map((tr) => (
+                <span
+                  key={tr.id}
+                  className={`chip interactive ${form.transport === tr.id ? 'accent' : ''}`}
+                  onClick={() => patch({ transport: tr.id })}
+                >
+                  {form.transport === tr.id && <Icon name="check" size={13} />}
+                  {t(tr.labelKey)}
+                </span>
+              ))}
+            </div>
+
+            {form.transport === 'stdio' && (
+              <>
+                <label className="field-label">{t('settings.mcpCommand')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder={t('settings.mcpCommandPlaceholder')}
+                  value={form.command}
+                  onChange={(e) => patch({ command: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpArgs')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpArgsPlaceholder')}
+                  value={form.argsText}
+                  onChange={(e) => patch({ argsText: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpEnv')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpEnvPlaceholder')}
+                  value={form.envText}
+                  onChange={(e) => patch({ envText: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpCwd')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  value={form.cwd}
+                  onChange={(e) => patch({ cwd: e.target.value })}
+                />
+              </>
+            )}
+
+            {form.transport === 'sse' && (
+              <>
+                <label className="field-label">{t('settings.mcpUrl')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder="https://example.com/sse"
+                  value={form.url}
+                  onChange={(e) => patch({ url: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpHeaders')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpHeadersPlaceholder')}
+                  value={form.headersText}
+                  onChange={(e) => patch({ headersText: e.target.value })}
+                />
+              </>
+            )}
+
+            {form.transport === 'http' && (
+              <>
+                <label className="field-label">{t('settings.mcpUrl')}</label>
+                <input
+                  className="prompt-input cm-input"
+                  placeholder="https://example.com/mcp"
+                  value={form.httpUrl}
+                  onChange={(e) => patch({ httpUrl: e.target.value })}
+                />
+
+                <label className="field-label">{t('settings.mcpHeaders')}</label>
+                <textarea
+                  className="prompt-input cm-input"
+                  rows={2}
+                  spellCheck={false}
+                  placeholder={t('settings.mcpHeadersPlaceholder')}
+                  value={form.headersText}
+                  onChange={(e) => patch({ headersText: e.target.value })}
+                />
+              </>
+            )}
+
+            <label className="field-label">{t('settings.mcpTimeout')}</label>
+            <input
+              className="prompt-input cm-input"
+              type="number"
+              placeholder={t('settings.mcpTimeoutPlaceholder')}
+              value={form.timeout}
+              onChange={(e) => patch({ timeout: e.target.value })}
+            />
+
+            <label className="field-label">{t('settings.mcpDescription')}</label>
+            <input
+              className="prompt-input cm-input"
+              value={form.description}
+              onChange={(e) => patch({ description: e.target.value })}
+            />
+
+            <label className="cm-check">
+              <input
+                type="checkbox"
+                checked={form.trust}
+                onChange={(e) => patch({ trust: e.target.checked })}
+              />
+              {t('settings.mcpTrust')}
+            </label>
+
+            <label className="cm-check">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => patch({ enabled: e.target.checked })}
+              />
+              {t('settings.mcpEnableServer')}
             </label>
           </div>
 

@@ -19,6 +19,9 @@ import type {
   CustomModelInput,
   DesktopUserSettings,
   DetectedIde,
+  McpServerEntry,
+  McpServerInput,
+  SaveMcpServerResult,
   DirEntry,
   EasycodeBridge,
   ExternalAgentAvailability,
@@ -29,6 +32,7 @@ import type {
   FeishuQrBegin,
   FeishuQrBeginResult,
   FeishuResult,
+  FeishuRunResult,
   FeishuStatus,
   FileBase64,
   GitFileDiff,
@@ -37,6 +41,7 @@ import type {
   PermissionRequest,
   PermissionResponse,
   PromptOptions,
+  ThinkingMode,
   RewindResult,
   SaveCustomModelResult,
   SessionEventEnvelope,
@@ -50,6 +55,7 @@ import type {
   UpdateCheckResult,
   UpdateDownloadProgress,
   UpdateState,
+  VersionInfo,
 } from '../shared/ipc.js';
 
 /** Subscribe to a push channel; returns an unsubscribe fn. */
@@ -91,10 +97,13 @@ const bridge: EasycodeBridge = {
       ipcRenderer.invoke(IpcInvoke.SessionSetModel, id, modelId) as Promise<void>,
     setMode: (id, mode: PermissionMode) =>
       ipcRenderer.invoke(IpcInvoke.SessionSetMode, id, mode) as Promise<void>,
+    setThinking: (id, thinking: ThinkingMode) =>
+      ipcRenderer.invoke(IpcInvoke.SessionSetThinking, id, thinking) as Promise<void>,
     rewind: (id, idx) => ipcRenderer.invoke(IpcInvoke.SessionRewind, id, idx) as Promise<RewindResult>,
     onEvent: (cb) => on<SessionEventEnvelope>(IpcEvent.SessionEvent, cb),
     onStatus: (cb) => on<SessionStatusEnvelope>(IpcEvent.SessionStatus, cb),
     onFocusRequest: (cb) => on<string>(IpcEvent.SessionFocusRequest, cb),
+    onNewChatRequest: (cb) => on<void>(IpcEvent.NewChatRequest, cb),
   },
   models: {
     listCustom: () =>
@@ -107,6 +116,14 @@ const bridge: EasycodeBridge = {
       ) as Promise<SaveCustomModelResult>,
     deleteCustom: (displayName) =>
       ipcRenderer.invoke(IpcInvoke.ModelsDeleteCustom, displayName) as Promise<void>,
+  },
+  mcp: {
+    list: () => ipcRenderer.invoke(IpcInvoke.McpList) as Promise<McpServerEntry[]>,
+    save: (input: McpServerInput, originalName?: string) =>
+      ipcRenderer.invoke(IpcInvoke.McpSave, input, originalName) as Promise<SaveMcpServerResult>,
+    delete: (name: string) => ipcRenderer.invoke(IpcInvoke.McpDelete, name) as Promise<void>,
+    setEnabled: (name: string, enabled: boolean) =>
+      ipcRenderer.invoke(IpcInvoke.McpSetEnabled, name, enabled) as Promise<void>,
   },
   settings: {
     get: () => ipcRenderer.invoke(IpcInvoke.SettingsGet) as Promise<DesktopUserSettings>,
@@ -153,6 +170,8 @@ const bridge: EasycodeBridge = {
       ipcRenderer.invoke(IpcInvoke.FeishuDetectExternal) as Promise<FeishuExternalProcess[]>,
     killExternal: () => ipcRenderer.invoke(IpcInvoke.FeishuKillExternal) as Promise<number>,
     lobby: () => ipcRenderer.invoke(IpcInvoke.FeishuLobby) as Promise<FeishuLobby>,
+    runCommand: (args: string) =>
+      ipcRenderer.invoke(IpcInvoke.FeishuRunCommand, args) as Promise<FeishuRunResult>,
     onChanged: (cb) => on<FeishuStatus>(IpcEvent.FeishuChanged, cb),
   },
   permissions: {
@@ -213,6 +232,10 @@ const bridge: EasycodeBridge = {
     snooze: () => ipcRenderer.invoke(IpcInvoke.UpdateSnooze) as Promise<void>,
     onStatus: (cb) => on<UpdateState>(IpcEvent.UpdateStatus, cb),
     onProgress: (cb) => on<UpdateDownloadProgress>(IpcEvent.UpdateProgress, cb),
+  },
+  app: {
+    getVersionInfo: () =>
+      ipcRenderer.invoke(IpcInvoke.AppGetVersionInfo) as Promise<VersionInfo>,
   },
 };
 

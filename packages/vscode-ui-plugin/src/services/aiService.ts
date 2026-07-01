@@ -233,6 +233,26 @@ export class AIService {
         customModels = undefined;
       }
 
+      // 🎯 加载子代理/内部场景模型覆盖（Code Expert / Verification 等），来自共享的
+      // ~/.easycode-user/settings.json。若不注入，Config 的 modelOverrides 为空，
+      // getSubAgentModelOverride() 永远返回 undefined，子 agent 会错误地继承父会话
+      // 模型而非 /config 中配置的专属模型（与 CLI 飞书/远程隔离 Config 同源的 bug）。
+      // webview 端修改后走 IPC 调 config.setModelOverrides() 做热重载，新会话则在这里读到最新值。
+      let modelOverrides: import('deepv-code-core').ModelOverrides | undefined;
+      try {
+        const { UserSettingsService } = await import('./userSettingsService.js');
+        modelOverrides = UserSettingsService.getInstance(this.logger).getModelOverrides();
+        if (modelOverrides && Object.keys(modelOverrides).length > 0) {
+          this.logger.info(`🎯 Loaded sub-agent model overrides: ${JSON.stringify(modelOverrides)}`);
+        }
+      } catch (moErr) {
+        this.logger.warn(
+          '⚠️ Failed to load model overrides, sub-agents will inherit session model',
+          moErr instanceof Error ? moErr : undefined,
+        );
+        modelOverrides = undefined;
+      }
+
       this.config = new Config({
         sessionId: this.sessionId,
         targetDir: targetDir,
@@ -250,6 +270,7 @@ export class AIService {
         mcpServers: mcpServers,              // 🎯 传入 MCP 服务器配置
         customProxyServerUrl: customProxyServerUrl, // 🎯 传入自定义代理服务器URL
         customModels: customModels,          // 🟢 自定义模型 — 与 CLI 共享存储
+        modelOverrides: modelOverrides,      // 🎯 子代理/内部场景模型覆盖 — 与 CLI 共享存储
         fileFiltering: {
           respectGitIgnore: true,
           respectGeminiIgnore: true,

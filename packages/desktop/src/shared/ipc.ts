@@ -33,6 +33,7 @@ export const IpcInvoke = {
   SessionCancel: 'session:cancel',
   SessionSetModel: 'session:set-model',
   SessionSetMode: 'session:set-mode',
+  SessionSetThinking: 'session:set-thinking',
   SessionRewind: 'session:rewind',
   SessionArchive: 'session:archive',
   SessionDelete: 'session:delete',
@@ -55,10 +56,17 @@ export const IpcInvoke = {
   FeishuDetectExternal: 'feishu:detect-external',
   FeishuKillExternal: 'feishu:kill-external',
   FeishuLobby: 'feishu:lobby',
+  /** Run a `/feishu` authorization subcommand (allow/deny/owner/allowlist) via pass-through. */
+  FeishuRunCommand: 'feishu:run-command',
   // custom models
   ModelsListCustom: 'models:list-custom',
   ModelsSaveCustom: 'models:save-custom',
   ModelsDeleteCustom: 'models:delete-custom',
+  // MCP servers (shared ~/.easycode-user/settings.json `mcpServers` + `excludeMCPServers`)
+  McpList: 'mcp:list',
+  McpSave: 'mcp:save',
+  McpDelete: 'mcp:delete',
+  McpSetEnabled: 'mcp:set-enabled',
   // user settings (shared ~/.easycode-user/settings.json)
   SettingsGet: 'settings:get',
   SettingsUpdate: 'settings:update',
@@ -103,6 +111,8 @@ export const IpcInvoke = {
   UpdateInstall: 'update:install',
   UpdateSkip: 'update:skip',
   UpdateSnooze: 'update:snooze',
+  // app meta (version / environment info for the About panel)
+  AppGetVersionInfo: 'app:get-version-info',
 } as const;
 
 /** Main -> renderer, push events (webContents.send / ipcRenderer.on). */
@@ -115,6 +125,8 @@ export const IpcEvent = {
   FeishuChanged: 'feishu:changed',
   /** Main asks the renderer to surface a session (e.g. notification clicked). */
   SessionFocusRequest: 'session:focus-request',
+  /** Main asks the renderer to start a new chat (e.g. tray "New Chat" clicked). */
+  NewChatRequest: 'session:new-chat-request',
   /** Version-update state changed (check result, download done, error, …). */
   UpdateStatus: 'update:status',
   /** Streamed download progress for an in-flight update download. */
@@ -228,6 +240,16 @@ export interface ModelInfo {
 }
 
 /**
+ * Single-string encoding of the backend's extended-thinking config, shared with
+ * the CLI's `/thinking` vocabulary and the ACP `thinking` config option:
+ *   - `off`  → thinking disabled
+ *   - `auto` → provider/model default
+ *   - low|medium|high|xhigh|max → thinking on at that reasoning effort
+ * See `packages/cli/src/acp/acpUtils.ts` (`thinkingConfigToOptionValue`).
+ */
+export type ThinkingMode = 'off' | 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
  * A locally-installed external editor/IDE detected for the file browser's
  * "Open in" menu. `id` is a stable key the renderer passes back to `ide.open`;
  * `name` is the display label. The concrete launch command stays in the main
@@ -257,6 +279,12 @@ export interface SessionMeta {
   permissionMode: PermissionMode;
   model?: string;
   availableModels: ModelInfo[];
+  /**
+   * Current extended-thinking mode/effort for this session, surfaced from the
+   * backend's ACP `thinking` config option. Undefined until the session has
+   * started. Switched via `sessions.setThinking`.
+   */
+  thinking?: ThinkingMode;
   /** Cumulative token usage from the latest usage_update. */
   tokenUsed?: number;
   tokenSize?: number;
@@ -303,6 +331,64 @@ export interface CustomModelEntry extends CustomModelInput {
 }
 
 export interface SaveCustomModelResult {
+  ok: boolean;
+  error?: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// MCP servers (stored in ~/.easycode-user/settings.json, shared w/ CLI)
+//
+// Add/edit/delete persists the `mcpServers` map — the very map the CLI and
+// every spawned `easycode --acp` backend read on session start. Enable/disable
+// toggles membership in the sibling `excludeMCPServers` array, which core honours
+// natively (see packages/core / cli loadCliConfig), so a disabled server simply
+// isn't loaded by the next created session. Both take effect on the next session
+// start, matching how the rest of the desktop's shared settings behave.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * MCP transport kind, derived from which connection field the stored config
+ * carries: `httpUrl` → streamable HTTP, `url` → SSE, otherwise a local `stdio`
+ * child process launched from `command`.
+ */
+export type McpTransport = 'stdio' | 'sse' | 'http';
+
+/** The user-editable fields of an MCP server entry. */
+export interface McpServerInput {
+  /** Unique server name — the key in the `mcpServers` map. */
+  name: string;
+  transport: McpTransport;
+  /** stdio: executable to launch. */
+  command?: string;
+  /** stdio: arguments passed to `command`. */
+  args?: string[];
+  /** stdio: extra environment variables (supports ${ENV_VAR}, resolved by the backend). */
+  env?: Record<string, string>;
+  /** stdio: working directory for the child process. */
+  cwd?: string;
+  /** sse: server URL. */
+  url?: string;
+  /** http: streamable-HTTP server URL. */
+  httpUrl?: string;
+  /** sse/http: extra request headers. */
+  headers?: Record<string, string>;
+  /** Connection timeout in milliseconds. */
+  timeout?: number;
+  /** Trust the server — skip the per-tool confirmation prompt. */
+  trust?: boolean;
+  /** Free-form description shown in the list. */
+  description?: string;
+  /** Whether the server is enabled (drives `excludeMCPServers` membership). */
+  enabled?: boolean;
+}
+
+/** A stored MCP server, with its resolved transport + enabled state. */
+export interface McpServerEntry extends McpServerInput {
+  transport: McpTransport;
+  enabled: boolean;
+}
+
+export interface SaveMcpServerResult {
   ok: boolean;
   error?: string;
 }
@@ -360,6 +446,21 @@ export type ThemeMode = 'system' | 'light' | 'dark';
  * omitted; the model and permission mode are handled per-session elsewhere in
  * the desktop UI.
  */
+/**
+ * Model overrides for internal scenes / sub-agents. Mirrors core's `ModelOverrides`
+ * (see `packages/core/src/config/config.ts`). Kept as a local copy so this shared
+ * type stays dependency-free and renderer-safe. Persisted to the same shared
+ * `~/.easycode-user/settings.json` under the `modelOverrides` key the CLI reads.
+ */
+export interface ModelOverrides {
+  /** Context-compression model. Unset = hardcoded scene default. */
+  compression?: string;
+  /** Code Expert sub-agent model. Unset = inherit the session model. */
+  codeExpert?: string;
+  /** Verification sub-agent model. Unset = inherit the session model. */
+  verification?: string;
+}
+
 export interface DesktopUserSettings {
   /** Preferred response language, e.g. "English" / "中文". Empty = model default. */
   preferredLanguage?: string;
@@ -387,6 +488,12 @@ export interface DesktopUserSettings {
    * Desktop-only key; the CLI ignores it but preserves it.
    */
   computerUseEnabled?: boolean;
+  /**
+   * Per-scene / per-sub-agent model overrides shared with the CLI's `/config`.
+   * Each field is optional; unset means "fall back to the built-in default"
+   * (compression → hardcoded scene model, sub-agents → inherit the session model).
+   */
+  modelOverrides?: ModelOverrides;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -609,7 +716,15 @@ export interface FeishuStatus {
   platform?: FeishuDomain;
   /** Bot owner's open_id (the user authorized to drive the bot). */
   ownerOpenId?: string;
+  /**
+   * Whether {@link ownerOpenId} has been confirmed in the Bot app's own open_id
+   * space (TOFU first-DM binding). `undefined` on legacy creds is treated as
+   * confirmed. `false` means it's a registration-time guess awaiting first DM.
+   */
+  ownerVerified?: boolean;
   allowlistCount?: number;
+  /** The full authorization allowlist (open_ids), for graphical management. */
+  allowlist?: string[];
   /** Whether the desktop-managed gateway child is alive. */
   running: boolean;
   pid?: number;
@@ -649,6 +764,19 @@ export interface FeishuQrBeginResult {
   ok: boolean;
   error?: string;
   begin?: FeishuQrBegin;
+}
+
+/**
+ * Result of a `/feishu` authorization pass-through command. On success
+ * `message` carries the CLI command's human-readable reply (e.g. "Added … to
+ * the authorization allowlist"); `status` is the refreshed gateway snapshot so
+ * the dialog re-renders owner/allowlist without a separate round-trip.
+ */
+export interface FeishuRunResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
+  status?: FeishuStatus;
 }
 
 /** A detected `--feishu` gateway process not managed by this desktop app. */
@@ -841,6 +969,33 @@ export interface UpdateCheckResult {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// App meta (About panel)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Version + environment snapshot shown in Settings → 关于 (VSCode-style). All
+ * values are read in the main process: `desktop` from `app.getVersion()`, the
+ * runtime fields from `process.versions`, `os` from `node:os`, and `cliCore`
+ * (the bundled `easycode --acp` backend's version) from the package.json shipped
+ * beside its entry. See main/appInfo.ts.
+ */
+export interface VersionInfo {
+  /** Easy Code Desktop's own version (packages/desktop/package.json). */
+  desktop: string;
+  /**
+   * The bundled backend (`easycode.js`) version — i.e. the packages/cli version
+   * shipped inside the app. `'unknown'` when the backend can't be located.
+   */
+  cliCore: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  v8: string;
+  /** `${os.type()} ${os.arch()} ${os.release()}`, e.g. "Windows_NT x64 10.0.26220". */
+  os: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // The bridge surface exposed on window.easycode (preload).
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -881,6 +1036,7 @@ export interface EasycodeBridge {
     cancel(sessionId: string): Promise<void>;
     setModel(sessionId: string, modelId: string): Promise<void>;
     setMode(sessionId: string, mode: PermissionMode): Promise<void>;
+    setThinking(sessionId: string, thinking: ThinkingMode): Promise<void>;
     rewind(sessionId: string, beforeUserMessageIndex: number): Promise<RewindResult>;
     onEvent(cb: (env: SessionEventEnvelope) => void): () => void;
     onStatus(cb: (env: SessionStatusEnvelope) => void): () => void;
@@ -890,6 +1046,11 @@ export interface EasycodeBridge {
      * background. Payload is the session id to focus.
      */
     onFocusRequest(cb: (sessionId: string) => void): () => void;
+    /**
+     * Main -> renderer: start a new chat. Fired when the user clicks the tray
+     * "New Chat" item while the window is hidden/in the background. No payload.
+     */
+    onNewChatRequest(cb: () => void): () => void;
   };
   models: {
     /** List the user's custom models (shared with the CLI). */
@@ -903,6 +1064,23 @@ export interface EasycodeBridge {
       originalDisplayName?: string,
     ): Promise<SaveCustomModelResult>;
     deleteCustom(displayName: string): Promise<void>;
+  };
+  mcp: {
+    /** List the configured MCP servers (shared with the CLI), with enabled state. */
+    list(): Promise<McpServerEntry[]>;
+    /**
+     * Add or update an MCP server (keyed by `name`). Pass `originalName` when an
+     * edit renamed the server so the old entry — and its enabled state — migrate
+     * instead of orphaning. Takes effect on the next created session.
+     */
+    save(input: McpServerInput, originalName?: string): Promise<SaveMcpServerResult>;
+    /** Remove an MCP server by name (also drops it from the disabled list). */
+    delete(name: string): Promise<void>;
+    /**
+     * Enable/disable a server without editing its config. Toggles membership in
+     * the shared `excludeMCPServers` list; the next created session honours it.
+     */
+    setEnabled(name: string, enabled: boolean): Promise<void>;
   };
   settings: {
     /** Read the shared user settings (the same file the CLI's `/config` edits). */
@@ -977,6 +1155,12 @@ export interface EasycodeBridge {
     killExternal(): Promise<number>;
     /** Read the project↔chat bindings (+ resolved chat names) for the lobby panel. */
     lobby(): Promise<FeishuLobby>;
+    /**
+     * Run a `/feishu` authorization subcommand (`allow <id>` / `deny <id>` /
+     * `owner <id>` / `allowlist`) by passing it through to the bundled backend.
+     * Reuses the CLI command logic verbatim — no reimplementation in the desktop.
+     */
+    runCommand(args: string): Promise<FeishuRunResult>;
     onChanged(cb: (status: FeishuStatus) => void): () => void;
   };
   permissions: {
@@ -1071,6 +1255,10 @@ export interface EasycodeBridge {
     snooze(): Promise<void>;
     onStatus(cb: (state: UpdateState) => void): () => void;
     onProgress(cb: (p: UpdateDownloadProgress) => void): () => void;
+  };
+  app: {
+    /** Version + environment snapshot for the Settings → 关于 panel. */
+    getVersionInfo(): Promise<VersionInfo>;
   };
 }
 

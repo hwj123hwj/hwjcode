@@ -291,6 +291,10 @@ export class RemoteSession {
       proxy: this.sharedConfig.getProxy?.(),
       customProxyServerUrl: this.sharedConfig.getCustomProxyServerUrl?.(),
       mcpServers: this.sharedConfig.getMcpServers?.(),
+      // 🎯 继承子代理模型覆盖（Code Expert / Verification 等），否则隔离 Config 的
+      // modelOverrides 为空，getSubAgentModelOverride 永远返回 undefined，子 agent
+      // 会错误地继承父会话模型而非 /config 中配置的专属模型。
+      modelOverrides: this.sharedConfig.getModelOverrides?.(),
     });
 
     return isolatedConfig;

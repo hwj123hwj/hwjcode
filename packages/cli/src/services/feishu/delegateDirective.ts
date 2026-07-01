@@ -185,20 +185,35 @@ export function buildDelegateDirective(
       ? '同步流式执行（用户要看到全过程）'
       : '后台异步执行（完成后通知用户）';
   const resumeArg = resumeSessionId
-    ? `，resumeSessionId="${resumeSessionId}"（续接已有会话）`
+    ? `，resumeSessionId="${resumeSessionId}"`
     : '';
   const resumeNote = resumeSessionId
-    ? `本次为续接历史会话（sessionId=${resumeSessionId}），${label} 会先恢复该会话的完整上下文再执行。`
+    ? `本次需要续接历史会话（sessionId="${resumeSessionId}"）。`
     : '';
+
   return [
-    `【强制派发指令】用户要求将以下任务交给本机的 ${label} 执行（${modeHint}）。`,
-    resumeNote,
-    `你必须立即调用 delegate_to_agent 工具，参数：agent="${agent}"，mode="${mode}"${resumeArg}，task 填写下面的完整原文。`,
-    '不要自己动手处理这个任务，也不要追问，直接派发：',
-    '',
+    `<System reminder>`,
+    `这是 delegate agent 工作专用群的消息（由系统自动流转或路由触发）。`,
+    `用户在这里发的消息应当优先派遣外部 agent（通过本机 \`delegate_to_agent\` 工具）来响应。`,
+    `除非满足以下特例情况，否则应当进行派发：`,
+    `- 该任务非常简单，只需要极少数（1~2 次）简单的内置工具调用即可完成`,
+    `- 或者该任务只是一个不需要执行复杂逻辑的简单问答`,
+    ``,
+    `当前的派发参数和上下文：`,
+    `- 外部 Agent: ${label}`,
+    `- 派发工具: delegate_to_agent`,
+    `- 执行模式: ${modeHint} (在工具参数中传入 mode="${mode}")`,
+    `- 关联参数: agent="${agent}"${resumeArg}`,
+    resumeNote ? `- 会话关联: ${resumeNote}` : '',
+    ``,
+    `如果你确认此任务需要由外部 Agent 响应，请直接使用上述参数调用 \`delegate_to_agent\` 工具。`,
+    `任务具体内容如下：`,
+    `---`,
     task,
+    `---`,
+    `</System reminder>`
   ]
-    .filter(Boolean)
+    .filter((line) => line !== undefined)
     .join('\n');
 }
 

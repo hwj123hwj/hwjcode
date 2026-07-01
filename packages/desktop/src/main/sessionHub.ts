@@ -23,6 +23,7 @@ import type {
   RewindResult,
   SessionMeta,
   SessionRunStatus,
+  ThinkingMode,
 } from '../shared/ipc.js';
 
 interface PersistedSession extends SessionMeta {
@@ -176,6 +177,7 @@ export class SessionHub {
       availableModels: res.availableModels,
       model: opts.model ?? res.model,
       permissionMode: opts.permissionMode ?? res.mode,
+      thinking: res.thinking,
       status: 'idle',
     })!;
 
@@ -235,6 +237,7 @@ export class SessionHub {
       acpSessionId: res.acpSessionId,
       availableModels: res.availableModels,
       model: rec.model ?? res.model,
+      thinking: res.thinking ?? rec.thinking,
       status: 'idle',
       archived: false,
     })!;
@@ -323,6 +326,11 @@ export class SessionHub {
   async setMode(id: string, mode: PermissionMode): Promise<void> {
     await this.liveBridge(id).setMode(mode);
     this.touch(id, { permissionMode: mode });
+  }
+
+  async setThinking(id: string, thinking: ThinkingMode): Promise<void> {
+    await this.liveBridge(id).setThinking(thinking);
+    this.touch(id, { thinking });
   }
 
   async rewind(id: string, beforeUserMessageIndex: number): Promise<RewindResult> {
