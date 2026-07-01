@@ -11,8 +11,11 @@ import { app, BrowserWindow, Menu, shell, nativeTheme, nativeImage } from 'elect
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
+import { preloadOpeners } from './openerService.js';
 import { ensurePathFromLoginShell, ensureFullEnvFromLoginShell } from './shellPath.js';
 import { createTray, destroyTray } from './tray.js';
+import { buildContextMenuTemplate, contextMenuLabels } from './contextMenu.js';
+import { pickTrayLang } from './trayLabels.js';
 import { IpcEvent } from '../shared/ipc.js';
 import { destroyOverlay } from './computerUse/overlay.js';
 import type { SessionHub } from './sessionHub.js';
@@ -206,6 +209,26 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
+  // Native right-click menu: cut/copy/paste/select-all in editable fields (prompt
+  // box, message-edit box, terminals) and copy for any selected transcript text.
+  // The menu language follows the OS locale, matching the tray (the renderer's
+  // localStorage override isn't reachable from the main process). Links are left
+  // to the renderer's in-app LinkContextMenu.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const template = buildContextMenuTemplate(
+      {
+        isEditable: params.isEditable,
+        editFlags: params.editFlags,
+        selectionText: params.selectionText,
+        linkURL: params.linkURL,
+      },
+      contextMenuLabels(pickTrayLang(app.getLocale())),
+    );
+    if (template.length === 0) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
+
   const devUrl = process.env['ELECTRON_RENDERER_URL'];
   if (devUrl) {
     void mainWindow.loadURL(devUrl);
@@ -276,6 +299,10 @@ function bootstrap(): void {
     // Kick off the version-update lifecycle (startup check + periodic poll). It
     // delays its first check internally so it never competes with boot.
     updater.start();
+    // Warm the "Open workspace with…" cache in the background (detect installed
+    // programs + extract their icons) so the first menu open is instant. Doesn't
+    // block the window — fire-and-forget after the window is already up.
+    preloadOpeners();
 
     app.on('activate', () => {
       // Dock/taskbar re-activation: recreate the window if it's gone, otherwise

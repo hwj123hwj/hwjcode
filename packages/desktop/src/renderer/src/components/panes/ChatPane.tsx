@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, type ChatItem, type SessionView, type ViewDensity } from '../../store';
+import { stripSystemReminders } from '../../stripSystemReminders';
 import { Markdown } from '../Markdown';
 import { ToolCall } from '../ToolCall';
 import { Icon, toolKindIcon } from '../Icon';
@@ -227,9 +228,14 @@ function ChatItemView({
   onOpenFile: (path: string) => void;
   onRewind: (beforeUserMessageIndex: number) => void;
 }) {
+  // Display-layer text: strip `<system-reminder>` blocks core injects into the
+  // content so they never render. The store keeps the original text untouched, so
+  // rewind/resend still operate on the real message. (`tool` items carry no text.)
+  const text = 'text' in item ? stripSystemReminders(item.text) : '';
+
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(item.text);
+  const [editText, setEditText] = useState(text);
   const editTaRef = useRef<HTMLTextAreaElement>(null);
 
   const lang = useStore((s) => s.lang);
@@ -274,7 +280,7 @@ function ChatItemView({
                     void handleSave();
                   } else if (e.key === 'Escape') {
                     setIsEditing(false);
-                    setEditText(item.text);
+                    setEditText(text);
                   }
                 }}
                 autoFocus
@@ -285,7 +291,7 @@ function ChatItemView({
                 </button>
                 <button className="btn xsmall" onClick={() => {
                   setIsEditing(false);
-                  setEditText(item.text);
+                  setEditText(text);
                 }}>
                   {t('common.cancel') ?? '取消'}
                 </button>
@@ -304,11 +310,11 @@ function ChatItemView({
                 ))}
               </div>
             )}
-            {item.text && <span className="msg-user-text">{item.text}</span>}
+            {text && <span className="msg-user-text">{text}</span>}
           </div>
           <div className="msg-user-meta">
             <span className="msg-meta-time">{formatTimestamp(item.timestamp, lang)}</span>
-            <button className="msg-meta-btn" onClick={() => handleCopy(item.text)} title={t('common.copy')}>
+            <button className="msg-meta-btn" onClick={() => handleCopy(text)} title={t('common.copy')}>
               <Icon name={copied ? 'check' : 'copy'} size={13} />
             </button>
             {isLastUser && userIndex !== undefined && (
@@ -323,10 +329,10 @@ function ChatItemView({
     case 'assistant':
       return (
         <div className="msg msg-assistant">
-          <Markdown text={item.text} />
+          <Markdown text={text} />
           <div className="msg-assistant-meta">
             <span className="msg-meta-time">{formatTimestamp(item.timestamp, lang)}</span>
-            <button className="msg-meta-btn" onClick={() => handleCopy(item.text)} title={t('common.copy')}>
+            <button className="msg-meta-btn" onClick={() => handleCopy(text)} title={t('common.copy')}>
               <Icon name={copied ? 'check' : 'copy'} size={13} />
             </button>
           </div>
@@ -341,19 +347,19 @@ function ChatItemView({
             <Icon name="think" size={13} />
             {t('chat.thought')}
           </div>
-          {item.text}
+          {text}
         </div>
       );
 
     case 'system':
       if (density === 'summary') return null;
-      return <div className="msg-system">{item.text}</div>;
+      return <div className="msg-system">{text}</div>;
 
     case 'error':
       return (
         <div className="msg msg-error">
           <Icon name="alert" size={16} />
-          <span>{item.text}</span>
+          <span>{text}</span>
         </div>
       );
 

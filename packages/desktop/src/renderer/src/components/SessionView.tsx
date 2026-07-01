@@ -5,6 +5,7 @@ import { SessionTodoPanel } from './StickyTodoPanel';
 import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
+import { OpenWithMenu } from './OpenWithMenu';
 import { WorkspaceToggles } from './workspace/WorkspaceToggles';
 import { Icon, type IconName } from './Icon';
 import { useT, type TFunc } from '../i18n/useT';
@@ -77,6 +78,8 @@ export function SessionView() {
             <span className="btn-text">{t('session.resume')}</span>
           </button>
         )}
+
+        <OpenWithMenu cwd={meta.cwd} />
 
         <div ref={viewsRef} style={{ position: 'relative' }}>
           <button className="chip interactive" onClick={() => setViewsOpen((o) => !o)}>

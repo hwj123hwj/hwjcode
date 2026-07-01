@@ -25,6 +25,7 @@ export const IpcInvoke = {
   AuthLogout: 'auth:logout',
   // sessions
   SessionList: 'session:list',
+  SessionSearch: 'session:search',
   SessionCreate: 'session:create',
   SessionCreateChat: 'session:create-chat',
   SessionResume: 'session:resume',
@@ -94,6 +95,10 @@ export const IpcInvoke = {
   GitBranch: 'workspace:git-branch',
   OpenExternal: 'workspace:open-external',
   SaveClipboardImage: 'workspace:save-clipboard-image',
+  SaveImageAs: 'workspace:save-image-as',
+  ListOpeners: 'workspace:list-openers',
+  GetLastOpener: 'workspace:get-last-opener',
+  OpenWith: 'workspace:open-with',
   // integrated terminal (real PTY shell)
   TerminalListShells: 'terminal:list-shells',
   TerminalCreate: 'terminal:create',
@@ -225,6 +230,31 @@ export type AgentKind = 'easy-code' | 'claude-code' | 'codex';
  *   under `~/.easycode-user/chats/<id>`; listed flat in the Chats section.
  */
 export type SessionKind = 'project' | 'chat';
+
+/** One hit from the full-text session search (title and/or transcript content). */
+export interface SessionSearchResult {
+  /** Desktop session id (focus target). */
+  sessionId: string;
+  title: string;
+  cwd: string;
+  kind: SessionKind;
+  /** True when the query matched the session title. */
+  matchedInTitle: boolean;
+  /** A content snippet around the first transcript match (absent if title-only). */
+  snippet?: string;
+  /** Last-updated timestamp, for ordering results. */
+  updatedAt: number;
+}
+
+/** A locally-installed program for the "Open workspace with…" toolbar menu. */
+export interface OpenerInfo {
+  /** Stable id passed back to `openWith`. */
+  id: string;
+  /** Display name (e.g. "VS Code", "File Explorer"). */
+  name: string;
+  /** Native icon as a base64 data URL, or null when none could be extracted. */
+  icon?: string | null;
+}
 
 /** Which local external agents were detected on PATH (claude / codex). */
 export interface ExternalAgentAvailability {
@@ -1010,6 +1040,12 @@ export interface EasycodeBridge {
   };
   sessions: {
     list(): Promise<SessionMeta[]>;
+    /**
+     * Full-text search across the user's own (non-archived) sessions: matches the
+     * title and the persisted transcript content, returning a content snippet for
+     * each content match. Powers the search command palette.
+     */
+    search(query: string): Promise<SessionSearchResult[]>;
     create(opts: CreateSessionOptions): Promise<SessionMeta>;
     /**
      * Start a directory-less "just chat" session. The hub picks a throwaway cwd
@@ -1201,6 +1237,33 @@ export interface EasycodeBridge {
       data: string,
       name?: string,
     ): Promise<string | null>;
+    /**
+     * Prompt the user with a native "Save As" dialog and write `data` (base64)
+     * to the chosen path. `defaultName` seeds the filename and `mimeType`
+     * (`image/png` | `image/svg+xml`) picks the file-type filter. Returns the
+     * saved absolute path, or null if the user cancelled or the write failed.
+     */
+    saveImageAs(
+      defaultName: string,
+      mimeType: string,
+      data: string,
+    ): Promise<string | null>;
+    /**
+     * The locally-installed programs (editors / file managers / terminals) for the
+     * "Open workspace with…" menu, each with its native icon (data URL). Served from
+     * a background-preloaded cache, so it returns immediately.
+     */
+    listOpeners(): Promise<OpenerInfo[]>;
+    /**
+     * The id of the program the user last opened a workspace with (persisted), or
+     * null if they never have. Seeds the split-button's default selection.
+     */
+    getLastOpener(): Promise<string | null>;
+    /**
+     * Launch the given detected opener on `folder` (the session's cwd). Also
+     * remembers it as the last choice for {@link getLastOpener}.
+     */
+    openWith(id: string, folder: string): Promise<void>;
   };
   clipboard: {
     /** Read a bitmap from the OS clipboard as base64 PNG (null when empty). */
