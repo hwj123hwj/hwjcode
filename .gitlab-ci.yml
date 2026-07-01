@@ -131,14 +131,16 @@ release-desktop-win:
   script:
     - npm ci --retry=10 --retry-delay=5000 --prefer-offline
     - $env:NEW_VERSION = $CI_COMMIT_TAG -replace '^desktop-win-release-v', ''
+    # 与 pack-installer.cjs 的 buildStamp() 格式一致（YYYYMMDDHHMM），提前算好
+    # 并传给它复用，这样产物文件名在打包前就已知，无需事后搜索。
+    - $env:BUILD_TIME = Get-Date -Format "yyyyMMddHHmm"
     - npm run bundle
     - cd packages/desktop
     # npm version 在版本号未变化时会报错退出（Version not changed）——用
     # npm pkg set 代替，同版本重跑（例如重试同一个 tag）也不会失败。
     - npm pkg set version="$env:NEW_VERSION"
     - npm run pack:win
-    # 文件名带 BUILD_TIME 时间戳，用通配符定位实际产物再上传。
-    - $exePath = (Get-ChildItem "release\$env:NEW_VERSION\*.exe" | Select-Object -First 1).FullName
+    - $exePath = "release\$env:NEW_VERSION\EasyCode-v$env:NEW_VERSION-$env:BUILD_TIME.exe"
     - Write-Host "Uploading $exePath to GCS"
     - gcs upload $exePath
   artifacts:

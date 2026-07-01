@@ -67,8 +67,14 @@ function restoreLink(p) {
   fs.symlinkSync(coreDir, p, process.platform === 'win32' ? 'junction' : 'dir');
 }
 
-/** Local-time build stamp `YYYYMMDDHHMM`, consumed by artifactName's ${env.BUILD_TIME}. */
+/**
+ * Local-time build stamp `YYYYMMDDHHMM`, consumed by artifactName's ${env.BUILD_TIME}.
+ * Reuses a caller-provided BUILD_TIME (e.g. CI computes it up front so it can
+ * predict the artifact filename before packaging even starts) instead of
+ * always minting a fresh one.
+ */
 function buildStamp() {
+  if (process.env.BUILD_TIME) return process.env.BUILD_TIME;
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
