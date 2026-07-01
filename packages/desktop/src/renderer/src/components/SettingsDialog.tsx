@@ -442,38 +442,49 @@ function GeneralModelSection() {
   const { settings, patch, saved } = useUserSettings();
   const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
 
-  // Build the default-model options the same way the new-session/empty-session
-  // pickers do: the built-in models cached on existing sessions' meta, merged
-  // with the user's custom models. No live session is needed here.
+  // Build the default-model options:
+  //   1. Built-in models from ACP handshake (availableModels on any session),
+  //      filtering out any stale `custom:` ids that may have been cached there.
+  //   2. User's custom models, read fresh from disk on mount and whenever
+  //      `customModelsRev` changes (save/delete in ModelsSection bumps it).
+  // Decoupled from [order, sessions] so tab-switching doesn't re-fetch and
+  // newly added models appear without requiring a session to already exist.
+  const customModelsRev = useStore((s) => s.customModelsRev);
   useEffect(() => {
     let alive = true;
     const builtins = new Map<string, string>();
     for (const id of order) {
       for (const m of sessions[id]?.meta.availableModels ?? []) {
+        // Skip stale custom-model ids that the backend cached in availableModels
+        if (m.modelId.startsWith('custom:')) continue;
         if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
       }
     }
-    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    const builtinOpts = [...builtins].map(([value, label]) => ({ value, label }));
     void api.models
       .listCustom()
       .then((custom) => {
         if (!alive) return;
-        const seen = new Set<string>(fromBuiltins.map((o) => o.value));
+        const seen = new Set<string>(builtinOpts.map((o) => o.value));
         const deduped = [
-          ...fromBuiltins,
-          ...custom.map((c) => ({ value: c.id, label: c.label })).filter(({ value }) => {
-            if (seen.has(value)) return false;
-            seen.add(value);
-            return true;
-          }),
+          ...builtinOpts,
+          ...custom
+            .filter((c) => c.enabled !== false)
+            .map((c) => ({ value: c.id, label: c.label }))
+            .filter(({ value }) => {
+              if (seen.has(value)) return false;
+              seen.add(value);
+              return true;
+            }),
         ];
         setModelOpts(deduped);
       })
-      .catch(() => alive && setModelOpts(fromBuiltins));
+      .catch(() => alive && setModelOpts(builtinOpts));
     return () => {
       alive = false;
     };
-  }, [order, sessions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customModelsRev]);
 
   return (
     <>
@@ -921,6 +932,7 @@ function ModelsSection() {
 
   const remove = async (m: CustomModelEntry) => {
     await api.models.deleteCustom(m.displayName);
+    useStore.getState().bumpCustomModelsRev();
     await refresh();
   };
 
@@ -938,6 +950,7 @@ function ModelsSection() {
       setError(res.error ?? t('settings.saveFailed'));
       return;
     }
+    useStore.getState().bumpCustomModelsRev();
     setForm(null);
     setEditingName(undefined);
     await refresh();

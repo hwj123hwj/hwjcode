@@ -114,7 +114,17 @@ export function PromptBar({ view }: { view: SessionView }) {
   const setThinking = useStore((s) => s.setThinking);
   const promptDraft = useStore((s) => s.sessions[view.meta.id]?.promptDraft);
   const setPromptDraft = useStore((s) => s.setPromptDraft);
+  const customModelsRev = useStore((s) => s.customModelsRev);
   const t = useT();
+
+  // Custom models loaded fresh from disk; re-fetched whenever customModelsRev
+  // changes (bumped by ModelsSection on every save/delete).
+  const [customModels, setCustomModels] = useState<import('@shared/ipc').CustomModelEntry[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void api.models.listCustom().then((list) => { if (alive) setCustomModels(list); });
+    return () => { alive = false; };
+  }, [customModelsRev]);
 
   const [text, setText] = useState('');
   const [showCwdHint, setShowCwdHint] = useState(false);
@@ -461,10 +471,28 @@ export function PromptBar({ view }: { view: SessionView }) {
     },
   };
 
+  // Built-in models from ACP handshake, strictly excluding any stale custom: ids.
+  const builtinModelOptions = (meta.availableModels ?? [])
+    .filter((m) => !m.modelId.startsWith('custom:'))
+    .map((m) => ({ value: m.modelId, label: m.name }));
+  const builtinIds = new Set(builtinModelOptions.map((o) => o.value));
+  // Deduplicate custom models by id (same endpoint+modelId => same id).
+  const seenCustomIds = new Set<string>();
+  const customModelOptions = customModels
+    .filter((c) => {
+      if (c.enabled === false) return false;
+      if (builtinIds.has(c.id)) return false;
+      if (seenCustomIds.has(c.id)) return false;
+      seenCustomIds.add(c.id);
+      return true;
+    })
+    .map((c) => ({ value: c.id, label: c.label }));
+
   const modelOptions: SelectOption[] = [
     ...(isEasyCode ? [effortOption] : []),
     ...(!meta.model ? [{ value: '', label: t('prompt.defaultModel') }] : []),
-    ...(meta.availableModels ?? []).map((m) => ({ value: m.modelId, label: m.name })),
+    ...builtinModelOptions,
+    ...customModelOptions,
   ];
 
   const isExternalAgent = !!meta.agentType && meta.agentType !== 'easy-code';

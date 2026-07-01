@@ -189,11 +189,15 @@ function EmptyState() {
   // Build the model picker options. We have no live session here, so the
   // built-in model list comes from the most recent existing session's
   // availableModels (cached on its meta), merged with the user's custom models.
+  // customModelsRev is bumped on every save/delete so the list stays in sync.
+  const customModelsRev = useStore((s) => s.customModelsRev);
   useEffect(() => {
     let alive = true;
     const builtins = new Map<string, string>();
     for (const id of order) {
       for (const m of sessions[id]?.meta.availableModels ?? []) {
+        // Skip stale custom: ids cached in old sessions' availableModels
+        if (m.modelId.startsWith('custom:')) continue;
         if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
       }
     }
@@ -205,7 +209,9 @@ function EmptyState() {
       const seen = new Set<string>();
       const opts = [
         ...[...builtins].map(([value, label]) => ({ value, label })),
-        ...custom.map((c) => ({ value: c.id, label: c.label })),
+        ...custom
+          .filter((c) => c.enabled !== false)
+          .map((c) => ({ value: c.id, label: c.label })),
       ].filter(({ value }) => {
         if (seen.has(value)) return false;
         seen.add(value);
@@ -220,7 +226,8 @@ function EmptyState() {
     return () => {
       alive = false;
     };
-  }, [order, sessions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customModelsRev, order, sessions]);
 
   // Dismiss the project menu on outside click / Escape.
   useEffect(() => {
