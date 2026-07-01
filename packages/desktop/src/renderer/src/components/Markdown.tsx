@@ -1,6 +1,8 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { Mermaid } from './Mermaid';
+import { Icon } from './Icon';
 import { useStore } from '../store';
+import { useT } from '../i18n/useT';
 
 /**
  * Open a link from rendered Markdown. Web links (http/https) open in the
@@ -22,6 +24,34 @@ function openMarkdownLink(url: string): void {
  */
 export function Markdown({ text }: { text: string }) {
   return <div className="md">{renderBlocks(text)}</div>;
+}
+
+/**
+ * A fenced code block with a hover copy button. Copy goes through the Electron
+ * clipboard bridge (robust regardless of document focus), and the button flips
+ * to a check for a moment as confirmation.
+ */
+function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false);
+  const t = useT();
+  const copy = () => {
+    void window.easycode.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <pre className="md-pre">
+      <button
+        className="md-copy-btn"
+        onClick={copy}
+        title={copied ? t('code.copied') : t('code.copy')}
+        aria-label={copied ? t('code.copied') : t('code.copy')}
+      >
+        <Icon name={copied ? 'check' : 'copy'} size={13} />
+      </button>
+      <code data-lang={lang}>{code}</code>
+    </pre>
+  );
 }
 
 function renderBlocks(src: string): ReactNode[] {
@@ -47,11 +77,7 @@ function renderBlocks(src: string): ReactNode[] {
       if (lang.toLowerCase() === 'mermaid') {
         out.push(<Mermaid key={key++} code={buf.join('\n')} />);
       } else {
-        out.push(
-          <pre key={key++}>
-            <code data-lang={lang}>{buf.join('\n')}</code>
-          </pre>,
-        );
+        out.push(<CodeBlock key={key++} code={buf.join('\n')} lang={lang} />);
       }
       continue;
     }

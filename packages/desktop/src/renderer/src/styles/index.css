@@ -542,6 +542,292 @@ select {
 .sidebar-search input::placeholder {
   color: var(--text-faint);
 }
+
+/* ── sidebar actions (New chat / Search) ───────────────────────────────────── */
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px 8px;
+}
+.sidebar-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.sidebar-action:hover {
+  background: var(--bg-raised);
+  color: var(--accent);
+}
+.sidebar-action .ic {
+  color: var(--text-dim);
+  flex: none;
+}
+.sidebar-action:hover .ic {
+  color: var(--accent);
+}
+
+/* ── search command palette ────────────────────────────────────────────────── */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  animation: fade-in 0.12s ease;
+}
+.palette {
+  width: min(680px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.45));
+  overflow: hidden;
+}
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.palette-input-ic {
+  color: var(--text-faint);
+  flex: none;
+}
+.palette-input input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font-size: 15px;
+}
+.palette-input input::placeholder {
+  color: var(--text-faint);
+}
+.palette-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.palette-section {
+  padding: 4px 0;
+}
+.palette-section-title {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.palette-row.active {
+  background: var(--bg-raised);
+}
+.palette-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.palette-title {
+  font-size: 13.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-snippet {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-project {
+  font-size: 12px;
+  color: var(--text-faint);
+  flex: none;
+}
+.palette-accel {
+  font-size: 11px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
+  flex: none;
+}
+.palette-action-ic {
+  color: var(--text-dim);
+  flex: none;
+}
+.palette-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* ── settings: archived chats ──────────────────────────────────────────────── */
+.arch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.arch-search {
+  position: relative;
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+}
+.arch-search .ic {
+  position: absolute;
+  left: 10px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.arch-search input {
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.arch-search input:focus {
+  border-color: var(--accent-border);
+  box-shadow: var(--ring);
+}
+.arch-filter {
+  min-width: 150px;
+  flex: none;
+}
+.arch-delete-all {
+  flex: none;
+}
+.arch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.arch-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.arch-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.arch-group-ic {
+  color: var(--text-dim);
+  flex: none;
+}
+.arch-group-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.arch-group-count {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.arch-group-menu-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.arch-menu-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+.arch-menu {
+  position: absolute;
+  right: 0;
+  top: 110%;
+  min-width: 190px;
+  z-index: 11;
+}
+.menu-pop button.danger {
+  color: var(--red);
+}
+.arch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.arch-row:last-child {
+  border-bottom: none;
+}
+.arch-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.arch-row-title {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.arch-row-date {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.arch-row-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  flex: none;
+}
+.arch-row:hover .arch-row-actions {
+  opacity: 1;
+}
 .session-list {
   flex: 1;
   overflow-y: auto;
@@ -1603,6 +1889,33 @@ select {
   padding: 0;
   font-size: 1em;
 }
+.md-pre {
+  position: relative;
+}
+.md-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.md-pre:hover .md-copy-btn {
+  opacity: 1;
+}
+.md-copy-btn:hover {
+  background: var(--bg-raised);
+  color: var(--text);
+}
 .md h1,
 .md h2,
 .md h3 {
@@ -1761,23 +2074,35 @@ select {
   z-index: 120;
   animation: fade-in 0.12s ease;
   /* Inset the panel from the window edges so the overlay doesn't run flush to
-     the frame, and reserve extra room at the top for the title-bar / window
-     controls so neither the panel nor the close button collides with them. */
-  --mermaid-zoom-edge: 28px;
-  --mermaid-zoom-top: 28px;
+     the frame, and reserve generous room at the top for the title-bar / window
+     controls so neither the panel nor the close button collides with them. The
+     top safe area clears the OS window-control buttons (minimize/maximize/close)
+     on the frameless title bar. */
+  --mermaid-zoom-edge: 64px;
+  --mermaid-zoom-top: 76px;
 }
 /* macOS draws traffic-light buttons over the top of the content (hiddenInset);
-   give the top a wider safe area so the close button clears them. */
+   give the top a wider safe area so the action buttons clear them. */
 [data-platform='darwin'] .mermaid-zoom-backdrop {
-  --mermaid-zoom-top: 52px;
+  --mermaid-zoom-top: 84px;
 }
-.mermaid-zoom-close {
+/* Windows draws the minimize/maximize/close overlay at the top-right of the
+   frameless window (titleBarOverlay, ~36px tall); reserve room below it. */
+[data-platform='win32'] .mermaid-zoom-backdrop {
+  --mermaid-zoom-top: 80px;
+}
+/* Top-right action bar (download + close), lifted half out of the top safe area
+   so it sits above the panel's corner instead of overlapping the diagram. */
+.mermaid-zoom-actions {
   position: absolute;
   top: var(--mermaid-zoom-top);
   right: var(--mermaid-zoom-edge);
-  /* Lift the button half-out of the top safe area so it sits above the panel's
-     top-right corner instead of overlapping the diagram. */
   transform: translateY(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 1;
+}
+.mermaid-zoom-btn {
   display: grid;
   place-items: center;
   width: 34px;
@@ -1788,9 +2113,8 @@ select {
   color: var(--text);
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  z-index: 1;
 }
-.mermaid-zoom-close:hover {
+.mermaid-zoom-btn:hover {
   background: var(--bg-elev);
 }
 .mermaid-zoom-stage {
@@ -1801,7 +2125,7 @@ select {
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  padding: 20px;
+  padding: 56px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-sunken);
@@ -1814,9 +2138,11 @@ select {
   transform-origin: center center;
 }
 .mermaid-zoom-svg svg {
-  /* Fit within the inset panel (minus its padding) rather than the viewport. */
-  max-width: 100%;
-  max-height: 100%;
+  /* Fit within the inset panel (minus its padding) rather than the viewport,
+     with extra headroom (<100%) so the diagram never runs to the panel edge at
+     the default zoom and stays comfortably centered, well clear of system UI. */
+  max-width: 88%;
+  max-height: 88%;
   height: auto;
 }
 
@@ -3976,7 +4302,7 @@ textarea.cm-input {
   color: var(--accent);
 }
 .empty-title {
-  font-size: 20px;
+  font-size: 28px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 4px;
@@ -4233,6 +4559,55 @@ textarea.cm-input {
 }
 .menu-pop button .ic.placeholder {
   opacity: 0;
+}
+
+/* ── "Open workspace with…" dropdown ───────────────────────────────────────── */
+.opener-menu {
+  min-width: 210px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.opener-ic {
+  flex: none;
+  border-radius: 3px;
+  object-fit: contain;
+}
+.menu-pop button .ic.opener-ic-placeholder {
+  color: var(--text-faint);
+}
+.opener-loading,
+.opener-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+/* ── Open-with split button: [ icon | ▾ ] ────────────────────────────────────
+   Two chips joined into one pill — the main (icon-only, name in its tooltip)
+   segment launches the last-used program, the caret segment opens the switch
+   dropdown. */
+.opener-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.opener-split .opener-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.opener-split .opener-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 7px;
+  padding-right: 9px;
+}
+/* Hovering either half highlights both, so the pill reads as one control. */
+.opener-split:hover .chip {
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* ── CustomSelect: rich rows, submenu flyout, toggle switch ───────────────── */

@@ -8,7 +8,8 @@
  * the renderer.
  */
 
-import { ipcMain, BrowserWindow, nativeTheme } from 'electron';
+import { ipcMain, BrowserWindow, nativeTheme, shell } from 'electron';
+import { exec, spawn } from 'node:child_process';
 import { SessionHub } from './sessionHub.js';
 import { FeishuManager } from './feishu.js';
 import { TurnNotifier } from './notifications.js';
@@ -35,6 +36,7 @@ import {
   readFileBase64,
   revealInFolder,
   saveClipboardImage,
+  saveImageAs,
   searchFiles,
 } from './workspace.js';
 import { deleteCustomModel, listCustomModels, saveCustomModel } from './customModels.js';
@@ -55,6 +57,8 @@ import { setOverlayVisible } from './computerUse/overlay.js';
 import { armEscStop, disarmEscStop } from './computerUse/escStop.js';
 import { detectExternalAgents } from './externalAgents.js';
 import { detectIdes, openInIde, openInTerminal } from './ideDetection.js';
+import { resolveLaunch } from './workspaceOpeners.js';
+import { getOpeners, getLastOpenerId, setLastOpenerId } from './openerService.js';
 import { getVersionInfo } from './appInfo.js';
 import { IpcEvent, IpcInvoke } from '../shared/ipc.js';
 import type {
@@ -135,6 +139,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
 
   // ── sessions ────────────────────────────────────────────────────────────
   ipcMain.handle(IpcInvoke.SessionList, () => hub.list());
+  ipcMain.handle(IpcInvoke.SessionSearch, (_e, query: string) => hub.searchContent(query));
   ipcMain.handle(IpcInvoke.SessionCreate, (_e, opts: CreateSessionOptions) => hub.create(opts));
   ipcMain.handle(IpcInvoke.SessionCreateChat, (_e, opts?: Omit<CreateSessionOptions, 'cwd'>) =>
     hub.createChat(opts),
@@ -305,6 +310,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null): IpcServices 
     (_e, cwd: string, mimeType: string, data: string, name?: string) =>
       saveClipboardImage(cwd, mimeType, data, name),
   );
+  ipcMain.handle(
+    IpcInvoke.SaveImageAs,
+    (_e, defaultName: string, mimeType: string, data: string) =>
+      saveImageAs(getWindow() ?? undefined, defaultName, mimeType, data),
+  );
+  // Detected programs (with inline icons) come from the background-preloaded cache,
+  // so the menu opens instantly instead of running detection on click.
+  ipcMain.handle(IpcInvoke.ListOpeners, () => getOpeners());
+  ipcMain.handle(IpcInvoke.GetLastOpener, () => getLastOpenerId());
+  ipcMain.handle(IpcInvoke.OpenWith, async (_e, id: string, folder: string) => {
+    const plan = await resolveLaunch(id, folder);
+    if (!plan) return;
+    // Remember this as the split-button's default for next time.
+    setLastOpenerId(id);
+    if (plan.kind === 'shellOpen') {
+      // The canonical way to reveal a folder in the OS file manager.
+      await shell.openPath(folder);
+      return;
+    }
+    if (plan.kind === 'exec') {
+      // Windows: `start "" <exe> <args>` returns immediately (so `exec` doesn't
+      // hang) and fully detaches the launched program from this process.
+      exec(plan.commandLine, { windowsHide: true }, () => undefined);
+      return;
+    }
+    // macOS/Linux: spawn detached so the child outlives Electron.
+    const child = spawn(plan.command, plan.args, {
+      detached: true,
+      stdio: 'ignore',
+      shell: plan.shell,
+    });
+    child.on('error', () => undefined);
+    child.unref();
+  });
 
   // ── integrated terminal ─────────────────────────────────────────────────────
   const terminals = new TerminalManager({

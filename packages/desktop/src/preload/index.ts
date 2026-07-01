@@ -36,6 +36,7 @@ import type {
   FeishuStatus,
   FileBase64,
   GitFileDiff,
+  OpenerInfo,
   PermissionMode,
   PickedFile,
   PermissionRequest,
@@ -46,6 +47,7 @@ import type {
   SaveCustomModelResult,
   SessionEventEnvelope,
   SessionMeta,
+  SessionSearchResult,
   SessionStatusEnvelope,
   ShellOption,
   TerminalDataEvent,
@@ -78,6 +80,8 @@ const bridge: EasycodeBridge = {
   },
   sessions: {
     list: () => ipcRenderer.invoke(IpcInvoke.SessionList) as Promise<SessionMeta[]>,
+    search: (query: string) =>
+      ipcRenderer.invoke(IpcInvoke.SessionSearch, query) as Promise<SessionSearchResult[]>,
     create: (opts: CreateSessionOptions) =>
       ipcRenderer.invoke(IpcInvoke.SessionCreate, opts) as Promise<SessionMeta>,
     createChat: (opts?: Omit<CreateSessionOptions, 'cwd'>) =>
@@ -202,6 +206,16 @@ const bridge: EasycodeBridge = {
         data,
         name,
       ) as Promise<string | null>,
+    saveImageAs: (defaultName, mimeType, data) =>
+      ipcRenderer.invoke(
+        IpcInvoke.SaveImageAs,
+        defaultName,
+        mimeType,
+        data,
+      ) as Promise<string | null>,
+    listOpeners: () => ipcRenderer.invoke(IpcInvoke.ListOpeners) as Promise<OpenerInfo[]>,
+    getLastOpener: () => ipcRenderer.invoke(IpcInvoke.GetLastOpener) as Promise<string | null>,
+    openWith: (id, folder) => ipcRenderer.invoke(IpcInvoke.OpenWith, id, folder) as Promise<void>,
   },
   clipboard: {
     readImage: () => ipcRenderer.invoke(IpcInvoke.ReadClipboardImage) as Promise<FileBase64 | null>,

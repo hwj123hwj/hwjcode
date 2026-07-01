@@ -13,6 +13,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { app } from 'electron';
 import { AcpSessionBridge } from './acpSession.js';
+import { isFeishuGatewaySession } from './feishuSession.js';
+import { sessionHistoryPath, extractHistoryText, findSnippet } from './sessionSearch.js';
+import type { SessionSearchResult } from '../shared/ipc.js';
 import type {
   AgentKind,
   CreateSessionOptions,
@@ -66,6 +69,13 @@ export class SessionHub {
       const raw = fs.readFileSync(this.storePath, 'utf8');
       const arr = JSON.parse(raw) as PersistedSession[];
       for (const rec of arr) {
+        // Never surface Feishu-gateway sessions in the desktop. When the CLI's
+        // Feishu gateway shares this machine's session store, its
+        // `feishu-<chatId>-<ts>` sessions can bleed in and render broken (user
+        // turns only, no agent replies). Skip them on load so they never show —
+        // and, since they're not re-added, they get pruned from sessions.json on
+        // the next persist.
+        if (isFeishuGatewaySession(rec)) continue;
         // Restored sessions are dormant until explicitly resumed.
         rec.status = 'idle';
         // Backfill agentType for sessions persisted before this field existed.
@@ -106,7 +116,58 @@ export class SessionHub {
   // ── queries ─────────────────────────────────────────────────────────────
 
   list(): SessionMeta[] {
-    return [...this.records.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    // Defensive: `load()` already prunes Feishu-gateway sessions, but filter here
+    // too so the renderer can never receive one regardless of how it entered.
+    return [...this.records.values()]
+      .filter((rec) => !isFeishuGatewaySession(rec))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /**
+   * Full-text search over the user's own non-archived sessions: match the title
+   * and the persisted transcript (`history.json`) content. Returns title matches
+   * first, then most-recently-updated. Missing/unreadable history is treated as
+   * "no content match" (the session can still match on title). Capped so a broad
+   * query can't return an unbounded list.
+   */
+  async searchContent(query: string): Promise<SessionSearchResult[]> {
+    const q = query.trim();
+    if (!q) return [];
+    const recs = [...this.records.values()].filter(
+      (r) => !r.archived && !isFeishuGatewaySession(r),
+    );
+    const results = await Promise.all(
+      recs.map(async (rec): Promise<SessionSearchResult | null> => {
+        const matchedInTitle = rec.title.toLowerCase().includes(q.toLowerCase());
+        let snippet: string | undefined;
+        const acp = rec.acpSessionId;
+        if (acp) {
+          try {
+            const raw = await fs.promises.readFile(sessionHistoryPath(rec.cwd, acp), 'utf8');
+            snippet = findSnippet(extractHistoryText(JSON.parse(raw)), q) ?? undefined;
+          } catch {
+            /* no persisted history for this session — title-only */
+          }
+        }
+        if (!matchedInTitle && !snippet) return null;
+        return {
+          sessionId: rec.id,
+          title: rec.title,
+          cwd: rec.cwd,
+          kind: rec.kind,
+          matchedInTitle,
+          snippet,
+          updatedAt: rec.updatedAt,
+        };
+      }),
+    );
+    return results
+      .filter((r): r is SessionSearchResult => r !== null)
+      .sort(
+        (a, b) =>
+          Number(b.matchedInTitle) - Number(a.matchedInTitle) || b.updatedAt - a.updatedAt,
+      )
+      .slice(0, 50);
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────

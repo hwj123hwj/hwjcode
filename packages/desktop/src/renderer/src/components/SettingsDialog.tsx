@@ -14,6 +14,8 @@ import type {
   McpTransport,
   ModelOverrides,
   ProjectMemoryMode,
+  SessionKind,
+  SessionMeta,
   ShellOption,
   TerminalShellKind,
   ThemeMode,
@@ -94,6 +96,7 @@ export type SectionId =
   | 'generalModel'
   | 'models'
   | 'mcp'
+  | 'archivedChats'
   | 'about';
 
 interface SectionDef {
@@ -140,6 +143,17 @@ const GROUPS: GroupDef[] = [
       { id: 'generalModel', icon: 'switch', labelKey: 'settings.navGeneralModel', Component: GeneralModelSection },
       { id: 'models', icon: 'cpu', labelKey: 'settings.tabModels', Component: ModelsSection },
       { id: 'mcp', icon: 'wrench', labelKey: 'settings.navMcp', Component: McpSection },
+    ],
+  },
+  {
+    titleKey: 'settings.groupArchived',
+    sections: [
+      {
+        id: 'archivedChats',
+        icon: 'archive',
+        labelKey: 'settings.navArchivedChats',
+        Component: ArchivedChatsSection,
+      },
     ],
   },
   {
@@ -428,38 +442,49 @@ function GeneralModelSection() {
   const { settings, patch, saved } = useUserSettings();
   const [modelOpts, setModelOpts] = useState<{ value: string; label: string }[]>([]);
 
-  // Build the default-model options the same way the new-session/empty-session
-  // pickers do: the built-in models cached on existing sessions' meta, merged
-  // with the user's custom models. No live session is needed here.
+  // Build the default-model options:
+  //   1. Built-in models from ACP handshake (availableModels on any session),
+  //      filtering out any stale `custom:` ids that may have been cached there.
+  //   2. User's custom models, read fresh from disk on mount and whenever
+  //      `customModelsRev` changes (save/delete in ModelsSection bumps it).
+  // Decoupled from [order, sessions] so tab-switching doesn't re-fetch and
+  // newly added models appear without requiring a session to already exist.
+  const customModelsRev = useStore((s) => s.customModelsRev);
   useEffect(() => {
     let alive = true;
     const builtins = new Map<string, string>();
     for (const id of order) {
       for (const m of sessions[id]?.meta.availableModels ?? []) {
+        // Skip stale custom-model ids that the backend cached in availableModels
+        if (m.modelId.startsWith('custom:')) continue;
         if (!builtins.has(m.modelId)) builtins.set(m.modelId, m.name);
       }
     }
-    const fromBuiltins = [...builtins].map(([value, label]) => ({ value, label }));
+    const builtinOpts = [...builtins].map(([value, label]) => ({ value, label }));
     void api.models
       .listCustom()
       .then((custom) => {
         if (!alive) return;
-        const seen = new Set<string>(fromBuiltins.map((o) => o.value));
+        const seen = new Set<string>(builtinOpts.map((o) => o.value));
         const deduped = [
-          ...fromBuiltins,
-          ...custom.map((c) => ({ value: c.id, label: c.label })).filter(({ value }) => {
-            if (seen.has(value)) return false;
-            seen.add(value);
-            return true;
-          }),
+          ...builtinOpts,
+          ...custom
+            .filter((c) => c.enabled !== false)
+            .map((c) => ({ value: c.id, label: c.label }))
+            .filter(({ value }) => {
+              if (seen.has(value)) return false;
+              seen.add(value);
+              return true;
+            }),
         ];
         setModelOpts(deduped);
       })
-      .catch(() => alive && setModelOpts(fromBuiltins));
+      .catch(() => alive && setModelOpts(builtinOpts));
     return () => {
       alive = false;
     };
-  }, [order, sessions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customModelsRev]);
 
   return (
     <>
@@ -907,6 +932,7 @@ function ModelsSection() {
 
   const remove = async (m: CustomModelEntry) => {
     await api.models.deleteCustom(m.displayName);
+    useStore.getState().bumpCustomModelsRev();
     await refresh();
   };
 
@@ -924,6 +950,7 @@ function ModelsSection() {
       setError(res.error ?? t('settings.saveFailed'));
       return;
     }
+    useStore.getState().bumpCustomModelsRev();
     setForm(null);
     setEditingName(undefined);
     await refresh();
@@ -1476,5 +1503,333 @@ function McpSection() {
         </>
       )}
     </>
+  );
+}
+
+/* ── 已归档会话 ──────────────────────────────────────────────────────────────
+ * Manage archived sessions in one place (they no longer appear in the sidebar):
+ * search + filter by type/project, unarchive or permanently delete a single one,
+ * bulk-delete a whole project, or delete them all. Drives the same store actions
+ * (archiveSession / deleteSession) the sidebar used to.
+ */
+type ArchTypeFilter = 'all' | 'chat' | 'project';
+
+/** A confirm-gated destructive action: the ids to delete + a display label. */
+interface PendingDelete {
+  label: string;
+  ids: string[];
+}
+
+/** Collapse key + display bucket for the single Chats group. */
+const ARCH_CHATS_KEY = '__chats__';
+
+function archProjectName(cwd: string): string {
+  const parts = cwd.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || cwd;
+}
+
+function formatArchDate(ts: number, lang: string): string {
+  return new Date(ts).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+interface ArchGroup {
+  key: string;
+  name: string;
+  kind: SessionKind;
+  metas: SessionMeta[];
+}
+
+function ArchivedChatsSection() {
+  const t = useT();
+  const lang = useStore((s) => s.lang);
+  const sessions = useStore((s) => s.sessions);
+  const order = useStore((s) => s.order);
+  const archiveSession = useStore((s) => s.archiveSession);
+  const deleteSession = useStore((s) => s.deleteSession);
+
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<ArchTypeFilter>('all');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [pending, setPending] = useState<PendingDelete | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  const archived = useMemo(
+    () => order.map((id) => sessions[id]?.meta).filter((m): m is SessionMeta => !!m && m.archived),
+    [order, sessions],
+  );
+
+  // Project options for the project filter (only projects that have archived chats).
+  const projectOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const m of archived) if (m.kind === 'project') seen.set(m.cwd, archProjectName(m.cwd));
+    return [
+      { value: '', label: t('settings.archivedAllProjects') },
+      ...[...seen.entries()].map(([value, label]) => ({ value, label })),
+    ];
+  }, [archived, t]);
+
+  const q = query.trim().toLowerCase();
+  const groups = useMemo<ArchGroup[]>(() => {
+    const filtered = archived.filter((m) => {
+      if (typeFilter === 'chat' && m.kind !== 'chat') return false;
+      if (typeFilter === 'project' && m.kind !== 'project') return false;
+      if (projectFilter && m.cwd !== projectFilter) return false;
+      if (q && !m.title.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    const map = new Map<string, ArchGroup>();
+    for (const m of filtered) {
+      const key = m.kind === 'chat' ? ARCH_CHATS_KEY : m.cwd;
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key,
+          name: m.kind === 'chat' ? t('sidebar.chatsFolder') : archProjectName(m.cwd),
+          kind: m.kind,
+          metas: [],
+        };
+        map.set(key, g);
+      }
+      g.metas.push(m);
+    }
+    return [...map.values()];
+  }, [archived, typeFilter, projectFilter, q, t]);
+
+  const runDelete = async () => {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      for (const id of pending.ids) await deleteSession(id);
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unarchiveAll = async (ids: string[]) => {
+    for (const id of ids) await archiveSession(id, false);
+  };
+
+  const typeOptions: { value: ArchTypeFilter; label: string }[] = [
+    { value: 'all', label: t('settings.archivedAllChats') },
+    { value: 'chat', label: t('sidebar.chatsFolder') },
+    { value: 'project', label: t('sidebar.projects') },
+  ];
+
+  return (
+    <>
+      <div className="arch-toolbar">
+        <div className="arch-search">
+          <Icon name="search" size={14} className="ic" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('settings.archivedSearchPlaceholder')}
+          />
+        </div>
+        <FilterSelect
+          icon="tasks"
+          value={typeFilter}
+          options={typeOptions}
+          onChange={(v) => setTypeFilter(v as ArchTypeFilter)}
+        />
+        <FilterSelect
+          icon="folder"
+          value={projectFilter}
+          options={projectOptions}
+          onChange={setProjectFilter}
+        />
+        <button
+          className="btn danger arch-delete-all"
+          disabled={archived.length === 0}
+          onClick={() =>
+            setPending({ label: t('settings.archivedDeleteAll'), ids: archived.map((m) => m.id) })
+          }
+        >
+          <Icon name="delete" size={14} />
+          {t('settings.archivedDeleteAll')}
+        </button>
+      </div>
+
+      {archived.length === 0 ? (
+        <div className="cm-empty">{t('settings.archivedEmpty')}</div>
+      ) : groups.length === 0 ? (
+        <div className="cm-empty">{t('settings.archivedNoMatch')}</div>
+      ) : (
+        <div className="arch-list">
+          {groups.map((g) => (
+            <div className="arch-group" key={g.key}>
+              <div className="arch-group-head">
+                <Icon name="folder" size={14} className="arch-group-ic" />
+                <span className="arch-group-name">{g.name}</span>
+                <span className="arch-group-count">
+                  {t('settings.archivedChatCount', { n: g.metas.length })}
+                </span>
+                <div className="arch-group-menu-wrap">
+                  <button
+                    className="icon-btn"
+                    title={t('common.more')}
+                    onClick={() => setOpenMenu((m) => (m === g.key ? null : g.key))}
+                  >
+                    <Icon name="wrench" size={14} />
+                  </button>
+                  {openMenu === g.key && (
+                    <>
+                      <div className="arch-menu-veil" onClick={() => setOpenMenu(null)} />
+                      <div className="menu-pop arch-menu">
+                        <button
+                          onClick={() => {
+                            setOpenMenu(null);
+                            void unarchiveAll(g.metas.map((m) => m.id));
+                          }}
+                        >
+                          <Icon name="archive-restore" size={14} />
+                          <span className="grow">{t('settings.archivedUnarchiveAll')}</span>
+                        </button>
+                        <button
+                          className="danger"
+                          onClick={() => {
+                            setOpenMenu(null);
+                            setPending({
+                              label: t('settings.archivedDeleteProject', { name: g.name }),
+                              ids: g.metas.map((m) => m.id),
+                            });
+                          }}
+                        >
+                          <Icon name="delete" size={14} />
+                          <span className="grow">{t('settings.archivedDeleteProjectShort')}</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              {g.metas.map((m) => (
+                <div className="arch-row" key={m.id}>
+                  <div className="arch-row-main">
+                    <span className="arch-row-title">{m.title}</span>
+                    <span className="arch-row-date">{formatArchDate(m.updatedAt, lang)}</span>
+                  </div>
+                  <div className="arch-row-actions">
+                    <button
+                      className="icon-btn"
+                      title={t('sidebar.unarchive')}
+                      onClick={() => void archiveSession(m.id, false)}
+                    >
+                      <Icon name="archive-restore" size={14} />
+                    </button>
+                    <button
+                      className="icon-btn danger"
+                      title={t('sidebar.delete')}
+                      onClick={() => setPending({ label: m.title, ids: [m.id] })}
+                    >
+                      <Icon name="delete" size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pending && (
+        <div className="modal-backdrop" onClick={() => !busy && setPending(null)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>
+                <Icon name="delete" size={17} />
+                {t('sidebar.deleteTitle')}
+              </h3>
+              <div className="sub">
+                {pending.ids.length > 1
+                  ? t('settings.archivedDeleteCountConfirm', { n: pending.ids.length })
+                  : t('sidebar.deleteConfirm', { title: pending.label })}
+              </div>
+            </div>
+            <div className="modal-body">
+              <div className="sub">{t('sidebar.deleteWarning')}</div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn" disabled={busy} onClick={() => setPending(null)}>
+                {t('common.cancel')}
+              </button>
+              <button className="btn danger" disabled={busy} onClick={() => void runDelete()}>
+                {busy ? <span className="spinner" /> : <Icon name="delete" size={14} />}
+                {t('sidebar.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Compact dropdown for the archived-chats filters (type / project). Mirrors
+ * `ShellSelect`'s look (`.shell-select` + `.menu-pop`).
+ */
+function FilterSelect({
+  value,
+  options,
+  icon,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  icon: IconName;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const current = options.find((o) => o.value === value)?.label ?? options[0]?.label ?? '';
+
+  return (
+    <div className="shell-select arch-filter" ref={ref}>
+      <button className="shell-select-trigger" onClick={() => setOpen((o) => !o)}>
+        <Icon name={icon} size={14} />
+        <span className="grow">{current}</span>
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open && (
+        <div className="menu-pop" style={{ left: 0, top: '110%', minWidth: 200, maxHeight: 300, overflowY: 'auto' }}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+            >
+              <span className="grow">{o.label}</span>
+              <Icon name="check" className={value === o.value ? 'shell-check' : 'placeholder'} size={14} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
