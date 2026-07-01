@@ -189,6 +189,16 @@ export function isAdaptiveThinkingClaude(modelId: string): boolean {
     }
   }
 
+  // 3. 纯主版本号模型（如 claude-sonnet-5，无次版本号）
+  // 匹配 -5、-5-xxx 等格式，避免误判日期字段
+  if (lower.includes('claude')) {
+    const soloVersionMatch = lower.match(/(?:^|[-@])(\d+)(?:$|[-@])/);
+    if (soloVersionMatch) {
+      const major = parseInt(soloVersionMatch[1], 10);
+      if (major >= 5) return true;
+    }
+  }
+
   // 备选兼容（无点命名）：claude-4-6, claude-4-7, claude-5 等
   if (lower.includes('claude-4-6') || lower.includes('claude-4-7') || lower.includes('claude-4-8') || lower.includes('claude-5-')) {
     return true;
