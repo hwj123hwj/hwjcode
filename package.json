@@ -1,6 +1,6 @@
 {
-  "name": "easycode-ai",
-  "version": "1.1.42",
+  "name": "hwjcode",
+  "version": "1.1.43",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -99,7 +99,7 @@
     "env:test": "./scripts/switch-env.sh test"
   },
   "bin": {
-    "easycode": "bundle/easycode.js"
+    "hwjcode": "bundle/easycode.js"
   },
   "preferGlobal": true,
   "files": [
