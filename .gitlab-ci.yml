@@ -136,11 +136,14 @@ release-desktop-win:
     - $env:BUILD_TIME = Get-Date -Format "yyyyMMddHHmm"
     # 桌面版「关于」面板显示的 Bundled backend 版本号，读的是 bundle/package.json，
     # 而后者是 npm run bundle 时直接抄 packages/cli/package.json 的 version 字段
-    # （见 scripts/copy_bundle_assets.js）。必须在 bundle 之前把 root/cli/core
-    # 三处也注入成同一个版本号，界面上显示的版本才会和这次的 tag 一致。
-    - npm pkg set version="$env:NEW_VERSION"
-    - npm pkg set version="$env:NEW_VERSION" --workspace=packages/cli
-    - npm pkg set version="$env:NEW_VERSION" --workspace=packages/core
+    # （见 scripts/copy_bundle_assets.js）。desktop 的 tag 版本号只是这个 Electron
+    # 壳自己的迭代节奏，跟它内部捆绑的 CLI/core 无关；这里应该反映的是当前已经
+    # 真实发布到 npm 的最新 CLI 版本（easycode-ai 的 latest dist-tag），而不是
+    # desktop 自己的版本号，否则「关于」面板显示的 backend 版本查不到对应发布记录。
+    - $env:CLI_VERSION = npm view easycode-ai version
+    - Write-Host "Bundling CLI/core at npm latest version $env:CLI_VERSION (desktop shell is $env:NEW_VERSION)"
+    - npm pkg set version="$env:CLI_VERSION" --workspace=packages/cli
+    - npm pkg set version="$env:CLI_VERSION" --workspace=packages/core
     - npm run bundle
     - cd packages/desktop
     - npm pkg set version="$env:NEW_VERSION"
