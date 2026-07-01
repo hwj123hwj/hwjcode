@@ -144,7 +144,7 @@ release-desktop-win:
     - Write-Host "Uploading $exePath to GCS"
     # 非交互式 shell executor 会话不继承登录终端的用户级 PATH，gcs 不在其中，
     # 因此用完整路径直接调用。整行加引号：裸 `&` 在 YAML 里是锚点语法，会导致解析报错。
-    - '& "C:\Users\cm\.local\bin\gcs.exe" upload $exePath'
+    - '& "D:\projects\gcs_tool\gcs.exe" upload $exePath'
   artifacts:
     paths:
       - packages/desktop/release/**/*.exe
