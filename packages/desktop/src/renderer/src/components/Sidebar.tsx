@@ -226,27 +226,21 @@ export function Sidebar() {
       className={`session-item ${nested ? 'nested' : ''} ${active === v.meta.id ? 'active' : ''}`}
       onClick={() => onClick(v.meta)}
     >
+      {/* Single compact line, matching the chat cards: status dot + title,
+          then the relative time on the right. The +N/-M diff is a per-project
+          value (git diff of the shared working tree), not per-session, so it's
+          no longer shown here — it lives inside the session view instead. Only
+          non-default backends get a small inline badge. */}
       <div className="session-row">
         <span className={`status-dot ${v.meta.status}`} />
         {renderTitle(v)}
-      </div>
-      <div className="session-row session-meta">
-        <span className="session-sub">{relTime(t, v.meta.updatedAt)}</span>
-        {(v.meta.added > 0 || v.meta.removed > 0) && (
-          <span className="diff-chip">
-            <span className="add">+{v.meta.added}</span>{' '}
-            <span className="del">-{v.meta.removed}</span>
-          </span>
-        )}
-        {/* Easy Code is the default backend — only badge the others, and
-            keep the badge on this second row so it never overlaps the
-            hover edit/archive actions pinned to the card's top-right. */}
         {v.meta.agentType !== 'easy-code' && (
           <span className="agent-badge">
             <AgentIcon agent={v.meta.agentType} size={12} />
             {AGENT_LABEL[v.meta.agentType]}
           </span>
         )}
+        <span className="session-time">{relTime(t, v.meta.updatedAt)}</span>
       </div>
       {renderActions(v)}
     </div>

@@ -20,6 +20,10 @@
   --bg-sunken: #121212;
   --bg-hover: #121212;
   --bg-active: #121212;
+  /* Floating sidebar-card surface. Kept separate from --bg-elev (which many
+     right-side surfaces use) so the sidebar can be a lighter raised #262626 over
+     the #1F1F1E content base without tinting toolbars / tool cards. */
+  --sidebar-bg: #262626;
   --border: #3a3937;
   --border-strong: #565552;
   --text: #FFFFFF;
@@ -96,16 +100,30 @@
   --border-btn-primary: #FFFFFF;
   --color-btn-primary: #1F1F1E;
   --bg-btn-primary-hover: #EFEEEB;
+
+  /* diff viewer (DiffPane). Dark defaults intentionally mirror the previous
+     hard-coded values so dark rendering is unchanged; the light palettes below
+     override these with a brighter GitHub-style scheme + colored line markers. */
+  --diff-add-bg: var(--green-weak);
+  --diff-del-bg: var(--red-weak);
+  --diff-hunk-bg: var(--blue-weak);
+  --diff-hunk-text: var(--blue);
+  --diff-add-marker: transparent;
+  --diff-del-marker: transparent;
+  --diff-gutter: var(--text-faint);
+  --diff-code-bg: var(--bg);
+  --diff-files-bg: var(--bg-elev);
 }
 
 /* Light palette — explicit user choice. */
 :root[data-theme='light'] {
-  --bg: #F8F8F6;
+  --bg: #FDFDFC;
   --bg-elev: #F7F7F5;
   --bg-raised: #FFFFFF;
   --bg-sunken: #EFEEEB;
   --bg-hover: #EFEEEB;
   --bg-active: #EFEEEB;
+  --sidebar-bg: #FFFFFF;
   --border: #D3D3D1;
   --border-strong: #D3D3D1;
   --text: #0B0B0B;
@@ -168,17 +186,29 @@
   --border-btn-primary: #0B0B0B;
   --color-btn-primary: #FFFFFF;
   --bg-btn-primary-hover: #2E2E2C;
+
+  /* diff viewer — brighter GitHub-style add/del with colored left markers. */
+  --diff-add-bg: #E6FFEC;
+  --diff-del-bg: #FFEBE9;
+  --diff-hunk-bg: #F2F4F8;
+  --diff-hunk-text: #57606A;
+  --diff-add-marker: #2DA44E;
+  --diff-del-marker: #CF222E;
+  --diff-gutter: #8C959F;
+  --diff-code-bg: #FFFFFF;
+  --diff-files-bg: #FFFFFF;
 }
 
 /* Light palette — system mode (no explicit choice) following the OS preference. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']):not([data-theme='light']) {
-    --bg: #F8F8F6;
+    --bg: #FDFDFC;
     --bg-elev: #F7F7F5;
     --bg-raised: #FFFFFF;
     --bg-sunken: #EFEEEB;
     --bg-hover: #EFEEEB;
     --bg-active: #EFEEEB;
+    --sidebar-bg: #FFFFFF;
     --border: #D3D3D1;
     --border-strong: #D3D3D1;
     --text: #0B0B0B;
@@ -241,6 +271,48 @@
     --border-btn-primary: #0B0B0B;
     --color-btn-primary: #FFFFFF;
     --bg-btn-primary-hover: #2E2E2C;
+
+    /* diff viewer — brighter GitHub-style add/del with colored left markers. */
+    --diff-add-bg: #E6FFEC;
+    --diff-del-bg: #FFEBE9;
+    --diff-hunk-bg: #F2F4F8;
+    --diff-hunk-text: #57606A;
+    --diff-add-marker: #2DA44E;
+    --diff-del-marker: #CF222E;
+    --diff-gutter: #8C959F;
+    --diff-code-bg: #FFFFFF;
+    --diff-files-bg: #FFFFFF;
+  }
+}
+
+/* ── floating sidebar card (both themes) ───────────────────────────────────
+   The expanded sidebar is a rounded panel that floats over the content base
+   with a soft shadow — the "detached card" look from the design. The STRUCTURE
+   (margin gap, radius, border, shadow, clip) is theme-independent; the surface
+   color comes from --sidebar-bg (dark #262626 over the #1F1F1E base, light
+   #FFFFFF over #FDFDFC), applied on the base `.sidebar` rule so both the main
+   sidebar and the collapsed-reveal overlay pick it up. Border + shadow use
+   theme variables so dark and light stay coordinated. Scoped to the expanded
+   sidebar (`.app > .sidebar`); the collapsed hover overlay stays a flush
+   slide-in panel (it carries its own --shadow-lg). `overflow: hidden` clips the
+   square head/foot to the radius (safe: the list scrolls internally and the
+   sidebar has no popovers that escape its bounds). */
+.app > .sidebar {
+  margin: 10px 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+/* The raised hover on New chat / Search is --bg-raised, which equals the white
+   sidebar in light mode (so it's invisible) — give those rows a subtle sunken
+   tint there. Dark's #262626 sidebar vs #1F1F1E raised reads fine as-is. */
+:root[data-theme='light'] .sidebar-action:hover {
+  background: var(--bg-sunken);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) .sidebar-action:hover {
+    background: var(--bg-sunken);
   }
 }
 
@@ -330,8 +402,9 @@ select {
   height: 100vh;
   background: var(--bg);
   /* Width of the left session-list sidebar — set inline from the store so a
-     drag-resize / persisted value flows straight into the layout. */
-  --sidebar-w: 272px;
+     drag-resize / persisted value flows straight into the layout. Kept in sync
+     with WORKSPACE_SIZE_LIMITS.sidebarWidth.default in store.ts. */
+  --sidebar-w: 236px;
 }
 .app > .workspace-shell {
   flex: 1;
@@ -343,7 +416,7 @@ select {
   width: var(--sidebar-w);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   min-height: 0;
 }
@@ -1027,7 +1100,11 @@ select {
 .session-actions {
   position: absolute;
   right: 7px;
-  top: 7px;
+  /* Vertically centre against the (now single-line) card so the edit/archive
+     icons line up with the session title, instead of a fixed top offset that
+     sat too low on the compact chat rows. */
+  top: 50%;
+  transform: translateY(-50%);
   display: none;
   gap: 2px;
   /* Semi-opaque background so action buttons don't visually merge with the
@@ -1039,9 +1116,9 @@ select {
 .session-item:hover .session-actions {
   display: flex;
 }
-/* On chat cards (single-line, compact padding) the hover actions overlap the
+/* On single-line cards (chat + project) the hover actions overlap the
    right-aligned time. Hide the time while hovering so icons have clear space. */
-.session-item.chat-item:hover .session-time {
+.session-item:hover .session-time {
   visibility: hidden;
 }
 .icon-btn {
@@ -1113,6 +1190,33 @@ select {
   min-height: 0;
   background: var(--bg);
   position: relative;
+}
+/* Below the toolbar: the session body and (when open) the diff viewer sit side
+   by side. Row so they split the width; each stretches to full height. */
+.main-lower {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+/* The session body (chat/side panes + todo + diff summary + prompt). Fills the
+   row when the diff is closed; shrinks to the other half when it's open. */
+.main-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+/* Diff viewer: a fixed 50% of the whole app window (50vw), full height via the
+   row's stretch — never full width. The body (chat + prompt) keeps the rest of
+   the row and stays visible; on narrow windows it shrinks (min-width:0). */
+.diff-fullpane {
+  flex: 0 0 50vw;
+  max-width: 50vw;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
 }
 /* The empty/home screen has no .toolbar, so this overlay strip provides the
    same draggable window region across the top of the main pane. Height mirrors
@@ -2152,6 +2256,76 @@ select {
   padding: 12px 16px 14px;
   background: var(--bg);
 }
+
+/* ── in-session change summary (above the prompt bar) ──────────────────────
+   A clickable +N/-M pill (opens the diff viewer) plus a "Commit changes"
+   button, aligned to the same 820px column as the prompt bar and right-
+   justified per the design. */
+.session-diffbar {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 0 16px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.diffbar-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: 20px;
+  padding: 4px 11px;
+  cursor: pointer;
+  transition: border-color 0.14s;
+}
+.diffbar-pill:hover {
+  border-color: var(--border-strong);
+}
+.diffbar-pill .add {
+  color: var(--green);
+}
+.diffbar-pill .del {
+  color: var(--red);
+}
+.diffbar-commit-btn {
+  gap: 6px;
+}
+.diffbar-commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.diffbar-input {
+  width: 240px;
+  max-width: 52vw;
+  padding: 6px 10px;
+  border: 1px solid var(--border-input, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--bg-input-field, var(--bg));
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.14s;
+}
+.diffbar-input:focus {
+  border-color: var(--border-input-focus, var(--accent));
+}
+.diffbar-error {
+  color: var(--red);
+  font-size: 11.5px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .promptbar-inner {
   max-width: 820px;
   margin: 0 auto;
@@ -2734,45 +2908,73 @@ select {
 }
 
 /* ── diff pane ─────────────────────────────────────────────────────────── */
-.diff-layout {
-  display: flex;
-  height: 100%;
-  min-height: 0;
+/* Stacked files: each is a section with a sticky, click-to-collapse header
+   (file name only + stats), no separate file-list panel. */
+.diff-file-section {
+  border-bottom: 1px solid var(--border);
 }
-.diff-files {
-  width: 236px;
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  flex: none;
-  background: var(--bg-elev);
-}
-.diff-file {
+.diff-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  cursor: pointer;
-  font-size: 12.5px;
+  padding: 8px 12px;
+  background: var(--diff-hunk-bg);
   border-bottom: 1px solid var(--border);
-  border-left: 2px solid transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
 }
-.diff-file .ic {
-  color: var(--text-faint);
-}
-.diff-file:hover {
+.diff-file-head:hover {
   background: var(--bg-hover);
 }
-.diff-file.active {
-  background: var(--accent-weak);
-  border-left-color: var(--accent);
+.diff-file-chevron {
+  flex: none;
+  color: var(--text-faint);
+  display: inline-grid;
+  place-items: center;
 }
-.diff-file .name {
-  flex: 1;
+.diff-file-name {
+  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
+}
+.diff-file-head .diff-chip {
+  flex: none;
+}
+/* "Expand N unchanged lines" bar between/around hunks. */
+.diff-gap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+  padding: 4px 12px 4px 46px;
+  font-family: var(--sans);
+  font-size: 12px;
   text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.diff-gap:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.diff-gap .ic {
+  flex: none;
+  color: var(--text-faint);
+}
+.diff-code {
+  flex: 1 1 auto;
 }
 .diff-view {
   flex: 1;
@@ -2780,29 +2982,34 @@ select {
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.5;
-  background: var(--bg);
+  background: var(--diff-code-bg);
 }
 .diff-line {
   display: flex;
   padding: 0 12px;
   white-space: pre;
 }
+/* The `inset 2px 0 0` shadow paints the colored left marker bar (light mode)
+   without shifting the code — the marker is transparent in dark, so dark keeps
+   its flat, marker-less look. */
 .diff-line.add {
-  background: var(--green-weak);
+  background: var(--diff-add-bg);
+  box-shadow: inset 2px 0 0 var(--diff-add-marker);
 }
 .diff-line.del {
-  background: var(--red-weak);
+  background: var(--diff-del-bg);
+  box-shadow: inset 2px 0 0 var(--diff-del-marker);
 }
 .diff-line.hunk {
-  color: var(--blue);
-  background: var(--blue-weak);
+  color: var(--diff-hunk-text);
+  background: var(--diff-hunk-bg);
 }
 .diff-line:hover {
   background: var(--bg-hover);
 }
 .diff-gutter {
   width: 46px;
-  color: var(--text-faint);
+  color: var(--diff-gutter);
   user-select: none;
   flex: none;
   text-align: right;
@@ -2837,6 +3044,31 @@ select {
 .diff-comment-row textarea:focus {
   border-color: var(--accent-border);
   box-shadow: var(--ring);
+}
+
+/* ── light-mode diff viewer: floating card ─────────────────────────────────
+   The diff pane becomes a rounded, softly-shadowed card that floats over the
+   #FDFDFC content — matching the sidebar treatment and the design mockup. Light
+   mode only (dark keeps its flush column); `overflow: hidden` clips the header
+   and code area to the card radius (both scroll internally). The two blocks
+   mirror the explicit-`light` and system-`light` palette cases. */
+:root[data-theme='light'] .diff-pane {
+  margin: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  background: var(--diff-code-bg);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']):not([data-theme='light']) .diff-pane {
+    margin: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    background: var(--diff-code-bg);
+  }
 }
 
 /* ── modal / dialogs ───────────────────────────────────────────────────── */

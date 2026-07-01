@@ -147,10 +147,10 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#F8F8F6',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#FDFDFC',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : (process.platform === 'win32' ? 'hidden' : 'default'),
     titleBarOverlay: process.platform === 'win32' ? {
-      color: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#F8F8F6',
+      color: nativeTheme.shouldUseDarkColors ? '#1F1F1E' : '#FDFDFC',
       symbolColor: nativeTheme.shouldUseDarkColors ? '#C2C1B6' : '#202124',
       height: 36,
     } : undefined,
@@ -178,10 +178,10 @@ function createWindow(): void {
 
   const handleThemeUpdate = (): void => {
     const isDark = nativeTheme.shouldUseDarkColors;
-    mainWindow?.setBackgroundColor(isDark ? '#1F1F1E' : '#F8F8F6');
+    mainWindow?.setBackgroundColor(isDark ? '#1F1F1E' : '#FDFDFC');
     if (process.platform === 'win32') {
       mainWindow?.setTitleBarOverlay({
-        color: isDark ? '#1F1F1E' : '#F8F8F6',
+        color: isDark ? '#1F1F1E' : '#FDFDFC',
         symbolColor: isDark ? '#C2C1B6' : '#202124',
         height: 36,
       });

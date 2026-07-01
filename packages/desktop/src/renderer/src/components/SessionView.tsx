@@ -5,6 +5,7 @@ import { SessionTodoPanel } from './StickyTodoPanel';
 import { DiffPane } from './panes/DiffPane';
 import { FilePane, PlanPane, TasksPane, TerminalPane } from './panes/SidePanes';
 import { PromptBar } from './PromptBar';
+import { SessionDiffBar } from './SessionDiffBar';
 import { OpenWithMenu } from './OpenWithMenu';
 import { WorkspaceToggles } from './workspace/WorkspaceToggles';
 import { Icon, type IconName } from './Icon';
@@ -62,6 +63,13 @@ export function SessionView() {
   const meta = view.meta;
   const dormant = meta.status === 'exited';
 
+  // The diff viewer takes over the whole right area rather than sharing it as a
+  // side-by-side column: when 'diff' is open we render it full-height (below the
+  // toolbar) and hide the normal body (chat + prompt), restoring it on close.
+  const diffOpen = view.panes.includes('diff');
+  const bodyPanes = view.panes.filter((p) => p !== 'diff');
+  if (bodyPanes.length === 0) bodyPanes.push('chat');
+
   return (
     <main className="main">
       <div className="toolbar">
@@ -111,15 +119,32 @@ export function SessionView() {
         <WorkspaceToggles />
       </div>
 
-      <div className="workspace">
-        {view.panes.map((p) => (
-          <PaneHost key={p} kind={p} view={view} t={t} />
-        ))}
+      {/* Below the toolbar: the session body and, when open, the diff viewer sit
+          side by side. The body stays mounted and simply shrinks to make room —
+          chat scroll, terminals and the prompt draft all survive a diff toggle,
+          and the diff pill in SessionDiffBar stays reachable to toggle it back. */}
+      <div className="main-lower">
+        <div className="main-body">
+          <div className="workspace">
+            {bodyPanes.map((p) => (
+              <PaneHost key={p} kind={p} view={view} t={t} />
+            ))}
+          </div>
+
+          <SessionTodoPanel key={view.meta.id} view={view} />
+
+          <SessionDiffBar view={view} />
+          <PromptBar view={view} />
+        </div>
+
+        {/* Diff viewer: fixed 50% of the right area, full height. Closed via its
+            own [X] or the diff pill (both remove 'diff' from panes). */}
+        {diffOpen && (
+          <div className="diff-fullpane">
+            <DiffPane view={view} />
+          </div>
+        )}
       </div>
-
-      <SessionTodoPanel key={view.meta.id} view={view} />
-
-      <PromptBar view={view} />
     </main>
   );
 }

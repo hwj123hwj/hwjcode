@@ -188,6 +188,11 @@ export const zh = {
   'diff.pickFile': '选择一个文件查看 diff',
   'diff.commentPlaceholder': '写下评审意见，回车提交…',
   'diff.addCommentTitle': '点击行添加评论',
+  'diff.expandLines': '展开 {n} 行未变更',
+  'diff.toggleFile': '折叠 / 展开该文件',
+  'diff.viewChanges': '查看改动',
+  'diff.commit': '提交改动',
+  'diff.commitTitle': '让智能体提交这些改动',
 
   // ── prompt bar ────────────────────────────────────────────────────────────────────
   'prompt.placeholder': '输入指令，@ 引用文件，/ 使用命令…',
