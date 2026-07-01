@@ -35,6 +35,13 @@ interface OpenerRecipe {
   alwaysAvailable?: boolean;
   /** Extra existence gate (e.g. a macOS `.app` bundle) and default icon source. */
   appBundle?: string;
+  /**
+   * macOS app name for an `open -a <name>` launch fallback. Used when a CLI-first
+   * editor (VS Code / Cursor / Windsurf) is installed as an `.app` but its CLI
+   * shim isn't on PATH — instead of failing to spawn a missing `code`, we launch
+   * the folder through `open -a <macAppName> <folder>`.
+   */
+  macAppName?: string;
   /** Explicit icon-source path (defaults to appBundle, else the resolved bin). */
   iconPath?: string;
   /**
@@ -199,9 +206,14 @@ export const PLATFORM_OPENERS: Record<Platform, OpenerRecipe[]> = {
   ],
   darwin: [
     { id: 'finder', name: 'Finder', bin: 'open', alwaysAvailable: true, shellOpen: true, iconPath: '/System/Library/CoreServices/Finder.app', buildArgs: (f) => [f] },
-    { id: 'vscode', name: 'VS Code', bin: 'code', buildArgs: (f) => [f] },
-    { id: 'cursor', name: 'Cursor', bin: 'cursor', buildArgs: (f) => [f] },
-    { id: 'windsurf', name: 'Windsurf', bin: 'windsurf', buildArgs: (f) => [f] },
+    // Editors: prefer the `code`/`cursor`/`windsurf` CLI shim (opens the folder as
+    // a project), but many users never run "Install 'code' command in PATH", so the
+    // shim isn't on PATH — especially under a Finder/Dock GUI launch with a minimal
+    // PATH. Declaring `appBundle` lets detection succeed off the installed `.app`
+    // alone; when the CLI is absent `resolveRecipe` falls back to `open -a <app>`.
+    { id: 'vscode', name: 'VS Code', bin: 'code', appBundle: '/Applications/Visual Studio Code.app', macAppName: 'Visual Studio Code', buildArgs: (f) => [f] },
+    { id: 'cursor', name: 'Cursor', bin: 'cursor', appBundle: '/Applications/Cursor.app', macAppName: 'Cursor', buildArgs: (f) => [f] },
+    { id: 'windsurf', name: 'Windsurf', bin: 'windsurf', appBundle: '/Applications/Windsurf.app', macAppName: 'Windsurf', buildArgs: (f) => [f] },
     // GUI IDEs: detect via their `.app` bundle (their CLI shim isn't always on
     // PATH) and open the folder as a project through `open -a <AppName>`.
     { id: 'android-studio', name: 'Android Studio', bin: 'open', appBundle: '/Applications/Android Studio.app', buildArgs: (f) => ['-a', 'Android Studio', f] },
@@ -233,6 +245,10 @@ interface ResolvedOpener {
   spawnCommand: string;
   /** macOS/Linux: `.cmd`/`.bat` shims must be spawned through a shell. */
   spawnShell: boolean;
+  /** macOS: app name for an `open -a` launch fallback when the CLI shim is absent. */
+  macAppName?: string;
+  /** macOS/Linux: whether the CLI shim (`r.bin`) was actually found on PATH. */
+  cliFound: boolean;
   /** Windows: the real program handed to `start` (a `.exe`, or the bin name). */
   winLaunch: string;
   /** Path handed to `app.getFileIcon` for the native icon, if any. */
@@ -367,6 +383,28 @@ async function resolveIconSource(
   return r.iconPath ?? r.appBundle ?? foundPath ?? null;
 }
 
+/**
+ * Decide how a macOS opener launches, given whether its CLI shim was found on
+ * PATH. Pure so it's unit-testable without touching the filesystem.
+ *
+ * - CLI present  → spawn the resolved CLI (`code`/`cursor`/…) with the recipe's
+ *   args (opens the folder as a project).
+ * - CLI absent but `macAppName` set → fall back to `open -a <AppName> <folder>`,
+ *   so a VS Code / Cursor installed only as an `.app` (no PATH shim) still opens.
+ * - Otherwise → spawn the recipe bin as-is (covers `open -a` recipes whose bin is
+ *   already `open`, e.g. iTerm/Terminal, and the no-fallback case).
+ */
+export function resolveMacLaunch(
+  r: Pick<OpenerRecipe, 'bin' | 'macAppName' | 'buildArgs'>,
+  foundCliPath: string | null,
+  folder: string,
+): { command: string; args: string[] } {
+  if (!foundCliPath && r.macAppName) {
+    return { command: 'open', args: ['-a', r.macAppName, folder] };
+  }
+  return { command: foundCliPath ?? r.bin, args: r.buildArgs(folder) };
+}
+
 /** Resolve a single recipe on this machine, or null if the program isn't present. */
 async function resolveRecipe(r: OpenerRecipe): Promise<ResolvedOpener | null> {
   const foundPath = await lookupCli(r.bin);
@@ -396,6 +434,8 @@ async function resolveRecipe(r: OpenerRecipe): Promise<ResolvedOpener | null> {
     buildArgs: r.buildArgs,
     spawnCommand,
     spawnShell,
+    macAppName: r.macAppName,
+    cliFound: !!foundPath,
     winLaunch,
     iconSource,
     bundledIcon: r.bundledIcon ?? null,
@@ -463,6 +503,15 @@ export async function resolveLaunch(id: string, folder: string): Promise<LaunchP
   const args = o.buildArgs(folder);
   if (process.platform === 'win32') {
     return { kind: 'exec', commandLine: winConsoleCommand(o.winLaunch, args) };
+  }
+  if (process.platform === 'darwin') {
+    // macOS: CLI shim if present, else `open -a <AppName>` for `.app`-only installs.
+    const launch = resolveMacLaunch(
+      { bin: o.spawnCommand, macAppName: o.macAppName, buildArgs: o.buildArgs },
+      o.cliFound ? o.spawnCommand : null,
+      folder,
+    );
+    return { kind: 'spawn', command: launch.command, args: launch.args, shell: o.spawnShell };
   }
   return { kind: 'spawn', command: o.spawnCommand, args, shell: o.spawnShell };
 }

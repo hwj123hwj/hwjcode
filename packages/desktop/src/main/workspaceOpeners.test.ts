@@ -5,7 +5,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { PLATFORM_OPENERS, quoteWinArg, winConsoleCommand } from './workspaceOpeners.js';
+import {
+  PLATFORM_OPENERS,
+  quoteWinArg,
+  winConsoleCommand,
+  resolveMacLaunch,
+} from './workspaceOpeners.js';
 
 describe('quoteWinArg', () => {
   it('quotes args containing whitespace', () => {
@@ -66,9 +71,10 @@ describe('PLATFORM_OPENERS catalog', () => {
     const win = Object.fromEntries(PLATFORM_OPENERS.win32.map((o) => [o.id, o]));
     expect(win.wt.bundledIcon).toBe('terminal');
     expect(win.wt.forceBundledIcon).toBe(true);
-    // Git Bash carries a bundled fallback but still tries its real exe icon first.
+    // Git Bash's exe carries no extractable icon (a generic console glyph), so it
+    // forces the bundled Git PNG — same treatment as Windows Terminal.
     expect(win['git-bash'].bundledIcon).toBe('git');
-    expect(win['git-bash'].forceBundledIcon).toBeUndefined();
+    expect(win['git-bash'].forceBundledIcon).toBe(true);
   });
 
   it('marks file managers for shell.openPath (not a spawn/exec launch)', () => {
@@ -87,5 +93,43 @@ describe('PLATFORM_OPENERS catalog', () => {
       const ids = list.map((o) => o.id);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+
+  it('gives macOS CLI-first editors an .app bundle + open-a fallback name', () => {
+    // Detection must not depend on the `code`/`cursor`/`windsurf` CLI shim being
+    // on PATH (a Finder/Dock GUI launch has a minimal PATH, and many users never
+    // install the shim). The `.app` bundle proves the editor is installed; the
+    // macAppName drives an `open -a` launch fallback when the CLI is absent.
+    const mac = Object.fromEntries(PLATFORM_OPENERS.darwin.map((o) => [o.id, o]));
+    expect(mac.vscode.appBundle).toBe('/Applications/Visual Studio Code.app');
+    expect(mac.vscode.macAppName).toBe('Visual Studio Code');
+    expect(mac.cursor.appBundle).toBe('/Applications/Cursor.app');
+    expect(mac.cursor.macAppName).toBe('Cursor');
+    expect(mac.windsurf.appBundle).toBe('/Applications/Windsurf.app');
+    expect(mac.windsurf.macAppName).toBe('Windsurf');
+  });
+});
+
+describe('resolveMacLaunch', () => {
+  const vscode = { bin: 'code', macAppName: 'Visual Studio Code', buildArgs: (f: string) => [f] };
+
+  it('spawns the CLI shim with its args when the CLI is found on PATH', () => {
+    const plan = resolveMacLaunch(vscode, '/usr/local/bin/code', '/proj');
+    expect(plan).toEqual({ command: '/usr/local/bin/code', args: ['/proj'] });
+  });
+
+  it('falls back to `open -a <AppName>` when the CLI shim is absent', () => {
+    // VS Code installed as an .app but with no `code` shim on PATH — the common
+    // case that previously made the editor un-launchable from the menu.
+    const plan = resolveMacLaunch(vscode, null, '/proj');
+    expect(plan).toEqual({ command: 'open', args: ['-a', 'Visual Studio Code', '/proj'] });
+  });
+
+  it('spawns the recipe bin as-is when no CLI and no macAppName (e.g. open -a recipes)', () => {
+    // iTerm/Terminal already have bin `open` + args `['-a', 'iTerm', folder]`, so
+    // with no macAppName they just spawn the bin with the recipe args.
+    const iterm = { bin: 'open', buildArgs: (f: string) => ['-a', 'iTerm', f] };
+    const plan = resolveMacLaunch(iterm, null, '/proj');
+    expect(plan).toEqual({ command: 'open', args: ['-a', 'iTerm', '/proj'] });
   });
 });
