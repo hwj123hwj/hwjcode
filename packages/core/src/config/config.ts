@@ -61,6 +61,7 @@ import { generateCustomModelId } from '../types/customModel.js';
 import { GeminiClient } from '../core/client.js';
 import { ResourceRegistry } from '../resources/resource-registry.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
+import { loadServerHierarchicalMemory } from '../utils/memoryDiscovery.js';
 import {
   type FileSystemService,
   StandardFileSystemService,
@@ -1158,6 +1159,106 @@ export class Config {
       }
     }
     return this.gitService;
+  }
+
+  /**
+   * 为 worktree 派生一个专属的 Config 实例。
+   *
+   * 采用与 remoteSession.buildIsolatedConfig() 相同的逐字段继承策略，
+   * 而非 spread originalParams（后者会丢失运行时转换的状态）。
+   *
+   * 保留：auth, tools, MCP servers, model overrides, proxy, sandbox, userRules...
+   * 切换：targetDir / cwd → worktree 目录
+   * 重新加载：项目级记忆文件（DEEPV.md / AGENTS.md）
+   *
+   * 注意：返回的 Config **未调用 initialize()**，调用方需自行初始化
+   * （与 buildIsolatedConfig 行为一致）。
+   */
+  async cloneForWorktree(targetDir: string): Promise<Config> {
+    // 1. 加载 worktree 目录的项目级记忆
+    const sessionMemory = await this.loadWorktreeMemory(targetDir);
+
+    // 2. 逐字段继承（与 buildIsolatedConfig 一致，补充 userRules）
+    return new Config({
+      // 标识
+      sessionId: this.getSessionId(),
+      cwd: targetDir,
+      targetDir, // ← 关键差异：切换到 worktree 目录
+
+      // 模型
+      model: this.getModel(),
+      embeddingModel: this.getEmbeddingModel(),
+      customModels: this.getCustomModels() ?? [],
+      cloudModels: this.getCloudModels() ?? [],
+      modelOverrides: this.getModelOverrides(),
+
+      // 工具 / MCP
+      mcpServers: this.getMcpServers(),
+      coreTools: this.getCoreTools(),
+      excludeTools: this.getExcludeTools(),
+
+      // 代理
+      proxy: this.getProxy(),
+      customProxyServerUrl: this.getCustomProxyServerUrl(),
+
+      // 沙箱
+      sandbox: this.getSandbox(),
+
+      // 调试
+      debugMode: this.getDebugMode(),
+
+      // 全局规则（userRules 通过 ConfigParameters 传入，确保不被默认空值覆盖）
+      userRules: this.getUserRules(),
+
+      // 记忆（重新加载）
+      userMemory: sessionMemory.userMemory,
+      memoryTokenCount: sessionMemory.memoryTokenCount,
+      geminiMdFileCount: sessionMemory.geminiMdFileCount,
+    });
+  }
+
+  /**
+   * 加载指定目录的项目级/全局指令记忆 (DEEPV.md / AGENTS.md 等)。
+   * 供 cloneForWorktree 使用。失败只返回空记忆，不中断主流程。
+   * 镜像 remoteSession.loadIsolatedSessionMemory 的实现，含精确 token 计数。
+   */
+  private async loadWorktreeMemory(
+    targetDir: string,
+  ): Promise<{ userMemory: string; memoryTokenCount: number; geminiMdFileCount: number }> {
+    try {
+      const fileService = new FileDiscoveryService(targetDir);
+      const result = await loadServerHierarchicalMemory(
+        targetDir,
+        false, // debugMode
+        fileService,
+        [], // extensionContextFilePaths
+        {
+          respectGitIgnore: true,
+          respectGeminiIgnore: true,
+        },
+      );
+
+      // 精确 token 计数（与 remoteSession.loadIsolatedSessionMemory 一致）
+      let memoryTokenCount = 0;
+      try {
+        const { getEncoding } = await import('js-tiktoken');
+        const enc = getEncoding('cl100k_base');
+        memoryTokenCount = enc.encode(result.memoryContent).length;
+      } catch {
+        // js-tiktoken 不可用时降级为 0，不影响功能
+      }
+
+      return {
+        userMemory: result.memoryContent,
+        memoryTokenCount,
+        geminiMdFileCount: result.fileCount,
+      };
+    } catch (err) {
+      console.warn(
+        `[CONFIG] cloneForWorktree: failed to load memory for ${targetDir}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { userMemory: '', memoryTokenCount: 0, geminiMdFileCount: 0 };
+    }
   }
 
   async createToolRegistry(): Promise<ToolRegistry> {

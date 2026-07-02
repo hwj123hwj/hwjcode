@@ -76,6 +76,7 @@ export * from './utils/events.js';
 export * from './utils/sessionUtils.js';
 export * from './utils/sessionSelector.js';
 export * from './utils/goalContinuationPrompt.js';
+export * from './utils/worktreeManager.js';
 
 export * from './utils/enhancedLogger.js';
 

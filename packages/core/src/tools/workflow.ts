@@ -19,12 +19,35 @@ import { ToolRegistry } from './tool-registry.js';
 import { Config } from '../config/config.js';
 import { WorkflowAgentBridge } from '../core/workflowAgentBridge.js';
 import { runWorkflowScript, extractMeta } from '../core/workflowRunner.js';
+import { resolveBuiltinWorkflow, isBuiltinWorkflow, listBuiltinWorkflows } from '../core/builtinWorkflows.js';
 import { ToolExecutionContext } from '../core/toolSchedulerAdapter.js';
 import { WorkflowRegistry } from '../core/workflowRegistry.js';
 
 export interface WorkflowToolParams {
   /**
+   * Name of a built-in workflow to run (e.g. "batch-parallel").
+   *
+   * When set, the tool resolves the named template and auto-generates the
+   * orchestration script — the AI does NOT need to write `script` manually.
+   * Pass `args` to provide the template's input data.
+   *
+   * Currently available built-ins:
+   * - `"batch-parallel"`: Run N independent tasks in parallel, each in its own
+   *   git worktree. Args: `{ tasks: [{ prompt, label?, name? }] }`.
+   *   Auto-enables `worktree_mode`.
+   */
+  name?: string;
+
+  /**
+   * Arguments to pass to a built-in workflow (used only when `name` is set).
+   * Must be JSON-serializable.
+   */
+  args?: unknown;
+
+  /**
    * A JavaScript orchestration script that drives the workflow.
+   *
+   * EITHER `name` OR `script` must be provided (not both).
    *
    * Requirements:
    * - Must export a default async function that accepts a single `agent` argument.
@@ -51,7 +74,7 @@ export interface WorkflowToolParams {
    * }
    * ```
    */
-  script: string;
+  script?: string;
 
   /** Short human-readable description for UI display (3-8 words). */
   description: string;
@@ -68,6 +91,20 @@ export interface WorkflowToolParams {
    * throws an error and aborts the workflow.
    */
   max_agents?: number;
+
+  /**
+   * When true, every sub-agent in this workflow runs inside its own isolated
+   * git worktree (independent directory + branch), so parallel tasks don't
+   * clobber each other's files. Only effective inside a git repository.
+   *
+   * Individual agents can still opt out with `{ worktree: false }` in the
+   * workflow script.
+   *
+   * After each agent finishes, its changes are auto-committed to a dedicated
+   * branch (e.g. `easycode/<name>`) for manual review/merge, then the worktree
+   * is cleaned up.
+   */
+  worktree_mode?: boolean;
 }
 
 /**
@@ -153,16 +190,29 @@ Each sub-agent must return a **distilled JSON summary** (target: under 2000 toke
       {
         type: Type.OBJECT,
         properties: {
+          name: {
+            type: Type.STRING,
+            description:
+              '(Recommended) Name of a built-in workflow to run. Available: "batch-parallel" — run N independent tasks in parallel with git worktree isolation.\n' +
+              'When set, you do NOT need to write `script`. Just provide `args`.\n\n' +
+              '### When to use `name: "batch-parallel"`:\n' +
+              'Use this when the user has a LIST of independent tasks — e.g.:\n' +
+              '- A requirements/PRD document with multiple improvement items\n' +
+              '- Multiple bug fixes or feature requests to process at once\n' +
+              '- A checklist of changes to apply to different parts of the codebase\n\n' +
+              '### How to use:\n' +
+              '1. Extract each task into a clear prompt string.\n' +
+              '2. Call workflow with name="batch-parallel" and args={tasks:[...]}.\n' +
+              '3. Each task runs in its own git worktree (isolated directory + branch).',
+          },
+          args: {
+            type: Type.OBJECT,
+            description:
+              'Arguments for a built-in workflow (used with `name`). For "batch-parallel": { tasks: [{ prompt: string, label?: string, name?: string }] }',
+          },
           script: {
             type: Type.STRING,
-            description: `JavaScript orchestration script with export const meta and export default async function(agent).
-Available globals: agent (callable + agent.run/runParallel/setPhase), phase(), JSON, console.log/error, Promise.
-NOT available: require, import, fs, process, fetch, any Node.js globals.
-
-IMPORTANT — sub-agent output discipline:
-- Every agent prompt MUST instruct the agent to return a distilled JSON summary, NOT raw file contents.
-- Use schema to enforce structure. Example prompt suffix: "Return JSON: {files:[...], summary:'...'}. Do NOT return raw file contents."
-- Context passed between agents is capped at ~5k tokens. Agents returning raw code will be truncated.`,
+            description: `(Advanced) Inline JS orchestration script. Use this only for complex custom orchestration. For simple batch-parallel tasks, prefer name: "batch-parallel".`,
           },
           description: {
             type: Type.STRING,
@@ -181,7 +231,7 @@ IMPORTANT — sub-agent output discipline:
             maximum: 1000,
           },
         },
-        required: ['script', 'description'],
+        required: ['description'],
       },
       true,  // isOutputMarkdown
       false, // forceMarkdown
@@ -191,8 +241,10 @@ IMPORTANT — sub-agent output discipline:
   }
 
   validateToolParams(params: WorkflowToolParams): string | null {
-    if (!params.script?.trim()) {
-      return 'script is required and must not be empty.';
+    // When using a built-in (name), script may be absent — we already resolved it
+    // in execute(). Only validate the script field when it's the inline path.
+    if (!params.name && !params.script?.trim()) {
+      return 'either `name` (a built-in workflow) or `script` is required and must not be empty.';
     }
     if (!params.description?.trim()) {
       return 'description is required.';
@@ -203,8 +255,8 @@ IMPORTANT — sub-agent output discipline:
     ) {
       return 'max_concurrency must be between 1 and 16.';
     }
-    // Sanity check: script must contain some form of export default
-    if (!/export\s+default/.test(params.script)) {
+    // Sanity check: script must contain some form of export default (inline path only)
+    if (params.script && !/export\s+default/.test(params.script)) {
       return 'script must export a default async function. Example: `export default async function(agent) { ... }`';
     }
     return null;
@@ -214,13 +266,13 @@ IMPORTANT — sub-agent output discipline:
     params: WorkflowToolParams,
     _abortSignal: AbortSignal,
   ): Promise<ToolCallConfirmationDetails | false> {
-    const meta = extractMeta(params.script);
+    const meta = extractMeta(params.script ?? '');
     const details: ToolWorkflowConfirmationDetails = {
       type: 'workflow',
       title: 'Run a dynamic workflow?',
       description: meta.description ?? params.description,
       phases: (meta.phases ?? []).map(p => ({ name: p.title, description: p.detail ?? '' })),
-      rawScript: params.script,
+      rawScript: params.script ?? (params.name ? `// built-in: ${params.name}` : ''),
       onConfirm: async (_outcome: ToolConfirmationOutcome) => {
         // The scheduler handles the outcome — Cancel stops execution,
         // any proceed outcome continues. Nothing extra needed here.
@@ -244,7 +296,40 @@ IMPORTANT — sub-agent output discipline:
     updateOutput?: (output: string) => void,
     _services?: ToolExecutionServices,
   ): Promise<ToolResult> {
-    const validationError = this.validateToolParams(params);
+    // ─── Resolve built-in workflow (name) OR inline script ──────────────────
+    let script: string;
+    let effectiveWorktreeMode = params.worktree_mode ?? false;
+
+    if (params.name) {
+      if (params.script) {
+        return {
+          llmContent: 'Workflow error: provide either `name` (a built-in) or `script` (inline), not both.',
+          returnDisplay: '**Workflow Error:** Provide either `name` or `script`, not both.',
+        };
+      }
+      const resolved = resolveBuiltinWorkflow(params.name, params.args);
+      if (!resolved) {
+        const known = listBuiltinWorkflows().join(', ') || '(none)';
+        return {
+          llmContent: `Unknown built-in workflow "${params.name}". Known: ${known}.`,
+          returnDisplay: `**Workflow Error:** Unknown built-in workflow "${params.name}". Known: ${known}.`,
+        };
+      }
+      script = resolved.script;
+      if (resolved.autoWorktree) effectiveWorktreeMode = true;
+    } else if (params.script) {
+      script = params.script;
+    } else {
+      const known = listBuiltinWorkflows().join(', ') || '(none)';
+      return {
+        llmContent:
+          `Workflow requires either \`name\` (a built-in) or \`script\` (inline).\n` +
+          `Available built-ins: ${known}`,
+        returnDisplay: '**Workflow Error:** Requires either `name` or `script`.',
+      };
+    }
+
+    const validationError = this.validateToolParams({ ...params, script });
     if (validationError) {
       return {
         llmContent: `Workflow parameter validation failed: ${validationError}`,
@@ -264,7 +349,7 @@ IMPORTANT — sub-agent output discipline:
     updateOutput?.(`**Workflow started:** ${params.description}\n`);
 
     // Register with the workflow registry — use meta if available
-    const meta = extractMeta(params.script);
+    const meta = extractMeta(script);
     const phases = (meta.phases ?? []).map(p => ({ name: p.title, description: p.detail ?? '' }));
     const description = meta.description ?? params.description;
     WorkflowRegistry.startWorkflow(workflowId, description, phases);
@@ -285,7 +370,12 @@ IMPORTANT — sub-agent output discipline:
       params.max_agents,
     );
 
-    const runResult = await runWorkflowScript(params.script, bridge, signal);
+    // Propagate worktree_mode so every sub-agent gets isolated by default.
+    if (effectiveWorktreeMode) {
+      bridge.setWorktreeMode(true);
+    }
+
+    const runResult = await runWorkflowScript(script, bridge, signal);
 
     if (runResult.success) {
       WorkflowRegistry.endWorkflow(workflowId, 'completed', runResult.totalTokenUsage);

@@ -10,6 +10,7 @@ import { GeminiClient } from './client.js';
 import { SubAgent } from './subAgent.js';
 import { getBuiltInAgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
 import { WorkflowRegistry } from './workflowRegistry.js';
+import { WorktreeManager, WorktreeInfo } from '../utils/worktreeManager.js';
 
 /**
  * Options passed to agent.run() inside a workflow script.
@@ -43,6 +44,32 @@ export interface WorkflowAgentRunOptions {
    *   schema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string' } } }, required: ['files'] }
    */
   schema?: Record<string, unknown>;
+
+  /**
+   * Whether to create an isolated git worktree for this sub-agent.
+   * When true, the sub-agent runs in an independent physical directory with its
+   * own branch, so file changes don't interfere with other parallel sub-agents.
+   *
+   * After the sub-agent finishes, changes are auto-committed to the worktree branch
+   * and the worktree is cleaned up. If nothing changed, cleanup happens without commit.
+   *
+   * Only takes effect inside a git repository. Silently ignored otherwise.
+   */
+  worktree?: boolean;
+
+  /**
+   * Optional readable name for the worktree (generates branch `easycode/<name>`
+   * and directory `.easycode/worktrees/<name>`). Falls back to a random slug if
+   * omitted or empty.
+   */
+  worktreeName?: string;
+
+  /**
+   * Optional initialization command run inside the new worktree before the
+   * sub-agent starts (e.g. `npm install`). Runs asynchronously in the background
+   * so it doesn't block agent startup.
+   */
+  worktreeStartCommand?: string;
 }
 
 export interface WorkflowAgentRunResult {
@@ -98,6 +125,12 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
   private totalAgentCount: number = 0;
   /** Current phase index. The workflow script should update this before each phase. */
   public currentPhaseIndex: number = 0;
+  /**
+   * When true, every sub-agent launched by run() gets its own isolated git worktree
+   * unless the individual task opts out with `{ worktree: false }`.
+   * Set by WorkflowTool when `worktree_mode: true` is passed.
+   */
+  private defaultWorktreeMode: boolean = false;
 
   setCurrentPhaseIndex(index: number): void {
     this.currentPhaseIndex = index;
@@ -117,6 +150,11 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
   ) {
     this.maxConcurrency = maxConcurrency;
     this.maxAgents = maxAgents;
+  }
+
+  /** Enable worktree mode for all subsequent sub-agents (unless overridden per-task). */
+  setWorktreeMode(enabled: boolean): void {
+    this.defaultWorktreeMode = enabled;
   }
 
   async run(options: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> {
@@ -146,8 +184,39 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
       WorkflowRegistry.startAgent(this.workflowId, agentId, label, options.prompt, options.model, this.currentPhaseIndex);
     }
 
+    // ─── Worktree isolation ────────────────────────────────────────────────
+    // Effective worktree flag: per-task override wins, else the bridge default.
+    const useWorktree = options.worktree ?? this.defaultWorktreeMode;
+    let worktreeInfo: WorktreeInfo | undefined;
+    let wm: WorktreeManager | undefined;
+    let effectiveConfig = this.config;
+
+    if (useWorktree) {
+      try {
+        wm = new WorktreeManager(this.config.getProjectRoot());
+        if (wm.isGitRepo()) {
+          worktreeInfo = await wm.create({
+            name: options.worktreeName,
+            startCommand: options.worktreeStartCommand,
+            asyncBoot: true,
+          });
+          // Clone Config so the sub-agent's file tools point at the worktree dir.
+          effectiveConfig = await this.config.cloneForWorktree(worktreeInfo.directory);
+        }
+      } catch (err) {
+        // Worktree creation failed — fall back to the shared workspace rather than
+        // aborting the entire workflow. Log and continue.
+        console.warn(
+          `[WorkflowAgentBridge] worktree creation failed, falling back to shared workspace: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+        worktreeInfo = undefined;
+        wm = undefined;
+      }
+    }
+
     const subAgent = new SubAgent(
-      this.config,
+      effectiveConfig,
       filteredRegistry,
       this.geminiClient,
       (output: string) => this.onUpdate?.(agentId, output),
@@ -184,8 +253,34 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
     let result: Awaited<ReturnType<typeof subAgent.executeTask>>;
     try {
       result = await subAgent.executeTask(prompt, maxTurns);
+    } catch (err) {
+      // On error: clean up the worktree (discard changes) before re-throwing.
+      if (worktreeInfo && wm) {
+        await wm.cleanup(worktreeInfo).catch(() => {});
+      }
+      clearTimeout(warningTimer);
+      throw err;
     } finally {
       clearTimeout(warningTimer);
+    }
+
+    // ─── Worktree commit + cleanup (success path) ─────────────────────────
+    if (worktreeInfo && wm) {
+      try {
+        const cleanupResult = await wm.commitAndCleanup(
+          worktreeInfo,
+          `easycode: ${options.label ?? options.prompt.slice(0, 80)}`,
+        );
+        if (cleanupResult.committed) {
+          result.summary +=
+            `\n\n[Worktree] Changes committed to branch \`${cleanupResult.branchName}\`` +
+            ` (${cleanupResult.commitSha ?? 'unknown'}). Review and merge manually.`;
+        }
+      } catch (err) {
+        console.warn(
+          `[WorkflowAgentBridge] worktree cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // Parse structured data from the summary.
