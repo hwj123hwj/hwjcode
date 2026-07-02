@@ -38,15 +38,22 @@ vi.mock('node:os', async (importOriginal) => {
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+/** Helper: build a mock npm registry response. */
+function mockNpmResponse(version: string) {
+  return {
+    ok: true,
+    json: async () => ({ version }),
+  };
+}
+
 describe('checkForUpdates', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Clear environment variables that affect version resolution before each test
     delete process.env.DEV;
     delete process.env.CLI_VERSION;
-    // Mock successful package.json
+    // Mock successful package.json — default: same name as the real fork
     getPackageJson.mockResolvedValue({
-      name: 'deepv-code-cli',
+      name: 'hwjcode',
       version: '1.0.0',
     });
   });
@@ -64,132 +71,60 @@ describe('checkForUpdates', () => {
     expect(result).toBeNull();
   });
 
-  it('should return null if there is no update', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: false,
-      }),
-    });
+  it('should return null if npm latest equals current version (no update)', async () => {
+    // package.json version is 1.0.0, npm latest is also 1.0.0
+    mockFetch.mockResolvedValue(mockNpmResponse('1.0.0'));
 
     const result = await checkForUpdates(false, true);
     expect(result).toBeNull();
   });
 
-  it('should return a message if a newer version is available and showProgress is true', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '1.1.0',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
+  it('should return a FORCE_UPDATE message when npm has a newer version', async () => {
+    // package.json version is 1.0.0, npm latest is 1.1.0
+    mockFetch.mockResolvedValue(mockNpmResponse('1.1.0'));
 
     const result = await checkForUpdates(true, true);
     expect(result).not.toBeNull();
-    expect(result).toContain('UPDATE_AVAILABLE:1.1.0');
+    // Fork: all updates are force updates
+    expect(result).toContain('FORCE_UPDATE:1.1.0');
     expect(result).toContain('1.0.0');
     expect(result).toContain('1.1.0');
+    // updateCommand should use the real package name
+    expect(result).toContain('npm install -g hwjcode@latest');
   });
 
-  it('should return null if newer version available but showProgress is false and not forced update', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '1.1.0',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
+  it('should return FORCE_UPDATE even when showProgress is false (fork forces all updates)', async () => {
+    mockFetch.mockResolvedValue(mockNpmResponse('1.1.0'));
 
     const result = await checkForUpdates(false, true);
-    expect(result).toBeNull();
-  });
-
-  it('should return null when server reports hasUpdate but latestVersion equals current version', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '1.0.0',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
-
-    const result = await checkForUpdates(true, true);
-    expect(result).toBeNull();
-  });
-
-  it('should return null when server reports hasUpdate but latestVersion is older than current version', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '0.9.9',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
-
-    const result = await checkForUpdates(true, true);
-    expect(result).toBeNull();
-  });
-
-  it('should not force update when latestVersion is not newer than current version', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        forceUpdate: true,
-        latestVersion: '1.0.0',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
-
-    const result = await checkForUpdates(false, true);
-    expect(result).toBeNull();
-  });
-
-  it('should still notify update when version strings are non-semver (trust server)', async () => {
-    getPackageJson.mockResolvedValue({
-      name: 'deepv-code-cli',
-      version: 'not-a-semver',
-    });
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: 'also-not-semver',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
-
-    const result = await checkForUpdates(true, true);
-    expect(result).toContain('UPDATE_AVAILABLE:');
-  });
-
-  it('should return a FORCE_UPDATE message if forceUpdate is true', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        forceUpdate: true,
-        latestVersion: '1.1.0',
-        updateCommand: 'npm install -g deepv-code-cli',
-      }),
-    });
-
-    const result = await checkForUpdates(false, true);
+    // Fork: force update = true regardless of showProgress
     expect(result).not.toBeNull();
     expect(result).toContain('FORCE_UPDATE:1.1.0');
+  });
+
+  it('should return null when npm latest equals current version', async () => {
+    mockFetch.mockResolvedValue(mockNpmResponse('1.0.0'));
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toBeNull();
+  });
+
+  it('should return null when npm latest is older than current version', async () => {
+    mockFetch.mockResolvedValue(mockNpmResponse('0.9.9'));
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toBeNull();
+  });
+
+  it('should still notify update when version strings are non-semver', async () => {
+    getPackageJson.mockResolvedValue({
+      name: 'hwjcode',
+      version: 'not-a-semver',
+    });
+    mockFetch.mockResolvedValue(mockNpmResponse('also-not-semver'));
+
+    const result = await checkForUpdates(true, true);
+    expect(result).toContain('FORCE_UPDATE:');
   });
 
   it('should handle fetch errors gracefully', async () => {
@@ -207,82 +142,69 @@ describe('checkForUpdates', () => {
     expect(result).toBeNull();
   });
 
-  it('should return null gracefully when the server returns non-JSON (e.g. HTML error page)', async () => {
+  it('should return null gracefully when npm returns non-JSON (e.g. HTML error page)', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       text: async () => '<!DOCTYPE html><html><body>502 Bad Gateway</body></html>',
     });
+    // json() will throw — should be caught
     const result = await checkForUpdates(true, true);
     expect(result).toBeNull();
   });
 
   it('should send a user-agent derived from the package name and version', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({ success: true, hasUpdate: false }),
-    });
+    mockFetch.mockResolvedValue(mockNpmResponse('1.0.0'));
 
     await checkForUpdates(false, true);
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [, init] = mockFetch.mock.calls[0];
-    expect(init.headers['User-Agent']).toBe('deepv-code-cli/1.0.0');
+    expect(init.headers['User-Agent']).toBe('hwjcode/1.0.0');
   });
 
   it('should use the CI-injected CLI_VERSION instead of the stale package.json version', async () => {
-    // Reproduces the real bug: package.json carries a stale placeholder version
-    // (e.g. 1.1.14) while the CI build injects the real version via CLI_VERSION
-    // (e.g. 1.1.36). The update check must report the injected version, not the
-    // stale one, otherwise the server is queried with a wrong version and keeps
-    // offering an "update" to a version the user already runs.
     getPackageJson.mockResolvedValue({
-      name: 'easycode',
+      name: 'hwjcode',
       version: '1.1.14',
     });
     process.env.CLI_VERSION = '1.1.36';
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '1.1.36',
-        updateCommand: 'npm install -g easycode-ai',
-      }),
-    });
+    mockFetch.mockResolvedValue(mockNpmResponse('1.1.36'));
 
     const result = await checkForUpdates(true, true);
 
-    // Server query and user-agent must carry the real injected version.
+    // npm registry URL must be used (not company backend)
     const [url, init] = mockFetch.mock.calls[0];
-    expect(url).toContain('version=1.1.36');
-    expect(init.headers['User-Agent']).toBe('easycode/1.1.36');
+    expect(url).toContain('registry.npmjs.org');
+    expect(init.headers['User-Agent']).toBe('hwjcode/1.1.36');
 
-    // 1.1.36 server-latest is not newer than the real 1.1.36 install → no prompt.
+    // 1.1.36 npm latest is not newer than 1.1.36 install → no prompt.
     expect(result).toBeNull();
   });
 
   it('should still detect a genuine update relative to the injected CLI_VERSION', async () => {
     getPackageJson.mockResolvedValue({
-      name: 'easycode',
+      name: 'hwjcode',
       version: '1.1.14',
     });
     process.env.CLI_VERSION = '1.1.36';
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify({
-        success: true,
-        hasUpdate: true,
-        latestVersion: '1.1.40',
-        updateCommand: 'npm install -g easycode-ai',
-      }),
-    });
+    mockFetch.mockResolvedValue(mockNpmResponse('1.1.40'));
 
     const result = await checkForUpdates(true, true);
 
-    expect(result).toContain('UPDATE_AVAILABLE:1.1.40');
+    expect(result).toContain('FORCE_UPDATE:1.1.40');
     expect(result).toContain('1.1.36');
     expect(result).not.toContain('1.1.14');
+  });
+
+  it('should query the npm registry (not company backend api-code.deepvlab.ai)', async () => {
+    mockFetch.mockResolvedValue(mockNpmResponse('1.0.0'));
+
+    await checkForUpdates(false, true);
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('registry.npmjs.org');
+    expect(url).not.toContain('api-code.deepvlab.ai');
   });
 });

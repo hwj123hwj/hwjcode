@@ -161,18 +161,21 @@ export async function checkForUpdates(
       }
     }
 
-    const serverUrl = getServerUrl();
-    const updateApiUrl = `${serverUrl}/api/update-check?version=${encodeURIComponent(currentVersion)}`;
+    // ─── 直接查询 npm registry（而非公司后端） ────────────────────────────
+    // 本项目是公司 CLI 的独立 fork（npm 包名可能与公司产品不同），
+    // 公司后端 api-code.deepvlab.ai 返回的是公司产品版本号，与本 fork 不一致。
+    // 因此直接查询 npm registry 获取真实 latest 版本号。
+    const npmRegistryUrl = `https://registry.npmjs.org/${encodeURIComponent(packageJson.name)}/latest`;
+    const updateCommand = `npm install -g ${packageJson.name}@latest`;
 
-    // 调用自己服务器的更新检测API
     const response = await fetch(
-      updateApiUrl,
+      npmRegistryUrl,
       {
         method: 'GET',
         headers: {
+          'Accept': 'application/json',
           'User-Agent': `${packageJson.name}/${currentVersion}`,
         },
-        // 设置超时
         signal: AbortSignal.timeout(10000), // 10秒超时
       }
     );
@@ -181,54 +184,31 @@ export async function checkForUpdates(
       const message = tp('update.check.failed.http', { status: response.status });
       console.warn(message);
       if (showProgress) {
-        console.warn(`[update-check] url: ${updateApiUrl} -> ${response.status} ${response.statusText}`);
+        console.warn(`[update-check] npm registry -> ${response.status} ${response.statusText}`);
       }
       return null;
     }
 
-    const rawText = await response.text();
-
-    let data: UpdateCheckResponse;
-    try {
-      data = JSON.parse(rawText);
-    } catch (parseErr) {
-      console.warn(tp('update.check.failed.generic', { error: String(parseErr) }));
-      if (showProgress) {
-        console.warn(`[update-check] non-JSON response from ${updateApiUrl}: ${rawText}`);
-      }
+    const npmData = await response.json() as { version?: string };
+    const latestVersion = npmData.version;
+    if (!latestVersion) {
+      console.warn('[update-check] npm registry response missing version field');
       return null;
     }
-
-    if (!data.success) {
-      const message = tp('update.check.failed.message', { message: String(data.message || '') });
-      console.warn(message);
-      return null;
-    }
-
-    // 简化：移除不必要的显示
 
     let result: string | null = null;
     const MESSAGE_SEPARATOR = '::MSG::';
 
-    // 客户端二次校验版本号：仅当服务器返回的 latestVersion 严格大于当前版本时，
-    // 才认为存在可用更新。避免服务器误报（如缓存了旧的 latestVersion）导致
-    // 已是最新版本却仍提示升级。当版本号非标准 semver 时，回退为信任服务器结果。
-    const hasRealUpdate =
-      data.hasUpdate &&
-      isNewerVersion(currentVersion, data.latestVersion);
+    // 客户端二次校验版本号：仅当 npm latest 严格大于当前版本时，才提示更新。
+    const hasRealUpdate = isNewerVersion(currentVersion, latestVersion);
 
-    if (hasRealUpdate && data.forceUpdate && data.latestVersion && data.updateCommand) {
-      // 返回特殊标记，表示需要强制更新
-      result = `FORCE_UPDATE:${data.latestVersion}:${data.updateCommand}${MESSAGE_SEPARATOR}${t('update.force.message.header')}
-${tp('update.version.line', { current: currentVersion, latest: String(data.latestVersion) })}
-${tp('update.command.line', { command: String(data.updateCommand) })}
+    if (hasRealUpdate) {
+      // fork 项目：所有 npm 更新都视为强制更新，确保运行实例始终最新
+      result = `FORCE_UPDATE:${latestVersion}:${updateCommand}${MESSAGE_SEPARATOR}${t('update.force.message.header')}
+${tp('update.version.line', { current: currentVersion, latest: latestVersion })}
+${tp('update.command.line', { command: updateCommand })}
 
 ${t('update.after.success.exit')}`;
-    } else if (hasRealUpdate && showProgress && data.latestVersion && data.updateCommand) {
-      // 非强制更新时的提示
-      result = `UPDATE_AVAILABLE:${data.latestVersion}:${data.updateCommand}${MESSAGE_SEPARATOR}${t('update.available.message.header')}
-${tp('update.version.line', { current: currentVersion, latest: String(data.latestVersion) })}
-${tp('update.command.line', { command: String(data.updateCommand) })}`;
     }
 
     // 保存缓存（非强制检查时）
