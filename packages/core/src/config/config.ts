@@ -263,6 +263,11 @@ export interface ConfigParameters {
   modelOverrides?: ModelOverrides;
 }
 
+// ─── 模块级 tiktoken encoder 缓存 ───────────────────────────────────────────
+// getEncoding('cl100k_base') 需要加载 ~1MB BPE 词表，重复调用开销大。
+// 在 batch-parallel 场景下每个 worktree clone 都会触发一次，缓存后只加载一次。
+let tiktokenEncoder: ReturnType<typeof import('js-tiktoken').getEncoding> | null = null;
+
 export class Config {
   private toolRegistry!: ToolRegistry;
   private promptRegistry!: PromptRegistry;
@@ -1238,12 +1243,14 @@ export class Config {
         },
       );
 
-      // 精确 token 计数（与 remoteSession.loadIsolatedSessionMemory 一致）
+      // 精确 token 计数（模块级缓存 encoder，避免每个 worktree clone 都重新加载 ~1MB 词表）
       let memoryTokenCount = 0;
       try {
-        const { getEncoding } = await import('js-tiktoken');
-        const enc = getEncoding('cl100k_base');
-        memoryTokenCount = enc.encode(result.memoryContent).length;
+        if (!tiktokenEncoder) {
+          const { getEncoding } = await import('js-tiktoken');
+          tiktokenEncoder = getEncoding('cl100k_base');
+        }
+        memoryTokenCount = tiktokenEncoder.encode(result.memoryContent).length;
       } catch {
         // js-tiktoken 不可用时降级为 0，不影响功能
       }

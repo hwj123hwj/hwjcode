@@ -539,8 +539,11 @@ export async function main() {
         console.error(`\n${t('update.success.restart')}`);
         process.exit(0);
       } else {
+        // 更新失败时不再 process.exit(1) 阻断 CLI 启动。
+        // 降级为软提示，允许用户继续使用当前版本。
+        // 缓存已做保护（updateCheck.ts 不缓存 FORCE_UPDATE），不会自我 DoS。
         console.error(`\n${t('update.manual.then.rerun')}`);
-        process.exit(1);
+        console.error(t('update.failed.fallback.continue'));
       }
     }
   }

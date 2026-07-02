@@ -2,6 +2,34 @@
 
 > Chronological record of wiki operations.
 
+## [2026-07-02] feat | Git Worktree 并行隔离 + Fork 更新检查修复
+
+审查了最近 5 个版本的提交（v1.1.60–v1.1.64），发现 v1.1.64 的 5 项修复仅在 test1
+分支，未合并到 master。同时发现 v1.1.63 的 `forceUpdate=true` 存在自我 DoS bug。
+
+### 本次修复内容
+
+1. **合并 v1.1.64 的 5 项修复到 master**：
+   - runParallel 移除 fail-fast（batch-parallel 场景下致命 bug）
+   - commitAndCleanup commit 失败时不删除分支（数据安全）
+   - tiktoken encoder 模块级缓存（性能）
+   - execGit 超时进程组 kill（防孤儿进程）
+   - 并发锁 LRU 淘汰移至 release 阶段（消除竞态）
+
+2. **修复 forceUpdate 自我 DoS bug**（v1.1.65）：
+   - 缓存保护：绝不缓存 FORCE_UPDATE 结果（避免失败后 24h 锁死）
+   - 降级启动：更新失败不再 `process.exit(1)`，改为软提示后继续启动
+
+### Pages Created
+- `wiki/git-worktree-parallel.md` — Git Worktree 并行工作区隔离完整文档
+- `wiki/fork-update-check.md` — Fork 更新检查机制（npm registry）+ 自我 DoS 防护
+
+### Pages Updated
+- `index.md` — Sources 表新增 #13、#14；Entities 表新增 git-worktree-parallel 和 fork-update-check
+
+### Test Results
+- 72 tests passed (5 test files): worktreeManager(28) + builtinWorkflows(11) + workflowAgentBridge.worktree(6) + workflowAgentBridge(12) + updateCheck(15)
+
 ## [2026-06-26] update | 上游同步 + PR #4 opt-in tools + bug 修复
 - Updated [[tools-system]]: 移除 PPT 工具引用，新增 OpenCliTool 和 opt-in 机制说明
 - Created [[OpenCliTool]]: 浏览器自动化工具页面，含依赖、设计要点、适配器说明

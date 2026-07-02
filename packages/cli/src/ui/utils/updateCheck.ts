@@ -212,10 +212,14 @@ ${t('update.after.success.exit')}`;
     }
 
     // 保存缓存（非强制检查时）
-    if (!forceCheck) {
+    // ⚠️ 安全规则：绝不缓存 FORCE_UPDATE 结果。
+    // 否则一旦 executeUpdateCommand 失败，缓存的 FORCE_UPDATE 会在 24h 内
+    // 反复触发失败重试，导致 CLI 完全无法启动（自我 DoS）。
+    // 只有"无更新"或"非强制更新"才缓存。
+    if (!forceCheck && result === null) {
       const cache: UpdateCheckCache = {
         lastCheckTime: now,
-        lastResult: result,
+        lastResult: null,
         version: currentVersion
       };
       await writeUpdateCheckCache(cache);

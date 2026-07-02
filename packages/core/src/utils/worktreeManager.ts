@@ -98,13 +98,6 @@ async function acquireLock(gitRoot: string): Promise<() => void> {
     locks.set(key, entry);
   }
 
-  // LRU 淘汰：超过上限时清理空闲条目
-  if (locks.size > MAX_LOCK_ENTRIES) {
-    for (const [k, v] of locks) {
-      if (v.count === 0 && k !== key) locks.delete(k);
-    }
-  }
-
   // 捕获上一位的 promise，再创建本位的释放 promise
   const prev = entry.promise;
   let release!: () => void;
@@ -120,6 +113,13 @@ async function acquireLock(gitRoot: string): Promise<() => void> {
 
   return () => {
     entry!.count--;
+    // 安全的 LRU 淘汰：在 release 时（count 归零后）检查并清理空闲条目，
+    // 避免在 acquire 过程中误删正在等待的锁条目。
+    if (entry!.count === 0 && locks.size > MAX_LOCK_ENTRIES) {
+      for (const [k, v] of locks) {
+        if (v.count === 0) locks.delete(k);
+      }
+    }
     release();
   };
 }
@@ -192,19 +192,31 @@ export function execGit(
   timeoutMs: number = 60000,
 ): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
+    // detached: true → 子进程成为独立进程组的 leader，便于 kill 整棵进程树
     const child = spawn('git', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: true,
     });
     let stdout = '';
     let stderr = '';
     let settled = false;
 
+    const killTree = (signal: NodeJS.Signals = 'SIGKILL') => {
+      try {
+        // 杀整个进程组（负 PID），防止 git hook / fsmonitor daemon 等子进程变成孤儿
+        process.kill(-child.pid!, signal);
+      } catch {
+        // 进程组 kill 失败时降级为单进程 kill
+        try { child.kill(signal); } catch { /* already dead */ }
+      }
+    };
+
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill('SIGKILL');
+        killTree('SIGKILL');
         resolve({ ok: false, stdout, stderr: stderr + '\n[timeout]', code: null });
       }
     }, timeoutMs);
@@ -390,6 +402,8 @@ export class WorktreeManager {
    * 提交修改并清理 worktree。
    * - 先用 isPristine 检查，无改动则跳过 commit 直接 cleanup（committed: false）。
    * - 有改动才 git add -A + commit。
+   *
+   * 数据安全原则：commit 失败时**绝不删除分支**，保留 worktree 内容供用户手动恢复。
    */
   async commitAndCleanup(
     info: WorktreeInfo,
@@ -403,10 +417,15 @@ export class WorktreeManager {
 
       let committed = false;
       let commitSha: string | undefined;
+      // 默认无改动时删除分支；任何有改动的情况都保守保留分支
+      let deleteBranch = true;
 
       // 检查是否有改动
       const pristine = await this.isPristine(info.directory);
       if (!pristine) {
+        // 有改动 → 保守起见不删除分支
+        deleteBranch = false;
+
         const msg =
           commitMessage ??
           `easycode: changes from worktree ${info.name}`;
@@ -418,7 +437,6 @@ export class WorktreeManager {
             error: `git add failed: ${addResult.stderr}`,
           };
         }
-        // 不使用 --allow-empty：如果没有实际变更（仅靠 status 判断不准），commit 会失败，我们降级为 cleanup
         const commitResult = await execGit(
           ['commit', '-m', msg, '--no-verify'],
           info.directory,
@@ -428,21 +446,24 @@ export class WorktreeManager {
           const shaResult = await execGit(['rev-parse', 'HEAD'], info.directory);
           commitSha = shaResult.ok ? shaResult.stdout : undefined;
         } else {
-          // 可能是 add -A 后仍无实际变更（如仅 stat 变化），视为无改动
+          // commit 失败 — 检查是否确实有改动
           const stillDirty = await execGit(['status', '--porcelain'], info.directory);
           if (stillDirty.ok && stillDirty.stdout.trim()) {
-            // 确实有改动但 commit 失败
+            // 确实有改动但 commit 失败 → 返回错误，保留 worktree + 分支
             return {
               success: false,
               committed: false,
               error: `git commit failed: ${commitResult.stderr}`,
             };
           }
+          // 模糊情况：status 干净但 commit 失败（可能是 stat-only 变化）。
+          // 保守处理：不删除分支，安全降级。
+          // deleteBranch 已经是 false，无需修改。
         }
       }
 
-      // 清理 worktree（有改动保留分支，无改动删除分支）
-      await this.cleanupByDir(info.directory, info.branch, !committed);
+      // 清理 worktree 目录（deleteBranch 决定是否删除分支）
+      await this.cleanupByDir(info.directory, info.branch, deleteBranch);
 
       return {
         success: true,

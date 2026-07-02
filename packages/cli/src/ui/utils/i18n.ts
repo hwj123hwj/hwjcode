@@ -192,6 +192,7 @@ export const translations = {
     'update.available.title': '📢 Update available',
     'update.success.restart': '🎉 Update complete! The program will exit. Please rerun easycode',
     'update.manual.then.rerun': '💡 Please run the update command manually, then rerun easycode',
+  'update.failed.fallback.continue': '⚠️ Update failed. Continuing with the current version. The update will be retried on next launch.',
     'update.continue.current': '✨ Continuing with current version...',
     'update.force.checking': '🔄 Forcing update check...',
     // Session Summary
@@ -1905,6 +1906,7 @@ export const translations = {
     'update.available.title': '📢 发现新版本',
     'update.success.restart': '🎉 更新完成！程序将退出，请重新运行 easycode',
     'update.manual.then.rerun': '💡 请手动执行更新命令，然后重新运行 easycode',
+  'update.failed.fallback.continue': '⚠️ 更新失败。将以当前版本继续运行，下次启动时会重试更新。',
     'update.continue.current': '✨ 继续使用当前版本...',
     'update.force.checking': '🔄 强制检查更新...',
     // Session Summary

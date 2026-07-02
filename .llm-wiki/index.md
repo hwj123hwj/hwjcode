@@ -18,6 +18,8 @@
 | 10 | conversation-2026-06-17-feishu-model-favorites | [source-feishu-model-favorites](wiki/source-feishu-model-favorites.md) | 飞书 /model favorites 子命令新增 & esbuild 陈旧 JS 产物 Bug 修复 | 2026-06-17 |
 | 11 | conversation-2026-06-18-upstream-sync | [source-upstream-sync-version-strategy](wiki/source-upstream-sync-version-strategy.md) | 上游同步版本号策略修复（只升不降）& 1.1.31 发版 & cron 时间调整 | 2026-06-18 |
 | 12 | conversation-2026-06-21 | [source-version-build-bugs-2026-06-21](wiki/source-version-build-bugs-2026-06-21.md) | CLI 版本号锁死、自定义模型压缩 token=0、自更新 npm 缓存问题 | 2026-06-21 |
+| 13 | conversation-2026-07-02 | [git-worktree-parallel](wiki/git-worktree-parallel.md) | Git worktree 并行工作区隔离 — batch-parallel 内置工作流 + WorktreeManager | 2026-07-02 |
+| 14 | conversation-2026-07-02 | [fork-update-check](wiki/fork-update-check.md) | Fork 更新检查改查 npm registry + 自我 DoS 防护 | 2026-07-02 |
 
 
 ## Entities
@@ -67,6 +69,8 @@
 | [opt-in-tools](wiki/opt-in-tools.md) | concept | 工具按需启用机制，6 工具默认禁用，需 coreTools 配置 |
 | [audio-reader](packages/core/src/tools/audio-reader.ts) | entity | Tool | `core/src/tools/audio-reader.ts` |
 | [self-update](wiki/self-update.md) | entity | Tool | `core/src/tools/self-update.ts` |
+| [git-worktree-parallel](wiki/git-worktree-parallel.md) | feature | Worktree isolation + batch-parallel workflow | `core/src/utils/worktreeManager.ts` |
+| [fork-update-check](wiki/fork-update-check.md) | concept | Fork 更新检查（npm registry）+ 自我 DoS 防护 | `cli/src/ui/utils/updateCheck.ts` |
 
 ## Overview
 
