@@ -275,6 +275,11 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
           result.summary +=
             `\n\n[Worktree] Changes committed to branch \`${cleanupResult.branchName}\`` +
             ` (${cleanupResult.commitSha ?? 'unknown'}). Review and merge manually.`;
+        } else if (!cleanupResult.success && cleanupResult.error) {
+          // commit 失败 → 保留 worktree + 分支。告知用户有残留需手动处理。
+          result.summary +=
+            `\n\n[Worktree] ⚠️ Commit failed: ${cleanupResult.error}` +
+            `\nWorktree \`${worktreeInfo.directory}\` and branch \`${worktreeInfo.branch}\` preserved for manual recovery.`;
         }
       } catch (err) {
         console.warn(
@@ -359,7 +364,11 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
             })
             .finally(() => {
               active--;
-              if (active === 0 && queueIndex >= queue.length) {
+              // Resolve when all tasks dispatched AND all active finished,
+              // OR when parent aborted (remaining queue tasks will never start).
+              // Without the abort check, Promise would deadlock on Ctrl+C
+              // (queueIndex < queue.length but tryNext is never called again).
+              if (active === 0 && (queueIndex >= queue.length || this.abortSignal.aborted)) {
                 resolve();
               } else if (!this.abortSignal.aborted) {
                 tryNext();

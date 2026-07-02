@@ -48,7 +48,7 @@ if (hasRealUpdate) {
 }
 ```
 
-## 自我 DoS 防护（v1.1.65）
+## 自我 DoS 防护（v1.1.65 → v1.1.66 迭代）
 
 ### 问题
 
@@ -59,30 +59,30 @@ v1.1.63 引入 `forceUpdate=true` 后，存在一个自我 DoS 陷阱：
 3. 24h 内再次启动 → 读缓存返回 FORCE_UPDATE → 再次失败 → 再次退出
 4. **结果：24h 内 CLI 完全无法启动**
 
-### 修复
+### v1.1.65 初版修复（不缓存 FORCE_UPDATE）
 
-**双重防护**：
+- 缓存保护：`if (!forceCheck && result === null)` — 只有"无更新"才缓存。
+- 降级启动：更新失败不再 `process.exit(1)`。
 
-1. **缓存保护**（`updateCheck.ts`）：**绝不缓存 FORCE_UPDATE 结果**。只有"无更新"
-   或"非强制更新"才写入缓存。FORCE_UPDATE 每次启动都重新查询 npm registry。
+**问题**：有更新时每次启动都打 npm registry 请求（失去缓存节流）。
+
+### v1.1.66 最终修复（failCount 策略）
+
+双重防护，兼顾安全和性能：
+
+1. **缓存 + failCount**（`updateCheck.ts`）：FORCE_UPDATE 结果正常缓存（节流），
+   但增加 `failCount` 字段。`failCount >= 3` 时降级为 null（跳过强制更新）：
 
    ```ts
-   if (!forceCheck && result === null) {
-     // 只有"无更新"才缓存，FORCE_UPDATE 永不缓存
-     await writeUpdateCheckCache(cache);
+   if (cache.failCount && cache.failCount >= 3 && cache.lastResult?.startsWith('FORCE_UPDATE:')) {
+     return null; // 降级：跳过强制更新，让 CLI 正常启动
    }
    ```
 
-2. **降级启动**（`gemini.tsx`）：更新失败时**不再 `process.exit(1)`**，改为软提示
-   后继续以当前版本启动：
+2. **失败时递增 failCount**（`gemini.tsx`）：`executeUpdateCommand` 失败后写回缓存
+   递增 failCount。成功更新后 failCount 自然重置（因为 `cache.version` 变了）。
 
-   ```ts
-   if (success) { process.exit(0); }
-   else {
-     console.error(t('update.failed.fallback.continue'));
-     // 不退出，继续启动 CLI
-   }
-   ```
+3. **降级启动**（`gemini.tsx`）：更新失败不再 `process.exit(1)`，改为软提示后继续启动。
 
 ## 相关文件
 

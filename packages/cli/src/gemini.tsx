@@ -9,7 +9,7 @@ import { render } from 'ink';
 import { AppWrapper } from './ui/App.js';
 import { loadCliConfig, parseArguments, CliArgs } from './config/config.js';
 import { readStdin } from './utils/readStdin.js';
-import { basename, resolve, normalize } from 'node:path';
+import { basename, resolve, normalize, join } from 'node:path';
 import v8 from 'node:v8';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -539,9 +539,17 @@ export async function main() {
         console.error(`\n${t('update.success.restart')}`);
         process.exit(0);
       } else {
-        // 更新失败时不再 process.exit(1) 阻断 CLI 启动。
-        // 降级为软提示，允许用户继续使用当前版本。
-        // 缓存已做保护（updateCheck.ts 不缓存 FORCE_UPDATE），不会自我 DoS。
+        // 更新失败：递增 failCount，达到阈值后不再强制阻塞启动。
+        try {
+          const cacheFile = join(os.homedir(), '.easycode-user', 'update-check.json');
+          const oldCache = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+          const newFailCount = (oldCache.failCount ?? 0) + 1;
+          fs.writeFileSync(cacheFile, JSON.stringify({
+            ...oldCache,
+            failCount: newFailCount,
+          }, null, 2));
+        } catch { /* cache write is best-effort */ }
+
         console.error(`\n${t('update.manual.then.rerun')}`);
         console.error(t('update.failed.fallback.continue'));
       }

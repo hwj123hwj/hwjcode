@@ -38,6 +38,8 @@ interface UpdateCheckCache {
   lastCheckTime: number;
   lastResult: string | null;
   version: string;
+  /** 连续更新失败次数。达到阈值后清除缓存的 FORCE_UPDATE，降级为提示。 */
+  failCount?: number;
 }
 
 // 获取缓存文件路径
@@ -155,6 +157,11 @@ export async function checkForUpdates(
         const timeSinceLastCheck = now - cache.lastCheckTime;
 
         if (timeSinceLastCheck < oneDayMs) {
+          // failCount 防护：如果连续失败次数达到阈值，清除缓存的 FORCE_UPDATE，
+          // 降级为普通提示，避免自我 DoS（更新失败后 24h 内反复尝试）。
+          if (cache.failCount && cache.failCount >= 3 && cache.lastResult?.startsWith('FORCE_UPDATE:')) {
+            return null; // 降级：跳过强制更新，让 CLI 正常启动
+          }
           // 缓存有效，静默返回
           return cache.lastResult;
         }
@@ -212,15 +219,29 @@ ${t('update.after.success.exit')}`;
     }
 
     // 保存缓存（非强制检查时）
-    // ⚠️ 安全规则：绝不缓存 FORCE_UPDATE 结果。
-    // 否则一旦 executeUpdateCommand 失败，缓存的 FORCE_UPDATE 会在 24h 内
-    // 反复触发失败重试，导致 CLI 完全无法启动（自我 DoS）。
-    // 只有"无更新"或"非强制更新"才缓存。
-    if (!forceCheck && result === null) {
+    // ⚠️ 安全规则：对 FORCE_UPDATE 使用 failCount 防护。
+    // 如果缓存 FORCE_UPDATE 结果，更新失败后 24h 内会反复触发失败重试，
+    // 导致 CLI 完全无法启动（自我 DoS）。
+    // 策略：缓存 FORCE_UPDATE 但记录 failCount，达到阈值后清除缓存。
+    //      "无更新"(null) 正常缓存；"非强制更新" 正常缓存。
+    if (!forceCheck) {
+      // 读取旧缓存获取 failCount
+      const oldCache = await readUpdateCheckCache();
+      const MAX_FAIL_COUNT = 3;
+
+      let failCount = oldCache?.failCount ?? 0;
+      // 如果检测到更新，且这是与缓存中相同的版本，保持 failCount
+      // 如果是不同的版本，重置 failCount
+      if (result && oldCache?.lastResult && result.split('::MSG::')[0] === oldCache.lastResult.split('::MSG::')[0]) {
+        // Same update as last time — could be a retry after failure
+        // Don't increment here; gemini.tsx is responsible for bumping on failure
+      }
+
       const cache: UpdateCheckCache = {
         lastCheckTime: now,
-        lastResult: null,
-        version: currentVersion
+        lastResult: result,
+        version: currentVersion,
+        failCount,
       };
       await writeUpdateCheckCache(cache);
     }

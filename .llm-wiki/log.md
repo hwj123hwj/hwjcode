@@ -2,6 +2,29 @@
 
 > Chronological record of wiki operations.
 
+## [2026-07-02] fix | v1.1.66: runParallel 死锁 + commit 静默吞错 + failCount 策略
+
+对 v1.1.65 进行代码审查后发现 3 个问题，本次全部修复。
+
+### 修复内容
+
+1. **🔴 runParallel 死锁**：parent abort 时 Promise 永不 resolve。
+   根因：`.finally` 的 resolve 条件没有考虑 abort 时 `queueIndex < length` 的情况。
+   修复：`if (active === 0 && (queueIndex >= queue.length || this.abortSignal.aborted))`
+
+2. **🟡 commit 失败静默吞错**：`run()` 只检查 `committed`，忽略 `success: false`。
+   修复：commit 失败时把 error 追加到 result.summary，告知用户有残留 worktree。
+
+3. **🟡 更新检查缓存性能**：v1.1.65 的"不缓存 FORCE_UPDATE"导致每次启动打网络请求。
+   修复：改用 failCount 策略 — 正常缓存 FORCE_UPDATE，但 failCount >= 3 时降级为 null。
+
+### Pages Updated
+- `wiki/git-worktree-parallel.md` — 新增 abort 死锁修复和 commit 失败上报章节
+- `wiki/fork-update-check.md` — 更新为 failCount 策略（v1.1.65 → v1.1.66 迭代）
+
+### Test Results
+- 72 tests passed (5 test files)
+
 ## [2026-07-02] feat | Git Worktree 并行隔离 + Fork 更新检查修复
 
 审查了最近 5 个版本的提交（v1.1.60–v1.1.64），发现 v1.1.64 的 5 项修复仅在 test1
