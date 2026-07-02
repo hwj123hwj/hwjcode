@@ -2,6 +2,18 @@
 
 > Chronological record of wiki operations.
 
+## [2026-07-02] fix | v1.1.67: failCount 重置规则修正
+
+v1.1.66 代码审查发现 failCount 写入逻辑缺陷：failCount 在目标版本变化时不会重置，
+导致用户成功更新后如果新版本恰好又有另一个更新，failCount 仍保留上次累积值。
+
+### 修复
+- `updateCheck.ts`：failCount 重置规则明确化——result 为 null 或目标版本变化时重置为 0，
+  同一目标版本保留旧值。
+
+### Pages Updated
+- `wiki/fork-update-check.md` — 新增 failCount 重置规则（v1.1.67）章节
+
 ## [2026-07-02] fix | v1.1.66: runParallel 死锁 + commit 静默吞错 + failCount 策略
 
 对 v1.1.65 进行代码审查后发现 3 个问题，本次全部修复。

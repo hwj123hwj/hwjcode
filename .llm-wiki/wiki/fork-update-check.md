@@ -84,6 +84,20 @@ v1.1.63 引入 `forceUpdate=true` 后，存在一个自我 DoS 陷阱：
 
 3. **降级启动**（`gemini.tsx`）：更新失败不再 `process.exit(1)`，改为软提示后继续启动。
 
+### failCount 重置规则（v1.1.67 修正）
+
+v1.1.66 的 failCount 写入逻辑有一个缺陷：failCount 永远不会被正确重置。
+当用户成功更新后，如果新版本恰好又有另一个更新，failCount 仍然保留上次累积的值。
+
+**修正后**（v1.1.67）：failCount 重置规则明确化：
+- `result === null`（无更新）→ failCount 重置为 0
+- 目标版本变化（`newKey !== oldKey`）→ failCount 重置为 0
+- 同一目标版本（`newKey === oldKey`）→ 保留旧 failCount（gemini.tsx 在失败时递增）
+
+```ts
+const failCount = (result && newKey === oldKey) ? (oldCache?.failCount ?? 0) : 0;
+```
+
 ## 相关文件
 
 | 文件 | 修改内容 |

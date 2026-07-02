@@ -222,20 +222,20 @@ ${t('update.after.success.exit')}`;
     // ⚠️ 安全规则：对 FORCE_UPDATE 使用 failCount 防护。
     // 如果缓存 FORCE_UPDATE 结果，更新失败后 24h 内会反复触发失败重试，
     // 导致 CLI 完全无法启动（自我 DoS）。
-    // 策略：缓存 FORCE_UPDATE 但记录 failCount，达到阈值后清除缓存。
-    //      "无更新"(null) 正常缓存；"非强制更新" 正常缓存。
+    // 策略：缓存 FORCE_UPDATE 但记录 failCount，达到阈值后降级为 null。
+    //      failCount 在目标版本变化时重置（不同版本 = 新的更新周期）。
     if (!forceCheck) {
-      // 读取旧缓存获取 failCount
       const oldCache = await readUpdateCheckCache();
-      const MAX_FAIL_COUNT = 3;
 
-      let failCount = oldCache?.failCount ?? 0;
-      // 如果检测到更新，且这是与缓存中相同的版本，保持 failCount
-      // 如果是不同的版本，重置 failCount
-      if (result && oldCache?.lastResult && result.split('::MSG::')[0] === oldCache.lastResult.split('::MSG::')[0]) {
-        // Same update as last time — could be a retry after failure
-        // Don't increment here; gemini.tsx is responsible for bumping on failure
-      }
+      // 判断是否是同一个更新目标（含版本号）
+      const newKey = result ? result.split('::MSG::')[0] : null;
+      const oldKey = oldCache?.lastResult ? oldCache.lastResult.split('::MSG::')[0] : null;
+
+      // failCount 重置规则：
+      // - result 为 null（无更新）→ 重置为 0
+      // - 目标版本变化（newKey !== oldKey）→ 重置为 0
+      // - 同一目标版本 → 保留旧 failCount（gemini.tsx 在失败时递增）
+      const failCount = (result && newKey === oldKey) ? (oldCache?.failCount ?? 0) : 0;
 
       const cache: UpdateCheckCache = {
         lastCheckTime: now,
