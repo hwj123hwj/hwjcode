@@ -326,54 +326,50 @@ export class WorkflowAgentBridge implements WorkflowAgentAPI {
   async runParallel(tasks: WorkflowAgentRunOptions[]): Promise<WorkflowAgentRunResult[]> {
     if (tasks.length === 0) return [];
 
-    // Local AbortController so we can cancel remaining tasks on first failure
-    const localAbort = new AbortController();
-    // Propagate parent abort to local
-    if (this.abortSignal.aborted) { localAbort.abort(); }
-    else { this.abortSignal.addEventListener('abort', () => localAbort.abort(), { once: true }); }
-
     const results: WorkflowAgentRunResult[] = new Array(tasks.length);
     const queue = tasks.map((task, index) => ({ task, index }));
     let active = 0;
     let queueIndex = 0;
-    let failed = false;
 
-    // Use a wrapped run() that respects localAbort. When localAbort fires,
-    // we skip spawning new tasks but allow in-flight tasks to finish naturally
-    // (they are bound to the parent abortSignal and will stop when it fires).
-    const runWithLocalAbort = (task: WorkflowAgentRunOptions): Promise<WorkflowAgentRunResult> => {
-      if (localAbort.signal.aborted) return Promise.reject(new Error('AbortError'));
-      return this.run(task);
-    };
-
-    await new Promise<void>((resolve, reject) => {
+    // ── No fail-fast: each task is independent (especially in worktree mode).
+    // A failure in one task does NOT cancel sibling tasks. All results are
+    // collected and returned. This ensures worktree cleanup always runs for
+    // every task, and sibling tasks that could succeed are not wasted.
+    //
+    // Parent abort is still respected: when the parent AbortController fires,
+    // in-flight sub-agents stop naturally (they're bound to abortSignal), and
+    // we skip scheduling remaining tasks.
+    await new Promise<void>((resolve) => {
       const tryNext = () => {
-        // Skip scheduling new tasks if we've been aborted
-        while (!failed && !localAbort.signal.aborted && active < this.maxConcurrency && queueIndex < queue.length) {
+        while (!this.abortSignal.aborted && active < this.maxConcurrency && queueIndex < queue.length) {
           const { task, index } = queue[queueIndex++]!;
           active++;
 
-          runWithLocalAbort(task)
+          this.run(task)
             .then(result => {
-              if (!failed) results[index] = result;
+              results[index] = result;
             })
             .catch(err => {
-              if (!failed) {
-                failed = true;
-                localAbort.abort();  // cancel remaining in-flight tasks
-                reject(err);
-              }
+              // Record the error as a failed result — don't abort sibling tasks.
+              results[index] = {
+                success: false,
+                result: `Task failed: ${err instanceof Error ? err.message : String(err)}`,
+                tokenUsage: undefined,
+              };
             })
             .finally(() => {
               active--;
-              if (active === 0 && (queueIndex >= queue.length || failed)) {
-                if (!failed) resolve();
-              } else if (!failed && !localAbort.signal.aborted) {
+              if (active === 0 && queueIndex >= queue.length) {
+                resolve();
+              } else if (!this.abortSignal.aborted) {
                 tryNext();
               }
             });
         }
-        if (queue.length === 0) resolve();
+        // Resolve immediately if no tasks or parent already aborted
+        if (queue.length === 0 || (active === 0 && this.abortSignal.aborted)) {
+          resolve();
+        }
       };
       tryNext();
     });
